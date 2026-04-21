@@ -1,0 +1,500 @@
+import React, { useState } from "react";
+import { Icon } from "./icons.jsx";
+import { StatusChip } from "./primitives.jsx";
+import { getCompanies, getUsers, companyById, userById, fmtMoney, fmtDate } from "./data.js";
+
+// ============ DETAIL DRAWER (read/edit a row) ============
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert }) => {
+  if (!row) return null;
+
+  const COMPANIES = getCompanies();
+  const USERS = getUsers();
+
+  const fields = {
+    potential: [
+      { k: "year", label: "Year", type: "number" },
+      { k: "name", label: "Project Name" },
+      { k: "role", label: "Prime or Sub", type: "select", options: ["Prime","Sub"] },
+      { k: "clientId", label: "Client", type: "company" },
+      { k: "amount", label: "Total Contract Amount", type: "money" },
+      { k: "msmm", label: "MSMM Amount", type: "money" },
+      { k: "subs", label: "Subs", type: "subs" },
+      { k: "pmId", label: "PM", type: "user" },
+      { k: "notes", label: "Notes", type: "textarea" },
+      { k: "dates", label: "Dates and Comments" },
+      { k: "projectNumber", label: "Project Number", type: "mono" },
+    ],
+    awaiting: [
+      { k: "name", label: "Project Name" },
+      { k: "clientId", label: "Client", type: "company" },
+      { k: "role", label: "Prime or Sub", type: "select", options: ["Prime","Sub"] },
+      { k: "subs", label: "Subs", type: "subs" },
+      { k: "status", label: "Status", type: "status" },
+      { k: "dateSubmitted", label: "Date Submitted", type: "date" },
+      { k: "clientContract", label: "Client Contract #", type: "mono" },
+      { k: "msmmContract", label: "MSMM Contract #", type: "mono" },
+      { k: "msmmUsed", label: "MSMM Used", type: "money" },
+      { k: "msmmRemaining", label: "MSMM Remaining", type: "money" },
+      { k: "pmId", label: "PM", type: "user" },
+      { k: "notes", label: "Notes", type: "textarea" },
+      { k: "projectNumber", label: "Project Number", type: "mono" },
+    ],
+    awarded: [
+      { k: "name", label: "Project Name" },
+      { k: "clientId", label: "Client", type: "company" },
+      { k: "status", label: "Status", type: "status" },
+      { k: "stage", label: "Stage", type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List","Design 30%","Design 60%","Design 90%","Draft Report","Construction Admin","Closeout"] },
+      { k: "details", label: "Details", type: "textarea" },
+      { k: "pools", label: "Pools" },
+      { k: "contractExpiry", label: "Contract Expiry", type: "date" },
+      { k: "msmmUsed", label: "MSMM Used", type: "money" },
+      { k: "msmmRemaining", label: "MSMM Remaining", type: "money" },
+      { k: "pmId", label: "PM", type: "user" },
+      { k: "projectNumber", label: "Project Number", type: "mono" },
+    ],
+    closed: [
+      { k: "name", label: "Project Name" },
+      { k: "clientId", label: "Client", type: "company" },
+      { k: "status", label: "Status", type: "status" },
+      { k: "dateClosed", label: "Date Closed", type: "date" },
+      { k: "reason", label: "Reason for Closure", type: "textarea" },
+      { k: "pmId", label: "PM", type: "user" },
+      { k: "projectNumber", label: "Project Number", type: "mono" },
+    ],
+    events: [
+      { k: "title", label: "Title" },
+      { k: "status", label: "Status", type: "select", options: ["Booked","Happened"] },
+      { k: "type", label: "Type", type: "select", options: ["Partner","AI","Project","Meetings","Event"] },
+      { k: "dateTime", label: "Date & Time", type: "datetime" },
+      { k: "attendees", label: "Attendees from MSMM", type: "users" },
+    ],
+    clients: [
+      { k: "name", label: "Company Name" },
+      { k: "type", label: "Type", type: "select", options: ["Client","Prime","Sub","Multiple"] },
+      { k: "contact", label: "Contact Person" },
+      { k: "email", label: "Email" },
+      { k: "phone", label: "Phone" },
+      { k: "address", label: "Address" },
+      { k: "notes", label: "Notes", type: "textarea" },
+    ],
+  }[table] || [];
+
+  const renderInput = (f) => {
+    const val = row[f.k];
+    const set = (v) => onUpdate(row.id, { [f.k]: v });
+    if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
+    if (f.type === "select") return (
+      <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
+        <option value="">—</option>
+        {f.options.map(o => <option key={o}>{o}</option>)}
+      </select>
+    );
+    if (f.type === "company") return (
+      <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
+        <option value="">—</option>
+        {COMPANIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+    );
+    if (f.type === "user") return (
+      <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
+        <option value="">—</option>
+        {USERS.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+    );
+    if (f.type === "users") return (
+      <div className="tag-input">
+        {(val || []).map(uid => {
+          const u = userById(uid); if (!u) return null;
+          return <span key={uid} className="tag"><span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
+            <button onClick={() => set(val.filter(x => x !== uid))}><Icon name="x" size={10}/></button></span>;
+        })}
+        <input placeholder="Add attendee…"/>
+      </div>
+    );
+    if (f.type === "money") return (
+      <input className="input" type="number" defaultValue={val || ""} onBlur={e => set(Number(e.target.value))}
+        style={{ fontFamily: "var(--font-mono)" }}/>
+    );
+    if (f.type === "date" || f.type === "datetime") return (
+      <input className="input" type={f.type === "datetime" ? "datetime-local" : "date"} defaultValue={val || ""} onBlur={e => set(e.target.value)}
+        style={{ fontFamily: "var(--font-mono)" }}/>
+    );
+    if (f.type === "mono") return (
+      <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}
+        style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
+    );
+    if (f.type === "status") return (
+      <div><StatusChip status={val}/></div>
+    );
+    if (f.type === "subs") {
+      const subs = val || [];
+      const subCompanies = COMPANIES.filter(c => c.type !== "Client");
+      const updateSub = (i, patch) => {
+        const next = subs.map((s, j) => j === i ? { ...s, ...patch } : s);
+        set(next);
+      };
+      const removeSub = (i) => set(subs.filter((_, j) => j !== i));
+      const addSub = () => set([...subs, { cId: null, desc: "", amt: 0 }]);
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {subs.length === 0 && (
+            <div style={{
+              fontSize: 12.5, color: "var(--text-soft)", fontStyle: "italic",
+              padding: "6px 10px", background: "var(--surface-2)",
+              border: "1px dashed var(--border)", borderRadius: 8,
+            }}>
+              No subs yet — click "Add sub" below to add one.
+            </div>
+          )}
+          {subs.map((s, i) => (
+            <div key={i} className="subrow"
+                 style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr) 110px 30px" }}>
+              <select
+                className="input"
+                value={s.cId || ""}
+                onChange={e => updateSub(i, { cId: e.target.value || null })}
+                style={{ minWidth: 0 }}
+              >
+                <option value="">— Company —</option>
+                {subCompanies.map(c =>
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                )}
+              </select>
+              <input
+                className="input"
+                placeholder="Discipline (e.g. Survey)"
+                value={s.desc || ""}
+                onChange={e => updateSub(i, { desc: e.target.value })}
+              />
+              <input
+                className="input mono"
+                type="number"
+                placeholder="$"
+                min="0"
+                value={s.amt ?? ""}
+                onChange={e => updateSub(i, { amt: e.target.value === "" ? 0 : Number(e.target.value) })}
+                style={{ fontFamily: "var(--font-mono)", textAlign: "right" }}
+              />
+              <button
+                className="row-btn"
+                title="Remove sub"
+                onClick={() => removeSub(i)}
+                style={{ color: "var(--rose)" }}
+              >
+                <Icon name="trash" size={12}/>
+              </button>
+            </div>
+          ))}
+          <div style={{
+            display: "flex", alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: subs.length ? 4 : 2,
+          }}>
+            <button
+              className="tool-chip"
+              onClick={addSub}
+              style={{ borderStyle: "solid", borderColor: "var(--accent-soft)", color: "var(--accent-ink)", background: "var(--accent-softer)" }}
+            >
+              <Icon name="plus" size={12}/>Add sub
+            </button>
+            {subs.length > 0 && (
+              <span className="mono" style={{ fontSize: 11, color: "var(--text-soft)" }}>
+                Total: {fmtMoney(subs.reduce((a, s) => a + (Number(s.amt) || 0), 0))}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
+    return <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
+  };
+
+  const titleMap = {
+    potential: "Potential Project", awaiting: "Awaiting Verdict", awarded: "Awarded Project",
+    closed: "Closed Out Project", events: "Event", clients: "Company",
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="drawer">
+        <div className="drawer-head">
+          <div>
+            <div className="drawer-eyebrow">
+              <Icon name="briefcase" size={12}/>
+              {titleMap[table]}
+              {row.projectNumber && <span className="mono" style={{ marginLeft: 6, color: "var(--text-soft)" }}>· {row.projectNumber}</span>}
+            </div>
+            <h3 className="drawer-title">{row.name || row.title}</h3>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {onForward && <button className="btn sm primary" onClick={onForward}><Icon name="forward" size={13}/>Move forward</button>}
+            <button className="btn sm" onClick={onAlert}><Icon name="bell" size={13}/>Alert</button>
+            <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
+          </div>
+        </div>
+        <div className="drawer-body">
+          {fields.map(f => (
+            <div key={f.k} className="field">
+              <div className="field-label">{f.label}</div>
+              <div className={"field-value" + (f.type === "textarea" || f.type === "subs" ? " multiline" : "")}>
+                {renderInput(f)}
+              </div>
+            </div>
+          ))}
+          {row.sourceId && (
+            <>
+              <div className="section-title" style={{ marginTop: 22 }}><Icon name="link" size={12}/>Linked history</div>
+              <div className="chip accent" style={{ fontSize: 12 }}>
+                <Icon name="forward" size={11}/>
+                Carried forward from previous stage · {row.sourceId}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="drawer-foot">
+          <button className="btn ghost sm" style={{ color: "var(--rose)" }}><Icon name="trash" size={13}/>Delete</button>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, color: "var(--text-soft)", fontSize: 12 }}>
+            <Icon name="check" size={12}/>Local-only (wire writes to Supabase next)
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ MOVE-FORWARD SLIDE PANEL ============
+export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
+  const configs = {
+    "potential→awaiting": {
+      title: "Submit project for verdict",
+      subtitle: "Moving to Awaiting Verdict · new fields only",
+      carried: ["year","name","clientId","role","subs","notes","projectNumber"],
+      newFields: [
+        { k: "status", label: "Status", type: "pill", value: "Awaiting Verdict" },
+        { k: "dateSubmitted", label: "Date Submitted", type: "date", value: new Date().toISOString().substr(0,10) },
+        { k: "clientContract", label: "Client Contract #", placeholder: "e.g. POSL-2026-045" },
+        { k: "msmmContract", label: "MSMM Contract #", placeholder: "e.g. MSMM-2026-045" },
+        { k: "msmmUsed", label: "MSMM Used", type: "money", value: 0 },
+        { k: "msmmRemaining", label: "MSMM Remaining", type: "money", value: row.msmm },
+      ]
+    },
+    "awaiting→awarded": {
+      title: "Mark project as Awarded",
+      subtitle: "Carries to Awarded Projects · also auto-creates Invoice row",
+      carried: ["year","name","clientId","role","subs","dateSubmitted","clientContract","msmmContract","msmmUsed","msmmRemaining","projectNumber","pmId"],
+      newFields: [
+        { k: "status", label: "Status", type: "pill", value: "Awarded" },
+        { k: "stage", label: "Stage", type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List","Design 30%"], value: "Multi-Use Contract" },
+        { k: "details", label: "Details", type: "textarea", placeholder: "Key notes, scope, team…" },
+        { k: "pools", label: "Pools", placeholder: "e.g. IDIQ Pool C" },
+        { k: "contractExpiry", label: "Contract Expiry", type: "date" },
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+          hint: "Determines how billing is categorized in Anticipated Invoice." },
+      ]
+    },
+    "awaiting→closed": {
+      title: "Close out project",
+      subtitle: "Carries to Closed Out Projects",
+      carried: ["year","name","clientId","role","subs","dateSubmitted","notes","clientContract","msmmContract","projectNumber","pmId"],
+      newFields: [
+        { k: "status", label: "Status", type: "pill", value: "Closed Out" },
+        { k: "dateClosed", label: "Date Closed", type: "date", value: new Date().toISOString().substr(0,10) },
+        { k: "reason", label: "Reason for Closure", type: "textarea", placeholder: "e.g. Client descope, lost bid, cancelled…" },
+      ]
+    },
+  };
+
+  const key = `${from}→${to}`;
+  const cfg = configs[key];
+  const [data, setData] = useState(() => {
+    const d = {};
+    (cfg?.newFields || []).forEach(f => { d[f.k] = f.value ?? ""; });
+    return d;
+  });
+
+  if (!cfg) return null;
+
+  const labels = {
+    year: "Year", name: "Project", clientId: "Client", role: "Role", subs: "Subs",
+    notes: "Notes", projectNumber: "Project #", dateSubmitted: "Submitted",
+    clientContract: "Client Contract", msmmContract: "MSMM Contract",
+    msmmUsed: "MSMM Used", msmmRemaining: "MSMM Rem.", pmId: "PM",
+  };
+  const formatCarried = (k) => {
+    const v = row[k];
+    if (v == null || v === "") return "—";
+    if (k === "clientId") return companyById(v)?.name || "—";
+    if (k === "pmId") return userById(v)?.name || "—";
+    if (k === "subs") return (v || []).map(s => `${companyById(s.cId)?.name?.split(" ")[0] || s.desc || "Sub"} (${fmtMoney(s.amt)})`).join(", ") || "—";
+    if (k === "msmmUsed" || k === "msmmRemaining") return fmtMoney(v);
+    if (k === "dateSubmitted") return fmtDate(v);
+    return v;
+  };
+
+  const renderField = (f) => {
+    const val = data[f.k];
+    const set = (v) => setData(d => ({ ...d, [f.k]: v }));
+    if (f.type === "pill") return <span className="chip accent" style={{ fontWeight: 600 }}><span className="chip-dot"/>{val}</span>;
+    if (f.type === "select") return (
+      <select className="select" value={val} onChange={e => set(e.target.value)}>
+        {f.options.map(o => <option key={o}>{o}</option>)}
+      </select>
+    );
+    if (f.type === "date") return <input className="input" type="date" value={val} onChange={e => set(e.target.value)} style={{ fontFamily: "var(--font-mono)" }}/>;
+    if (f.type === "money") return <input className="input" type="number" value={val} onChange={e => set(Number(e.target.value))} style={{ fontFamily: "var(--font-mono)" }}/>;
+    if (f.type === "textarea") return <textarea className="textarea" value={val} placeholder={f.placeholder} onChange={e => set(e.target.value)}/>;
+    return <input className="input" value={val} placeholder={f.placeholder} onChange={e => set(e.target.value)}/>;
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="drawer">
+        <div className="drawer-head">
+          <div>
+            <div className="drawer-eyebrow">
+              <Icon name="forward" size={12}/>{cfg.subtitle}
+            </div>
+            <h3 className="drawer-title">{cfg.title}</h3>
+          </div>
+          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
+        </div>
+        <div className="drawer-body">
+          <div className="carried-section">
+            <div className="carried-title"><Icon name="check" size={11}/>Carried forward · locked</div>
+            <dl className="carried-grid">
+              {cfg.carried.map(k => (
+                <React.Fragment key={k}>
+                  <dt>{labels[k] || k}</dt>
+                  <dd>{formatCarried(k)}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          </div>
+          <div className="section-title"><Icon name="sparkles" size={12}/>New fields required</div>
+          {cfg.newFields.map(f => (
+            <div key={f.k} className="field">
+              <div className="field-label">{f.label}</div>
+              <div className={"field-value" + (f.type === "textarea" ? " multiline" : "")}>
+                {renderField(f)}
+                {f.hint && <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>{f.hint}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="drawer-foot">
+          <button className="btn ghost sm" onClick={onClose}>Cancel</button>
+          <button className="btn primary sm" onClick={() => onConfirm(data)}>
+            <Icon name="forward" size={13}/>{cfg.title}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ ALERT MODAL ============
+export const AlertModal = ({ row, onClose, onConfirm }) => {
+  const USERS = getUsers();
+  const [recipients, setRecipients] = useState([row.pmId].filter(Boolean));
+  const [date, setDate] = useState(new Date(Date.now() + 5 * 86400000).toISOString().substr(0, 10));
+  const [time, setTime] = useState("09:00");
+  const [recur, setRecur] = useState("one-time");
+  const [message, setMessage] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [pickQ, setPickQ] = useState("");
+
+  const available = USERS.filter(u => !recipients.includes(u.id) &&
+    (!pickQ || u.name.toLowerCase().includes(pickQ.toLowerCase())));
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="modal">
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="bell" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Set alert</div>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>{row.name || row.title}</h3>
+            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+              Beacon will email tagged users at the scheduled time with a link to this row.
+            </div>
+          </div>
+          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
+        </div>
+        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div className="field-label" style={{ marginBottom: 6 }}>Notify</div>
+            <div className="tag-input" onClick={() => setPicking(true)} style={{ position: "relative" }}>
+              {recipients.map(uid => {
+                const u = userById(uid); if (!u) return null;
+                return <span key={uid} className="tag"><span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
+                  <button onClick={(e) => { e.stopPropagation(); setRecipients(recipients.filter(x => x !== uid)); }}>
+                    <Icon name="x" size={10}/></button></span>;
+              })}
+              <input placeholder={recipients.length ? "Add another…" : "Pick MSMM users…"}
+                value={pickQ}
+                onChange={e => { setPickQ(e.target.value); setPicking(true); }}
+                onFocus={() => setPicking(true)}
+                onBlur={() => setTimeout(() => setPicking(false), 150)}
+              />
+              {picking && available.length > 0 && (
+                <div className="menu" style={{ left: 0, right: 0, top: "calc(100% + 4px)", position: "absolute", margin: 4 }}>
+                  {available.slice(0, 6).map(u => (
+                    <button key={u.id} className="menu-item"
+                      onMouseDown={() => { setRecipients([...recipients, u.id]); setPickQ(""); }}>
+                      <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+                      <span>{u.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <div className="field-label" style={{ marginBottom: 6 }}>First alert date</div>
+              <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)}
+                style={{ fontFamily: "var(--font-mono)" }}/>
+            </div>
+            <div>
+              <div className="field-label" style={{ marginBottom: 6 }}>Time</div>
+              <input className="input" type="time" value={time} onChange={e => setTime(e.target.value)}
+                style={{ fontFamily: "var(--font-mono)" }}/>
+            </div>
+          </div>
+
+          <div>
+            <div className="field-label" style={{ marginBottom: 6 }}>Recurrence</div>
+            <div className="radio-row">
+              {["one-time","weekly","biweekly","monthly","custom"].map(r => (
+                <button key={r} className={"radio-chip" + (recur === r ? " active" : "")}
+                  onClick={() => setRecur(r)}>{r}</button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="field-label" style={{ marginBottom: 6 }}>Message (optional)</div>
+            <textarea className="textarea" value={message} onChange={e => setMessage(e.target.value)}
+              placeholder="e.g. Reminder: verdict expected this week. Check in with client PM."/>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <div style={{ fontSize: 12, color: "var(--text-soft)", display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="clock" size={12}/>
+            First send {fmtDate(date)} at {time} · {recur === "one-time" ? "does not repeat" : `repeats ${recur}`}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={onClose}>Cancel</button>
+            <button className="btn primary sm" onClick={() => onConfirm({ recipients, date, time, recur, message })}>
+              <Icon name="bell" size={13}/>Schedule alert
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
