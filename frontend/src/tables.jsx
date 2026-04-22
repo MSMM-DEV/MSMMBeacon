@@ -868,7 +868,7 @@ export const PotentialTable = ({
     { label: "MSMM", w: "110px", sortKey: "msmm" },
     { label: "Subs", w: "minmax(180px, 1.5fr)" },
     { label: "PM", w: "140px", sortKey: "pm",
-      sortValue: r => userById(r.pmId)?.name || "" },
+      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "100px", sortKey: "projectNumber" },
     { label: "Probability", w: "120px", sortKey: "probability",
       sortValue: r => probRank(r.probability) },
@@ -1048,9 +1048,9 @@ export const PotentialTable = ({
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
           "PM": (
             <div className="td">
-              <EditableCell value={r.pmId} type="select" options={userOptions}
-                onChange={v => updateRow(r.id, { pmId: v })}
-                render={v => v ? <UserTag userId={v}/> : <span className="empty-cell">—</span>}/>
+              {(r.pmIds || []).length > 0
+                ? <UserStack ids={r.pmIds}/>
+                : <span className="empty-cell">—</span>}
             </div>
           ),
           "Proj #": (
@@ -1169,7 +1169,7 @@ export const AwaitingTable = ({
     { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
     { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining" },
     { label: "PM", w: "140px", sortKey: "pm",
-      sortValue: r => userById(r.pmId)?.name || "" },
+      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
     { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
     { label: "Status", w: "150px", sortKey: "status", defaultHidden: true },
@@ -1283,9 +1283,9 @@ export const AwaitingTable = ({
           ),
           "PM": (
             <div className="td">
-              <EditableCell value={r.pmId} type="select" options={userOptions}
-                onChange={v => updateRow(r.id, { pmId: v })}
-                render={v => v ? <UserTag userId={v}/> : <span className="empty-cell">—</span>}/>
+              {(r.pmIds || []).length > 0
+                ? <UserStack ids={r.pmIds}/>
+                : <span className="empty-cell">—</span>}
             </div>
           ),
           "Proj #": (
@@ -1361,7 +1361,7 @@ export const AwardedTable = ({
     { label: "Remaining", w: "120px", sortKey: "msmmRemaining" },
     { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
     { label: "PM", w: "130px", sortKey: "pm",
-      sortValue: r => userById(r.pmId)?.name || "" },
+      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
     { label: "Role", w: "100px", sortKey: "role", defaultHidden: true },
     { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
@@ -1485,9 +1485,9 @@ export const AwardedTable = ({
           ),
           "PM": (
             <div className="td">
-              <EditableCell value={r.pmId} type="select" options={userOptions}
-                onChange={v => updateRow(r.id, { pmId: v })}
-                render={v => v ? <UserTag userId={v}/> : <span className="empty-cell">—</span>}/>
+              {(r.pmIds || []).length > 0
+                ? <UserStack ids={r.pmIds}/>
+                : <span className="empty-cell">—</span>}
             </div>
           ),
           "Proj #": (
@@ -1582,7 +1582,7 @@ export const SoqTable = ({
     { label: "Remaining", w: "120px", sortKey: "msmmRemaining", defaultHidden: true },
     { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
     { label: "PM", w: "130px", sortKey: "pm",
-      sortValue: r => userById(r.pmId)?.name || "" },
+      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
     { label: "Role", w: "100px", sortKey: "role", defaultHidden: true },
     { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
@@ -1716,9 +1716,9 @@ export const SoqTable = ({
           ),
           "PM": (
             <div className="td">
-              <EditableCell value={r.pmId} type="select" options={userOptions}
-                onChange={v => updateRow(r.id, { pmId: v })}
-                render={v => v ? <UserTag userId={v}/> : <span className="empty-cell">—</span>}/>
+              {(r.pmIds || []).length > 0
+                ? <UserStack ids={r.pmIds}/>
+                : <span className="empty-cell">—</span>}
             </div>
           ),
           "Proj #": (
@@ -1801,7 +1801,7 @@ export const ClosedTable = ({
     { label: "Contract", w: "120px", sortKey: "amount" },
     { label: "Reason", w: "minmax(220px, 2fr)", sortKey: "reason" },
     { label: "PM", w: "130px", sortKey: "pm",
-      sortValue: r => userById(r.pmId)?.name || "" },
+      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
     { label: "Role", w: "100px", sortKey: "role", defaultHidden: true },
     { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
@@ -1878,9 +1878,9 @@ export const ClosedTable = ({
           ),
           "PM": (
             <div className="td">
-              <EditableCell value={r.pmId} type="select" options={userOptions}
-                onChange={v => updateRow(r.id, { pmId: v })}
-                render={v => v ? <UserTag userId={v}/> : <span className="empty-cell">—</span>}/>
+              {(r.pmIds || []).length > 0
+                ? <UserStack ids={r.pmIds}/>
+                : <span className="empty-cell">—</span>}
             </div>
           ),
           "Proj #": (
@@ -1954,12 +1954,20 @@ export const InvoiceTable = ({
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
   const pmOptions = USERS.map(u => ({ value: u.id, label: u.name }));
-  const ytdActual = (r) => r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b || 0), 0);
-  const totalAll  = (r) => r.values.reduce((a,b) => a + (b || 0), 0);
-  const rollforward = (r) => Math.max(0, r.remainingStart - totalAll(r));
+  // Auto-calculated defaults. Shown values respect per-row overrides from
+  // the DB (ytdActualOverride / rollforwardOverride). NULL override = auto.
+  const ytdActualAuto    = (r) => r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b || 0), 0);
+  const totalAll         = (r) => r.values.reduce((a,b) => a + (b || 0), 0);
+  const rollforwardAuto  = (r) => Math.max(0, r.remainingStart - totalAll(r));
+  const ytdActualShown   = (r) => r.ytdActualOverride   != null ? r.ytdActualOverride   : ytdActualAuto(r);
+  const rollforwardShown = (r) => r.rollforwardOverride != null ? r.rollforwardOverride : rollforwardAuto(r);
+  const isYtdOverride    = (r) => r.ytdActualOverride   != null;
+  const isRfOverride     = (r) => r.rollforwardOverride != null;
   const isOrange = (r) => !!(r.sourcePotentialId && orangeSourceIds?.has(r.sourcePotentialId));
   const sumBy = (arr, fn) => arr.reduce((a, r) => a + fn(r), 0);
   const nonOrangeRows = rows.filter(r => !isOrange(r));
+  const orangeRows    = rows.filter(isOrange);
+  const orderedRows   = [...nonOrangeRows, ...orangeRows];
 
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const yearBtnRef = useRef(null);
@@ -2060,7 +2068,7 @@ export const InvoiceTable = ({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {orderedRows.map((r) => (
                   <tr key={r.id}
                       className={flashId === r.id ? "flash" : ""}
                       data-prob={isOrange(r) ? "orange" : undefined}
@@ -2071,8 +2079,10 @@ export const InvoiceTable = ({
                         onChange={v => updateRow(r.id, { projectNumber: v })}/>
                     </td>
                     <td className="sticky-2" style={{ fontWeight: 500 }}>
-                      <EditableCell value={r.name}
-                        onChange={v => updateRow(r.id, { name: v })}/>
+                      <div className="inv-name-wrap">
+                        <EditableCell value={r.name}
+                          onChange={v => updateRow(r.id, { name: v })}/>
+                      </div>
                     </td>
                     <td>
                       <EditableCell value={r.type} type="select" options={invoiceTypeOptions}
@@ -2082,13 +2092,9 @@ export const InvoiceTable = ({
                           : <span className="empty-cell">—</span>}/>
                     </td>
                     <td>
-                      <EditableCell value={r.pmId} type="select" options={pmOptions}
-                        onChange={v => updateRow(r.id, { pmId: v })}
-                        render={v => {
-                          const u = userById(v);
-                          return u ? <span className={`avatar xs ${u.color}`} title={u.name}>{u.initials}</span>
-                                   : <span className="empty-cell">—</span>;
-                        }}/>
+                      {(r.pmIds || []).length > 0
+                        ? <UserStack ids={r.pmIds}/>
+                        : <span className="empty-cell">—</span>}
                     </td>
                     <td>
                       <EditableCell value={r.amount} type="number"
@@ -2109,8 +2115,19 @@ export const InvoiceTable = ({
                         />
                       </td>
                     ))}
-                    <td className="total-cell">{fmtMoney(ytdActual(r))}</td>
-                    <td className="total-cell" style={{ color: "var(--accent-ink)" }}>{fmtMoney(rollforward(r))}</td>
+                    <td className={"total-cell" + (isYtdOverride(r) ? " inv-override" : "")}
+                        title={isYtdOverride(r) ? "Manually overridden — clear the cell to reset to auto-calc" : "Auto-calculated — click to override"}>
+                      <EditableCell value={ytdActualShown(r)} type="number"
+                        onChange={v => updateRow(r.id, { ytdActualOverride: v == null ? null : Number(v) })}
+                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                    </td>
+                    <td className={"total-cell" + (isRfOverride(r) ? " inv-override" : "")}
+                        style={{ color: "var(--accent-ink)" }}
+                        title={isRfOverride(r) ? "Manually overridden — clear the cell to reset to auto-calc" : "Auto-calculated — click to override"}>
+                      <EditableCell value={rollforwardShown(r)} type="number"
+                        onChange={v => updateRow(r.id, { rollforwardOverride: v == null ? null : Number(v) })}
+                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                    </td>
                     <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
                       <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                         <Icon name="bell" size={14}/>
@@ -2136,10 +2153,10 @@ export const InvoiceTable = ({
                         </td>
                       ))}
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(nonOrangeRows, ytdActual))}
+                        {fmtMoney(sumBy(nonOrangeRows, ytdActualShown))}
                       </td>
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(nonOrangeRows, rollforward))}
+                        {fmtMoney(sumBy(nonOrangeRows, rollforwardShown))}
                       </td>
                       <td className="total-cell"></td>
                     </tr>
@@ -2159,10 +2176,10 @@ export const InvoiceTable = ({
                         </td>
                       ))}
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(rows, ytdActual))}
+                        {fmtMoney(sumBy(rows, ytdActualShown))}
                       </td>
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(rows, rollforward))}
+                        {fmtMoney(sumBy(rows, rollforwardShown))}
                       </td>
                       <td className="total-cell"></td>
                     </tr>

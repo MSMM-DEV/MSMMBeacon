@@ -457,7 +457,10 @@ const SoqTimeline = ({ soq, onOpen }) => {
           const left = pctFor(sT);
           const width = Math.max(1.4, pctFor(eT) - left);
           const tone = toneFor(row.recurring);
-          const pm = userById(row.pmId)?.shortName;
+          const pm = (row.pmIds || [])
+            .map(id => userById(id)?.shortName)
+            .filter(Boolean)
+            .join(", ");
           return (
             <li key={row.id} className="soq-row" onClick={() => onOpen(row)}>
               <div className="soq-name">

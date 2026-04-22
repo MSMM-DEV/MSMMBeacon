@@ -32,6 +32,11 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     columns:  <><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="15" y="3" width="6" height="18" rx="1"/></>,
     flag:     <><path d="M4 21V4h12l-2 4 2 4H4"/></>,
     sparkles: <><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l3 3M15 15l3 3M6 18l3-3M15 9l3-3"/></>,
+    lock:     <><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></>,
+    mail:     <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 7 9-7"/></>,
+    eye:      <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
+    eyeOff:   <><path d="M10.6 6.1A11 11 0 0 1 22 12s-1.3 2.6-3.9 4.6M6.1 6.1 2 12s3.5 7 10 7a10 10 0 0 0 5.8-1.8M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
+    logout:   <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></>,
   };
   const d = paths[name];
   return (

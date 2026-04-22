@@ -9,12 +9,14 @@ import { QuadSheet } from "./quadsheet.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
+import { LoginPage } from "./login.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
+  supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -193,7 +195,7 @@ const EXPORT_COLUMNS = {
     { label: "Subs",                        get: r => r._total
         ? fmtMoney(r.subsTotal)
         : (r.subs || []).map(s => `${companyById(s.cId)?.name || s.desc || "Sub"}${s.amt ? " " + fmtMoney(s.amt) : ""}`.trim()).join("; ") },
-    { label: "PM",                wMm: 22,  get: r => r._total ? "" : (userById(r.pmId)?.name || "") },
+    { label: "PM",                wMm: 22,  get: r => r._total ? "" : ((r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ")) },
     { label: "Proj #",            wMm: 20,  get: r => r._total ? "" : (r.projectNumber || "") },
     { label: "Probability",       wMm: 22,  get: r => r._total ? "" : (r.probability || "") },
     { label: "Notes",                       get: r => r._total ? "" : (r.notes || "") },
@@ -209,7 +211,7 @@ const EXPORT_COLUMNS = {
     { label: "Client Contract",   wMm: 28,  get: r => r.clientContract || "" },
     { label: "MSMM Contract",     wMm: 28,  get: r => r.msmmContract || "" },
     { label: "MSMM Remaining",    wMm: 26,  get: r => fmtMoney(r.msmmRemaining) },
-    { label: "PM",                wMm: 22,  get: r => userById(r.pmId)?.name || "" },
+    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
     { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
     { label: "Status",            wMm: 28,  get: r => r.status || "Awaiting Verdict" },
@@ -226,7 +228,7 @@ const EXPORT_COLUMNS = {
     { label: "MSMM Used",         wMm: 24,  get: r => fmtMoney(r.msmmUsed) },
     { label: "Remaining",         wMm: 24,  get: r => fmtMoney(r.msmmRemaining) },
     { label: "Expiry",            wMm: 22,  get: r => fmtDate(r.contractExpiry) },
-    { label: "PM",                wMm: 22,  get: r => userById(r.pmId)?.name || "" },
+    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
     { label: "Role",              wMm: 18,  get: r => r.role || "" },
     { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
@@ -246,7 +248,7 @@ const EXPORT_COLUMNS = {
     { label: "Stage",                       get: r => r.stage || "" },
     { label: "Pool",                        get: r => r.pools || "" },
     { label: "Contract",          wMm: 26,  get: r => fmtMoney((r.msmmUsed || 0) + (r.msmmRemaining || 0)) },
-    { label: "PM",                wMm: 22,  get: r => userById(r.pmId)?.name || "" },
+    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
     { label: "Details",                     get: r => r.details || "" },
   ],
@@ -258,7 +260,7 @@ const EXPORT_COLUMNS = {
     { label: "Closed",            wMm: 22,  get: r => fmtDate(r.dateClosed) },
     { label: "Contract",          wMm: 24,  get: r => fmtMoney(r.amount) },
     { label: "Reason",                      get: r => r.reason || "" },
-    { label: "PM",                wMm: 22,  get: r => userById(r.pmId)?.name || "" },
+    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
     { label: "Role",              wMm: 18,  get: r => r.role || "" },
     { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
@@ -270,11 +272,11 @@ const EXPORT_COLUMNS = {
   invoice: [
     { label: "Project",                     get: r => r.name },
     { label: "Type",              wMm: 14,  get: r => r.type || "" },
-    { label: "PM",                wMm: 22,  get: r => userById(r.pmId)?.name || "" },
+    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Contract",          wMm: 24,  get: r => fmtMoney(r.amount) },
     { label: "Remaining Jan 1",   wMm: 26,  get: r => fmtMoney(r.remainingStart) },
     ...MONTHS.map((m, i) => ({ label: m, wMm: 16, get: r => r.values[i] ? fmtMoney(r.values[i]) : "" })),
-    { label: "YTD Actual",        wMm: 22,  get: r => fmtMoney(r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a+(b||0), 0)) },
+    { label: "YTD Actual",        wMm: 22,  get: r => fmtMoney(r.ytdActualOverride != null ? r.ytdActualOverride : r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a+(b||0), 0)) },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
@@ -320,7 +322,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       amount: null,
       msmm: (dbRow.msmm_used || 0) + (dbRow.msmm_remaining || 0),
       subs: extras.subs || [],
-      pmId: extras.pmId || null,
+      pmIds: extras.pmIds || [],
       notes: dbRow.notes || "",
       dates: "",
       projectNumber: dbRow.project_number || "",
@@ -349,7 +351,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       msmm: dbRow.msmm_amount,
       // Keep the user's chosen subs shape; sort by ord if we built it from DB rows later.
       subs: extras.subs || [],
-      pmId: extras.pmId || null,
+      pmIds: extras.pmIds || [],
       notes: dbRow.notes || "",
       dates: dbRow.next_action_note || "",
       nextActionDate: dbRow.next_action_date || "",
@@ -450,7 +452,18 @@ function LoadingScreen({ error }) {
 // ======================================================================
 // Main App
 // ======================================================================
-function BeaconApp({ initial }) {
+function BeaconApp({ initial, currentUser, onSignOut }) {
+  const isAdmin = currentUser?.role === "Admin";
+  const userDisplayName =
+    currentUser?.display_name
+    || [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ").trim()
+    || currentUser?.email
+    || "Signed in";
+  const userInitials =
+    (currentUser?.first_name?.[0] || "") +
+    (currentUser?.last_name?.[0]  || "")
+    || userDisplayName.slice(0, 2);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [tweaks, setTweaks] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("beacon-tweaks") || "null");
@@ -522,7 +535,20 @@ function BeaconApp({ initial }) {
       return { ...r, values: nv };
     }));
   };
-  const updateInvoice = makeUpdate(setInvoice);
+  // Invoice updates are local-only today with one exception: the YTD Actual
+  // and Rollforward override columns persist to Supabase so the user's manual
+  // numbers survive reloads. Other invoice fields will be wired in a later pass.
+  const updateInvoice = (id, patch) => {
+    setInvoice(rows => rows.map(r => r.id === id ? { ...r, ...patch } : r));
+    const dbPatch = {};
+    if ("ytdActualOverride"   in patch) dbPatch.ytd_actual_override  = patch.ytdActualOverride;
+    if ("rollforwardOverride" in patch) dbPatch.rollforward_override = patch.rollforwardOverride;
+    if (Object.keys(dbPatch).length === 0) return;
+    supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
+      .then(({ error }) => {
+        if (error) showToast(`Save failed: ${error.message}`, "x");
+      });
+  };
 
   const openDrawer = (row, table) => setDrawer({ row, table });
   const triggerForward = (row, fromTable, toTable) => setMoving({ row, from: fromTable, to: toTable });
@@ -544,7 +570,7 @@ function BeaconApp({ initial }) {
       const invRow = {
         id: mkId(), sourceId: rest.id,
         projectNumber: rest.projectNumber, name: rest.name,
-        pmId: rest.pmId, amount: rest.amount || 0,
+        pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
         type: _invoiceType || "ENG",
         remainingStart: rest.msmmRemaining || 0,
         values: Array(12).fill(0),
@@ -586,7 +612,7 @@ function BeaconApp({ initial }) {
         sourcePotentialId: ir.source_potential_id || uiRow.id,
         projectNumber: ir.project_number || uiRow.projectNumber || "",
         name: ir.project_name || uiRow.name,
-        pmId: uiRow.pmId || null,
+        pmIds: [...(uiRow.pmIds || [])],
         amount: ir.total_contract_amount ?? uiRow.amount ?? 0,
         type: "ENG",
         remainingStart: ir.msmm_amount ?? uiRow.msmm ?? 0,
@@ -780,7 +806,38 @@ function BeaconApp({ initial }) {
           <button className="iconbtn" title="Tweaks" onClick={() => setTweaksOpen(v => !v)}>
             <Icon name="settings" size={16}/>
           </button>
-          <div className="avatar" title="Signed-in user">RM</div>
+          <div style={{ position: "relative" }}>
+            <div className="session-chip" onClick={() => setMenuOpen(v => !v)}
+                 title={`${userDisplayName} · ${currentUser?.role || "User"}`}>
+              <div className="avatar" style={{ width: 26, height: 26, fontSize: 11 }}>
+                {userInitials.toUpperCase()}
+              </div>
+              <span className="session-name">{currentUser?.first_name || userDisplayName}</span>
+              <span className={"session-role" + (isAdmin ? " admin" : "")}>
+                {currentUser?.role || "User"}
+              </span>
+            </div>
+            {menuOpen && (
+              <>
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="menu"
+                     style={{ position: "absolute", right: 0, top: "calc(100% + 6px)",
+                              zIndex: 41, minWidth: 220 }}>
+                  <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{userDisplayName}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--text-soft)" }}>{currentUser?.email}</div>
+                  </div>
+                  <button className="menu-item" onClick={() => { setMenuOpen(false); onSignOut?.(); }}>
+                    <Icon name="logout" size={13}/>
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1049,23 +1106,79 @@ function BeaconApp({ initial }) {
 }
 
 // ======================================================================
-// Root
+// Root — auth gate + data bootstrap
+// ======================================================================
+// Boot sequence:
+//   1. Apply saved tweaks (theme/density) so the login page matches the app.
+//   2. Read the current Supabase session. If absent → LoginPage.
+//   3. If present, resolve the beacon.users row (for role), then loadBeacon().
+//   4. Subscribe to onAuthStateChange so SIGNED_OUT / SIGNED_IN events from
+//      other tabs or the sign-out button flush state cleanly.
+//
+// The LoginPage calls onSignedIn(beaconUser); we reuse the same "hydrate"
+// function so the post-login and cold-boot code paths stay identical.
 // ======================================================================
 export default function App() {
-  const [state, setState] = useState({ ready: false, error: null, data: null });
+  const [phase, setPhase] = useState("booting");   // "booting" | "anon" | "loading" | "ready" | "error"
+  const [error, setError] = useState(null);
+  const [data, setData]   = useState(null);
+  const [beaconUser, setBeaconUser] = useState(null);
+
+  // Load the beacon workspace once we have a confirmed session + user row.
+  const hydrate = async (bu) => {
+    setBeaconUser(bu);
+    setPhase("loading");
+    try {
+      const d = await loadBeacon();
+      setData(d);
+      setPhase("ready");
+    } catch (err) {
+      setError(err);
+      setPhase("error");
+    }
+  };
 
   useEffect(() => {
+    // Restore persisted tweaks so the login page itself matches the theme.
     try {
       const saved = JSON.parse(localStorage.getItem("beacon-tweaks") || "null");
       applyTweaks(saved || DEFAULT_TWEAKS);
     } catch { applyTweaks(DEFAULT_TWEAKS); }
 
-    loadBeacon()
-      .then(data => setState({ ready: true, error: null, data }))
-      .catch(err => setState({ ready: false, error: err, data: null }));
+    let cancelled = false;
+
+    (async () => {
+      const session = await getCurrentSession();
+      if (cancelled) return;
+      if (!session) { setPhase("anon"); return; }
+      const bu = await fetchCurrentBeaconUser();
+      if (cancelled) return;
+      if (!bu) { setPhase("anon"); return; }
+      hydrate(bu);
+    })();
+
+    // Cross-tab / background sign-out → kick user back to login.
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        setBeaconUser(null);
+        setData(null);
+        setPhase("anon");
+      }
+    });
+    return () => { cancelled = true; sub?.subscription?.unsubscribe?.(); };
+    // hydrate is stable (component-scope closure that only reads setters).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (state.error) return <LoadingScreen error={state.error}/>;
-  if (!state.ready) return <LoadingScreen/>;
-  return <BeaconApp initial={state.data}/>;
+  const handleSignOut = async () => {
+    await signOut();
+    setBeaconUser(null);
+    setData(null);
+    setPhase("anon");
+  };
+
+  if (phase === "error") return <LoadingScreen error={error}/>;
+  if (phase === "anon")  return <LoginPage onSignedIn={hydrate}/>;
+  if (phase !== "ready" || !data) return <LoadingScreen/>;
+  return <BeaconApp initial={data} currentUser={beaconUser} onSignOut={handleSignOut}/>;
 }

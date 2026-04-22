@@ -486,34 +486,39 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .chip.blue { color: #C6D4E3; border-color: #40505E; }
 [data-theme="dark"] .chip.accent { color: var(--accent-ink); border-color: #5C4220; }
 
-/* ---- Probability palette (traffic-light + orange, darker & denser than neutral chips) ---- */
+/* ---- Probability palette (traffic-light + orange) ----
+   Each hue commits to its own lane so the category reads at a glance.
+   Tuned for: clear separation between Low (red) and Orange; yellow lighter
+   than orange so similar hues read as distinct lightness; green actually
+   green (not olive). Dark-theme values sit in the same hue families but
+   lifted in luminance so they hold on dark surfaces. */
 :root {
-  --prob-high:    #3E5C2C;   /* deep green */
-  --prob-medium:  #9A6F0F;   /* dark ochre/yellow */
-  --prob-low:     #7A2A2A;   /* deep red */
-  --prob-orange:  #B5461A;   /* pre-billed / orange */
-  --prob-high-bg:   rgba(62, 92, 44, 0.14);
-  --prob-medium-bg: rgba(154, 111, 15, 0.14);
-  --prob-low-bg:    rgba(122, 42, 42, 0.13);
-  --prob-orange-bg: rgba(181, 70, 26, 0.14);
-  --prob-high-bg-hover:   rgba(62, 92, 44, 0.24);
-  --prob-medium-bg-hover: rgba(154, 111, 15, 0.24);
-  --prob-low-bg-hover:    rgba(122, 42, 42, 0.22);
-  --prob-orange-bg-hover: rgba(181, 70, 26, 0.24);
+  --prob-high:    #2F7548;   /* forest green */
+  --prob-medium:  #C89B1C;   /* warm gold */
+  --prob-low:     #A3302E;   /* crimson */
+  --prob-orange:  #D97418;   /* cadmium orange */
+  --prob-high-bg:   rgba(47, 117, 72, 0.14);
+  --prob-medium-bg: rgba(200, 155, 28, 0.16);
+  --prob-low-bg:    rgba(163, 48, 46, 0.13);
+  --prob-orange-bg: rgba(217, 116, 24, 0.15);
+  --prob-high-bg-hover:   rgba(47, 117, 72, 0.24);
+  --prob-medium-bg-hover: rgba(200, 155, 28, 0.26);
+  --prob-low-bg-hover:    rgba(163, 48, 46, 0.22);
+  --prob-orange-bg-hover: rgba(217, 116, 24, 0.25);
 }
 [data-theme="dark"] {
-  --prob-high:    #8FAE73;
-  --prob-medium:  #D9B55B;
-  --prob-low:     #CC7673;
-  --prob-orange:  #E29258;
-  --prob-high-bg:   rgba(143, 174, 115, 0.16);
-  --prob-medium-bg: rgba(217, 181, 91, 0.15);
-  --prob-low-bg:    rgba(204, 118, 115, 0.16);
-  --prob-orange-bg: rgba(226, 146, 88, 0.18);
-  --prob-high-bg-hover:   rgba(143, 174, 115, 0.26);
-  --prob-medium-bg-hover: rgba(217, 181, 91, 0.25);
-  --prob-low-bg-hover:    rgba(204, 118, 115, 0.26);
-  --prob-orange-bg-hover: rgba(226, 146, 88, 0.28);
+  --prob-high:    #7EB889;   /* moss green */
+  --prob-medium:  #E4C35F;   /* honey gold */
+  --prob-low:     #E07A78;   /* soft coral-red */
+  --prob-orange:  #F3A064;   /* warm mandarin */
+  --prob-high-bg:   rgba(126, 184, 137, 0.16);
+  --prob-medium-bg: rgba(228, 195, 95, 0.15);
+  --prob-low-bg:    rgba(224, 122, 120, 0.16);
+  --prob-orange-bg: rgba(243, 160, 100, 0.18);
+  --prob-high-bg-hover:   rgba(126, 184, 137, 0.26);
+  --prob-medium-bg-hover: rgba(228, 195, 95, 0.25);
+  --prob-low-bg-hover:    rgba(224, 122, 120, 0.26);
+  --prob-orange-bg-hover: rgba(243, 160, 100, 0.28);
 }
 
 .trow[data-prob="high"]   { background-color: var(--prob-high-bg);   box-shadow: inset 4px 0 0 var(--prob-high); }
@@ -565,7 +570,15 @@ html, body { overflow-x: clip; }
 /* Invoice spreadsheet rows: orange tint matches Potential row. Sticky cells
    carry the left stripe; month/total cells keep their own bg. */
 .invoice-table tr[data-prob="orange"] td.sticky-1,
-.invoice-table tr[data-prob="orange"] td.sticky-2 { background-color: var(--prob-orange-bg); box-shadow: inset 4px 0 0 var(--prob-orange); }
+.invoice-table tr[data-prob="orange"] td.sticky-2 {
+  /* Sticky cells must be fully opaque so scrolled neighbors don't show
+     through. --prob-orange-bg is 14% alpha; composite it over --surface
+     so the tint reads the same but hides the content behind. */
+  background:
+    linear-gradient(var(--prob-orange-bg), var(--prob-orange-bg)),
+    var(--surface);
+  box-shadow: inset 4px 0 0 var(--prob-orange);
+}
 .invoice-table tr[data-prob="orange"] td:not(.sticky-1):not(.sticky-2):not(.month-actual):not(.month-proj):not(.total-cell) { background-color: var(--prob-orange-bg); }
 
 /* ---- Org-type palette (Awaiting Verdict, matches the customer's xlsx)
@@ -996,6 +1009,18 @@ html, body { overflow-x: clip; }
 }
 .invoice-table th.sticky-1, .invoice-table td.sticky-1 { left: 0; min-width: 110px; max-width: 110px; }
 .invoice-table th.sticky-2, .invoice-table td.sticky-2 { left: 110px; }
+/* CSS max-width is ignored on <td> in auto table-layout (per CSS spec), so
+   we cap the inner content with a block wrapper instead. The td inherits the
+   wrapper's width, keeping long underscored project names from escaping the
+   column and stacking on top of Type/PM/Contract (sticky has a higher
+   z-index than neighbors). */
+.invoice-table td.sticky-2 .inv-name-wrap {
+  display: block;
+  max-width: 240px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+}
 /* Backward-compat alias */
 .invoice-table th.sticky-left, .invoice-table td.sticky-left {
   text-align: left; font-family: var(--font-body);
@@ -1037,6 +1062,23 @@ html, body { overflow-x: clip; }
   background: var(--bg-elev);
   color: var(--text);
   font-weight: 600;
+}
+/* YTD Actual / Rollforward cell when the user has written a manual override.
+   A small accent dot before the number signals "this value is frozen, not
+   auto-calculated." Paired with a tooltip on the <td>. Cleared by emptying
+   the cell in the editor. */
+.invoice-table td.total-cell.inv-override {
+  position: relative;
+}
+.invoice-table td.total-cell.inv-override::before {
+  content: "";
+  position: absolute;
+  left: 3px; top: 50%;
+  width: 5px; height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--bg-elev);
 }
 .invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2) { filter: brightness(0.98); }
 [data-theme="dark"] .invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2) { filter: brightness(1.1); }
@@ -1601,4 +1643,306 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .soq-rec.tone-maybe  { background: #251E33; border-color: #463A5C; color: #C5B3E0; }
 [data-theme="dark"] .soq-rec.tone-no     { background: #2E2520; border-color: #55463C; color: #D1B9AB; }
 [data-theme="dark"] .soq-rec.tone-unknown{ background: var(--surface-2); border-color: var(--border); color: var(--text-soft); }
+
+/* ======================================================================
+ * LOGIN PAGE — editorial two-column entry gate
+ * ====================================================================== */
+.login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; }
+  .login-hero { display: none; }
+}
+
+/* ---- Left · editorial hero ---- */
+.login-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 36px 44px;
+  display: flex; flex-direction: column;
+  justify-content: space-between;
+  color: #F7EFDF;
+  background: linear-gradient(155deg, #2D1C0A 0%, #5A3616 48%, #A66428 100%);
+  isolation: isolate;
+}
+.login-hero .brand { color: #F7EFDF; }
+.login-hero .brand-mark {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.1), 0 6px 14px -4px rgba(0,0,0,.35);
+}
+.login-hero .brand-sub {
+  color: #E8C997;
+  border-left-color: rgba(232,201,151,.32);
+}
+
+/* Decorative stripes — thin amber geometry running diagonally. */
+.hero-stripe {
+  position: absolute;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255,198,124,.22), transparent);
+  height: 1px;
+  transform-origin: center;
+  transform: rotate(-18deg);
+  width: 140%;
+  left: -20%;
+}
+.hero-stripe.stripe-a { top: 22%; opacity: .7; }
+.hero-stripe.stripe-b { top: 46%; opacity: .35; height: 1px; }
+.hero-stripe.stripe-c { top: 78%; opacity: .55; }
+
+.hero-grain {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(800px 400px at 80% -10%, rgba(255,198,124,.25), transparent 60%),
+    radial-gradient(500px 400px at -10% 90%, rgba(255,198,124,.12), transparent 60%);
+  z-index: 0;
+}
+.login-hero > * { position: relative; z-index: 1; }
+
+.hero-top { display: flex; align-items: center; gap: 12px; }
+.hero-body { max-width: 480px; }
+.hero-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  color: #EFC48D;
+  margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(36px, 4.2vw, 52px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  margin: 0 0 20px;
+  color: #FBF3E3;
+}
+.hero-title em {
+  font-style: italic;
+  font-weight: 400;
+  color: #E9B470;
+}
+.hero-copy {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: #E0CDA8;
+  max-width: 440px;
+  margin: 0 0 26px;
+}
+.hero-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  font-size: 13px;
+  color: #EDD7AE;
+}
+.hero-list li { display: flex; align-items: center; gap: 10px; }
+.hero-list .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #E9B470;
+  box-shadow: 0 0 0 3px rgba(233,180,112,.18);
+}
+.hero-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11.5px;
+  color: rgba(239,196,141,.68);
+  letter-spacing: .04em;
+}
+.hero-foot .mono { font-family: var(--font-mono); letter-spacing: .12em; }
+
+/* ---- Right · form card ---- */
+.login-panel {
+  display: grid; place-items: center;
+  padding: 36px 40px;
+  background:
+    radial-gradient(800px 380px at 50% -10%, rgba(200,130,59,.10), transparent 70%),
+    var(--bg-elev);
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex; flex-direction: column;
+  gap: 14px;
+}
+.login-card-head {
+  display: flex; flex-direction: column; gap: 6px;
+  padding-bottom: 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.login-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--text-soft);
+}
+.login-title {
+  font-family: var(--font-display);
+  font-size: 26px; font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--text);
+}
+.login-sub {
+  font-size: 13px;
+  color: var(--text-soft);
+  margin: 0;
+}
+
+.login-field {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.login-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.login-input-wrap {
+  position: relative;
+  display: flex; align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: border-color .12s ease, box-shadow .12s ease;
+  color: var(--text-muted);
+}
+.login-input-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-softer);
+  color: var(--accent-ink);
+}
+.login-input-wrap input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  padding: 0;
+  min-width: 0;
+}
+.login-input-wrap input::placeholder { color: var(--text-soft); }
+.login-eye {
+  display: grid; place-items: center;
+  width: 28px; height: 28px;
+  border: 0; background: transparent;
+  color: var(--text-soft);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.login-eye:hover { color: var(--accent-ink); background: var(--surface-2); }
+
+.login-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #FBE7E3;
+  border: 1px solid #EDB2A9;
+  color: #9E3D2E;
+  font-size: 12.5px;
+}
+[data-theme="dark"] .login-error {
+  background: #3A1D18; border-color: #6E3326; color: #F0A69A;
+}
+
+.login-submit {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-ink) 100%);
+  color: #FFF6E4;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  cursor: pointer;
+  box-shadow: 0 6px 14px -6px rgba(107,63,16,.55), inset 0 1px 0 rgba(255,255,255,.15);
+  transition: transform .08s ease, box-shadow .12s ease, opacity .12s ease;
+}
+.login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px -8px rgba(107,63,16,.55), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.login-submit:active:not(:disabled) { transform: translateY(0); }
+.login-submit:disabled { opacity: .75; cursor: progress; }
+
+.login-spin {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.4);
+  border-top-color: #FFF;
+  animation: loginSpin .7s linear infinite;
+}
+@keyframes loginSpin { to { transform: rotate(360deg); } }
+
+.login-hint {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-soft);
+  margin-top: 2px;
+}
+
+/* Dark-theme tweaks for the right panel (hero already has a fixed palette). */
+[data-theme="dark"] .login-panel {
+  background:
+    radial-gradient(800px 380px at 50% -10%, rgba(200,130,59,.14), transparent 70%),
+    var(--bg-elev);
+}
+
+/* ======================================================================
+ * SESSION CHIP — compact user + sign-out in topbar.
+ * ====================================================================== */
+.session-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.session-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+.session-chip .avatar { margin: 0; }
+.session-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+.session-role {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+}
+.session-role.admin {
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border-color: var(--accent-soft);
+}
+.session-menu-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  background: transparent; border: 0;
+  color: var(--text-soft);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.session-menu-btn:hover { color: var(--accent-ink); background: var(--surface); }
 

@@ -10,7 +10,7 @@ import { supabase, THIS_YEAR, MONTHS, fmtMoney } from "./data.js";
 //   2. Insert related rows (PM join for potential, subs for potential,
 //      attendees for events) keyed on the new id.
 //   3. Call onCreated(dbRow, extras). App.jsx's adaptInsertedRow uses
-//      `extras.pmId`, `extras.subs`, `extras.attendees` to build the UI row
+//      `extras.pmIds`, `extras.subs`, `extras.attendees` to build the UI row
 //      so the freshly-created entry shows its relations immediately.
 //
 // Errors after step 1 are reported inline; the main row stays in the DB.
@@ -82,7 +82,7 @@ const INITIAL = {
     msmm_remaining: "",
     client_contract_number: "",
     msmm_contract_number: "",
-    pm_user_id: "",
+    pm_user_ids: [],
     subs: [],
   },
   potential: {
@@ -93,7 +93,7 @@ const INITIAL = {
     total_contract_amount: "",
     msmm_amount: "",
     probability: "High",
-    pm_user_id: "",
+    pm_user_ids: [],
     subs: [],
     notes: "",
     next_action_note: "",
@@ -300,12 +300,13 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
     const extras = {};
     try {
       if (table === "potential") {
-        if (form.pm_user_id) {
+        const pmIds = (form.pm_user_ids || []).filter(Boolean);
+        if (pmIds.length > 0) {
           const { error: e1 } = await supabase
             .from("potential_project_pms")
-            .insert({ potential_project_id: row.id, user_id: form.pm_user_id });
+            .insert(pmIds.map(uid => ({ potential_project_id: row.id, user_id: uid })));
           if (e1) throw e1;
-          extras.pmId = form.pm_user_id;
+          extras.pmIds = pmIds;
         }
         const subs = (form.subs || []).filter(s => s.cId || s.desc || s.amt);
         if (subs.length > 0) {
@@ -323,17 +324,17 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
         }
         // Orange → auto-create a linked anticipated_invoice row so the
         // pre-awarded project shows up on the Invoice tab immediately.
+        // anticipated_invoice is intentionally minimal — only the columns
+        // listed below exist on it. Don't send role/client_id/msmm_amount/
+        // notes here; they live on the potential row and are looked up via
+        // source_potential_id when needed.
         if (form.probability === "Orange") {
           const invPayload = {
             source_potential_id: row.id,
             project_name: row.project_name,
             year: row.year,
-            role: row.role || null,
-            client_id: row.client_id || null,
-            total_contract_amount: row.total_contract_amount ?? null,
-            msmm_amount: row.msmm_amount ?? null,
             project_number: row.project_number || null,
-            notes: row.notes || null,
+            contract_amount: row.total_contract_amount ?? null,
           };
           const { data: invRow, error: e4 } = await supabase
             .from("anticipated_invoice").insert(invPayload).select().single();
@@ -341,12 +342,13 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
           extras.invoiceRow = invRow;
         }
       } else if (table === "soq") {
-        if (form.pm_user_id) {
+        const pmIds = (form.pm_user_ids || []).filter(Boolean);
+        if (pmIds.length > 0) {
           const { error: eSP } = await supabase
             .from("soq_pms")
-            .insert({ soq_id: row.id, user_id: form.pm_user_id });
+            .insert(pmIds.map(uid => ({ soq_id: row.id, user_id: uid })));
           if (eSP) throw eSP;
-          extras.pmId = form.pm_user_id;
+          extras.pmIds = pmIds;
         }
         const subs = (form.subs || []).filter(s => s.cId);
         if (subs.length > 0) {
@@ -424,12 +426,10 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
             <SubsEditor value={form.subs} companies={companies}
                         onChange={next => set("subs", next)}/>
           </Field>
-          <Field label="PM">
-            <select className="select" value={form.pm_user_id}
-                    onChange={e => set("pm_user_id", e.target.value)}>
-              <option value="">—</option>
-              {(users || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+          <Field label="PMs" multiline>
+            <UserMultiPicker value={form.pm_user_ids} users={users}
+                             onChange={next => set("pm_user_ids", next)}
+                             placeholder="Pick MSMM users…"/>
           </Field>
           <Field label="Probability">
             <select className="select" value={form.probability}
@@ -517,12 +517,10 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
               <option value="No">No</option>
             </select>
           </Field>
-          <Field label="PM">
-            <select className="select" value={form.pm_user_id}
-                    onChange={e => set("pm_user_id", e.target.value)}>
-              <option value="">—</option>
-              {(users || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+          <Field label="PMs" multiline>
+            <UserMultiPicker value={form.pm_user_ids} users={users}
+                             onChange={next => set("pm_user_ids", next)}
+                             placeholder="Pick MSMM users…"/>
           </Field>
           <Field label="Subs" multiline>
             <SubsEditor value={form.subs} companies={companies}

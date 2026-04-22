@@ -15,8 +15,81 @@ if (!URL || !KEY) {
 
 export const supabase = createClient(URL, KEY, {
   db: { schema: "beacon" },
-  auth: { persistSession: false, autoRefreshToken: false },
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    storageKey: "beacon.auth",
+    detectSessionInUrl: false,
+  },
 });
+
+// ----------------------------------------------------------------------
+// Auth helpers
+// ----------------------------------------------------------------------
+// The auth flow:
+//   1. User submits email + password on the login page.
+//   2. signIn() resolves a Supabase session (or an error).
+//   3. fetchCurrentBeaconUser() looks up the matching beacon.users row by
+//      email so we know the app-level role (Admin / User) for this session.
+//
+// The beacon.users row is cached at module level (_currentBeaconUser) so any
+// component can check the current user's role without re-querying.
+
+let _currentBeaconUser = null;
+export const getCurrentBeaconUser = () => _currentBeaconUser;
+export const isAdmin = () => _currentBeaconUser?.role === "Admin";
+
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: String(email || "").trim().toLowerCase(),
+    password: password || "",
+  });
+  if (error) return { ok: false, error };
+  return { ok: true, session: data.session };
+}
+
+export async function signOut() {
+  _currentBeaconUser = null;
+  const { error } = await supabase.auth.signOut();
+  return { ok: !error, error };
+}
+
+export async function getCurrentSession() {
+  const { data } = await supabase.auth.getSession();
+  return data?.session || null;
+}
+
+// Resolve the beacon.users row for the currently-signed-in auth user.
+// Matches first by auth_user_id (set by the backfill trigger / admin API),
+// then falls back to a case-insensitive email match.
+export async function fetchCurrentBeaconUser() {
+  const { data: sess } = await supabase.auth.getSession();
+  const authUser = sess?.session?.user;
+  if (!authUser) { _currentBeaconUser = null; return null; }
+
+  let row = null;
+  // Try auth_user_id first — unique, and the trigger links on insert.
+  {
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("auth_user_id", authUser.id)
+      .maybeSingle();
+    if (!error && data) row = data;
+  }
+  // Fallback: email match (citext is case-insensitive but we lowercase anyway).
+  if (!row && authUser.email) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .ilike("email", authUser.email)
+      .maybeSingle();
+    if (!error && data) row = data;
+  }
+
+  _currentBeaconUser = row;
+  return row;
+}
 
 // ----------------------------------------------------------------------
 // Module-level caches — populated by loadBeacon(). Static for the session.
@@ -41,9 +114,8 @@ export const THIS_YEAR   = new Date().getFullYear();
 
 export const mkId = () => "r_" + Math.random().toString(36).slice(2, 10);
 
-export const fmtMoney = (n, showCents = false) => {
+export const fmtMoney = (n, showCents = true) => {
   if (n == null || n === "") return "—";
-  if (n === 0) return "$0";
   return "$" + Number(n).toLocaleString("en-US", {
     minimumFractionDigits: showCents ? 2 : 0,
     maximumFractionDigits: showCents ? 2 : 0,
@@ -127,7 +199,10 @@ const adaptSubsCosted = (arr) =>
     .sort((a, b) => (a.ord || 0) - (b.ord || 0))
     .map(s => ({ cId: s.company_id, desc: s.discipline || "", amt: s.amount || 0 }));
 
-const firstPm = (pms) => (pms && pms[0] ? pms[0].user_id : null);
+// Multi-PM — every join table can carry any number of PMs per project. Preserve
+// join-row order as returned by PostgREST (stable across fetches for the same
+// dataset; the DB doesn't record a per-row ord).
+const allPms = (pms) => (pms || []).map(p => p.user_id).filter(Boolean);
 
 function adaptPotential(r) {
   return {
@@ -139,7 +214,7 @@ function adaptPotential(r) {
     amount: r.total_contract_amount,
     msmm: r.msmm_amount,
     subs: adaptSubsCosted(r.subs),
-    pmId: firstPm(r.pms),
+    pmIds: allPms(r.pms),
     notes: r.notes || "",
     dates: r.next_action_note || "",
     nextActionDate: r.next_action_date || "",
@@ -159,7 +234,7 @@ function adaptAwaiting(r) {
     amount: null,
     msmm: r.msmm_remaining || 0,
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
-    pmId: firstPm(r.pms),
+    pmIds: allPms(r.pms),
     notes: r.notes || "",
     dates: "",
     projectNumber: r.project_number || "",
@@ -183,7 +258,7 @@ function adaptSoq(r) {
     amount: null,
     msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
-    pmId: firstPm(r.pms),
+    pmIds: allPms(r.pms),
     notes: r.notes || "",
     dates: "",
     projectNumber: r.project_number || "",
@@ -212,7 +287,7 @@ function adaptAwarded(r) {
     amount: null,
     msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
-    pmId: firstPm(r.pms),
+    pmIds: allPms(r.pms),
     notes: "",
     dates: "",
     projectNumber: r.project_number || "",
@@ -239,7 +314,7 @@ function adaptClosed(r) {
     amount: null,
     msmm: 0,
     subs: [],
-    pmId: firstPm(r.pms),
+    pmIds: allPms(r.pms),
     notes: r.notes || "",
     dates: "",
     projectNumber: r.project_number || "",
@@ -259,7 +334,7 @@ function adaptInvoice(r) {
     sourcePotentialId: r.source_potential_id || null,
     projectNumber: r.project_number || "",
     name: r.project_name,
-    pmId: firstPm(r.pms),
+    pmIds: allPms(r.pms),
     amount: r.contract_amount || 0,
     type: r.type || "ENG",
     remainingStart: r.msmm_remaining_to_bill_year_start || 0,
@@ -269,6 +344,9 @@ function adaptInvoice(r) {
       r.sep_amount, r.oct_amount, r.nov_amount, r.dec_amount,
     ].map(v => v || 0),
     year: r.year,
+    // NULL = use auto-calc; numeric = user has frozen the value.
+    ytdActualOverride:   r.ytd_actual_override   ?? null,
+    rollforwardOverride: r.rollforward_override  ?? null,
   };
 }
 

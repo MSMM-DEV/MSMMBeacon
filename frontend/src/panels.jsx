@@ -3,6 +3,52 @@ import { Icon } from "./icons.jsx";
 import { StatusChip } from "./primitives.jsx";
 import { getCompanies, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
 
+// Multi-user picker used by both the PMs field and Events attendees.
+// Search-as-you-type dropdown; selected users render as chips with remove-x.
+// Kept tiny (no icons/icon package) so it composes neatly in a drawer field.
+function UsersField({ value, onChange, placeholder = "Pick users…" }) {
+  const USERS = getUsers();
+  const ids = value || [];
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const available = USERS.filter(
+    u => !ids.includes(u.id) && (!q || u.name.toLowerCase().includes(q.toLowerCase()))
+  );
+  return (
+    <div className="tag-input" onClick={() => setOpen(true)} style={{ position: "relative" }}>
+      {ids.map(uid => {
+        const u = userById(uid); if (!u) return null;
+        return (
+          <span key={uid} className="tag">
+            <span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
+            <button type="button" onClick={(e) => { e.stopPropagation(); onChange(ids.filter(x => x !== uid)); }}>
+              <Icon name="x" size={10}/>
+            </button>
+          </span>
+        );
+      })}
+      <input
+        placeholder={ids.length ? "Add another…" : placeholder}
+        value={q}
+        onChange={e => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && available.length > 0 && (
+        <div className="menu" style={{ left: 0, right: 0, top: "calc(100% + 4px)", position: "absolute", margin: 4 }}>
+          {available.slice(0, 8).map(u => (
+            <button key={u.id} type="button" className="menu-item"
+                    onMouseDown={() => { onChange([...ids, u.id]); setQ(""); }}>
+              <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+              <span>{u.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ DETAIL DRAWER (read/edit a row) ============
 export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert }) => {
   if (!row) return null;
@@ -21,7 +67,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "amount",         label: "Total Contract Amount",   type: "money" },
       { k: "msmm",           label: "MSMM Amount",             type: "money" },
       { k: "subs",           label: "Subs",                    type: "subs" },
-      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "probability",    label: "Probability",             type: "select", options: ["High","Medium","Low","Orange"] },
       { k: "anticipatedInvoiceStartMonth", label: "Anticipated Invoice Start Month", type: "month",
         showIf: (r) => r.probability === "Orange" },
@@ -43,7 +89,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
       { k: "msmmUsed",       label: "MSMM Used",               type: "money" },
       { k: "msmmRemaining",  label: "MSMM Remaining",          type: "money" },
-      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
@@ -64,7 +110,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
       { k: "msmmUsed",       label: "MSMM Used",               type: "money" },
       { k: "msmmRemaining",  label: "MSMM Remaining",          type: "money" },
-      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
@@ -84,7 +130,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
       { k: "msmmUsed",       label: "MSMM Used",               type: "money" },
       { k: "msmmRemaining",  label: "MSMM Remaining",          type: "money" },
-      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
@@ -101,7 +147,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "reason",         label: "Reason for Closure",      type: "textarea" },
       { k: "clientContract", label: "Client Contract #",       type: "mono" },
       { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
-      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
@@ -109,7 +155,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "name",           label: "Project Name" },
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
       { k: "type",           label: "Type",                    type: "select", options: ["ENG","PM"] },
-      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "amount",         label: "Contract Amount",         type: "money" },
       { k: "remainingStart", label: "Remaining to Bill (Jan 1)", type: "money" },
     ],
@@ -166,14 +212,8 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       </select>
     );
     if (f.type === "users") return (
-      <div className="tag-input">
-        {(val || []).map(uid => {
-          const u = userById(uid); if (!u) return null;
-          return <span key={uid} className="tag"><span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
-            <button onClick={() => set(val.filter(x => x !== uid))}><Icon name="x" size={10}/></button></span>;
-        })}
-        <input placeholder="Add attendee…"/>
-      </div>
+      <UsersField value={val || []} onChange={set}
+                  placeholder={f.placeholder || "Pick MSMM users…"}/>
     );
     if (f.type === "money") return (
       <input className="input" type="number" defaultValue={val || ""} onBlur={e => set(Number(e.target.value))}
@@ -360,7 +400,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
     "awaiting→awarded": {
       title: "Mark project as Awarded",
       subtitle: "Carries to Awarded Projects · also auto-creates Invoice row",
-      carried: ["year","name","clientId","role","subs","dateSubmitted","clientContract","msmmContract","msmmUsed","msmmRemaining","projectNumber","pmId"],
+      carried: ["year","name","clientId","role","subs","dateSubmitted","clientContract","msmmContract","msmmUsed","msmmRemaining","projectNumber","pmIds"],
       newFields: [
         { k: "status", label: "Status", type: "pill", value: "Awarded" },
         { k: "stage", label: "Stage", type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List","Design 30%"], value: "Multi-Use Contract" },
@@ -374,7 +414,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
     "awaiting→closed": {
       title: "Close out project",
       subtitle: "Carries to Closed Out Projects",
-      carried: ["year","name","clientId","role","subs","dateSubmitted","notes","clientContract","msmmContract","projectNumber","pmId"],
+      carried: ["year","name","clientId","role","subs","dateSubmitted","notes","clientContract","msmmContract","projectNumber","pmIds"],
       newFields: [
         { k: "status", label: "Status", type: "pill", value: "Closed Out" },
         { k: "dateClosed", label: "Date Closed", type: "date", value: new Date().toISOString().substr(0,10) },
@@ -397,13 +437,13 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
     year: "Year", name: "Project", clientId: "Client", role: "Role", subs: "Subs",
     notes: "Notes", projectNumber: "Project #", dateSubmitted: "Submitted",
     clientContract: "Client Contract", msmmContract: "MSMM Contract",
-    msmmUsed: "MSMM Used", msmmRemaining: "MSMM Rem.", pmId: "PM",
+    msmmUsed: "MSMM Used", msmmRemaining: "MSMM Rem.", pmIds: "PMs",
   };
   const formatCarried = (k) => {
     const v = row[k];
     if (v == null || v === "") return "—";
     if (k === "clientId") return companyById(v)?.name || "—";
-    if (k === "pmId") return userById(v)?.name || "—";
+    if (k === "pmIds") return (v || []).map(id => userById(id)?.name).filter(Boolean).join(", ") || "—";
     if (k === "subs") return (v || []).map(s => `${companyById(s.cId)?.name?.split(" ")[0] || s.desc || "Sub"} (${fmtMoney(s.amt)})`).join(", ") || "—";
     if (k === "msmmUsed" || k === "msmmRemaining") return fmtMoney(v);
     if (k === "dateSubmitted") return fmtDate(v);
@@ -475,7 +515,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
 // ============ ALERT MODAL ============
 export const AlertModal = ({ row, onClose, onConfirm }) => {
   const USERS = getUsers();
-  const [recipients, setRecipients] = useState([row.pmId].filter(Boolean));
+  const [recipients, setRecipients] = useState([...(row.pmIds || [])]);
   const [date, setDate] = useState(new Date(Date.now() + 5 * 86400000).toISOString().substr(0, 10));
   const [time, setTime] = useState("09:00");
   const [recur, setRecur] = useState("one-time");
