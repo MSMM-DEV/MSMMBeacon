@@ -99,6 +99,44 @@ Scheduling + sending alerts needs three moving pieces stood up once. Skip if you
 
 Admin users also get a **"Run tick now"** button in the gear-icon Alerts tab that POSTs to the same endpoint using their session — handy for testing without waiting for the next cron beat.
 
+## Deployment (Vercel)
+
+Hosting split:
+- **Vercel** — serves `frontend/` as a static Vite build.
+- **Supabase** — hosts Postgres + PostgREST + both Edge Functions (`admin-users`, `send-alert`).
+- **GitHub Actions** — runs the 1-min `alert-tick` cron that pokes `send-alert`.
+
+### First-time setup
+
+1. **Import the repo** in the Vercel dashboard → New Project → pick this repo.
+2. **Set Root Directory to `frontend`** in Project Settings → General. Vercel then auto-detects Vite and sets `npm run build` + output dir `dist/` correctly. `frontend/vercel.json` handles SPA rewrites (`?tab=X&rowId=Y` deep links work on reload) and security headers.
+3. **Add Environment Variables** (Project Settings → Environment Variables), for both **Production** and **Preview** scopes:
+   - `VITE_SUPABASE_URL` — e.g. `https://ggqlcsppojypgaiyhods.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY` — the `anon public` key from Supabase → Settings → API
+   
+   Do **not** add `SUPABASE_SERVICE_KEY`, `RESEND_API_KEY`, `OPENAI_API_KEY`, or `PASSWORD` — those are server-side only and live as Supabase Edge Function secrets.
+4. **Deploy.** Vercel builds from `main`; PRs get preview deploys automatically.
+
+### Post-deploy glue (one-time)
+
+Grab your Vercel URL (e.g. `https://beacon-xyz.vercel.app`, or your custom domain) and point the alerts pipeline at it:
+
+```sh
+supabase secrets set APP_URL="https://<your-vercel-url>" --project-ref ggqlcsppojypgaiyhods
+```
+
+`APP_URL` is what `send-alert` uses to build deep links in outgoing emails. Without this, links in alert emails will point to `http://localhost:5173`.
+
+### Custom domain (optional)
+
+Add the domain in Vercel → Project Settings → Domains, create the DNS record Vercel tells you to, then re-run the `APP_URL` secret update to point at the custom domain. No Supabase-side changes needed — we use password auth, not magic links, so no redirect URL allowlist is involved.
+
+### Preview deploys
+
+Preview deploys work for the frontend. Two caveats:
+- They share the same Supabase instance as production. Creating/editing data on a preview writes to the real DB.
+- Alert emails triggered from a preview still contain `APP_URL`-based links that point at the production URL, not the preview. If you're testing the email-link flow, do it on production or temporarily flip `APP_URL` while iterating.
+
 ## What's in the DB after ingest
 
 | Table | Rows |
