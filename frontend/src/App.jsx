@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
-  PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
+  PotentialTable, AwaitingTable, AwardedTable, SoqTable, ClosedTable,
   InvoiceTable, EventsTable, ClientsTable, CompaniesTable,
 } from "./tables.jsx";
+import { QuadSheet } from "./quadsheet.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
@@ -26,26 +27,35 @@ const countRefs = (id) => {
   return list.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
 };
 
+// Display order differs from the move-forward flow: Invoice is shown first
+// because it's what leadership looks at most. The actual pipeline (Potential
+// → Awaiting Verdict → Awarded / Closed Out) keeps its → arrows; the Invoice
+// tab sits in its own "head" group separated by a gap so no arrow implies
+// a bogus Invoice → Potential flow.
 const TAB_META = [
+  { key: "invoice",   label: "Invoice",          stage: "stage-invoice",   group: "head" },
   { key: "potential", label: "Potential",        stage: "stage-potential", group: "pipeline" },
   { key: "awaiting",  label: "Awaiting Verdict", stage: "stage-awaiting",  group: "pipeline" },
   { key: "awarded",   label: "Awarded",          stage: "stage-awarded",   group: "pipeline" },
+  { key: "soq",       label: "SOQ",              stage: "stage-awarded",   group: "pipeline" },
   { key: "closed",    label: "Closed Out",       stage: "stage-closed",    group: "pipeline" },
-  { key: "invoice",   label: "Invoice",          stage: "stage-invoice",   group: "pipeline" },
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "clients",   label: "Clients",          stage: "stage-clients",   group: "side" },
   { key: "companies", label: "Companies",        stage: "stage-clients",   group: "side" },
+  { key: "quad",      label: "Quad Sheet",       stage: "stage-quad",      group: "side" },
 ];
 
 const PAGE_META = {
   potential: { title: "Potential Projects", desc: "Opportunities being scoped and proposed. Move forward to submit." },
   awaiting:  { title: "Awaiting Verdict", desc: "Submitted proposals pending client decision. Mark as Awarded or Closed Out." },
   awarded:   { title: "Awarded Projects", desc: "Active engagements. Each has a matching row in the Anticipated Invoice." },
+  soq:       { title: "SOQ", desc: "Statements of Qualifications — parallel to the pipeline. Grouped by org type." },
   closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   clients:   { title: "Clients", desc: "Organizations that hire us. Referenced by every project row's Client field." },
   companies: { title: "Companies", desc: "Firms we team with as Primes or Subs. Referenced by project Prime and Subs fields." },
+  quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and SOQs at a glance." },
 };
 
 const DEFAULT_TWEAKS = {
@@ -81,6 +91,15 @@ const FILTERS = {
       return days > 0 && days < 180;
     },
     low: r => (r.msmmUsed + r.msmmRemaining) > 0 && (r.msmmRemaining / (r.msmmUsed + r.msmmRemaining)) < 0.2,
+  },
+  soq: {
+    all:       () => true,
+    recurring: r => r.recurring === "Yes" || r.recurring === "In Talks",
+    expiring:  r => {
+      if (!r.contractExpiry) return false;
+      const days = (new Date(r.contractExpiry).getTime() - Date.now()) / 86400000;
+      return days > 0 && days < 180;
+    },
   },
   closed: {
     all: () => true,
@@ -122,6 +141,11 @@ const FILTER_CHIPS = {
     { key: "all",      label: "All" },
     { key: "expiring", label: "Expiring soon", icon: "clock" },
     { key: "low",      label: "Low remaining", icon: "trend" },
+  ],
+  soq: [
+    { key: "all",       label: "All" },
+    { key: "recurring", label: "Recurring", icon: "clock" },
+    { key: "expiring",  label: "Expiring soon", icon: "clock" },
   ],
   closed: [
     { key: "all",      label: "All" },
@@ -181,6 +205,7 @@ const EXPORT_COLUMNS = {
     { label: "Client",                      get: r => companyById(r.clientId)?.name || "" },
     { label: "Role",              wMm: 18,  get: r => r.role || "" },
     { label: "Submitted",         wMm: 22,  get: r => fmtDate(r.dateSubmitted) },
+    { label: "Anticipated Result", wMm: 26, get: r => fmtDate(r.anticipatedResultDate) },
     { label: "Client Contract",   wMm: 28,  get: r => r.clientContract || "" },
     { label: "MSMM Contract",     wMm: 28,  get: r => r.msmmContract || "" },
     { label: "MSMM Remaining",    wMm: 26,  get: r => fmtMoney(r.msmmRemaining) },
@@ -209,6 +234,20 @@ const EXPORT_COLUMNS = {
     { label: "Client Contract",             get: r => r.clientContract || "" },
     { label: "MSMM Contract",               get: r => r.msmmContract || "" },
     { label: "Status",            wMm: 26,  get: r => r.status || "Awarded" },
+    { label: "Details",                     get: r => r.details || "" },
+  ],
+  soq: [
+    { label: "Year",              wMm: 14,  get: r => r.year },
+    { label: "Project",                     get: r => r.name },
+    { label: "Client",                      get: r => companyById(r.clientId)?.name || "" },
+    { label: "Start Date",        wMm: 22,  get: r => fmtDate(r.startDate) },
+    { label: "Expiry",            wMm: 22,  get: r => fmtDate(r.contractExpiry) },
+    { label: "Recurring",         wMm: 22,  get: r => r.recurring || "" },
+    { label: "Stage",                       get: r => r.stage || "" },
+    { label: "Pool",                        get: r => r.pools || "" },
+    { label: "Contract",          wMm: 26,  get: r => fmtMoney((r.msmmUsed || 0) + (r.msmmRemaining || 0)) },
+    { label: "PM",                wMm: 22,  get: r => userById(r.pmId)?.name || "" },
+    { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
     { label: "Details",                     get: r => r.details || "" },
   ],
   closed: [
@@ -270,7 +309,35 @@ const EXPORT_COLUMNS = {
 };
 
 // DB row → UI row adapter for newly-inserted rows from CreateModal
-function adaptInsertedRow(table, dbRow) {
+function adaptInsertedRow(table, dbRow, extras = {}) {
+  if (table === "soq") {
+    return {
+      id: dbRow.id,
+      year: dbRow.year,
+      name: dbRow.project_name,
+      role: dbRow.prime_company_id ? "Sub" : "Prime",
+      clientId: dbRow.client_id || null,
+      amount: null,
+      msmm: (dbRow.msmm_used || 0) + (dbRow.msmm_remaining || 0),
+      subs: extras.subs || [],
+      pmId: extras.pmId || null,
+      notes: dbRow.notes || "",
+      dates: "",
+      projectNumber: dbRow.project_number || "",
+      status: "SOQ",
+      dateSubmitted: dbRow.date_submitted || "",
+      clientContract: dbRow.client_contract_number || "",
+      msmmContract: dbRow.msmm_contract_number || "",
+      msmmUsed: dbRow.msmm_used || 0,
+      msmmRemaining: dbRow.msmm_remaining || 0,
+      stage: "",
+      details: dbRow.details || "",
+      pools: dbRow.pool || "",
+      startDate: dbRow.start_date || "",
+      contractExpiry: dbRow.contract_expiry_date || "",
+      recurring: dbRow.recurring || "",
+    };
+  }
   if (table === "potential") {
     return {
       id: dbRow.id,
@@ -280,12 +347,15 @@ function adaptInsertedRow(table, dbRow) {
       clientId: dbRow.client_id || null,
       amount: dbRow.total_contract_amount,
       msmm: dbRow.msmm_amount,
-      subs: [],
-      pmId: null,
+      // Keep the user's chosen subs shape; sort by ord if we built it from DB rows later.
+      subs: extras.subs || [],
+      pmId: extras.pmId || null,
       notes: dbRow.notes || "",
       dates: dbRow.next_action_note || "",
+      nextActionDate: dbRow.next_action_date || "",
       projectNumber: dbRow.project_number || "",
       probability: dbRow.probability,
+      anticipatedInvoiceStartMonth: dbRow.anticipated_invoice_start_month ?? null,
     };
   }
   if (table === "events") {
@@ -296,7 +366,8 @@ function adaptInsertedRow(table, dbRow) {
       type: dbRow.type || "",
       title: dbRow.title,
       dateTime: dbRow.event_datetime || "",
-      attendees: [],
+      attendees: extras.attendees || [],
+      notes: dbRow.notes || "",
     };
   }
   if (table === "clients") {
@@ -397,6 +468,7 @@ function BeaconApp({ initial }) {
   const [potential, setPotential] = useState(initial.potential);
   const [awaiting,  setAwaiting]  = useState(initial.awaiting);
   const [awarded,   setAwarded]   = useState(initial.awarded);
+  const [soq,       setSoq]       = useState(initial.soq || []);
   const [closed,    setClosed]    = useState(initial.closed);
   const [invoice,   setInvoice]   = useState(initial.invoices);
   const [events,    setEvents]    = useState(initial.events);
@@ -405,13 +477,13 @@ function BeaconApp({ initial }) {
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
-    potential: "all", awaiting: "all", awarded: "all", closed: "all",
+    potential: "all", awaiting: "all", awarded: "all", soq: "all", closed: "all",
     events: "all", clients: "all", companies: "all",
   });
 
   // Year filter state. null = All years; number = filter to that year.
   const [yearFilter, setYearFilter] = useState({
-    potential: null, awaiting: null, awarded: null, closed: null, invoice: null,
+    potential: null, awaiting: null, awarded: null, soq: null, closed: null, invoice: null,
   });
   const setYear = (t, y) => setYearFilter(f => ({ ...f, [t]: y }));
 
@@ -436,6 +508,7 @@ function BeaconApp({ initial }) {
   const updatePotential = makeUpdate(setPotential);
   const updateAwaiting  = makeUpdate(setAwaiting);
   const updateAwarded   = makeUpdate(setAwarded);
+  const updateSoq       = makeUpdate(setSoq);
   const updateClosed    = makeUpdate(setClosed);
   const updateEvents    = makeUpdate(setEvents);
   const updateClients   = makeUpdate(setClients);
@@ -449,6 +522,7 @@ function BeaconApp({ initial }) {
       return { ...r, values: nv };
     }));
   };
+  const updateInvoice = makeUpdate(setInvoice);
 
   const openDrawer = (row, table) => setDrawer({ row, table });
   const triggerForward = (row, fromTable, toTable) => setMoving({ row, from: fromTable, to: toTable });
@@ -495,12 +569,31 @@ function BeaconApp({ initial }) {
     setAlertObj(null);
   };
 
-  const handleCreated = (table, dbRow) => {
-    const uiRow = adaptInsertedRow(table, dbRow);
+  const handleCreated = (table, dbRow, extras = {}) => {
+    const uiRow = adaptInsertedRow(table, dbRow, extras);
     if (table === "potential")  setPotential(rs => [uiRow, ...rs]);
+    if (table === "soq")        setSoq(rs => [uiRow, ...rs]);
     if (table === "events")     setEvents(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
     if (table === "companies")  setCompanies(rs => [uiRow, ...rs]);
+    // Orange potential auto-creates an Anticipated Invoice row tagged with
+    // source_potential_id so the Invoice tab picks up the stripe.
+    if (table === "potential" && extras.invoiceRow) {
+      const ir = extras.invoiceRow;
+      const invUiRow = {
+        id: ir.id,
+        sourceId: null,
+        sourcePotentialId: ir.source_potential_id || uiRow.id,
+        projectNumber: ir.project_number || uiRow.projectNumber || "",
+        name: ir.project_name || uiRow.name,
+        pmId: uiRow.pmId || null,
+        amount: ir.total_contract_amount ?? uiRow.amount ?? 0,
+        type: "ENG",
+        remainingStart: ir.msmm_amount ?? uiRow.msmm ?? 0,
+        values: Array(12).fill(0),
+      };
+      setInvoice(rs => [invUiRow, ...rs]);
+    }
     setFlashId(uiRow.id);
     setTimeout(() => setFlashId(null), 1500);
     showToast(`${table[0].toUpperCase() + table.slice(1)} created`);
@@ -578,10 +671,11 @@ function BeaconApp({ initial }) {
       potential: uniq(potential),
       awaiting:  uniq(awaiting),
       awarded:   uniq(awarded),
+      soq:       uniq(soq),
       closed:    uniq(closed),
       invoice:   uniq(invoice),
     };
-  }, [potential, awaiting, awarded, closed, invoice]);
+  }, [potential, awaiting, awarded, soq, closed, invoice]);
 
   // Apply year filter, then category filter.
   const filtered = useMemo(() => {
@@ -598,16 +692,25 @@ function BeaconApp({ initial }) {
       potential: apply("potential", potential),
       awaiting:  apply("awaiting",  awaiting),
       awarded:   apply("awarded",   awarded),
+      soq:       apply("soq",       soq),
       closed:    apply("closed",    closed),
       invoice:   applyYear("invoice", invoice),
       events:    apply("events",    events),
       clients:   apply("clients",   clients),
       companies: apply("companies", companies),
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoice, events, clients, companies]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, soq, closed, invoice, events, clients, companies]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
+
+  // Set of potential_project ids currently tagged probability=Orange. Invoice
+  // rows whose sourcePotentialId is in this set are highlighted orange and
+  // excluded from the "Total — excl. Orange" row.
+  const orangeSourceIds = useMemo(
+    () => new Set(potential.filter(p => p.probability === "Orange").map(p => p.id)),
+    [potential]
+  );
 
   // Expose the projects-by-type snapshot to EXPORT_COLUMNS' countRefs helper.
   useEffect(() => {
@@ -642,17 +745,22 @@ function BeaconApp({ initial }) {
 
   const tabCounts = {
     potential: potential.length, awaiting: awaiting.length,
-    awarded: awarded.length, closed: closed.length,
+    awarded: awarded.length, soq: soq.length, closed: closed.length,
     invoice: invoice.length, events: events.length,
     clients: clients.length, companies: companies.length,
+    quad: null,
   };
 
   const currentMeta = PAGE_META[tab];
 
   // Does the current tab support "New X"? (awaiting/awarded/closed come from move-forward; invoice is auto-created)
-  const newForTab = { potential: "potential", events: "events", clients: "clients", companies: "companies" };
+  const newForTab = { potential: "potential", soq: "soq", events: "events", clients: "clients", companies: "companies" };
   const newTarget = newForTab[tab];
-  const newLabel = tab === "events" ? "New event" : tab === "clients" ? "New client" : tab === "companies" ? "New company" : "New project";
+  const newLabel = tab === "events" ? "New event"
+                 : tab === "clients" ? "New client"
+                 : tab === "companies" ? "New company"
+                 : tab === "soq" ? "New SOQ"
+                 : "New project";
 
   return (
     <div className="app">
@@ -678,6 +786,16 @@ function BeaconApp({ initial }) {
 
       <div className="tabwrap">
         <div className="pipeline" role="tablist">
+          {TAB_META.filter(t => t.group === "head").map(t => (
+            <button key={t.key}
+              className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}
+              onClick={() => setTab(t.key)} role="tab">
+              <span className="dot"/>
+              {t.label}
+              <span className="count">{tabCounts[t.key]}</span>
+            </button>
+          ))}
+          {TAB_META.some(t => t.group === "head") && <div style={{ width: 24 }}/>}
           {TAB_META.filter(t => t.group === "pipeline").map((t, i, arr) => (
             <React.Fragment key={t.key}>
               <button
@@ -772,6 +890,17 @@ function BeaconApp({ initial }) {
             yearValue={yearFilter.awarded}
             onYearChange={(y) => setYear("awarded", y)}/>
         )}
+        {tab === "soq" && (
+          <SoqTable rows={filtered.soq} updateRow={updateSoq}
+            onOpenDrawer={r => openDrawer(r, "soq")}
+            onAlert={r => setAlertObj({ row: r })}
+            flashId={flashId}
+            filters={chipsFor("soq")}
+            tab="soq"
+            yearOptions={availableYears.soq}
+            yearValue={yearFilter.soq}
+            onYearChange={(y) => setYear("soq", y)}/>
+        )}
         {tab === "closed" && (
           <ClosedTable rows={filtered.closed}
             updateRow={updateClosed}
@@ -787,9 +916,12 @@ function BeaconApp({ initial }) {
         {tab === "invoice" && (
           <InvoiceTable rows={filtered.invoice}
             updateInvoice={updateInvoiceCell}
+            updateRow={updateInvoice}
+            onOpenDrawer={r => openDrawer(r, "invoice")}
             onAlert={r => setAlertObj({ row: r })}
             flashId={flashId}
             tab="invoice"
+            orangeSourceIds={orangeSourceIds}
             yearOptions={availableYears.invoice}
             yearValue={yearFilter.invoice}
             onYearChange={(y) => setYear("invoice", y)}/>
@@ -821,6 +953,15 @@ function BeaconApp({ initial }) {
             filters={chipsFor("companies")}
             tab="companies"/>
         )}
+        {tab === "quad" && (
+          <QuadSheet
+            invoice={invoice}
+            events={events}
+            awaiting={awaiting}
+            soq={soq}
+            onOpen={(t, r) => openDrawer(r, t)}
+          />
+        )}
       </div>
 
       {drawer && (() => {
@@ -831,7 +972,9 @@ function BeaconApp({ initial }) {
           drawer.table === "potential" ? potential :
           drawer.table === "awaiting"  ? awaiting  :
           drawer.table === "awarded"   ? awarded   :
+          drawer.table === "soq"       ? soq       :
           drawer.table === "closed"    ? closed    :
+          drawer.table === "invoice"   ? invoice   :
           drawer.table === "events"    ? events    :
           drawer.table === "clients"   ? clients   :
           drawer.table === "companies" ? companies :
@@ -841,13 +984,15 @@ function BeaconApp({ initial }) {
         return (
         <DetailDrawer
           row={liveRow}
-          table={drawer.table === "companies" ? "clients" : drawer.table}
+          table={drawer.table}
           onClose={() => setDrawer(null)}
           onUpdate={
             drawer.table === "potential" ? updatePotential :
             drawer.table === "awaiting"  ? updateAwaiting  :
             drawer.table === "awarded"   ? updateAwarded   :
+            drawer.table === "soq"       ? updateSoq       :
             drawer.table === "closed"    ? updateClosed    :
+            drawer.table === "invoice"   ? updateInvoice   :
             drawer.table === "events"    ? updateEvents    :
             drawer.table === "clients"   ? updateClients   :
             drawer.table === "companies" ? updateCompanies :
@@ -886,7 +1031,7 @@ function BeaconApp({ initial }) {
           companies={companies}
           users={getUsers()}
           onClose={() => setCreateTable(null)}
-          onCreated={(dbRow) => handleCreated(createTable, dbRow)}/>
+          onCreated={(dbRow, extras) => handleCreated(createTable, dbRow, extras)}/>
       )}
 
       {toast && (

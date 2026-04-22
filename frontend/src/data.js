@@ -145,6 +145,7 @@ function adaptPotential(r) {
     nextActionDate: r.next_action_date || "",
     projectNumber: r.project_number || "",
     probability: r.probability,
+    anticipatedInvoiceStartMonth: r.anticipated_invoice_start_month ?? null,
   };
 }
 
@@ -164,10 +165,40 @@ function adaptAwaiting(r) {
     projectNumber: r.project_number || "",
     status: "Awaiting Verdict",
     dateSubmitted: r.date_submitted || "",
+    anticipatedResultDate: r.anticipated_result_date || "",
     clientContract: r.client_contract_number || "",
     msmmContract: r.msmm_contract_number || "",
     msmmUsed: r.msmm_used || 0,
     msmmRemaining: r.msmm_remaining || 0,
+  };
+}
+
+function adaptSoq(r) {
+  return {
+    id: r.id,
+    year: r.year,
+    name: r.project_name,
+    role: r.prime_company_id ? "Sub" : "Prime",
+    clientId: r.client_id,
+    amount: null,
+    msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
+    subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
+    pmId: firstPm(r.pms),
+    notes: r.notes || "",
+    dates: "",
+    projectNumber: r.project_number || "",
+    status: "SOQ",
+    dateSubmitted: r.date_submitted || "",
+    clientContract: r.client_contract_number || "",
+    msmmContract: r.msmm_contract_number || "",
+    msmmUsed: r.msmm_used || 0,
+    msmmRemaining: r.msmm_remaining || 0,
+    stage: r.stage?.name || "",
+    details: r.details || "",
+    pools: r.pool || "",
+    startDate: r.start_date || "",
+    contractExpiry: r.contract_expiry_date || "",
+    recurring: r.recurring || "",
   };
 }
 
@@ -225,6 +256,7 @@ function adaptInvoice(r) {
   return {
     id: r.id,
     sourceId: r.source_awarded_id,
+    sourcePotentialId: r.source_potential_id || null,
     projectNumber: r.project_number || "",
     name: r.project_name,
     pmId: firstPm(r.pms),
@@ -262,7 +294,7 @@ async function pget(builder, label) {
 }
 
 export async function loadBeacon() {
-  const [users, clients, companies, potential, awaiting, awarded, closed, invoice, events] = await Promise.all([
+  const [users, clients, companies, potential, awaiting, awarded, closed, invoice, events, soq] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
     pget(supabase.from("companies").select("*").order("name"), "companies"),
@@ -305,6 +337,13 @@ export async function loadBeacon() {
         .order("event_date", { ascending: false, nullsFirst: false }),
       "events"
     ),
+    pget(
+      supabase.from("soq")
+        .select("*, stage:stage_id(name), subs:soq_subs(company_id), pms:soq_pms(user_id)")
+        .order("year", { ascending: false })
+        .order("project_name"),
+      "soq"
+    ),
   ]);
 
   _users = users.map(adaptUser);
@@ -338,6 +377,7 @@ export async function loadBeacon() {
     closed:    closed.map(adaptClosed),
     invoices:  invoice.map(adaptInvoice),
     events:    events.map(adaptEvent),
+    soq:       soq.map(adaptSoq),
     clients:   _companies,
     users:     _users,
   };

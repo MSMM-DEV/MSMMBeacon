@@ -1,0 +1,487 @@
+import React, { useMemo, useState, useRef, useEffect } from "react";
+import { Icon } from "./icons.jsx";
+import {
+  fmtDate, fmtMoney, MONTHS, TODAY_MONTH, THIS_YEAR,
+  companyById, userById,
+} from "./data.js";
+
+// ============================================================================
+// Quad Sheet — executive snapshot for board members / decision-makers.
+//
+// Four live panes:
+//   Q1  Invoice flow — interactive line chart over 12 months (Actual + Proj).
+//   Q2  Events ledger — chronological list of upcoming + recent events.
+//   Q3  Awaiting docket — project name + anticipated result date.
+//   Q4  SOQ timeline — start → expiry as horizontal gantt-style bars.
+//
+// Styling: editorial / executive — generous whitespace, mono numerics, an
+// asymmetric 2x2 grid where Q1 gets extra visual weight (it's the only
+// interactive panel). Content scrolls inside a panel if it overflows.
+// ============================================================================
+
+export const QuadSheet = ({ invoice, events, awaiting, soq, onOpen }) => {
+  return (
+    <div className="quad">
+      <QuadCard
+        eyebrow="01 · Cash Flow"
+        title="Anticipated Invoice"
+        sub={`${THIS_YEAR} · monthly actual vs. projection`}
+        accent="flow"
+        className="quad-q1">
+        <InvoiceChart invoice={invoice}/>
+      </QuadCard>
+
+      <QuadCard
+        eyebrow="02 · Calendar"
+        title="Events"
+        sub={`${events.length} tracked · sorted by date`}
+        accent="cal"
+        className="quad-q2">
+        <EventLedger events={events} onOpen={r => onOpen("events", r)}/>
+      </QuadCard>
+
+      <QuadCard
+        eyebrow="03 · Pipeline"
+        title="Awaiting Verdict"
+        sub={`${awaiting.length} in review · anticipated result`}
+        accent="await"
+        className="quad-q3">
+        <AwaitingList awaiting={awaiting} onOpen={r => onOpen("awaiting", r)}/>
+      </QuadCard>
+
+      <QuadCard
+        eyebrow="04 · Qualifications"
+        title="Statements of Qualifications"
+        sub={`${soq.length} on file · start → expiration`}
+        accent="soq"
+        className="quad-q4">
+        <SoqTimeline soq={soq} onOpen={r => onOpen("soq", r)}/>
+      </QuadCard>
+    </div>
+  );
+};
+
+// ----------------------------------------------------------------------------
+// Card shell — shared chrome for every quadrant.
+// ----------------------------------------------------------------------------
+const QuadCard = ({ eyebrow, title, sub, accent, className, children }) => (
+  <section className={`quad-card ${className || ""}`} data-accent={accent}>
+    <header className="quad-head">
+      <div className="quad-eyebrow">{eyebrow}</div>
+      <h2 className="quad-title">{title}</h2>
+      {sub && <div className="quad-sub">{sub}</div>}
+    </header>
+    <div className="quad-body">{children}</div>
+  </section>
+);
+
+// ============================================================================
+// Q1 — Invoice chart
+// ============================================================================
+// Aggregates the 12 monthly numbers across every invoice row. Months up to and
+// including the current month render as a filled area curve; later months are
+// shown as a dashed projection line. Hover snaps to the nearest month and
+// shows a read-out.
+// ----------------------------------------------------------------------------
+const InvoiceChart = ({ invoice }) => {
+  const { totals, yMax } = useMemo(() => {
+    const totals = Array(12).fill(0);
+    for (const r of invoice) {
+      for (let i = 0; i < 12; i++) totals[i] += Number(r.values?.[i] || 0);
+    }
+    const peak = Math.max(...totals, 1);
+    // Pad yMax to a clean round number so the grid feels intentional.
+    const mag = Math.pow(10, Math.floor(Math.log10(peak)));
+    const yMax = Math.ceil(peak / mag) * mag;
+    return { totals, yMax };
+  }, [invoice]);
+
+  const W = 760, H = 280;
+  const padL = 48, padR = 20, padT = 20, padB = 36;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const step = plotW / 11;
+
+  const pts = totals.map((v, i) => [
+    padL + i * step,
+    padT + plotH - (v / yMax) * plotH,
+  ]);
+
+  const toPath = (from, to) =>
+    pts.slice(from, to + 1)
+       .map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1))
+       .join(" ");
+
+  // Actual = indices 0..TODAY_MONTH inclusive. Projection = TODAY_MONTH..11.
+  // The projection path starts at TODAY_MONTH so the two meet.
+  const actualPath = toPath(0, TODAY_MONTH);
+  const projPath   = toPath(TODAY_MONTH, 11);
+  const actualArea =
+    actualPath +
+    ` L${pts[TODAY_MONTH][0].toFixed(1)},${(padT + plotH).toFixed(1)}` +
+    ` L${pts[0][0].toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+
+  // Y-axis ticks (4 bands).
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => ({
+    y: padT + plotH - t * plotH,
+    v: t * yMax,
+  }));
+
+  // Hover state — tracked in DOM to avoid re-rendering the whole SVG per move.
+  const [hoverIdx, setHoverIdx] = useState(null);
+  const onMove = (e) => {
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * W;
+    if (x < padL - step / 2 || x > padL + plotW + step / 2) {
+      setHoverIdx(null);
+      return;
+    }
+    const idx = Math.max(0, Math.min(11, Math.round((x - padL) / step)));
+    setHoverIdx(idx);
+  };
+
+  const ytdActual = totals.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+  const projRem   = totals.slice(TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="chart-wrap">
+      <div className="chart-kpis">
+        <div className="kpi">
+          <div className="kpi-label">YTD Actual</div>
+          <div className="kpi-val">{fmtMoney(ytdActual)}</div>
+          <div className="kpi-sub">Jan–{MONTHS[TODAY_MONTH]}</div>
+        </div>
+        <div className="kpi-sep"/>
+        <div className="kpi">
+          <div className="kpi-label">Projection remaining</div>
+          <div className="kpi-val ink-soft">{fmtMoney(projRem)}</div>
+          <div className="kpi-sub">{MONTHS[TODAY_MONTH + 1] || "—"}–Dec</div>
+        </div>
+        <div className="kpi-sep"/>
+        <div className="kpi">
+          <div className="kpi-label">Full year</div>
+          <div className="kpi-val mono-xl">{fmtMoney(ytdActual + projRem)}</div>
+          <div className="kpi-sub">all invoices</div>
+        </div>
+      </div>
+
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="flow-chart"
+        onMouseMove={onMove}
+        onMouseLeave={() => setHoverIdx(null)}
+        role="img"
+        aria-label="Invoice flow chart"
+      >
+        <defs>
+          <linearGradient id="flowFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor="var(--accent)"  stopOpacity="0.32"/>
+            <stop offset="100%" stopColor="var(--accent)"  stopOpacity="0.02"/>
+          </linearGradient>
+        </defs>
+
+        {/* Y-axis grid */}
+        {yTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={padL} x2={W - padR} y1={t.y} y2={t.y}
+                  stroke="var(--border)" strokeDasharray="2 3" opacity="0.55"/>
+            <text x={padL - 10} y={t.y + 4}
+                  textAnchor="end"
+                  className="chart-tick">
+              {t.v === 0 ? "0" : t.v >= 1e6 ? (t.v / 1e6).toFixed(1) + "M" : (t.v / 1e3).toFixed(0) + "k"}
+            </text>
+          </g>
+        ))}
+
+        {/* Month labels */}
+        {MONTHS.map((m, i) => (
+          <text key={i}
+                x={pts[i][0]} y={H - 14}
+                textAnchor="middle"
+                className={"chart-month" + (i === TODAY_MONTH ? " is-today" : "")}>
+            {m}
+          </text>
+        ))}
+
+        {/* Today marker */}
+        <line
+          x1={pts[TODAY_MONTH][0]} x2={pts[TODAY_MONTH][0]}
+          y1={padT} y2={padT + plotH}
+          className="chart-today"/>
+
+        {/* Actual area + line */}
+        <path d={actualArea} fill="url(#flowFill)"/>
+        <path d={actualPath} fill="none" className="chart-actual"/>
+
+        {/* Projection line (dashed) */}
+        <path d={projPath} fill="none" className="chart-proj"/>
+
+        {/* Data dots */}
+        {pts.map((p, i) => (
+          <circle key={i} cx={p[0]} cy={p[1]} r={3.5}
+                  className={i <= TODAY_MONTH ? "chart-dot actual" : "chart-dot proj"}/>
+        ))}
+
+        {/* Hover readout */}
+        {hoverIdx != null && (
+          <g>
+            <line x1={pts[hoverIdx][0]} x2={pts[hoverIdx][0]}
+                  y1={padT} y2={padT + plotH}
+                  className="chart-hover-line"/>
+            <circle cx={pts[hoverIdx][0]} cy={pts[hoverIdx][1]}
+                    r={6} className="chart-hover-dot"/>
+            {(() => {
+              const x = pts[hoverIdx][0];
+              const y = pts[hoverIdx][1];
+              const boxW = 140, boxH = 46;
+              const left = Math.min(W - padR - boxW, Math.max(padL, x - boxW / 2));
+              const top  = Math.max(padT, y - boxH - 14);
+              return (
+                <g transform={`translate(${left},${top})`}>
+                  <rect width={boxW} height={boxH} rx={8}
+                        className="chart-tip-bg"/>
+                  <text x={12} y={18} className="chart-tip-label">
+                    {MONTHS[hoverIdx]} {THIS_YEAR} · {hoverIdx <= TODAY_MONTH ? "Actual" : "Projection"}
+                  </text>
+                  <text x={12} y={36} className="chart-tip-val">
+                    {fmtMoney(totals[hoverIdx])}
+                  </text>
+                </g>
+              );
+            })()}
+          </g>
+        )}
+      </svg>
+
+      <div className="chart-legend">
+        <span><span className="swatch actual"/>Actual · closed months</span>
+        <span><span className="swatch proj"/>Projection · forecast</span>
+        <span><span className="swatch today"/>Today</span>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// Q2 — Event ledger
+// ============================================================================
+// Sorted by anchor date (datetime first, then date). Future events are
+// highlighted; past events subdued. Click opens the event in its drawer.
+// ----------------------------------------------------------------------------
+const EventLedger = ({ events, onOpen }) => {
+  const anchored = useMemo(() => {
+    const now = Date.now();
+    return events
+      .map(e => {
+        const iso = e.dateTime || e.date || null;
+        const t = iso ? new Date(iso).getTime() : null;
+        return { ...e, _t: t, _future: t != null && t >= now };
+      })
+      .filter(e => e._t != null)
+      .sort((a, b) => a._t - b._t);
+  }, [events]);
+
+  if (anchored.length === 0) {
+    return <div className="quad-empty">No dated events yet.</div>;
+  }
+
+  // Future first, then past-reverse-chronological so the most recent is next.
+  const future = anchored.filter(e => e._future);
+  const past   = anchored.filter(e => !e._future).reverse();
+  const ordered = [...future, ...past].slice(0, 40);
+
+  return (
+    <ul className="event-ledger">
+      {ordered.map(e => (
+        <li key={e.id}
+            className={"evt" + (e._future ? " future" : " past")}
+            onClick={() => onOpen(e)}>
+          <div className="evt-date">
+            <div className="evt-mo">{monthShort(e._t)}</div>
+            <div className="evt-day">{dayOf(e._t)}</div>
+          </div>
+          <div className="evt-body">
+            <div className="evt-title">{e.title}</div>
+            <div className="evt-meta">
+              {e.type && <span className={`chip ${typeColor(e.type)}`}>{e.type}</span>}
+              <span className="evt-when">
+                {e.dateTime
+                  ? new Date(e.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+                  : fmtDate(e.date)}
+              </span>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+const monthShort = (ms) => new Date(ms).toLocaleDateString("en-US", { month: "short" });
+const dayOf = (ms) => new Date(ms).getDate();
+const typeColor = (t) => ({
+  "Partner": "accent", "AI": "sage", "Project": "blue",
+  "Meetings": "muted", "Board Meetings": "blue", "Event": "rose",
+}[t] || "muted");
+
+// ============================================================================
+// Q3 — Awaiting verdict: name + anticipated result date
+// ============================================================================
+// Sorted by anticipatedResultDate ascending (soonest first); rows without a
+// date fall to the bottom. The row shows days-until if the date is in the
+// future, or the elapsed time if overdue.
+// ----------------------------------------------------------------------------
+const AwaitingList = ({ awaiting, onOpen }) => {
+  const rows = useMemo(() => {
+    const withDate = [];
+    const withoutDate = [];
+    const now = Date.now();
+    for (const r of awaiting) {
+      if (r.anticipatedResultDate) {
+        const t = new Date(r.anticipatedResultDate).getTime();
+        const daysOut = Math.round((t - now) / 86400000);
+        withDate.push({ ...r, _t: t, _daysOut: daysOut });
+      } else {
+        withoutDate.push({ ...r, _t: null, _daysOut: null });
+      }
+    }
+    withDate.sort((a, b) => a._t - b._t);
+    return [...withDate, ...withoutDate];
+  }, [awaiting]);
+
+  if (rows.length === 0) {
+    return <div className="quad-empty">No projects awaiting verdict.</div>;
+  }
+
+  return (
+    <ul className="await-list">
+      {rows.map(r => {
+        const client = companyById(r.clientId)?.name || "";
+        const d = r._daysOut;
+        const tone =
+          d == null     ? "tba" :
+          d < 0         ? "overdue" :
+          d <= 14       ? "soon" :
+          d <= 60       ? "upcoming" : "later";
+        const label =
+          d == null     ? "TBA" :
+          d < 0         ? `${-d}d overdue` :
+          d === 0       ? "today" :
+          d === 1       ? "tomorrow" :
+          d < 30        ? `in ${d}d` :
+                          `in ${Math.round(d/30)}mo`;
+        return (
+          <li key={r.id} className="await-row" onClick={() => onOpen(r)}>
+            <div className="await-main">
+              <div className="await-name">{r.name}</div>
+              {client && <div className="await-client">{client}</div>}
+            </div>
+            <div className={`await-pill ${tone}`}>
+              <div className="await-pill-date">{fmtDate(r.anticipatedResultDate) === "—" ? "—" : fmtDate(r.anticipatedResultDate)}</div>
+              <div className="await-pill-rel">{label}</div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
+
+// ============================================================================
+// Q4 — SOQ timeline: gantt-style bars from start → expiration
+// ============================================================================
+// Computes the global [minStart, maxEnd] window across all SOQs, then draws
+// each bar proportionally. Today's position is marked with a vertical line.
+// Bars are color-coded by recurring status.
+// ----------------------------------------------------------------------------
+const SoqTimeline = ({ soq, onOpen }) => {
+  const { items, minT, maxT, todayT } = useMemo(() => {
+    const now = Date.now();
+    const items = [];
+    let minT = Infinity, maxT = -Infinity;
+    for (const r of soq) {
+      const s = r.startDate ? new Date(r.startDate).getTime() : null;
+      const e = r.contractExpiry ? new Date(r.contractExpiry).getTime() : null;
+      if (!s && !e) continue;
+      const sT = s ?? e;
+      const eT = e ?? s;
+      items.push({ row: r, sT, eT });
+      if (sT < minT) minT = sT;
+      if (eT > maxT) maxT = eT;
+    }
+    // Include today in the window so the "today" marker always shows up.
+    if (now < minT) minT = now;
+    if (now > maxT) maxT = now;
+    // Small padding so bars don't hug the edges.
+    const pad = (maxT - minT) * 0.04 || 86400000 * 14;
+    return { items, minT: minT - pad, maxT: maxT + pad, todayT: now };
+  }, [soq]);
+
+  if (items.length === 0) {
+    return <div className="quad-empty">No SOQs recorded.</div>;
+  }
+
+  const range = maxT - minT || 1;
+  const pctFor = (t) => ((t - minT) / range) * 100;
+  const todayPct = pctFor(todayT);
+
+  // Year tick marks — calendar-year boundaries that fall inside the window.
+  const yTicks = [];
+  const y0 = new Date(minT).getFullYear();
+  const y1 = new Date(maxT).getFullYear();
+  for (let y = y0; y <= y1 + 1; y++) {
+    const t = new Date(y, 0, 1).getTime();
+    if (t >= minT && t <= maxT) yTicks.push({ y, pct: pctFor(t) });
+  }
+
+  const toneFor = (rec) => ({
+    "Yes": "yes", "In Talks": "talks", "Maybe": "maybe", "No": "no",
+  }[rec] || "unknown");
+
+  return (
+    <div className="soq-timeline">
+      <div className="soq-axis">
+        {yTicks.map((t, i) => (
+          <div key={i} className="soq-tick" style={{ left: `${t.pct}%` }}>
+            <span className="soq-tick-label">{t.y}</span>
+          </div>
+        ))}
+        <div className="soq-today" style={{ left: `${todayPct}%` }} title="Today">
+          <span>NOW</span>
+        </div>
+      </div>
+      <ul className="soq-bars">
+        {items.map(({ row, sT, eT }) => {
+          const left = pctFor(sT);
+          const width = Math.max(1.4, pctFor(eT) - left);
+          const tone = toneFor(row.recurring);
+          const pm = userById(row.pmId)?.shortName;
+          return (
+            <li key={row.id} className="soq-row" onClick={() => onOpen(row)}>
+              <div className="soq-name">
+                <div className="soq-project">{row.name}</div>
+                <div className="soq-client">{companyById(row.clientId)?.name || "—"}{pm ? ` · ${pm}` : ""}</div>
+              </div>
+              <div className="soq-lane">
+                <div className={`soq-bar tone-${tone}`}
+                     style={{ left: `${left}%`, width: `${width}%` }}
+                     title={`${fmtDate(row.startDate)} → ${fmtDate(row.contractExpiry)}`}>
+                  <span className="soq-bar-start">{fmtDateShort(sT)}</span>
+                  <span className="soq-bar-end">{fmtDateShort(eT)}</span>
+                </div>
+              </div>
+              <div className={`soq-rec tone-${tone}`}>
+                {row.recurring || "—"}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+};
+
+const fmtDateShort = (ms) =>
+  new Date(ms).toLocaleDateString("en-US", { month: "short", year: "2-digit" });

@@ -144,14 +144,27 @@ const truncCell = (text, max = 80) => {
   );
 };
 
-// Probability chip mapping — matches the row-stripe colors (green/yellow/red).
+// Probability chip mapping — matches row-stripe colors. Orange rides with the
+// traffic-light set; auto-creates an Invoice row (handled in forms.jsx).
 const probChipClass = (p) => {
   const key = String(p || "").toLowerCase();
   if (key === "high")   return "prob-high";
   if (key === "medium") return "prob-medium";
   if (key === "low")    return "prob-low";
+  if (key === "orange") return "prob-orange";
   return "muted";
 };
+const PROB_RANK = { High: 1, Medium: 2, Low: 3, Orange: 4 };
+const probRank = (p) => PROB_RANK[p] ?? 5;
+
+// Events grouping rank — Board Meetings first (highest-value stakeholder
+// touchpoint), then partner-facing, then internal.
+const EVENT_TYPE_RANK = { "Board Meetings": 1, "Partner": 2, "Meetings": 3, "Project": 4, "AI": 5, "Event": 6 };
+const eventTypeRank = (t) => EVENT_TYPE_RANK[t] ?? 99;
+
+// SOQ "recurring" values; used as a secondary sort (more-certain first).
+const RECURRING_RANK = { "Yes": 1, "In Talks": 2, "Maybe": 3, "No": 4 };
+const recurringRank = (r) => RECURRING_RANK[r] ?? 99;
 
 // Internal-only column labels (leading checkbox, trailing actions) start with
 // this prefix. They participate in grid layout but must not appear in the
@@ -748,25 +761,30 @@ const TableView = ({
         search={search} setSearch={setSearch}
         yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       />
-      <HeaderRow
-        columns={orderedColumns} gridCols={gridCols} sort={sort}
-        onSortToggle={onSortToggle} hiddenCols={hiddenCols}
-        onReorder={onReorder}
-        columnWidths={columnWidths} setColumnWidths={setColumnWidths}
-      />
-      {sortedRows.length === 0 ? (
-        showNoMatches ? (
-          <EmptyState
-            title="No matches"
-            hint={`Nothing matches "${search}".`}
-            iconName="search"
-          />
+      {/* Table-only horizontal scroll container. Keeps the toolbar fixed-width
+          while the header row + data rows scroll together when total column
+          width exceeds viewport. The PAGE never gets a horizontal scrollbar. */}
+      <div className="table-scroll">
+        <HeaderRow
+          columns={orderedColumns} gridCols={gridCols} sort={sort}
+          onSortToggle={onSortToggle} hiddenCols={hiddenCols}
+          onReorder={onReorder}
+          columnWidths={columnWidths} setColumnWidths={setColumnWidths}
+        />
+        {sortedRows.length === 0 ? (
+          showNoMatches ? (
+            <EmptyState
+              title="No matches"
+              hint={`Nothing matches "${search}".`}
+              iconName="search"
+            />
+          ) : (
+            <EmptyState title={emptyTitle} hint={emptyHint} iconName={emptyIcon}/>
+          )
         ) : (
-          <EmptyState title={emptyTitle} hint={emptyHint} iconName={emptyIcon}/>
-        )
-      ) : (
-        processedRows.map((r, i) => renderRow(r, i, gridCols, visibleColumns, hiddenCols))
-      )}
+          processedRows.map((r, i) => renderRow(r, i, gridCols, visibleColumns, hiddenCols))
+        )}
+      </div>
     </div>
   );
 };
@@ -823,10 +841,10 @@ const buildOptions = () => {
     companiesOnlyOpts,
     userOptions,
     orgTypeOptions:      ["City", "State", "Federal", "Local", "Parish", "Regional", "Other"],
-    probOptions:         ["High", "Medium", "Low"],
+    probOptions:         ["High", "Medium", "Low", "Orange"],
     roleOptions:         ["Prime", "Sub"],
     eventStatusOptions:  ["Booked", "Happened"],
-    eventTypeOptions:    ["Partner", "AI", "Project", "Meetings", "Event"],
+    eventTypeOptions:    ["Partner", "AI", "Project", "Meetings", "Board Meetings", "Event"],
     invoiceTypeOptions:  ["ENG", "PM"],
     companyTypeOptions:  ["Prime", "Sub", "Multiple"],
     stageOptions:        ["Multi-Use Contract", "Single Use Contract (Project)", "AE Selected List"],
@@ -853,7 +871,7 @@ export const PotentialTable = ({
       sortValue: r => userById(r.pmId)?.name || "" },
     { label: "Proj #", w: "100px", sortKey: "projectNumber" },
     { label: "Probability", w: "120px", sortKey: "probability",
-      sortValue: r => ({ High: 1, Medium: 2, Low: 3 }[r.probability] ?? 4) },
+      sortValue: r => probRank(r.probability) },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Dates & Comments", w: "minmax(180px, 1.4fr)", defaultHidden: true },
     { label: "__actions", w: "110px", locked: true },
@@ -1096,6 +1114,42 @@ export const PotentialTable = ({
 };
 
 // ---------- Awaiting Verdict ----------
+// Org-type ordering used as the primary sort for Awaiting Verdict AND Awarded.
+// Matches the customer's xlsx grouping convention in both sheets:
+//   Federal → State → Regional → Parish → City → Local → Other → unassigned
+// (In the source files, rows were hand-ordered Federal first, City last with
+// purple highlight; this rank preserves that positioning.)
+const ORG_RANK = { Federal: 1, State: 2, Regional: 3, Parish: 4, City: 5, Local: 6, Other: 7 };
+const orgRank = (clientId) => ORG_RANK[companyById(clientId)?.orgType] ?? 99;
+
+// Builds the {ORG_TYPE} section-header rows that separate groups.
+// Safe to reuse across tables that are primary-sorted by org type.
+const injectOrgHeaders = (unitLabel = "row") => (sortedRows) => {
+  if (!sortedRows || sortedRows.length === 0) return sortedRows;
+  const counts = {};
+  for (const r of sortedRows) {
+    const o = companyById(r.clientId)?.orgType || "—";
+    counts[o] = (counts[o] || 0) + 1;
+  }
+  const plural = (n) => n === 1 ? unitLabel : (unitLabel + "s");
+  const out = [];
+  let lastOrg;
+  for (const r of sortedRows) {
+    const o = companyById(r.clientId)?.orgType || "—";
+    if (o !== lastOrg) {
+      out.push({
+        id: `_orgheader_${o}`,
+        _orgHeader: o,
+        _count: counts[o],
+        _unit: plural(counts[o]),
+      });
+      lastOrg = o;
+    }
+    out.push(r);
+  }
+  return out;
+};
+
 export const AwaitingTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, onCloseOut, flashId, filters,
   yearOptions, yearValue, onYearChange,
@@ -1106,8 +1160,11 @@ export const AwaitingTable = ({
     { label: "Project", w: "minmax(240px, 2fr)", sortKey: "name" },
     { label: "Client", w: "minmax(160px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
+    { label: "Org Type", w: "110px", sortKey: "orgType", defaultHidden: true,
+      sortValue: r => orgRank(r.clientId) },
     { label: "Role", w: "100px", sortKey: "role" },
     { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
+    { label: "Anticipated Result", w: "140px", sortKey: "anticipatedResultDate" },
     { label: "Client Contract", w: "150px", sortKey: "clientContract" },
     { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
     { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining" },
@@ -1123,16 +1180,34 @@ export const AwaitingTable = ({
 
   const { clientOptions, userOptions, roleOptions } = buildOptions();
 
+  // Primary sort by org-type keeps rows grouped (user sort slots in as secondary).
+  const primarySort = [{ key: "orgType", dir: "asc" }];
+
   return (
     <TableView
       tab={tab}
       filters={filters}
       columns={cols} rows={rows}
+      primarySort={primarySort}
+      postProcess={injectOrgHeaders("submittal")}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No projects awaiting verdict"
       emptyHint="Projects you submit move here until awarded or closed out."
       emptyIcon="clock"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        if (r._orgHeader) {
+          const raw = r._orgHeader;
+          const orgKey = raw === "—" ? "unknown" : raw.toLowerCase();
+          return (
+            <div key={r.id} className="trow org-header"
+                 data-org={orgKey}
+                 style={{ gridTemplateColumns: gridCols }}>
+              <div className="td" style={{ color: "var(--text)" }}>
+                Org Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._unit}
+              </div>
+            </div>
+          );
+        }
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
@@ -1158,6 +1233,14 @@ export const AwaitingTable = ({
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
           ),
+          "Org Type": (
+            <div className="td subtle">
+              {(() => {
+                const o = companyById(r.clientId)?.orgType;
+                return o ? <span className="chip muted">{o}</span> : <span className="empty-cell">—</span>;
+              })()}
+            </div>
+          ),
           "Role": (
             <div className="td">
               <EditableCell value={r.role} type="select" options={roleOptions}
@@ -1169,6 +1252,13 @@ export const AwaitingTable = ({
             <div className="td mono subtle">
               <EditableCell value={r.dateSubmitted} type="date"
                 onChange={v => updateRow(r.id, { dateSubmitted: v })}
+                format={v => fmtDate(v)}/>
+            </div>
+          ),
+          "Anticipated Result": (
+            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+              <EditableCell value={r.anticipatedResultDate} type="date"
+                onChange={v => updateRow(r.id, { anticipatedResultDate: v })}
                 format={v => fmtDate(v)}/>
             </div>
           ),
@@ -1236,8 +1326,10 @@ export const AwaitingTable = ({
             </div>
           ),
         };
+        const orgKey = (companyById(r.clientId)?.orgType || "").toLowerCase() || undefined;
         return (
           <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-org={orgKey}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}
@@ -1259,6 +1351,8 @@ export const AwardedTable = ({
     { label: "Project", w: "minmax(220px, 2fr)", sortKey: "name" },
     { label: "Client", w: "minmax(150px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
+    { label: "Org Type", w: "110px", sortKey: "orgType", defaultHidden: true,
+      sortValue: r => orgRank(r.clientId) },
     { label: "Stage", w: "150px", sortKey: "stage" },
     { label: "Pool", w: "130px", sortKey: "pools" },
     { label: "Contract", w: "120px", sortKey: "contract",
@@ -1282,16 +1376,34 @@ export const AwardedTable = ({
 
   const { clientOptions, userOptions, roleOptions, stageOptions } = buildOptions();
 
+  // Primary sort by org-type keeps rows grouped (user sort slots in as secondary).
+  const primarySort = [{ key: "orgType", dir: "asc" }];
+
   return (
     <TableView
       tab={tab}
       filters={filters}
       columns={cols} rows={rows}
+      primarySort={primarySort}
+      postProcess={injectOrgHeaders("project")}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No awarded projects"
       emptyHint="When an awaiting project is awarded, it moves here for tracking."
       emptyIcon="check"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        if (r._orgHeader) {
+          const raw = r._orgHeader;
+          const orgKey = raw === "—" ? "unknown" : raw.toLowerCase();
+          return (
+            <div key={r.id} className="trow org-header"
+                 data-org={orgKey}
+                 style={{ gridTemplateColumns: gridCols }}>
+              <div className="td" style={{ color: "var(--text)" }}>
+                Org Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._unit}
+              </div>
+            </div>
+          );
+        }
         const total = (r.msmmUsed || 0) + (r.msmmRemaining || 0);
         const pct = total ? Math.round(((r.msmmUsed || 0) / total) * 100) : 0;
         const cells = {
@@ -1319,6 +1431,14 @@ export const AwardedTable = ({
               <EditableCell value={r.clientId} type="select" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Org Type": (
+            <div className="td subtle">
+              {(() => {
+                const o = companyById(r.clientId)?.orgType;
+                return o ? <span className="chip muted">{o}</span> : <span className="empty-cell">—</span>;
+              })()}
             </div>
           ),
           "Stage": (
@@ -1422,8 +1542,239 @@ export const AwardedTable = ({
             </div>
           ),
         };
+        const orgKey = (companyById(r.clientId)?.orgType || "").toLowerCase() || undefined;
         return (
           <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-org={orgKey}
+               style={{ gridTemplateColumns: gridCols, cursor: "default" }}
+               onDoubleClick={() => onOpenDrawer(r)}>
+            {renderOrderedCells(visibleColumns, cells)}
+          </div>
+        );
+      }}
+    />
+  );
+};
+
+// ---------- SOQ (Statement of Qualifications) ----------
+// Parallel track to Awarded; columns mirror Awarded plus Start Date + Recurring.
+// Sorted by org type (same primary sort as Awarded / Awaiting).
+export const SoqTable = ({
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters,
+  yearOptions, yearValue, onYearChange,
+}) => {
+  const cols = [
+    { label: "__select", w: "42px", locked: true },
+    { label: "Year", w: "64px", sortKey: "year" },
+    { label: "Project", w: "minmax(220px, 2fr)", sortKey: "name" },
+    { label: "Client", w: "minmax(150px, 1.2fr)", sortKey: "clientName",
+      sortValue: r => companyById(r.clientId)?.name || "" },
+    { label: "Org Type", w: "110px", sortKey: "orgType", defaultHidden: true,
+      sortValue: r => orgRank(r.clientId) },
+    { label: "Start Date", w: "120px", sortKey: "startDate" },
+    { label: "Recurring", w: "120px", sortKey: "recurring",
+      sortValue: r => recurringRank(r.recurring) },
+    { label: "Stage", w: "150px", sortKey: "stage" },
+    { label: "Pool", w: "130px", sortKey: "pools" },
+    { label: "Contract", w: "120px", sortKey: "contract",
+      sortValue: r => (r.msmmUsed || 0) + (r.msmmRemaining || 0) },
+    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed", defaultHidden: true },
+    { label: "Remaining", w: "120px", sortKey: "msmmRemaining", defaultHidden: true },
+    { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
+    { label: "PM", w: "130px", sortKey: "pm",
+      sortValue: r => userById(r.pmId)?.name || "" },
+    { label: "Proj #", w: "110px", sortKey: "projectNumber" },
+    { label: "Role", w: "100px", sortKey: "role", defaultHidden: true },
+    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted", defaultHidden: true },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract", defaultHidden: true },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract", defaultHidden: true },
+    { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details", defaultHidden: true },
+    { label: "__actions", w: "90px", locked: true },
+  ];
+  const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
+  const recurringColor = r => ({ "Yes": "sage", "In Talks": "accent", "Maybe": "blue", "No": "rose" }[r] || "muted");
+
+  const { clientOptions, userOptions, roleOptions, stageOptions } = buildOptions();
+  const recurringOptions = ["Yes", "No", "Maybe", "In Talks"];
+
+  const primarySort = [{ key: "orgType", dir: "asc" }];
+
+  return (
+    <TableView
+      tab={tab}
+      filters={filters}
+      columns={cols} rows={rows}
+      primarySort={primarySort}
+      postProcess={injectOrgHeaders("SOQ")}
+      yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
+      emptyTitle="No SOQs yet"
+      emptyHint="SOQs (Statements of Qualifications) live here — parallel to the pipeline."
+      emptyIcon="briefcase"
+      renderRow={(r, _i, gridCols, visibleColumns) => {
+        if (r._orgHeader) {
+          const raw = r._orgHeader;
+          const orgKey = raw === "—" ? "unknown" : raw.toLowerCase();
+          return (
+            <div key={r.id} className="trow org-header"
+                 data-org={orgKey}
+                 style={{ gridTemplateColumns: gridCols }}>
+              <div className="td" style={{ color: "var(--text)" }}>
+                Org Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._unit}
+              </div>
+            </div>
+          );
+        }
+        const total = (r.msmmUsed || 0) + (r.msmmRemaining || 0);
+        const cells = {
+          "__select": (
+            <div className="td row-check" onClick={e => e.stopPropagation()}>
+              <input type="checkbox"/>
+            </div>
+          ),
+          "Year": (
+            <div className="td mono subtle">
+              <EditableCell value={r.year} type="number"
+                onChange={v => updateRow(r.id, { year: v })}/>
+            </div>
+          ),
+          "Project": (
+            <div className="td" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2, whiteSpace: "normal" }}>
+              <span style={{ fontWeight: 500, width: "100%" }}>
+                <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
+              </span>
+              <span className="mono" style={{ fontSize: 11, color: "var(--text-soft)" }}>{r.projectNumber}</span>
+            </div>
+          ),
+          "Client": (
+            <div className="td subtle">
+              <EditableCell value={r.clientId} type="select" options={clientOptions}
+                onChange={v => updateRow(r.id, { clientId: v })}
+                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Org Type": (
+            <div className="td subtle">
+              {(() => {
+                const o = companyById(r.clientId)?.orgType;
+                return o ? <span className="chip muted">{o}</span> : <span className="empty-cell">—</span>;
+              })()}
+            </div>
+          ),
+          "Start Date": (
+            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+              <EditableCell value={r.startDate} type="date"
+                onChange={v => updateRow(r.id, { startDate: v })}
+                format={v => fmtDate(v)}/>
+            </div>
+          ),
+          "Recurring": (
+            <div className="td">
+              <EditableCell value={r.recurring} type="select" options={recurringOptions}
+                onChange={v => updateRow(r.id, { recurring: v })}
+                render={v => v
+                  ? <span className={`chip ${recurringColor(v)}`}>{v}</span>
+                  : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Stage": (
+            <div className="td">
+              <EditableCell value={r.stage} type="select" options={stageOptions}
+                onChange={v => updateRow(r.id, { stage: v })}
+                render={v => v
+                  ? <span className={`chip ${stageColor(v)}`}>{v}</span>
+                  : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Pool": (
+            <div className="td subtle" style={{ fontSize: 12 }}>
+              <EditableCell value={r.pools}
+                onChange={v => updateRow(r.id, { pools: v })}/>
+            </div>
+          ),
+          "Contract": <div className="td mono">{fmtMoney(total || null)}</div>,
+          "MSMM Used": (
+            <div className="td mono subtle">
+              <EditableCell value={r.msmmUsed} type="number"
+                onChange={v => updateRow(r.id, { msmmUsed: v })}
+                format={v => fmtMoney(v)}/>
+            </div>
+          ),
+          "Remaining": (
+            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+              <EditableCell value={r.msmmRemaining} type="number"
+                onChange={v => updateRow(r.id, { msmmRemaining: v })}
+                format={v => fmtMoney(v)}/>
+            </div>
+          ),
+          "Expiry": (
+            <div className="td mono subtle">
+              <EditableCell value={r.contractExpiry} type="date"
+                onChange={v => updateRow(r.id, { contractExpiry: v })}
+                format={v => fmtDate(v)}/>
+            </div>
+          ),
+          "PM": (
+            <div className="td">
+              <EditableCell value={r.pmId} type="select" options={userOptions}
+                onChange={v => updateRow(r.id, { pmId: v })}
+                render={v => v ? <UserTag userId={v}/> : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Proj #": (
+            <div className="td mono subtle">
+              <EditableCell value={r.projectNumber}
+                onChange={v => updateRow(r.id, { projectNumber: v })}/>
+            </div>
+          ),
+          "Role": (
+            <div className="td">
+              <EditableCell value={r.role} type="select" options={roleOptions}
+                onChange={v => updateRow(r.id, { role: v })}
+                render={v => <RoleChip role={v}/>}/>
+            </div>
+          ),
+          "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
+          "Submitted": (
+            <div className="td mono subtle">
+              <EditableCell value={r.dateSubmitted} type="date"
+                onChange={v => updateRow(r.id, { dateSubmitted: v })}
+                format={v => fmtDate(v)}/>
+            </div>
+          ),
+          "Client Contract": (
+            <div className="td mono" style={{ fontSize: 12 }}>
+              <EditableCell value={r.clientContract}
+                onChange={v => updateRow(r.id, { clientContract: v })}/>
+            </div>
+          ),
+          "MSMM Contract": (
+            <div className="td mono" style={{ fontSize: 12 }}>
+              <EditableCell value={r.msmmContract}
+                onChange={v => updateRow(r.id, { msmmContract: v })}/>
+            </div>
+          ),
+          "Details": (
+            <div className="td subtle" style={{ fontSize: 12.5 }}>
+              <EditableCell value={r.details} type="textarea"
+                onChange={v => updateRow(r.id, { details: v })}
+                format={v => truncCell(v, 100)}/>
+            </div>
+          ),
+          "__actions": (
+            <div className="td" style={{ justifyContent: "flex-end" }}>
+              <div className="row-actions" onClick={e => e.stopPropagation()}>
+                <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+                  <Icon name="bell" size={14}/>
+                </button>
+              </div>
+            </div>
+          ),
+        };
+        const orgKey = (companyById(r.clientId)?.orgType || "").toLowerCase() || undefined;
+        return (
+          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-org={orgKey}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}
@@ -1595,12 +1946,20 @@ export const ClosedTable = ({
 // snapshot are intentionally skipped here. We still wire the Year chip so
 // users can filter this spreadsheet by year in the same UX pattern.
 export const InvoiceTable = ({
-  tab, rows, updateInvoice, onAlert, flashId,
+  tab, rows, updateInvoice, updateRow = _noopUpdate,
+  onOpenDrawer, onAlert, flashId,
   yearOptions, yearValue, onYearChange,
+  orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
 }) => {
+  const USERS = getUsers();
+  const invoiceTypeOptions = ["ENG", "PM"];
+  const pmOptions = USERS.map(u => ({ value: u.id, label: u.name }));
   const ytdActual = (r) => r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b || 0), 0);
   const totalAll  = (r) => r.values.reduce((a,b) => a + (b || 0), 0);
   const rollforward = (r) => Math.max(0, r.remainingStart - totalAll(r));
+  const isOrange = (r) => !!(r.sourcePotentialId && orangeSourceIds?.has(r.sourcePotentialId));
+  const sumBy = (arr, fn) => arr.reduce((a, r) => a + fn(r), 0);
+  const nonOrangeRows = rows.filter(r => !isOrange(r));
 
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const yearBtnRef = useRef(null);
@@ -1681,7 +2040,8 @@ export const InvoiceTable = ({
             <table className="invoice-table">
               <thead>
                 <tr>
-                  <th className="sticky-left" style={{ minWidth: 280 }}>Project</th>
+                  <th className="sticky-1">Proj #</th>
+                  <th className="sticky-2" style={{ minWidth: 260 }}>Project Name</th>
                   <th style={{ minWidth: 70 }}>Type</th>
                   <th style={{ minWidth: 80 }}>PM</th>
                   <th>Contract</th>
@@ -1701,19 +2061,45 @@ export const InvoiceTable = ({
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className={flashId === r.id ? "flash" : ""}>
-                    <td className="sticky-left">
-                      <div style={{ fontWeight: 500 }}>{r.name}</div>
-                      <div className="mono" style={{ fontSize: 11, color: "var(--text-soft)" }}>{r.projectNumber}</div>
+                  <tr key={r.id}
+                      className={flashId === r.id ? "flash" : ""}
+                      data-prob={isOrange(r) ? "orange" : undefined}
+                      onDoubleClick={() => onOpenDrawer?.(r)}
+                      style={{ cursor: "default" }}>
+                    <td className="sticky-1 mono" style={{ fontSize: 12 }}>
+                      <EditableCell value={r.projectNumber || ""}
+                        onChange={v => updateRow(r.id, { projectNumber: v })}/>
+                    </td>
+                    <td className="sticky-2" style={{ fontWeight: 500 }}>
+                      <EditableCell value={r.name}
+                        onChange={v => updateRow(r.id, { name: v })}/>
                     </td>
                     <td>
-                      <span className={`chip ${r.type === "ENG" ? "sage" : "blue"}`} style={{ fontSize: 11 }}>{r.type}</span>
+                      <EditableCell value={r.type} type="select" options={invoiceTypeOptions}
+                        onChange={v => updateRow(r.id, { type: v })}
+                        render={v => v
+                          ? <span className={`chip ${v === "ENG" ? "sage" : "blue"}`} style={{ fontSize: 11 }}>{v}</span>
+                          : <span className="empty-cell">—</span>}/>
                     </td>
                     <td>
-                      {(() => { const u = userById(r.pmId); return u ? <span className={`avatar xs ${u.color}`} title={u.name}>{u.initials}</span> : "—"; })()}
+                      <EditableCell value={r.pmId} type="select" options={pmOptions}
+                        onChange={v => updateRow(r.id, { pmId: v })}
+                        render={v => {
+                          const u = userById(v);
+                          return u ? <span className={`avatar xs ${u.color}`} title={u.name}>{u.initials}</span>
+                                   : <span className="empty-cell">—</span>;
+                        }}/>
                     </td>
-                    <td>{fmtMoney(r.amount)}</td>
-                    <td>{fmtMoney(r.remainingStart)}</td>
+                    <td>
+                      <EditableCell value={r.amount} type="number"
+                        onChange={v => updateRow(r.id, { amount: v })}
+                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                    </td>
+                    <td>
+                      <EditableCell value={r.remainingStart} type="number"
+                        onChange={v => updateRow(r.id, { remainingStart: v })}
+                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                    </td>
                     {r.values.map((v, i) => (
                       <td key={i}
                           className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "")}>
@@ -1725,7 +2111,7 @@ export const InvoiceTable = ({
                     ))}
                     <td className="total-cell">{fmtMoney(ytdActual(r))}</td>
                     <td className="total-cell" style={{ color: "var(--accent-ink)" }}>{fmtMoney(rollforward(r))}</td>
-                    <td style={{ textAlign: "center" }}>
+                    <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
                       <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                         <Icon name="bell" size={14}/>
                       </button>
@@ -1733,25 +2119,54 @@ export const InvoiceTable = ({
                   </tr>
                 ))}
                 {rows.length > 0 && (
-                  <tr>
-                    <td className="sticky-left total-cell" style={{ fontWeight: 600 }}>All projects — Total</td>
-                    <td className="total-cell">—</td>
-                    <td className="total-cell">—</td>
-                    <td className="total-cell">{fmtMoney(rows.reduce((a,r) => a + (r.amount||0), 0))}</td>
-                    <td className="total-cell">{fmtMoney(rows.reduce((a,r) => a + (r.remainingStart||0), 0))}</td>
-                    {MONTHS.map((_, i) => (
-                      <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
-                        {fmtMoney(rows.reduce((a,r) => a + (r.values[i] || 0), 0))}
+                  <>
+                    {/* Total excluding orange (non-orange invoice rows only) */}
+                    <tr>
+                      <td className="sticky-1 total-cell"/>
+                      <td className="sticky-2 total-cell" style={{ fontWeight: 600 }}>
+                        Total — excl. Orange
                       </td>
-                    ))}
-                    <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                      {fmtMoney(rows.reduce((a,r) => a + ytdActual(r), 0))}
-                    </td>
-                    <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                      {fmtMoney(rows.reduce((a,r) => a + rollforward(r), 0))}
-                    </td>
-                    <td className="total-cell"></td>
-                  </tr>
+                      <td className="total-cell">—</td>
+                      <td className="total-cell">—</td>
+                      <td className="total-cell">{fmtMoney(sumBy(nonOrangeRows, r => r.amount || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(nonOrangeRows, r => r.remainingStart || 0))}</td>
+                      {MONTHS.map((_, i) => (
+                        <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
+                          {fmtMoney(sumBy(nonOrangeRows, r => r.values[i] || 0))}
+                        </td>
+                      ))}
+                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(nonOrangeRows, ytdActual))}
+                      </td>
+                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(nonOrangeRows, rollforward))}
+                      </td>
+                      <td className="total-cell"></td>
+                    </tr>
+                    {/* Total including orange (everything) */}
+                    <tr>
+                      <td className="sticky-1 total-cell"/>
+                      <td className="sticky-2 total-cell" style={{ fontWeight: 700, color: "var(--prob-orange)" }}>
+                        Total — incl. Orange
+                      </td>
+                      <td className="total-cell">—</td>
+                      <td className="total-cell">—</td>
+                      <td className="total-cell">{fmtMoney(sumBy(rows, r => r.amount || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(rows, r => r.remainingStart || 0))}</td>
+                      {MONTHS.map((_, i) => (
+                        <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
+                          {fmtMoney(sumBy(rows, r => r.values[i] || 0))}
+                        </td>
+                      ))}
+                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(rows, ytdActual))}
+                      </td>
+                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(rows, rollforward))}
+                      </td>
+                      <td className="total-cell"></td>
+                    </tr>
+                  </>
                 )}
               </tbody>
             </table>
@@ -1776,7 +2191,8 @@ export const EventsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, 
   const cols = [
     { label: "__select", w: "42px", locked: true },
     { label: "Status", w: "120px", sortKey: "status" },
-    { label: "Type", w: "110px", sortKey: "type" },
+    { label: "Type", w: "140px", sortKey: "type",
+      sortValue: r => eventTypeRank(r.type) },
     { label: "Title", w: "minmax(260px, 2.5fr)", sortKey: "title" },
     { label: "Date & Time", w: "160px", sortKey: "dateTime" },
     { label: "Attendees", w: "minmax(160px, 1.2fr)" },
@@ -1785,20 +2201,64 @@ export const EventsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, 
     { label: "__actions", w: "80px", locked: true },
   ];
   const typeColor = t => ({
-    "Partner": "accent", "AI": "sage", "Project": "blue", "Meetings": "muted", "Event": "rose"
+    "Partner": "accent", "AI": "sage", "Project": "blue", "Meetings": "muted",
+    "Board Meetings": "blue", "Event": "rose"
   }[t] || "muted");
 
   const { eventStatusOptions, eventTypeOptions } = buildOptions();
+
+  // Group-by-type: rows keep their user sort inside each type, and a header
+  // row introduces each type block (same mechanic the Awarded/Awaiting
+  // tables use for org-type). eventTypeRank lives at module scope.
+  const primarySort = [{ key: "type", dir: "asc" }];
+  const injectTypeHeaders = (sortedRows) => {
+    if (!sortedRows || sortedRows.length === 0) return sortedRows;
+    const counts = {};
+    for (const r of sortedRows) {
+      const t = r.type || "—";
+      counts[t] = (counts[t] || 0) + 1;
+    }
+    const out = [];
+    let lastType;
+    for (const r of sortedRows) {
+      const t = r.type || "—";
+      if (t !== lastType) {
+        out.push({
+          id: `_typeheader_${t}`,
+          _typeHeader: t,
+          _count: counts[t],
+        });
+        lastType = t;
+      }
+      out.push(r);
+    }
+    return out;
+  };
 
   return (
     <TableView
       tab={tab}
       filters={filters}
       columns={cols} rows={rows}
+      primarySort={primarySort}
+      postProcess={injectTypeHeaders}
       emptyTitle="No events logged yet"
       emptyHint="Track partner touchpoints, conferences, and meetings here."
       emptyIcon="calendar"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        if (r._typeHeader) {
+          const raw = r._typeHeader;
+          const typeKey = raw === "—" ? "unknown" : raw.toLowerCase().replace(/\s+/g, "-");
+          return (
+            <div key={r.id} className="trow org-header"
+                 data-org={typeKey}
+                 style={{ gridTemplateColumns: gridCols }}>
+              <div className="td" style={{ color: "var(--text)" }}>
+                Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._count === 1 ? "event" : "events"}
+              </div>
+            </div>
+          );
+        }
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip } from "./primitives.jsx";
-import { getCompanies, getUsers, companyById, userById, fmtMoney, fmtDate } from "./data.js";
+import { getCompanies, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
 
 // ============ DETAIL DRAWER (read/edit a row) ============
 export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert }) => {
@@ -10,72 +10,136 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
   const COMPANIES = getCompanies();
   const USERS = getUsers();
 
+  // Every column that appears in the corresponding table in tables.jsx must have
+  // a field here so the drawer is the complete editor for the row.
   const fields = {
     potential: [
-      { k: "year", label: "Year", type: "number" },
-      { k: "name", label: "Project Name" },
-      { k: "role", label: "Prime or Sub", type: "select", options: ["Prime","Sub"] },
-      { k: "clientId", label: "Client", type: "company" },
-      { k: "amount", label: "Total Contract Amount", type: "money" },
-      { k: "msmm", label: "MSMM Amount", type: "money" },
-      { k: "subs", label: "Subs", type: "subs" },
-      { k: "pmId", label: "PM", type: "user" },
-      { k: "notes", label: "Notes", type: "textarea" },
-      { k: "dates", label: "Dates and Comments" },
-      { k: "projectNumber", label: "Project Number", type: "mono" },
+      { k: "year",           label: "Year",                    type: "number" },
+      { k: "name",           label: "Project Name" },
+      { k: "role",           label: "Prime or Sub",            type: "select", options: ["Prime","Sub"] },
+      { k: "clientId",       label: "Client",                  type: "company" },
+      { k: "amount",         label: "Total Contract Amount",   type: "money" },
+      { k: "msmm",           label: "MSMM Amount",             type: "money" },
+      { k: "subs",           label: "Subs",                    type: "subs" },
+      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "probability",    label: "Probability",             type: "select", options: ["High","Medium","Low","Orange"] },
+      { k: "anticipatedInvoiceStartMonth", label: "Anticipated Invoice Start Month", type: "month",
+        showIf: (r) => r.probability === "Orange" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+      { k: "dates",          label: "Dates and Comments" },
+      { k: "nextActionDate", label: "Next Action Date",        type: "date" },
+      { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
     awaiting: [
-      { k: "name", label: "Project Name" },
-      { k: "clientId", label: "Client", type: "company" },
-      { k: "role", label: "Prime or Sub", type: "select", options: ["Prime","Sub"] },
-      { k: "subs", label: "Subs", type: "subs" },
-      { k: "status", label: "Status", type: "status" },
-      { k: "dateSubmitted", label: "Date Submitted", type: "date" },
-      { k: "clientContract", label: "Client Contract #", type: "mono" },
-      { k: "msmmContract", label: "MSMM Contract #", type: "mono" },
-      { k: "msmmUsed", label: "MSMM Used", type: "money" },
-      { k: "msmmRemaining", label: "MSMM Remaining", type: "money" },
-      { k: "pmId", label: "PM", type: "user" },
-      { k: "notes", label: "Notes", type: "textarea" },
-      { k: "projectNumber", label: "Project Number", type: "mono" },
+      { k: "year",           label: "Year",                    type: "number" },
+      { k: "name",           label: "Project Name" },
+      { k: "clientId",       label: "Client",                  type: "company" },
+      { k: "role",           label: "Prime or Sub",            type: "select", options: ["Prime","Sub"] },
+      { k: "subs",           label: "Subs",                    type: "subs" },
+      { k: "status",         label: "Status",                  type: "status" },
+      { k: "dateSubmitted",  label: "Date Submitted",          type: "date" },
+      { k: "anticipatedResultDate", label: "Anticipated Result Date", type: "date" },
+      { k: "clientContract", label: "Client Contract #",       type: "mono" },
+      { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
+      { k: "msmmUsed",       label: "MSMM Used",               type: "money" },
+      { k: "msmmRemaining",  label: "MSMM Remaining",          type: "money" },
+      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+      { k: "projectNumber",  label: "Project Number",          type: "mono" },
+    ],
+    soq: [
+      { k: "year",           label: "Year",                    type: "number" },
+      { k: "name",           label: "Project Name" },
+      { k: "clientId",       label: "Client",                  type: "company" },
+      { k: "role",           label: "Prime or Sub",            type: "select", options: ["Prime","Sub"] },
+      { k: "subs",           label: "Subs",                    type: "subs" },
+      { k: "startDate",      label: "Start Date",              type: "date" },
+      { k: "contractExpiry", label: "Expiration Date",         type: "date" },
+      { k: "recurring",      label: "Recurring",               type: "select", options: ["Yes","No","Maybe","In Talks"] },
+      { k: "stage",          label: "Stage",                   type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List","Design 30%","Design 60%","Design 90%","Draft Report","Construction Admin","Closeout"] },
+      { k: "details",        label: "Details",                 type: "textarea" },
+      { k: "pools",          label: "Pools" },
+      { k: "dateSubmitted",  label: "Date Submitted",          type: "date" },
+      { k: "clientContract", label: "Client Contract #",       type: "mono" },
+      { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
+      { k: "msmmUsed",       label: "MSMM Used",               type: "money" },
+      { k: "msmmRemaining",  label: "MSMM Remaining",          type: "money" },
+      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+      { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
     awarded: [
-      { k: "name", label: "Project Name" },
-      { k: "clientId", label: "Client", type: "company" },
-      { k: "status", label: "Status", type: "status" },
-      { k: "stage", label: "Stage", type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List","Design 30%","Design 60%","Design 90%","Draft Report","Construction Admin","Closeout"] },
-      { k: "details", label: "Details", type: "textarea" },
-      { k: "pools", label: "Pools" },
-      { k: "contractExpiry", label: "Contract Expiry", type: "date" },
-      { k: "msmmUsed", label: "MSMM Used", type: "money" },
-      { k: "msmmRemaining", label: "MSMM Remaining", type: "money" },
-      { k: "pmId", label: "PM", type: "user" },
-      { k: "projectNumber", label: "Project Number", type: "mono" },
+      { k: "year",           label: "Year",                    type: "number" },
+      { k: "name",           label: "Project Name" },
+      { k: "clientId",       label: "Client",                  type: "company" },
+      { k: "role",           label: "Prime or Sub",            type: "select", options: ["Prime","Sub"] },
+      { k: "subs",           label: "Subs",                    type: "subs" },
+      { k: "status",         label: "Status",                  type: "status" },
+      { k: "stage",          label: "Stage",                   type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List","Design 30%","Design 60%","Design 90%","Draft Report","Construction Admin","Closeout"] },
+      { k: "details",        label: "Details",                 type: "textarea" },
+      { k: "pools",          label: "Pools" },
+      { k: "dateSubmitted",  label: "Date Submitted",          type: "date" },
+      { k: "contractExpiry", label: "Contract Expiry",         type: "date" },
+      { k: "clientContract", label: "Client Contract #",       type: "mono" },
+      { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
+      { k: "msmmUsed",       label: "MSMM Used",               type: "money" },
+      { k: "msmmRemaining",  label: "MSMM Remaining",          type: "money" },
+      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+      { k: "projectNumber",  label: "Project Number",          type: "mono" },
     ],
     closed: [
-      { k: "name", label: "Project Name" },
-      { k: "clientId", label: "Client", type: "company" },
-      { k: "status", label: "Status", type: "status" },
-      { k: "dateClosed", label: "Date Closed", type: "date" },
-      { k: "reason", label: "Reason for Closure", type: "textarea" },
-      { k: "pmId", label: "PM", type: "user" },
-      { k: "projectNumber", label: "Project Number", type: "mono" },
+      { k: "year",           label: "Year",                    type: "number" },
+      { k: "name",           label: "Project Name" },
+      { k: "clientId",       label: "Client",                  type: "company" },
+      { k: "role",           label: "Prime or Sub",            type: "select", options: ["Prime","Sub"] },
+      { k: "subs",           label: "Subs",                    type: "subs" },
+      { k: "status",         label: "Status",                  type: "status" },
+      { k: "dateSubmitted",  label: "Date Submitted",          type: "date" },
+      { k: "dateClosed",     label: "Date Closed",             type: "date" },
+      { k: "amount",         label: "Contract Amount",         type: "money" },
+      { k: "reason",         label: "Reason for Closure",      type: "textarea" },
+      { k: "clientContract", label: "Client Contract #",       type: "mono" },
+      { k: "msmmContract",   label: "MSMM Contract #",         type: "mono" },
+      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+      { k: "projectNumber",  label: "Project Number",          type: "mono" },
+    ],
+    invoice: [
+      { k: "name",           label: "Project Name" },
+      { k: "projectNumber",  label: "Project Number",          type: "mono" },
+      { k: "type",           label: "Type",                    type: "select", options: ["ENG","PM"] },
+      { k: "pmId",           label: "PM",                      type: "user" },
+      { k: "amount",         label: "Contract Amount",         type: "money" },
+      { k: "remainingStart", label: "Remaining to Bill (Jan 1)", type: "money" },
     ],
     events: [
-      { k: "title", label: "Title" },
-      { k: "status", label: "Status", type: "select", options: ["Booked","Happened"] },
-      { k: "type", label: "Type", type: "select", options: ["Partner","AI","Project","Meetings","Event"] },
-      { k: "dateTime", label: "Date & Time", type: "datetime" },
-      { k: "attendees", label: "Attendees from MSMM", type: "users" },
+      { k: "title",          label: "Title" },
+      { k: "status",         label: "Status",                  type: "select", options: ["Booked","Happened"] },
+      { k: "type",           label: "Type",                    type: "select", options: ["Partner","AI","Project","Meetings","Board Meetings","Event"] },
+      { k: "date",           label: "Date",                    type: "date" },
+      { k: "dateTime",       label: "Date & Time",             type: "datetime" },
+      { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
     clients: [
-      { k: "name", label: "Company Name" },
-      { k: "type", label: "Type", type: "select", options: ["Client","Prime","Sub","Multiple"] },
-      { k: "contact", label: "Contact Person" },
-      { k: "email", label: "Email" },
-      { k: "phone", label: "Phone" },
-      { k: "address", label: "Address" },
-      { k: "notes", label: "Notes", type: "textarea" },
+      { k: "name",           label: "Client Name" },
+      { k: "district",       label: "District / State" },
+      { k: "orgType",        label: "Org Type",                type: "select", options: ["City","State","Federal","Local","Parish","Regional","Other"] },
+      { k: "contact",        label: "Contact Person" },
+      { k: "email",          label: "Email" },
+      { k: "phone",          label: "Phone" },
+      { k: "address",        label: "Address" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+    ],
+    companies: [
+      { k: "name",           label: "Company Name" },
+      { k: "type",           label: "Type",                    type: "select", options: ["Prime","Sub","Multiple"] },
+      { k: "contact",        label: "Contact Person" },
+      { k: "email",          label: "Email" },
+      { k: "phone",          label: "Phone" },
+      { k: "address",        label: "Address" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
   }[table] || [];
 
@@ -122,6 +186,13 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
     if (f.type === "mono") return (
       <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}
         style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
+    );
+    if (f.type === "month") return (
+      <select className="select" value={val || ""}
+              onChange={e => set(e.target.value === "" ? null : Number(e.target.value))}>
+        <option value="">—</option>
+        {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+      </select>
     );
     if (f.type === "status") return (
       <div><StatusChip status={val}/></div>
@@ -210,8 +281,15 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
   };
 
   const titleMap = {
-    potential: "Potential Project", awaiting: "Awaiting Verdict", awarded: "Awarded Project",
-    closed: "Closed Out Project", events: "Event", clients: "Company",
+    potential: "Potential Project",
+    awaiting:  "Awaiting Verdict",
+    awarded:   "Awarded Project",
+    soq:       "Statement of Qualifications",
+    closed:    "Closed Out Project",
+    invoice:   "Anticipated Invoice",
+    events:    "Event",
+    clients:   "Client",
+    companies: "Company",
   };
 
   return (
@@ -234,7 +312,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           </div>
         </div>
         <div className="drawer-body">
-          {fields.map(f => (
+          {fields.filter(f => !f.showIf || f.showIf(row)).map(f => (
             <div key={f.k} className="field">
               <div className="field-label">{f.label}</div>
               <div className={"field-value" + (f.type === "textarea" || f.type === "subs" ? " multiline" : "")}>
