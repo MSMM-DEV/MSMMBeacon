@@ -59,6 +59,47 @@ export async function getCurrentSession() {
   return data?.session || null;
 }
 
+// ----------------------------------------------------------------------
+// Admin panel helpers
+// ----------------------------------------------------------------------
+// Refresh the full beacon.users list and rebuild the module-level _users
+// cache so PM pickers, attendee pickers, and lookups everywhere see changes
+// after an admin action (add / rename / delete / role change).
+export async function listAllUsersFull() {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, first_name, last_name, display_name, short_name, login_name, role, is_enabled, auth_user_id, created_at, updated_at")
+    .order("display_name");
+  if (error) throw error;
+  // Rebuild module cache so getUsers()/userById() reflect the new roster.
+  _users = (data || []).map(adaptUser);
+  return data || [];
+}
+
+// Thin wrapper around the admin-users Edge Function. Produces friendlier
+// errors when the function isn't deployed or the caller isn't an Admin.
+export async function adminAction(action, payload = {}) {
+  const { data, error } = await supabase.functions.invoke("admin-users", {
+    body: { action, payload },
+  });
+  if (error) {
+    // supabase-js v2 surfaces the function response body here when the
+    // function returns a non-2xx. Unwrap it if present.
+    let detail = error.message || "admin action failed";
+    try {
+      const ctx = error.context;
+      const text = ctx && typeof ctx.text === "function" ? await ctx.text() : null;
+      if (text) {
+        try { detail = JSON.parse(text).error || text; }
+        catch { detail = text; }
+      }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  if (data && data.ok === false) throw new Error(data.error || "admin action failed");
+  return data;
+}
+
 // Resolve the beacon.users row for the currently-signed-in auth user.
 // Matches first by auth_user_id (set by the backfill trigger / admin API),
 // then falls back to a case-insensitive email match.
@@ -137,6 +178,66 @@ export const fmtDateTime = (iso) => {
   if (isNaN(dt)) return "—";
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " · " +
     dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+};
+
+// ----------------------------------------------------------------------
+// Alerts — anchor metadata per tab + tab → DB enum mapping
+// ----------------------------------------------------------------------
+// Each anchor entry has:
+//   field    — beacon.<table> DB column name (snake_case); stored in
+//              beacon.alerts.anchor_field.
+//   uiField  — the camelCase key on the adapted UI row (see adapt* fns).
+//   label    — friendly text shown in the modal anchor chip.
+//   hasTime  — true when the source column is timestamptz so we can keep
+//              the user's time; false for `date` columns (the modal fills
+//              09:00 as the default wall-clock time).
+const TAB_ANCHORS = {
+  potential: [
+    { field: "next_action_date",        uiField: "nextActionDate",        label: "Next action" },
+  ],
+  awaiting: [
+    { field: "anticipated_result_date", uiField: "anticipatedResultDate", label: "Anticipated result" },
+    { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
+  ],
+  awarded: [
+    { field: "contract_expiry_date",    uiField: "contractExpiry",        label: "Contract expiry" },
+    { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
+  ],
+  soq: [
+    { field: "contract_expiry_date",    uiField: "contractExpiry",        label: "Contract expiry" },
+    { field: "start_date",              uiField: "startDate",             label: "Start date" },
+    { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
+  ],
+  closed: [
+    { field: "date_closed",             uiField: "dateClosed",            label: "Closed" },
+    { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
+  ],
+  events: [
+    { field: "event_datetime",          uiField: "dateTime",              label: "Event time", hasTime: true },
+    { field: "event_date",              uiField: "date",                  label: "Event date" },
+  ],
+  invoice: [],
+};
+
+// Returns [{field, uiField, label, hasTime, value}] for each anchor on this
+// tab that actually has a value on the given row. Order matches TAB_ANCHORS
+// (first entry = the "primary" anchor).
+export function getRowAnchors(tab, row) {
+  const anchors = TAB_ANCHORS[tab] || [];
+  return anchors
+    .map(a => ({ ...a, value: row?.[a.uiField] || "" }))
+    .filter(a => a.value);
+}
+
+// UI tab key → beacon.alert_subject_enum value.
+export const TAB_TO_SUBJECT_TABLE = {
+  potential: "potential",
+  awaiting:  "awaiting",
+  awarded:   "awarded",
+  soq:       "soq",
+  closed:    "closed_out",
+  invoice:   "invoice",
+  events:    "event",
 };
 
 // ----------------------------------------------------------------------
@@ -459,4 +560,118 @@ export async function loadBeacon() {
     clients:   _companies,
     users:     _users,
   };
+}
+
+// ----------------------------------------------------------------------
+// Admin · Alerts — everything the AlertsAdmin panel needs.
+// ----------------------------------------------------------------------
+// beacon.alerts / alert_recipients / alert_fires are writable by authenticated
+// users today (prototype RLS). The Edge Function (service role) is the only
+// mover that dispatches email; all other mutations are plain PostgREST calls.
+
+// One row per alert, newest first. Recipients + creator embedded.
+export async function loadAdminAlerts() {
+  const { data, error } = await supabase
+    .from("alerts")
+    .select(`
+      id, subject_table, subject_row_id, first_fire_at, recurrence, recurrence_rule,
+      message, is_active, anchor_field, anchor_offset_minutes, timezone, created_at,
+      created_by,
+      recipients:alert_recipients(user_id, users(id, display_name, first_name, email, is_enabled)),
+      creator:created_by(id, display_name, first_name)
+    `)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(a => ({
+    ...a,
+    creatorName: a.creator?.display_name || a.creator?.first_name || "",
+    recipients: (a.recipients || []).map(r => r.users).filter(Boolean),
+  }));
+}
+
+// Last N fires for one alert, newest first. Used by the expand-for-history UI.
+export async function loadAlertFires(alertId, limit = 10) {
+  const { data, error } = await supabase
+    .from("alert_fires")
+    .select("id, alert_id, scheduled_at, fired_at, status, error_message, attempts, created_at")
+    .eq("alert_id", alertId)
+    .order("scheduled_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+// Summary counts for the Dispatch header strip. `lastTick` is the most recent
+// fired_at across all fires — used as the LIVE indicator's "last tick" stamp.
+export async function load24hVitals() {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const head = { count: "exact", head: true };
+  const [active, sent, failed, skipped, pending, lastTick] = await Promise.all([
+    supabase.from("alerts").select("id", head).eq("is_active", true),
+    supabase.from("alert_fires").select("id", head).eq("status", "sent").gte("fired_at", since),
+    supabase.from("alert_fires").select("id", head).eq("status", "failed").gte("fired_at", since),
+    supabase.from("alert_fires").select("id", head).eq("status", "skipped").gte("fired_at", since),
+    supabase.from("alert_fires").select("id", head).eq("status", "pending"),
+    supabase.from("alert_fires").select("fired_at").not("fired_at", "is", null)
+      .order("fired_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  return {
+    active:   active.count   ?? 0,
+    sent:     sent.count     ?? 0,
+    failed:   failed.count   ?? 0,
+    skipped:  skipped.count  ?? 0,
+    pending:  pending.count  ?? 0,
+    lastTick: lastTick.data?.fired_at || null,
+  };
+}
+
+export async function setAlertActive(alertId, isActive) {
+  const { error } = await supabase.from("alerts").update({ is_active: isActive }).eq("id", alertId);
+  if (error) throw error;
+}
+
+export async function deleteAlert(alertId) {
+  // FK cascade removes alert_recipients + alert_fires rows.
+  const { error } = await supabase.from("alerts").delete().eq("id", alertId);
+  if (error) throw error;
+}
+
+// Re-enqueue: insert a fresh pending alert_fires row at now(). The dispatcher
+// picks it up on the next tick and retries with attempt-count = 1 (on fresh row).
+export async function retryAlertFire(alertId) {
+  const { error } = await supabase.from("alert_fires").insert({
+    alert_id: alertId,
+    scheduled_at: new Date().toISOString(),
+    status: "pending",
+  });
+  if (error) throw error;
+}
+
+// Replace-entire-list semantics. Simpler than diffing and keeps the UI code
+// trivial — the picker just hands us the full final list of user_ids.
+export async function setAlertRecipients(alertId, userIds) {
+  const { error: delErr } = await supabase.from("alert_recipients").delete().eq("alert_id", alertId);
+  if (delErr) throw delErr;
+  if (!userIds || userIds.length === 0) return;
+  const rows = userIds.map(uid => ({ alert_id: alertId, user_id: uid }));
+  const { error: insErr } = await supabase.from("alert_recipients").insert(rows);
+  if (insErr) throw insErr;
+}
+
+// Admin-triggered manual tick. send-alert accepts either the service-role key
+// (GitHub Actions) or an authenticated Admin session JWT (this code path).
+// supabase.functions.invoke uses the caller's session by default.
+export async function runAlertTickNow() {
+  const { data, error } = await supabase.functions.invoke("send-alert", { body: {} });
+  if (error) {
+    // supabase-js puts the function's response body on error.context when non-2xx.
+    let detail = error.message || "tick failed";
+    try {
+      const ctx = error.context;
+      const text = ctx && typeof ctx.text === "function" ? await ctx.text() : null;
+      if (text) { try { detail = JSON.parse(text).error || text; } catch { detail = text; } }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return data; // { ok, processed, sent, failed, skipped, disabled? }
 }

@@ -1,0 +1,41 @@
+name: alert-tick
+
+# Every minute, POST to the Supabase Edge Function `send-alert` so it can
+# drain due rows from beacon.alert_fires and ship the emails. GitHub's
+# scheduler can slip 1–10 min on public runners — acceptable for reminders.
+#
+# Two repo secrets required (Settings → Secrets and variables → Actions):
+#   SEND_ALERT_URL   https://<project-ref>.supabase.co/functions/v1/send-alert
+#   SEND_ALERT_AUTH  the Supabase service-role key for this project
+#
+# Kill switch: set ALERTS_ENABLED=false as a function secret to stop dispatch
+# without touching this workflow.
+
+on:
+  schedule:
+    - cron: '*/1 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: alert-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST to send-alert
+        env:
+          SEND_ALERT_URL:  ${{ secrets.SEND_ALERT_URL }}
+          SEND_ALERT_AUTH: ${{ secrets.SEND_ALERT_AUTH }}
+        run: |
+          if [ -z "$SEND_ALERT_URL" ] || [ -z "$SEND_ALERT_AUTH" ]; then
+            echo "Missing SEND_ALERT_URL or SEND_ALERT_AUTH repo secret." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$SEND_ALERT_URL" \
+            -H "Authorization: Bearer $SEND_ALERT_AUTH" \
+            -H "Content-Type: application/json" \
+            --max-time 90 \
+            -d '{}'

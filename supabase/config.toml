@@ -314,6 +314,15 @@ deno_version = 1
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# ---- Edge Functions ------------------------------------------------------
+# admin-users does its OWN JWT validation + admin-role check inside the
+# function body (see supabase/functions/admin-users/index.ts). The gateway's
+# default verify_jwt=true would reject the browser's CORS preflight OPTIONS
+# (no Authorization header) with 401 and break the admin panel. Turning off
+# gateway verification is safe here — the function still refuses non-admins.
+[functions.admin-users]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

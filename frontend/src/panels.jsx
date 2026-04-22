@@ -513,7 +513,50 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
 };
 
 // ============ ALERT MODAL ============
-export const AlertModal = ({ row, onClose, onConfirm }) => {
+// `anchors` (from App.jsx via getRowAnchors(tab, row)) is an array of
+// populated date fields on this row — e.g. [{field:'anticipated_result_date',
+// uiField:'anticipatedResultDate', label:'Anticipated result', value:'2026-04-30',
+// hasTime:false}]. When present, the modal shows:
+//   • anchor chips — which existing date on the row to anchor to
+//   • offset chips — how far before the anchor to fire (30m/1h/1d/2d/custom)
+// Selecting both fills the date+time inputs; inputs remain source-of-truth
+// so the user can fine-tune afterwards.
+const OFFSET_PRESETS = [
+  { key: "30m", label: "30 min before", minutes: -30 },
+  { key: "1h",  label: "1 hr before",   minutes: -60 },
+  { key: "1d",  label: "1 day before",  minutes: -1440 },
+  { key: "2d",  label: "2 days before", minutes: -2880 },
+];
+const DEFAULT_ANCHOR_HOUR = 9; // date-only anchors use 09:00 local as the anchor time
+const BROWSER_TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago"; }
+  catch { return "America/Chicago"; }
+})();
+
+function computeFromAnchor(anchor, offsetMinutes) {
+  // anchor.value may be an ISO date ('YYYY-MM-DD') or a timestamptz string.
+  const iso = String(anchor.value || "");
+  let baseMs;
+  if (anchor.hasTime) {
+    const dt = new Date(iso);
+    if (isNaN(dt)) return null;
+    baseMs = dt.getTime();
+  } else {
+    const s = iso.substr(0, 10);
+    const [y, m, d] = s.split("-").map(Number);
+    if (!y) return null;
+    baseMs = new Date(y, (m || 1) - 1, d || 1, DEFAULT_ANCHOR_HOUR, 0, 0).getTime();
+  }
+  const targetMs = baseMs + offsetMinutes * 60_000;
+  const t = new Date(targetMs);
+  const pad = n => String(n).padStart(2, "0");
+  return {
+    date: `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`,
+    time: `${pad(t.getHours())}:${pad(t.getMinutes())}`,
+  };
+}
+
+export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
   const USERS = getUsers();
   const [recipients, setRecipients] = useState([...(row.pmIds || [])]);
   const [date, setDate] = useState(new Date(Date.now() + 5 * 86400000).toISOString().substr(0, 10));
@@ -522,9 +565,31 @@ export const AlertModal = ({ row, onClose, onConfirm }) => {
   const [message, setMessage] = useState("");
   const [picking, setPicking] = useState(false);
   const [pickQ, setPickQ] = useState("");
+  const [anchorField, setAnchorField] = useState(null);
+  const [offsetKey, setOffsetKey]     = useState(null);
 
   const available = USERS.filter(u => !recipients.includes(u.id) &&
     (!pickQ || u.name.toLowerCase().includes(pickQ.toLowerCase())));
+
+  const pickAnchor = (a) => {
+    setAnchorField(a.field);
+    if (offsetKey) {
+      const preset = OFFSET_PRESETS.find(p => p.key === offsetKey);
+      const r = preset && computeFromAnchor(a, preset.minutes);
+      if (r) { setDate(r.date); setTime(r.time); }
+    }
+  };
+  const pickOffset = (preset) => {
+    setOffsetKey(preset.key);
+    const a = anchors.find(x => x.field === anchorField) || anchors[0];
+    if (!a) return;
+    if (!anchorField) setAnchorField(a.field);
+    const r = computeFromAnchor(a, preset.minutes);
+    if (r) { setDate(r.date); setTime(r.time); }
+  };
+  const clearAnchor = () => { setAnchorField(null); setOffsetKey(null); };
+  const onManualDate = (v) => { setDate(v); setOffsetKey(null); };
+  const onManualTime = (v) => { setTime(v); setOffsetKey(null); };
 
   return (
     <>
@@ -571,15 +636,47 @@ export const AlertModal = ({ row, onClose, onConfirm }) => {
             </div>
           </div>
 
+          {anchors.length > 0 && (
+            <div>
+              <div className="field-label" style={{ marginBottom: 6 }}>Anchor to</div>
+              <div className="alert-anchor-chips">
+                {anchors.map(a => (
+                  <button key={a.field} type="button"
+                    className={"anchor-chip" + (anchorField === a.field ? " active" : "")}
+                    onClick={() => pickAnchor(a)}>
+                    <span className="anchor-chip-label">{a.label}</span>
+                    <span className="anchor-chip-date">{fmtDate(a.value)}</span>
+                  </button>
+                ))}
+                <button type="button"
+                  className={"anchor-chip" + (anchorField === null ? " active" : "")}
+                  onClick={clearAnchor}>
+                  <span className="anchor-chip-label">None (pick manually)</span>
+                </button>
+              </div>
+              <div className="alert-offset-chips" style={{ marginTop: 8 }}>
+                {OFFSET_PRESETS.map(p => (
+                  <button key={p.key} type="button"
+                    disabled={!anchorField && anchors.length === 0}
+                    className={"offset-chip" + (offsetKey === p.key ? " active" : "")}
+                    onClick={() => pickOffset(p)}>{p.label}</button>
+                ))}
+                <button type="button"
+                  className={"offset-chip" + (offsetKey === null ? " active" : "")}
+                  onClick={() => setOffsetKey(null)}>Custom…</button>
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
               <div className="field-label" style={{ marginBottom: 6 }}>First alert date</div>
-              <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)}
+              <input className="input" type="date" value={date} onChange={e => onManualDate(e.target.value)}
                 style={{ fontFamily: "var(--font-mono)" }}/>
             </div>
             <div>
               <div className="field-label" style={{ marginBottom: 6 }}>Time</div>
-              <input className="input" type="time" value={time} onChange={e => setTime(e.target.value)}
+              <input className="input" type="time" value={time} onChange={e => onManualTime(e.target.value)}
                 style={{ fontFamily: "var(--font-mono)" }}/>
             </div>
           </div>
@@ -607,7 +704,15 @@ export const AlertModal = ({ row, onClose, onConfirm }) => {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn sm" onClick={onClose}>Cancel</button>
-            <button className="btn primary sm" onClick={() => onConfirm({ recipients, date, time, recur, message })}>
+            <button className="btn primary sm" onClick={() => {
+              const preset = OFFSET_PRESETS.find(p => p.key === offsetKey);
+              onConfirm({
+                recipients, date, time, recur, message,
+                anchorField,
+                anchorOffsetMinutes: preset ? preset.minutes : null,
+                timezone: BROWSER_TZ,
+              });
+            }}>
               <Icon name="bell" size={13}/>Schedule alert
             </button>
           </div>

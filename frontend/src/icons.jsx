@@ -37,6 +37,8 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     eye:      <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
     eyeOff:   <><path d="M10.6 6.1A11 11 0 0 1 22 12s-1.3 2.6-3.9 4.6M6.1 6.1 2 12s3.5 7 10 7a10 10 0 0 0 5.8-1.8M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
     logout:   <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></>,
+    shield:   <><path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6l-8-3Z"/></>,
+    ban:      <><circle cx="12" cy="12" r="9"/><path d="m5.5 5.5 13 13"/></>,
   };
   const d = paths[name];
   return (

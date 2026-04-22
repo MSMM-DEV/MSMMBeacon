@@ -10,6 +10,7 @@ import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
+import { AdminPanel } from "./admin.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import {
@@ -17,6 +18,7 @@ import {
   MONTHS, TODAY_MONTH, THIS_YEAR,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
+  getRowAnchors, TAB_TO_SUBJECT_TABLE,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -452,7 +454,7 @@ function LoadingScreen({ error }) {
 // ======================================================================
 // Main App
 // ======================================================================
-function BeaconApp({ initial, currentUser, onSignOut }) {
+function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const isAdmin = currentUser?.role === "Admin";
   const userDisplayName =
     currentUser?.display_name
@@ -471,11 +473,38 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
     } catch { return { ...DEFAULT_TWEAKS }; }
   });
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [adminOpen, setAdminOpen]   = useState(false);
+  // Bump to force PM pickers / Quad Sheet / exports to re-read the users cache
+  // after the admin panel mutates the roster. The value is read via a data
+  // attribute below so unused-var lint stays happy; re-render is the goal.
+  const [rosterTick, setRosterTick] = useState(0);
   const [tab, setTab] = useState(() => localStorage.getItem("beacon-tab") || "potential");
+  // Deep-link landing: if the URL carries ?tab=X&rowId=Y (from an alert email),
+  // record the row id until the target tab's rows are available, then auto-open
+  // the detail drawer on it. Cleared after consumption so tab-switches don't
+  // re-trigger.
+  const [pendingFocusRowId, setPendingFocusRowId] = useState(null);
 
   useEffect(() => { localStorage.setItem("beacon-tab", tab); }, [tab]);
   useEffect(() => { localStorage.setItem("beacon-tweaks", JSON.stringify(tweaks)); }, [tweaks]);
   useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
+
+  // Consume URL params once on BeaconApp mount. BeaconApp only renders after
+  // `phase === "ready"`, so we know the session + data are loaded — no race
+  // with the boot machine in the root <App/>.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      const rowParam = params.get("rowId");
+      if (tabParam && TAB_META.some(t => t.key === tabParam)) setTab(tabParam);
+      if (rowParam) setPendingFocusRowId(rowParam);
+      if (tabParam || rowParam) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    } catch { /* malformed params — ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Data state
   const [potential, setPotential] = useState(initial.potential);
@@ -553,6 +582,23 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
   const openDrawer = (row, table) => setDrawer({ row, table });
   const triggerForward = (row, fromTable, toTable) => setMoving({ row, from: fromTable, to: toTable });
 
+  // When a deep-link pending row id is set, look it up in the current tab's
+  // rows and open the drawer once found. Re-runs when rows update (covers the
+  // slim chance that the row isn't in state yet at mount).
+  useEffect(() => {
+    if (!pendingFocusRowId) return;
+    const rowsByTab = {
+      potential, awaiting, awarded, soq, closed,
+      invoice, events, clients, companies,
+    };
+    const rows = rowsByTab[tab] || [];
+    const match = rows.find(r => r.id === pendingFocusRowId);
+    if (match) {
+      openDrawer(match, tab);
+      setPendingFocusRowId(null);
+    }
+  }, [pendingFocusRowId, tab, potential, awaiting, awarded, soq, closed, invoice, events, clients, companies]);
+
   const confirmMove = (newData) => {
     const { row, from, to } = moving;
     const newRow = { ...row, ...newData, id: mkId(), sourceId: row.id };
@@ -590,9 +636,75 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
     setTimeout(() => setFlashId(null), 1500);
   };
 
-  const confirmAlert = (data) => {
-    showToast(`Alert scheduled for ${data.recipients.length} user${data.recipients.length !== 1 ? "s" : ""} on ${fmtDate(data.date)}`, "bell");
-    setAlertObj(null);
+  // Persist the alert end-to-end: parent alerts row → alert_recipients bulk
+  // insert → initial pending alert_fires row. The send-alert Edge Function
+  // picks up the pending fire on its next tick and ships the email.
+  //
+  // UI recurrence values use hyphen ("one-time"); the DB enum uses underscore.
+  const RECUR_UI_TO_DB = {
+    "one-time": "one_time",
+    "weekly":   "weekly",
+    "biweekly": "biweekly",
+    "monthly":  "monthly",
+    "custom":   "custom",
+  };
+  const confirmAlert = async (data) => {
+    if (!alert?.row || !alert?.tab) { setAlertObj(null); return; }
+    if (!data.recipients?.length) {
+      showToast("Pick at least one recipient before scheduling", "x");
+      return;
+    }
+    const subjectTable = TAB_TO_SUBJECT_TABLE[alert.tab];
+    if (!subjectTable) {
+      showToast(`Can't schedule alerts from the ${alert.tab} tab`, "x");
+      return;
+    }
+    // date + time are in the user's local tz; new Date(`${date}T${time}`) parses
+    // as local, .toISOString() emits UTC. The alert's stored timezone lets the
+    // server recompute recurrences with DST-correct wall-clock semantics.
+    const firstFireAt = new Date(`${data.date}T${data.time || "09:00"}`).toISOString();
+    const recurDb = RECUR_UI_TO_DB[data.recur] || "one_time";
+
+    try {
+      const { data: row, error: aErr } = await supabase
+        .from("alerts")
+        .insert({
+          subject_table:         subjectTable,
+          subject_row_id:        alert.row.id,
+          first_fire_at:         firstFireAt,
+          recurrence:            recurDb,
+          recurrence_rule:       recurDb === "custom" ? (data.recurrenceRule || null) : null,
+          message:               data.message || null,
+          anchor_field:          data.anchorField || null,
+          anchor_offset_minutes: data.anchorOffsetMinutes ?? null,
+          timezone:              data.timezone || "America/Chicago",
+          created_by:            currentUser?.id || null,
+          is_active:             true,
+        })
+        .select("id")
+        .single();
+      if (aErr) throw aErr;
+
+      const recipRows = data.recipients.map(uid => ({ alert_id: row.id, user_id: uid }));
+      const { error: rErr } = await supabase.from("alert_recipients").insert(recipRows);
+      if (rErr) throw rErr;
+
+      const { error: fErr } = await supabase.from("alert_fires").insert({
+        alert_id:     row.id,
+        scheduled_at: firstFireAt,
+        status:       "pending",
+      });
+      if (fErr) throw fErr;
+
+      showToast(
+        `Alert scheduled · ${data.recipients.length} recipient${data.recipients.length === 1 ? "" : "s"} · first send ${fmtDate(data.date)} ${data.time}`,
+        "bell"
+      );
+      setAlertObj(null);
+    } catch (err) {
+      const msg = err?.message || "Failed to schedule alert";
+      showToast(`Schedule failed: ${msg}`, "x");
+    }
   };
 
   const handleCreated = (table, dbRow, extras = {}) => {
@@ -789,7 +901,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
                  : "New project";
 
   return (
-    <div className="app">
+    <div className="app" data-roster-tick={rosterTick}>
       <div className="topbar">
         <div className="brand">
           <div className="brand-mark"/>
@@ -803,7 +915,11 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
         </div>
         <div className="top-actions">
           <button className="iconbtn" title="Notifications"><Icon name="bell" size={16}/></button>
-          <button className="iconbtn" title="Tweaks" onClick={() => setTweaksOpen(v => !v)}>
+          <button
+            className="iconbtn"
+            title={isAdmin ? "Admin · Users & tweaks" : "Tweaks"}
+            onClick={() => isAdmin ? setAdminOpen(v => !v) : setTweaksOpen(v => !v)}
+          >
             <Icon name="settings" size={16}/>
           </button>
           <div style={{ position: "relative" }}>
@@ -915,7 +1031,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
           <PotentialTable rows={filtered.potential} updateRow={updatePotential}
             onOpenDrawer={r => openDrawer(r, "potential")}
             onForward={r => triggerForward(r, "potential", "awaiting")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "potential" })}
             flashId={flashId}
             filters={chipsFor("potential")}
             tab="potential"
@@ -928,7 +1044,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
             onOpenDrawer={r => openDrawer(r, "awaiting")}
             onForward={r => triggerForward(r, "awaiting", "awarded")}
             onCloseOut={r => triggerForward(r, "awaiting", "closed")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "awaiting" })}
             flashId={flashId}
             filters={chipsFor("awaiting")}
             tab="awaiting"
@@ -939,7 +1055,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
         {tab === "awarded" && (
           <AwardedTable rows={filtered.awarded} updateRow={updateAwarded}
             onOpenDrawer={r => openDrawer(r, "awarded")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
             flashId={flashId}
             filters={chipsFor("awarded")}
             tab="awarded"
@@ -950,7 +1066,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
         {tab === "soq" && (
           <SoqTable rows={filtered.soq} updateRow={updateSoq}
             onOpenDrawer={r => openDrawer(r, "soq")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "soq" })}
             flashId={flashId}
             filters={chipsFor("soq")}
             tab="soq"
@@ -962,7 +1078,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
           <ClosedTable rows={filtered.closed}
             updateRow={updateClosed}
             onOpenDrawer={r => openDrawer(r, "closed")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "closed" })}
             flashId={flashId}
             filters={chipsFor("closed")}
             tab="closed"
@@ -975,7 +1091,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
             updateInvoice={updateInvoiceCell}
             updateRow={updateInvoice}
             onOpenDrawer={r => openDrawer(r, "invoice")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
             flashId={flashId}
             tab="invoice"
             orangeSourceIds={orangeSourceIds}
@@ -987,7 +1103,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
           <EventsTable rows={filtered.events}
             updateRow={updateEvents}
             onOpenDrawer={r => openDrawer(r, "events")}
-            onAlert={r => setAlertObj({ row: r })}
+            onAlert={r => setAlertObj({ row: r, tab: "events" })}
             flashId={flashId}
             filters={chipsFor("events")}
             tab="events"/>
@@ -1060,7 +1176,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
             drawer.table === "awaiting"  ? () => { triggerForward(liveRow, "awaiting", "awarded"); setDrawer(null); } :
             null
           }
-          onAlert={() => { setAlertObj({ row: liveRow }); setDrawer(null); }}
+          onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
         />
         );
       })()}
@@ -1077,6 +1193,7 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
       {alert && (
         <AlertModal
           row={alert.row}
+          anchors={getRowAnchors(alert.tab, alert.row)}
           onClose={() => setAlertObj(null)}
           onConfirm={confirmAlert}/>
       )}
@@ -1098,6 +1215,31 @@ function BeaconApp({ initial, currentUser, onSignOut }) {
         </div>
       )}
 
+      {adminOpen && isAdmin && (
+        <AdminPanel
+          tweaks={tweaks}
+          setTweak={setTweak}
+          currentUser={currentUser}
+          onClose={() => setAdminOpen(false)}
+          onRosterChange={async () => {
+            setRosterTick(t => t + 1);
+            // If the admin edited themselves (role change, ban) we want the
+            // topbar / isAdmin gate to reflect the new state right away.
+            onRefreshCurrentUser?.();
+          }}
+          // Keyed by beacon.alert_subject_enum value; AlertsAdmin looks up
+          // each alert's subject row to render its name/number.
+          alertSubjectLookup={{
+            potential:  Object.fromEntries((potential || []).map(r => [r.id, r])),
+            awaiting:   Object.fromEntries((awaiting  || []).map(r => [r.id, r])),
+            awarded:    Object.fromEntries((awarded   || []).map(r => [r.id, r])),
+            soq:        Object.fromEntries((soq       || []).map(r => [r.id, r])),
+            closed_out: Object.fromEntries((closed    || []).map(r => [r.id, r])),
+            invoice:    Object.fromEntries((invoice   || []).map(r => [r.id, r])),
+            event:      Object.fromEntries((events    || []).map(r => [r.id, r])),
+          }}
+        />
+      )}
       {tweaksOpen && (
         <TweaksPanel tweaks={tweaks} setTweak={setTweak} onClose={() => setTweaksOpen(false)}/>
       )}
@@ -1177,8 +1319,23 @@ export default function App() {
     setPhase("anon");
   };
 
+  // Re-fetch the current beacon.users row — called after admin actions that
+  // might touch the signed-in user (self-demote, self-ban, etc) so the topbar
+  // + admin gate reflect reality without forcing a full reload.
+  const refreshCurrentUser = async () => {
+    const fresh = await fetchCurrentBeaconUser();
+    if (fresh) setBeaconUser(fresh);
+  };
+
   if (phase === "error") return <LoadingScreen error={error}/>;
   if (phase === "anon")  return <LoginPage onSignedIn={hydrate}/>;
   if (phase !== "ready" || !data) return <LoadingScreen/>;
-  return <BeaconApp initial={data} currentUser={beaconUser} onSignOut={handleSignOut}/>;
+  return (
+    <BeaconApp
+      initial={data}
+      currentUser={beaconUser}
+      onSignOut={handleSignOut}
+      onRefreshCurrentUser={refreshCurrentUser}
+    />
+  );
 }
