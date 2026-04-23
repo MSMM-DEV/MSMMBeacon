@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip } from "./primitives.jsx";
-import { getCompanies, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
+import { getClientsOnly, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
 
 // Multi-user picker used by both the PMs field and Events attendees.
 // Search-as-you-type dropdown; selected users render as chips with remove-x.
@@ -53,7 +53,13 @@ function UsersField({ value, onChange, placeholder = "Pick users…" }) {
 export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert }) => {
   if (!row) return null;
 
-  const COMPANIES = getCompanies();
+  // type="company" in the drawer field configs is (by current usage) always
+  // a Client reference — the target column on every project table is
+  // `client_id` → beacon.clients. Feed the dropdown from clients-only so a
+  // selection can't violate the FK. (The field-type name "company" is a
+  // legacy artifact of the merged list; not renaming to avoid a cascade
+  // of unrelated edits.)
+  const COMPANIES = getClientsOnly();
   const USERS = getUsers();
 
   // Every column that appears in the corresponding table in tables.jsx must have

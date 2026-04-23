@@ -837,7 +837,15 @@ const renderOrderedCells = (visibleColumns, cells) =>
 // Built at the top of each table body. We rebuild per-render so newly added
 // users/companies show up — the lookup arrays are cheap (<~200 items).
 const buildOptions = () => {
-  const clientOptions     = getCompanies().map(c => ({ value: c.id, label: c.name }));
+  // clientOptions is used for the inline-edit "Client" dropdown on every
+  // project table. It MUST be clients-only because the DB column
+  // `<project>.client_id` is a FK to beacon.clients — writing a company
+  // UUID here fires `client_id_fkey` (409). Sub-rows where the UI
+  // displays a prime-firm fallback via adapter's `r.client_id ||
+  // r.prime_company_id` still RENDER correctly (companyById() reads the
+  // merged list), but the EDIT list is restricted to real clients so
+  // picking a value always yields a valid client_id.
+  const clientOptions     = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
   const clientsOnlyOpts   = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
   const companiesOnlyOpts = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
   const userOptions       = getUsers().map(u => ({ value: u.id, label: u.name }));
