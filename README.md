@@ -5,7 +5,7 @@ Project-lifecycle dashboard for an engineering firm. Projects flow through stage
 ## Stack
 
 - **Database**: Supabase Postgres, `beacon` schema. Schema + seed in [`supabase/migrations/`](./supabase/migrations).
-- **Frontend**: Vite + React (ES modules), `@supabase/supabase-js`. See [`frontend/`](./frontend).
+- **Frontend**: Vite + React (ES modules), `@supabase/supabase-js`. Responsive across phone / tablet / desktop. See [`frontend/`](./frontend).
 - **Auth**: Supabase Auth (email + password). Every request after login uses the `authenticated` role; there are two app-level roles (`Admin`, `User`) stored on `beacon.users.role`.
 - **Edge Functions** (Deno, deployed to Supabase): `admin-users` (privileged user CRUD) and `send-alert` (picks up due `alert_fires` rows, ships email via Resend). See [`supabase/functions/`](./supabase/functions).
 - **Scheduler**: GitHub Actions workflow [`alert-tick.yml`](./.github/workflows/alert-tick.yml) POSTs to `send-alert` every minute.
@@ -28,7 +28,8 @@ MSMMBeacon/
 │   │   ├── 20260423120000_user_roles.sql              beacon.users.role ∈ {Admin, User}; Raj = Admin
 │   │   ├── 20260423130000_orange_probability_enum.sql codifies 'Orange' on probability_enum
 │   │   ├── 20260423140000_invoice_overrides.sql       anticipated_invoice.ytd_actual_override + rollforward_override
-│   │   └── 20260424120000_alerts_wiring.sql           alerts anchor/timezone/attempts cols, claim_pending_fires + complete_fire RPCs, row-delete triggers
+│   │   ├── 20260424120000_alerts_wiring.sql           alerts anchor/timezone/attempts cols, claim_pending_fires + complete_fire RPCs, row-delete triggers
+│   │   └── 20260424120000_admin_only_user_writes.sql  Admin-only RLS on beacon.users writes (is_current_user_admin() helper)
 │   └── functions/
 │       ├── admin-users/           privileged user CRUD (create / change-password / delete / ban / set-role)
 │       └── send-alert/            reads due alert_fires, renders email per subject_table, dispatches via Resend

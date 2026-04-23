@@ -378,6 +378,23 @@ html, body { overflow-x: clip; }
   gap: 0;
   align-items: center;
 }
+
+/* Shared-width wrapper for header + rows inside the horizontal-scroll
+   container. Forces all .thead / .trow children to render at the SAME
+   width via normal block-level inheritance (they otherwise sized to 100%
+   of .table-scroll, which is narrower than the grid's track minimums on
+   phone — so cells visually overflowed the row, leaving row backgrounds
+   unpainted in the scrolled-in region).
+   The chosen keyword is `min-content`, not `max-content`: min-content
+   resolves to the SUM OF TRACK MINIMUMS (fixed px tracks + the 240px /
+   160px minimums of every `minmax(Npx, Mfr)` track), which is exactly
+   what the grid needs to render without clipping. max-content would
+   additionally pull in the max-content of cell text (long project names
+   etc.), inflating the wrapper past what the grid requires and forcing
+   horizontal scroll on wide desktops where the table previously fit. */
+.table-scroll-body {
+  min-width: min-content;
+}
 .thead {
   /* top:0 (not 60) because .table-scroll is a scroll container on both axes
      once overflow-x:auto is applied (CSS coerces overflow-y:visible/clip
@@ -1388,12 +1405,24 @@ html, body { overflow-x: clip; }
   stroke-dasharray: 3 4;
   opacity: .65;
 }
-.chart-actual { stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
-.chart-proj   { stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: 5 4; opacity: .55; stroke-linecap: round; }
-.chart-dot.actual { fill: var(--surface); stroke: var(--accent); stroke-width: 1.8; }
-.chart-dot.proj   { fill: var(--surface); stroke: var(--accent); stroke-width: 1.4; opacity: .55; }
+/* Primary series — "With Orange" total. Uses --prob-orange (cadmium
+   orange) so the line is semantically self-describing: its color IS the
+   Orange probability color from the Potential table. Clearly distinct
+   from the sage baseline beneath it. */
+.chart-actual { stroke: var(--prob-orange); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.chart-proj   { stroke: var(--prob-orange); stroke-width: 1.8; stroke-dasharray: 5 4; opacity: .6; stroke-linecap: round; }
+.chart-dot.actual { fill: var(--surface); stroke: var(--prob-orange); stroke-width: 1.8; }
+.chart-dot.proj   { fill: var(--surface); stroke: var(--prob-orange); stroke-width: 1.4; opacity: .6; }
+/* Secondary series — "Without Orange" baseline. Sage reads as "secured"
+   against the warmer orange of the with-Orange total. Thinner strokes +
+   smaller dots keep the primary series visually dominant. */
+.chart-actual-base { stroke: var(--sage); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-proj-base   { stroke: var(--sage); stroke-width: 1.6; stroke-dasharray: 5 4; opacity: .7; stroke-linecap: round; }
+.chart-dot.actual-base { fill: var(--surface); stroke: var(--sage); stroke-width: 1.6; }
+.chart-dot.proj-base   { fill: var(--surface); stroke: var(--sage); stroke-width: 1.3; opacity: .7; }
 .chart-hover-line { stroke: var(--accent-ink); stroke-width: 1; opacity: .4; }
-.chart-hover-dot  { fill: var(--accent); stroke: var(--surface); stroke-width: 2.5; }
+.chart-hover-dot  { fill: var(--prob-orange); stroke: var(--surface); stroke-width: 2.5; }
+.chart-hover-dot-base { fill: var(--sage); stroke: var(--surface); stroke-width: 2; }
 .chart-tip-bg    { fill: var(--bg-elev); stroke: var(--border); }
 .chart-tip-label {
   font-family: var(--font-mono);
@@ -1406,6 +1435,12 @@ html, body { overflow-x: clip; }
   font-size: 14px;
   font-weight: 600;
   fill: var(--text);
+}
+.chart-tip-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: var(--text-soft);
+  letter-spacing: .02em;
 }
 
 .chart-legend {
@@ -1421,12 +1456,13 @@ html, body { overflow-x: clip; }
   margin-right: 6px;
   border-radius: 2px;
 }
-.chart-legend .swatch.actual { background: var(--accent); }
+.chart-legend .swatch.actual { background: var(--prob-orange); }
+.chart-legend .swatch.actual-base { background: var(--sage); }
 .chart-legend .swatch.proj   {
-  background: linear-gradient(to right, var(--accent) 50%, transparent 50%);
+  background: linear-gradient(to right, var(--prob-orange) 50%, transparent 50%);
   background-size: 6px 3px;
   background-repeat: repeat-x;
-  opacity: .6;
+  opacity: .7;
 }
 .chart-legend .swatch.today {
   background: transparent;
@@ -2813,4 +2849,402 @@ html, body { overflow-x: clip; }
 }
 [data-theme="dark"] .dispatch-error {
   background: #3A1E1A; color: #F0A69A; border-color: #6E3326;
+}
+
+/* ======================================================================
+ * RESPONSIVE — mobile, tablet, laptop overrides.
+ *
+ * Design posture: the app is desktop-first (data-dense tables are the core
+ * product). Narrower viewports tighten chrome, collapse non-essential
+ * ornamentation, and convert the side-slide drawer into a bottom sheet.
+ * Tables keep their column grids and scroll horizontally inside .table-scroll
+ * rather than collapsing to cards — the user's muscle memory for the grid
+ * is load-bearing.
+ *
+ * Breakpoint ladder:
+ *   ≤1280px  ·  laptops / tight desktops
+ *   ≤1024px  ·  tablet landscape / small laptop
+ *   ≤ 840px  ·  tablet portrait
+ *   ≤ 640px  ·  phone landscape / small tablet
+ *   ≤ 440px  ·  phone portrait
+ * ====================================================================== */
+
+/* Shared — always allow safe-area padding on iOS notches. */
+.topbar {
+  padding-left: max(28px, env(safe-area-inset-left));
+  padding-right: max(28px, env(safe-area-inset-right));
+}
+.tabwrap, .page {
+  padding-left: max(28px, env(safe-area-inset-left));
+  padding-right: max(28px, env(safe-area-inset-right));
+}
+
+/* On touch-primary devices, the hover-only row-action fade never fires.
+   Show the row buttons always + enlarge tap targets. */
+@media (hover: none) and (pointer: coarse) {
+  .row-actions { opacity: 1; }
+  .iconbtn { width: 38px; height: 38px; }
+  .row-btn { width: 32px; height: 32px; }
+  .drawer-close { width: 36px; height: 36px; }
+  .tab { padding-top: 12px; padding-bottom: 14px; }
+  .btn { padding-top: 10px; padding-bottom: 10px; }
+}
+
+/* ---------------------------------------------------------------- ≤1280px */
+@media (max-width: 1280px) {
+  .topbar  { padding: 14px 20px; }
+  .tabwrap { padding-left: 20px; padding-right: 20px; }
+  .page    { padding: 24px 20px 60px; }
+  .search  { min-width: 220px; }
+  .stats   { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ---------------------------------------------------------------- ≤1024px */
+@media (max-width: 1024px) {
+  .topbar { gap: 14px; padding: 12px 18px; }
+  .brand-sub { display: none; }
+  .search { min-width: 0; flex: 1; }
+  .top-actions { gap: 6px; }
+
+  .tabwrap { padding: 14px 18px 0; }
+  /* Let the tab row scroll horizontally instead of wrapping — wrapping on
+     laptops steals vertical real estate from the table. */
+  .pipeline {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scroll-behavior: smooth;
+    padding-bottom: 2px;
+  }
+  .pipeline::-webkit-scrollbar { height: 4px; }
+  .pipeline::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+  .tab { flex-shrink: 0; }
+
+  .page { padding: 22px 18px 56px; }
+  .page-title { font-size: 23px; }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  /* Dispatch vitals: 5 cols are too tight when the admin drawer narrows. */
+  .dispatch-vitals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ----------------------------------------------------------------- ≤840px */
+@media (max-width: 840px) {
+  .topbar { padding: 10px 14px; gap: 10px; }
+  .tabwrap { padding: 10px 14px 0; }
+  .page { padding: 20px 14px 56px; }
+
+  /* Search collapses to icon-only; the full-text search lives in the table
+     toolbar's Filter menu, so the topbar pill becomes a visual cue only. */
+  .search {
+    min-width: 0;
+    width: 38px;
+    padding: 0;
+    justify-content: center;
+    flex: 0 0 38px;
+  }
+  .search input, .search .kbd { display: none; }
+
+  /* Bell is decorative right now; free the horizontal space. */
+  .topbar .iconbtn[title="Notifications"] { display: none; }
+
+  /* Session chip collapses — avatar + role pill remain. */
+  .session-chip .session-name { display: none; }
+
+  /* Page head stacks vertically so the title doesn't squeeze the actions. */
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .page-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .page-title { font-size: 22px; }
+  .page-desc { font-size: 13px; max-width: none; }
+
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat { padding: 12px 14px; }
+  .stat-val { font-size: 21px; }
+
+  /* Tabs shrink slightly so more fit before scroll. */
+  .tab { padding: 9px 12px 11px; font-size: 12.5px; gap: 7px; }
+  .tab-sep { display: none; }
+  .tab .count { font-size: 10px; padding: 1px 5px; }
+
+  /* Drawer: slide over most of the viewport, keep drawer body scrolling. */
+  .drawer {
+    width: min(520px, 100vw);
+    max-width: 100vw;
+    border-left: 0;
+    border-top-left-radius: 14px;
+    border-bottom-left-radius: 0;
+  }
+  .drawer.narrow { width: min(440px, 100vw); }
+  .drawer-head { padding: 16px 18px 12px; }
+  .drawer-body { padding: 8px 18px 20px; }
+  .drawer-foot { padding: 12px 18px; }
+
+  /* Modals (Alert, Create, MoveForward): shift to bottom-sheet pattern —
+     more thumbable + easier to dismiss. Fill the viewport width. */
+  .modal {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: 100vw !important;
+    max-width: 100vw;
+    max-height: 92vh;
+    transform: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+    animation: sheetIn .25s cubic-bezier(.2,.8,.2,1);
+    display: flex;
+    flex-direction: column;
+  }
+  .modal-body { overflow-y: auto; flex: 1; }
+  @keyframes sheetIn {
+    from { transform: translateY(24px); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+  }
+
+  /* Tweaks mini-panel also becomes a bottom sheet. */
+  .tweaks-panel {
+    right: 0; left: 0; bottom: 0;
+    width: 100vw;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+  }
+
+  /* Toast stays centered but away from notch. */
+  .toast { bottom: max(20px, env(safe-area-inset-bottom) + 10px); }
+
+  /* Quad Sheet stacks + trims padding. */
+  .quad { grid-template-columns: 1fr; grid-template-rows: auto; gap: 14px; padding: 0 0 20px; }
+  .quad-q1, .quad-q2, .quad-q3, .quad-q4 { grid-column: 1; grid-row: auto; }
+  .quad-card { padding: 18px 18px 16px; border-radius: 12px; }
+  .quad-title { font-size: 19px; }
+
+  /* Admin + Dispatch chrome */
+  .admin-drawer.admin-drawer-wide { width: min(640px, 100vw); }
+  .dispatch-vitals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-toolbar { flex-wrap: wrap; }
+  .admin-toolbar .admin-search { flex: 1 1 100%; }
+}
+
+/* ----------------------------------------------------------------- ≤640px */
+@media (max-width: 640px) {
+  .topbar { padding: 10px 12px; gap: 8px; }
+  .tabwrap { padding: 10px 12px 0; }
+  .page { padding: 18px 12px 48px; }
+
+  /* Search pill has no handler yet — hide entirely on phones so users
+     don't tap an inert icon. (Real search lives in each table toolbar.) */
+  .search { display: none; }
+
+  /* At phone widths the title line gets smaller type so the prominent
+     primary CTA doesn't compete for eye-attention. */
+  .page-title { font-size: 20px; letter-spacing: -0.015em; }
+  .page-desc { font-size: 12.5px; }
+
+  /* Stat strip: keep two columns (four values is our story); 1-col only on
+     tiny phones below. */
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat { padding: 11px 12px; }
+  .stat-val { font-size: 20px; }
+  .stat-label { font-size: 10.5px; }
+  .stat-sparkline { right: 8px; bottom: 8px; }
+
+  /* Tables — tighten chrome, keep horizontal scroll intact so column grids
+     continue to work without reflow (user mental model stays desktop). */
+  .tablewrap { border-radius: 12px; }
+  .toolbar { padding: 8px 10px; gap: 6px; }
+  .tool-chip { padding: 4px 8px; font-size: 12px; }
+  .tool-sep { margin: 0 2px; }
+
+  /* Give the horizontal table-scroll an inertial scroll feel on iOS and a
+     thin scrollbar so users can tell it scrolls. Applies to both the grid
+     (.table-scroll) and the <table>-based invoice (.invoice-wrap). */
+  .table-scroll, .invoice-wrap { -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .table-scroll::-webkit-scrollbar, .invoice-wrap::-webkit-scrollbar { height: 6px; }
+  .table-scroll::-webkit-scrollbar-thumb,
+  .invoice-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+  /* Sparkline would collide with a seven-figure stat value on narrow cards.
+     The value is the data; the spark is decoration. Drop it on phones. */
+  .stat-sparkline { display: none; }
+
+  /* Row density: pull cell padding in a touch so more columns peek. */
+  .th, .td { padding-left: 10px; padding-right: 10px; font-size: 12.5px; }
+  .th { font-size: 10.5px; }
+
+  /* Modal / drawer internals: field label column stacks above input so full
+     input width is available on narrow screens. */
+  .field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 10px 0 12px;
+  }
+  .field-label { padding-top: 0; }
+  .field-value { min-height: 0; }
+
+  /* Subrow (2 Sub entries on Potential form etc.): stack name/amount. */
+  .subrow { grid-template-columns: 1fr 110px 32px; gap: 4px; }
+
+  /* Alerts modal: anchor chips shift to horizontal-scroll so 3–5 chips fit. */
+  .alert-anchor-chips, .alert-offset-chips {
+    flex-wrap: wrap;
+  }
+
+  /* Dispatch Desk */
+  .dispatch-vitals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dispatch-masthead { grid-template-columns: 1fr auto; gap: 6px; }
+  .dispatch-eyebrow { border-right: 0; padding-right: 0; margin-right: 0; }
+  .dispatch-toolbar { flex-wrap: wrap; }
+  .dispatch-filter-chips { flex-wrap: wrap; }
+  .dispatch-card-main {
+    grid-template-columns: 1fr 18px;
+    row-gap: 4px;
+    padding: 10px 8px 10px 12px;
+  }
+  .dispatch-card-recip { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .fire-row { gap: 6px; padding: 6px 8px; }
+  .fire-time { min-width: 0; flex: 1 1 100%; }
+  .fire-err, .fire-fired { flex: 1 1 100%; }
+
+  /* Admin list rows: stack the right-hand controls onto their own row so
+     name/email aren't clipped on a 360px phone. */
+  .admin-row {
+    grid-template-columns: 36px 1fr 32px;
+    grid-template-rows: auto auto;
+    row-gap: 6px;
+  }
+  .admin-badges {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+  }
+  .admin-row-actions { grid-column: 3; grid-row: 1; }
+
+  /* Quad sub-components */
+  .chart-kpis { flex-wrap: wrap; gap: 10px 0; }
+  .kpi { padding: 0 14px; min-width: 40%; }
+  .kpi:first-child { padding-left: 0; }
+  .kpi-sep { display: none; }
+  .chart-legend { flex-wrap: wrap; gap: 10px; }
+
+  .soq-axis { margin-left: 0; margin-right: 0; }
+  .soq-row {
+    grid-template-columns: 1fr 70px;
+    grid-template-rows: auto auto;
+    row-gap: 4px;
+    padding: 8px 2px;
+  }
+  .soq-name { grid-column: 1 / -1; grid-row: 1; padding-left: 0; }
+  .soq-lane { grid-column: 1; grid-row: 2; }
+  .soq-rec  { grid-column: 2; grid-row: 2; }
+
+  .await-row { padding: 10px 12px; gap: 10px; }
+  .await-pill { min-width: 88px; padding: 4px 8px 5px; }
+
+  /* Event ledger: shorter date tile. */
+  .evt { grid-template-columns: 44px 1fr; gap: 10px; }
+  .evt-day { font-size: 18px; }
+
+  /* Login page already has an 860px breakpoint that hides the hero; just
+     make the right panel breathe on narrow screens. */
+  .login-panel { padding: 26px 20px; }
+  .login-card  { max-width: 360px; }
+  .login-title { font-size: 23px; }
+
+  /* PDF / New-project buttons keep their icon but shorten — label stays,
+     but sm size already handles it. */
+}
+
+/* ----------------------------------------------------------------- ≤440px */
+@media (max-width: 440px) {
+  .topbar { padding: 9px 10px; gap: 6px; }
+  .tabwrap { padding: 8px 10px 0; }
+  .page { padding: 16px 10px 40px; }
+
+  .brand { font-size: 15px; gap: 8px; }
+  .brand-mark { width: 26px; height: 26px; }
+
+  /* One icon, one session chip, plus the search icon. Hide session role
+     pill on tiny phones — avatar + menu remain the route to sign out. */
+  .session-role { display: none; }
+  .session-chip { padding: 3px 3px 3px 3px; }
+
+  /* 4 stats in one 2×2 grid even on smallest phones — feels more
+     deliberate than a vertical ticker. */
+  .stat-val { font-size: 18px; }
+
+  /* Tables: last safety margin on cell padding. */
+  .th, .td { padding-left: 9px; padding-right: 9px; font-size: 12px; }
+  .th { font-size: 10px; }
+
+  /* Page actions: the two buttons wrap onto their own row naturally; let
+     the primary CTA span full-width so it's thumb-reachable. */
+  .page-actions > .btn.primary { flex: 1; justify-content: center; }
+
+  /* Dispatch vitals at their densest: 2 cols is the floor. */
+  .dispatch-vitals .vital { padding: 10px 12px 8px; }
+  .vital-value { font-size: 22px; }
+
+  /* Drawer: go fully edge-to-edge; the inner padding carries the breathing
+     room. Keeps editors usable on 320–360px phones. */
+  .drawer { width: 100vw; border-top-left-radius: 0; }
+  .drawer-head { padding: 14px 16px 10px; }
+  .drawer-body { padding: 6px 16px 16px; }
+  .drawer-foot { padding: 10px 16px; }
+
+  /* Admin drawer mirrors — already min() bound but force 100vw for edges. */
+  .admin-drawer, .admin-drawer.admin-drawer-wide { width: 100vw; }
+
+  .modal-head { padding: 14px 16px 8px; }
+  .modal-body { padding: 12px 16px 14px; }
+  .modal-foot { padding: 10px 16px; flex-wrap: wrap; }
+  .modal-foot > *:first-child { order: 2; }
+  .modal-foot .btn { flex: 1; justify-content: center; }
+
+  /* Quad card: tighter still. */
+  .quad-card { padding: 16px 16px 14px; }
+  .quad-title { font-size: 18px; }
+  .kpi { min-width: 100%; padding: 0; }
+  .chart-kpis { gap: 12px; }
+}
+
+/* ------------- Orientation-specific — modal sheet on landscape phones */
+@media (max-height: 500px) and (max-width: 900px) {
+  /* Short+wide viewports (landscape phone): modals lose the bottom-sheet
+     treatment because the sheet would cover nearly the whole screen. Recenter. */
+  .modal {
+    top: 50%; left: 50%; bottom: auto;
+    transform: translate(-50%, -50%);
+    width: min(560px, 94vw) !important;
+    max-height: 92vh;
+    border-radius: var(--radius-lg);
+    animation: pop .22s cubic-bezier(.2,.8,.2,1);
+  }
+}
+
+/* ------------- Print --------------------------------------------------- */
+@media print {
+  .topbar, .tabwrap, .toolbar, .page-actions, .tweaks-panel,
+  .drawer, .modal, .overlay, .toast, .admin-toast { display: none !important; }
+  .page { padding: 0; }
+  .tablewrap { border: 0; box-shadow: none; }
+}
+
+/* ------------- Reduced motion ----------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

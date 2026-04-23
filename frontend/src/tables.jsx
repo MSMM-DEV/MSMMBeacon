@@ -763,27 +763,33 @@ const TableView = ({
       />
       {/* Table-only horizontal scroll container. Keeps the toolbar fixed-width
           while the header row + data rows scroll together when total column
-          width exceeds viewport. The PAGE never gets a horizontal scrollbar. */}
+          width exceeds viewport. The PAGE never gets a horizontal scrollbar.
+          .table-scroll-body wraps header + rows so they share a single width
+          (max of all children's intrinsic widths). Without the wrapper, each
+          .trow would size to its own content and rows would drift out of
+          alignment at narrow viewports. */}
       <div className="table-scroll">
-        <HeaderRow
-          columns={orderedColumns} gridCols={gridCols} sort={sort}
-          onSortToggle={onSortToggle} hiddenCols={hiddenCols}
-          onReorder={onReorder}
-          columnWidths={columnWidths} setColumnWidths={setColumnWidths}
-        />
-        {sortedRows.length === 0 ? (
-          showNoMatches ? (
-            <EmptyState
-              title="No matches"
-              hint={`Nothing matches "${search}".`}
-              iconName="search"
-            />
+        <div className="table-scroll-body">
+          <HeaderRow
+            columns={orderedColumns} gridCols={gridCols} sort={sort}
+            onSortToggle={onSortToggle} hiddenCols={hiddenCols}
+            onReorder={onReorder}
+            columnWidths={columnWidths} setColumnWidths={setColumnWidths}
+          />
+          {sortedRows.length === 0 ? (
+            showNoMatches ? (
+              <EmptyState
+                title="No matches"
+                hint={`Nothing matches "${search}".`}
+                iconName="search"
+              />
+            ) : (
+              <EmptyState title={emptyTitle} hint={emptyHint} iconName={emptyIcon}/>
+            )
           ) : (
-            <EmptyState title={emptyTitle} hint={emptyHint} iconName={emptyIcon}/>
-          )
-        ) : (
-          processedRows.map((r, i) => renderRow(r, i, gridCols, visibleColumns, hiddenCols))
-        )}
+            processedRows.map((r, i) => renderRow(r, i, gridCols, visibleColumns, hiddenCols))
+          )}
+        </div>
       </div>
     </div>
   );

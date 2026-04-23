@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
@@ -489,6 +489,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   useEffect(() => { localStorage.setItem("beacon-tweaks", JSON.stringify(tweaks)); }, [tweaks]);
   useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
 
+  // Keep the active tab visible. On narrow viewports the pipeline scrolls
+  // horizontally (overflow-x: auto), so the active tab can sit off-screen
+  // if the user touch-scrolled the rail or switched tabs programmatically.
+  // Scroll the active button into view every time the tab changes.
+  const pipelineRef = useRef(null);
+  useEffect(() => {
+    const rail = pipelineRef.current;
+    if (!rail) return;
+    const active = rail.querySelector(".tab.active");
+    if (active && active.scrollIntoView) {
+      active.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+    }
+  }, [tab]);
+
   // Consume URL params once on BeaconApp mount. BeaconApp only renders after
   // `phase === "ready"`, so we know the session + data are loaded — no race
   // with the boot machine in the root <App/>.
@@ -556,22 +570,52 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateClients   = makeUpdate(setClients);
   const updateCompanies = makeUpdate(setCompanies);
 
+  // Monthly value edits (Jan–Dec cells in the Invoice table) write through
+  // to the corresponding per-month column on beacon.anticipated_invoice.
+  // Writes are optimistic: local React state updates immediately so the
+  // cell reflects the new value, then the PostgREST PATCH fires; if it
+  // fails the toast surfaces the error (local state is NOT rolled back —
+  // matches the existing override-cell behavior).
+  const INVOICE_MONTH_COLS = [
+    "jan_amount","feb_amount","mar_amount","apr_amount",
+    "may_amount","jun_amount","jul_amount","aug_amount",
+    "sep_amount","oct_amount","nov_amount","dec_amount",
+  ];
   const updateInvoiceCell = (id, monthIdx, v) => {
+    const nv = Number(v || 0);
     setInvoice(rows => rows.map(r => {
       if (r.id !== id) return r;
-      const nv = [...r.values];
-      nv[monthIdx] = v || 0;
-      return { ...r, values: nv };
+      const vals = [...r.values];
+      vals[monthIdx] = nv;
+      return { ...r, values: vals };
     }));
+    const col = INVOICE_MONTH_COLS[monthIdx];
+    if (!col) return;
+    supabase.from("anticipated_invoice").update({ [col]: nv }).eq("id", id)
+      .then(({ error }) => {
+        if (error) showToast(`Save failed: ${error.message}`, "x");
+      });
   };
-  // Invoice updates are local-only today with one exception: the YTD Actual
-  // and Rollforward override columns persist to Supabase so the user's manual
-  // numbers survive reloads. Other invoice fields will be wired in a later pass.
+
+  // UI-field → DB-column whitelist for other editable Invoice cells. Any
+  // key not in this map updates local state only (e.g. pmIds is managed
+  // via the anticipated_invoice_pms join table, not columns on the row).
+  const INVOICE_COL_MAP = {
+    ytdActualOverride:   "ytd_actual_override",
+    rollforwardOverride: "rollforward_override",
+    name:                "project_name",
+    projectNumber:       "project_number",
+    amount:              "contract_amount",
+    type:                "type",
+    remainingStart:      "msmm_remaining_to_bill_year_start",
+    year:                "year",
+  };
   const updateInvoice = (id, patch) => {
     setInvoice(rows => rows.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = {};
-    if ("ytdActualOverride"   in patch) dbPatch.ytd_actual_override  = patch.ytdActualOverride;
-    if ("rollforwardOverride" in patch) dbPatch.rollforward_override = patch.rollforwardOverride;
+    for (const [uiKey, dbCol] of Object.entries(INVOICE_COL_MAP)) {
+      if (uiKey in patch) dbPatch[dbCol] = patch[uiKey];
+    }
     if (Object.keys(dbPatch).length === 0) return;
     supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
       .then(({ error }) => {
@@ -958,7 +1002,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       </div>
 
       <div className="tabwrap">
-        <div className="pipeline" role="tablist">
+        <div className="pipeline" role="tablist" ref={pipelineRef}>
           {TAB_META.filter(t => t.group === "head").map(t => (
             <button key={t.key}
               className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}

@@ -84,16 +84,31 @@ const QuadCard = ({ eyebrow, title, sub, accent, className, children }) => (
 // shows a read-out.
 // ----------------------------------------------------------------------------
 const InvoiceChart = ({ invoice }) => {
-  const { totals, yMax } = useMemo(() => {
-    const totals = Array(12).fill(0);
+  // Two parallel 12-month totals:
+  //   totalsBase — sum of invoices NOT sourced from an Orange potential row
+  //                (i.e. formally awarded work — the "secured" baseline)
+  //   totalsAll  — sum of ALL invoices (base + Orange pre-awarded)
+  // The delta between the two lines is the Orange pipeline's billing.
+  // We pin yMax to totalsAll so the chart scales to the higher envelope.
+  // BOTH lines are always rendered, even if they coincide (no Orange this
+  // year) or base is flat at 0 (all billing is Orange) — the KPIs/tooltip
+  // convey the numeric split even when the visual lines sit on top of
+  // each other.
+  const { totalsBase, totalsAll, yMax } = useMemo(() => {
+    const totalsBase = Array(12).fill(0);
+    const totalsAll  = Array(12).fill(0);
     for (const r of invoice) {
-      for (let i = 0; i < 12; i++) totals[i] += Number(r.values?.[i] || 0);
+      const isOrange = !!r.sourcePotentialId;
+      for (let i = 0; i < 12; i++) {
+        const v = Number(r.values?.[i] || 0);
+        totalsAll[i] += v;
+        if (!isOrange) totalsBase[i] += v;
+      }
     }
-    const peak = Math.max(...totals, 1);
-    // Pad yMax to a clean round number so the grid feels intentional.
+    const peak = Math.max(...totalsAll, 1);
     const mag = Math.pow(10, Math.floor(Math.log10(peak)));
     const yMax = Math.ceil(peak / mag) * mag;
-    return { totals, yMax };
+    return { totalsBase, totalsAll, yMax };
   }, [invoice]);
 
   const W = 760, H = 280;
@@ -102,24 +117,28 @@ const InvoiceChart = ({ invoice }) => {
   const plotH = H - padT - padB;
   const step = plotW / 11;
 
-  const pts = totals.map((v, i) => [
+  const mkPts = (arr) => arr.map((v, i) => [
     padL + i * step,
     padT + plotH - (v / yMax) * plotH,
   ]);
+  const ptsAll  = mkPts(totalsAll);
+  const ptsBase = mkPts(totalsBase);
 
-  const toPath = (from, to) =>
+  const toPath = (pts, from, to) =>
     pts.slice(from, to + 1)
        .map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1))
        .join(" ");
 
   // Actual = indices 0..TODAY_MONTH inclusive. Projection = TODAY_MONTH..11.
   // The projection path starts at TODAY_MONTH so the two meet.
-  const actualPath = toPath(0, TODAY_MONTH);
-  const projPath   = toPath(TODAY_MONTH, 11);
-  const actualArea =
-    actualPath +
-    ` L${pts[TODAY_MONTH][0].toFixed(1)},${(padT + plotH).toFixed(1)}` +
-    ` L${pts[0][0].toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+  const allActualPath  = toPath(ptsAll,  0, TODAY_MONTH);
+  const allProjPath    = toPath(ptsAll,  TODAY_MONTH, 11);
+  const baseActualPath = toPath(ptsBase, 0, TODAY_MONTH);
+  const baseProjPath   = toPath(ptsBase, TODAY_MONTH, 11);
+  const allActualArea =
+    allActualPath +
+    ` L${ptsAll[TODAY_MONTH][0].toFixed(1)},${(padT + plotH).toFixed(1)}` +
+    ` L${ptsAll[0][0].toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
 
   // Y-axis ticks (4 bands).
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => ({
@@ -141,28 +160,30 @@ const InvoiceChart = ({ invoice }) => {
     setHoverIdx(idx);
   };
 
-  const ytdActual = totals.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
-  const projRem   = totals.slice(TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+  const ytdActualAll  = totalsAll.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+  const ytdActualBase = totalsBase.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+  const projRemAll    = totalsAll.slice(TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+  const projRemBase   = totalsBase.slice(TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
 
   return (
     <div className="chart-wrap">
       <div className="chart-kpis">
         <div className="kpi">
           <div className="kpi-label">YTD Actual</div>
-          <div className="kpi-val">{fmtMoney(ytdActual)}</div>
-          <div className="kpi-sub">Jan–{MONTHS[TODAY_MONTH]}</div>
+          <div className="kpi-val">{fmtMoney(ytdActualAll)}</div>
+          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase)}</div>
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
           <div className="kpi-label">Projection remaining</div>
-          <div className="kpi-val ink-soft">{fmtMoney(projRem)}</div>
-          <div className="kpi-sub">{MONTHS[TODAY_MONTH + 1] || "—"}–Dec</div>
+          <div className="kpi-val ink-soft">{fmtMoney(projRemAll)}</div>
+          <div className="kpi-sub">w/o Orange · {fmtMoney(projRemBase)}</div>
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
           <div className="kpi-label">Full year</div>
-          <div className="kpi-val mono-xl">{fmtMoney(ytdActual + projRem)}</div>
-          <div className="kpi-sub">all invoices</div>
+          <div className="kpi-val mono-xl">{fmtMoney(ytdActualAll + projRemAll)}</div>
+          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase + projRemBase)}</div>
         </div>
       </div>
 
@@ -177,8 +198,8 @@ const InvoiceChart = ({ invoice }) => {
       >
         <defs>
           <linearGradient id="flowFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="var(--accent)"  stopOpacity="0.32"/>
-            <stop offset="100%" stopColor="var(--accent)"  stopOpacity="0.02"/>
+            <stop offset="0%"   stopColor="var(--prob-orange)" stopOpacity="0.28"/>
+            <stop offset="100%" stopColor="var(--prob-orange)" stopOpacity="0.02"/>
           </linearGradient>
         </defs>
 
@@ -198,7 +219,7 @@ const InvoiceChart = ({ invoice }) => {
         {/* Month labels */}
         {MONTHS.map((m, i) => (
           <text key={i}
-                x={pts[i][0]} y={H - 14}
+                x={ptsAll[i][0]} y={H - 14}
                 textAnchor="middle"
                 className={"chart-month" + (i === TODAY_MONTH ? " is-today" : "")}>
             {m}
@@ -207,35 +228,48 @@ const InvoiceChart = ({ invoice }) => {
 
         {/* Today marker */}
         <line
-          x1={pts[TODAY_MONTH][0]} x2={pts[TODAY_MONTH][0]}
+          x1={ptsAll[TODAY_MONTH][0]} x2={ptsAll[TODAY_MONTH][0]}
           y1={padT} y2={padT + plotH}
           className="chart-today"/>
 
-        {/* Actual area + line */}
-        <path d={actualArea} fill="url(#flowFill)"/>
-        <path d={actualPath} fill="none" className="chart-actual"/>
+        {/* Area fill under the WITH-ORANGE line — the primary envelope. */}
+        <path d={allActualArea} fill="url(#flowFill)"/>
 
-        {/* Projection line (dashed) */}
-        <path d={projPath} fill="none" className="chart-proj"/>
+        {/* Without-Orange baseline — drawn before the primary so the amber
+            (with-Orange) sits on top when they coincide. Both series always
+            render so the chart reads as "base vs. total" even in years
+            with no Orange activity (lines just overlap in that case). */}
+        <path d={baseActualPath} fill="none" className="chart-actual-base"/>
+        <path d={baseProjPath}   fill="none" className="chart-proj-base"/>
 
-        {/* Data dots */}
-        {pts.map((p, i) => (
-          <circle key={i} cx={p[0]} cy={p[1]} r={3.5}
+        {/* With-Orange total — primary line. */}
+        <path d={allActualPath} fill="none" className="chart-actual"/>
+        <path d={allProjPath}   fill="none" className="chart-proj"/>
+
+        {/* Data dots — base series behind, primary series on top. */}
+        {ptsBase.map((p, i) => (
+          <circle key={`b${i}`} cx={p[0]} cy={p[1]} r={3}
+                  className={i <= TODAY_MONTH ? "chart-dot actual-base" : "chart-dot proj-base"}/>
+        ))}
+        {ptsAll.map((p, i) => (
+          <circle key={`a${i}`} cx={p[0]} cy={p[1]} r={3.5}
                   className={i <= TODAY_MONTH ? "chart-dot actual" : "chart-dot proj"}/>
         ))}
 
-        {/* Hover readout */}
+        {/* Hover readout — always shows both values. */}
         {hoverIdx != null && (
           <g>
-            <line x1={pts[hoverIdx][0]} x2={pts[hoverIdx][0]}
+            <line x1={ptsAll[hoverIdx][0]} x2={ptsAll[hoverIdx][0]}
                   y1={padT} y2={padT + plotH}
                   className="chart-hover-line"/>
-            <circle cx={pts[hoverIdx][0]} cy={pts[hoverIdx][1]}
+            <circle cx={ptsAll[hoverIdx][0]} cy={ptsAll[hoverIdx][1]}
                     r={6} className="chart-hover-dot"/>
+            <circle cx={ptsBase[hoverIdx][0]} cy={ptsBase[hoverIdx][1]}
+                    r={5} className="chart-hover-dot-base"/>
             {(() => {
-              const x = pts[hoverIdx][0];
-              const y = pts[hoverIdx][1];
-              const boxW = 140, boxH = 46;
+              const x = ptsAll[hoverIdx][0];
+              const y = ptsAll[hoverIdx][1];
+              const boxW = 180, boxH = 66;
               const left = Math.min(W - padR - boxW, Math.max(padL, x - boxW / 2));
               const top  = Math.max(padT, y - boxH - 14);
               return (
@@ -245,8 +279,11 @@ const InvoiceChart = ({ invoice }) => {
                   <text x={12} y={18} className="chart-tip-label">
                     {MONTHS[hoverIdx]} {THIS_YEAR} · {hoverIdx <= TODAY_MONTH ? "Actual" : "Projection"}
                   </text>
-                  <text x={12} y={36} className="chart-tip-val">
-                    {fmtMoney(totals[hoverIdx])}
+                  <text x={12} y={38} className="chart-tip-val">
+                    {fmtMoney(totalsAll[hoverIdx])}
+                  </text>
+                  <text x={12} y={56} className="chart-tip-sub">
+                    w/o Orange · {fmtMoney(totalsBase[hoverIdx])}
                   </text>
                 </g>
               );
@@ -256,7 +293,8 @@ const InvoiceChart = ({ invoice }) => {
       </svg>
 
       <div className="chart-legend">
-        <span><span className="swatch actual"/>Actual · closed months</span>
+        <span><span className="swatch actual"/>With Orange · total</span>
+        <span><span className="swatch actual-base"/>Without Orange · base</span>
         <span><span className="swatch proj"/>Projection · forecast</span>
         <span><span className="swatch today"/>Today</span>
       </div>
