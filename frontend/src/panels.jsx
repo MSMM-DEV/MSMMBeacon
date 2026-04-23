@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip } from "./primitives.jsx";
-import { getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
+import { getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
 // Multi-user picker used by both the PMs field and Events attendees.
@@ -61,8 +61,9 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
   //     the Subs editor inside f.type === "subs".
   // Before splitting these, the Subs picker was filtering a clients-only
   // list looking for non-clients — always returned empty.
-  const CLIENT_OPTIONS = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
-  const SUB_OPTIONS    = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
+  const CLIENT_OPTIONS         = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
+  const CLIENT_OR_FIRM_OPTIONS = buildClientOrCompanyOptions();
+  const SUB_OPTIONS            = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
   const USERS = getUsers();
 
   // Every column that appears in the corresponding table in tables.jsx must have
@@ -212,14 +213,21 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
         {f.options.map(o => <option key={o}>{o}</option>)}
       </select>
     );
-    if (f.type === "company") return (
-      <SearchableSelect
-        value={val || ""}
-        options={CLIENT_OPTIONS}
-        placeholder="Search clients…"
-        onChange={v => set(v || null)}
-      />
-    );
+    if (f.type === "company") {
+      // Sub-role rows get the merged Client+Firm list so users can edit
+      // the displayed prime firm alongside actual clients. Prime rows
+      // stay clients-only (FK to beacon.clients allows nothing else).
+      const opts = row.role === "Sub" ? CLIENT_OR_FIRM_OPTIONS : CLIENT_OPTIONS;
+      const placeholder = row.role === "Sub" ? "Search clients or firms…" : "Search clients…";
+      return (
+        <SearchableSelect
+          value={val || ""}
+          options={opts}
+          placeholder={placeholder}
+          onChange={v => set(v || null)}
+        />
+      );
+    }
     if (f.type === "user") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
         <option value="">—</option>

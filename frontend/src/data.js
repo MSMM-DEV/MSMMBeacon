@@ -143,6 +143,34 @@ export const getUsers     = () => _users;
 export const getCompanies = () => _companies;                                         // merged (clients + companies) for generic lookups
 export const getClientsOnly   = () => _companies.filter(c => c.type === "Client");     // beacon.clients rows
 export const getCompaniesOnly = () => _companies.filter(c => c.type !== "Client");     // beacon.companies rows
+
+// Combined Client-or-Prime-Firm picker options. Used ONLY for Sub-role
+// rows, where the "Client" column in the UI can represent either the end
+// client (client_id) or the external prime firm (prime_company_id). A
+// " · Firm" suffix on company entries lets the user tell the two kinds
+// apart in the dropdown. Prime-role rows keep the clients-only list.
+export const buildClientOrCompanyOptions = () => [
+  ...getClientsOnly().map(c => ({ value: c.id, label: c.name })),
+  ...getCompaniesOnly().map(c => ({ value: c.id, label: `${c.name} · Firm` })),
+];
+
+// Decide which DB column a picked "Client" UUID maps to. For Prime-role
+// rows the dropdown is clients-only so picks always yield client_id. For
+// Sub-role rows the dropdown is merged and the user can pick either kind —
+// this helper inspects which pool the UUID belongs to and returns the
+// partial payload ({ client_id: v } OR { prime_company_id: v, client_id:
+// null }) that routes the write correctly without tripping the
+// client_id_fkey FK on beacon.clients.
+//
+// Clearing the cell always nulls client_id (not prime_company_id) — the
+// role='Sub' constraint requires prime_company_id to stay set, so the
+// user must change role to Prime first to drop the prime firm.
+export const routeClientPick = (v) => {
+  if (v === "" || v == null) return { client_id: null };
+  const clients = getClientsOnly();
+  if (clients.some(c => c.id === v)) return { client_id: v };
+  return { prime_company_id: v, client_id: null };
+};
 export const userById     = (id) => _users.find(u => u.id === id);
 export const companyById  = (id) => _companies.find(c => c.id === id);
 
@@ -331,7 +359,10 @@ function adaptAwaiting(r) {
     year: r.year,
     name: r.project_name,
     role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id,
+    // Sub rows without a client_id fall back to the prime firm, matching
+    // adaptPotential. The "Client" cell then shows the prime when no
+    // actual client is set — consistent with how Potential already behaves.
+    clientId: r.client_id || r.prime_company_id || null,
     amount: null,
     msmm: r.msmm_remaining || 0,
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
@@ -355,7 +386,7 @@ function adaptSoq(r) {
     year: r.year,
     name: r.project_name,
     role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id,
+    clientId: r.client_id || r.prime_company_id || null,
     amount: null,
     msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
@@ -384,7 +415,7 @@ function adaptAwarded(r) {
     year: r.year,
     name: r.project_name,
     role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id,
+    clientId: r.client_id || r.prime_company_id || null,
     amount: null,
     msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
@@ -411,7 +442,7 @@ function adaptClosed(r) {
     year: r.year,
     name: r.project_name,
     role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id,
+    clientId: r.client_id || r.prime_company_id || null,
     amount: null,
     msmm: 0,
     subs: [],

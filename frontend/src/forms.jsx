@@ -282,6 +282,15 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
   const clientOptions = useMemo(() =>
     (clients || []).map(c => ({ value: c.id, label: c.name })),
   [clients]);
+  // Merged Client+Firm list for Sub-role rows. Companies get a " · Firm"
+  // suffix so the two pools are visually distinguishable.
+  const clientOrFirmOptions = useMemo(() => ([
+    ...(clients || []).map(c => ({ value: c.id, label: c.name })),
+    ...(companies || []).filter(c => c.type !== "Client")
+                        .map(c => ({ value: c.id, label: `${c.name} · Firm` })),
+  ]), [clients, companies]);
+  // Set of real-client ids for payload routing (see onSubmit below).
+  const clientIdSet = useMemo(() => new Set((clients || []).map(c => c.id)), [clients]);
 
   const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}) }));
   const [pending, setPending] = useState(false);
@@ -324,6 +333,15 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
 
     // Step 1 — insert the main row.
     const payload = buildPayload();
+    // Route the unified client_id field for project tables. The Client
+    // picker for Sub-role rows includes both clients AND companies; if the
+    // user picked a company, send it to prime_company_id instead (and
+    // blank client_id) to avoid the client_id_fkey violation on insert.
+    const projectTables = new Set(["potential_projects", "awaiting_verdict", "soq"]);
+    if (projectTables.has(dbTable) && payload.client_id && !clientIdSet.has(payload.client_id)) {
+      payload.prime_company_id = payload.client_id;
+      delete payload.client_id;
+    }
     const { data: row, error: err } = await supabase
       .from(dbTable).insert(payload).select().single();
     if (err) {
@@ -460,8 +478,8 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
           <Field label="Client">
             <SearchableSelect
               value={form.client_id || ""}
-              options={clientOptions}
-              placeholder="Search clients…"
+              options={form.role === "Sub" ? clientOrFirmOptions : clientOptions}
+              placeholder={form.role === "Sub" ? "Search clients or firms…" : "Search clients…"}
               onChange={v => set("client_id", v || "")}
             />
           </Field>
@@ -542,8 +560,8 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
           <Field label="Client">
             <SearchableSelect
               value={form.client_id || ""}
-              options={clientOptions}
-              placeholder="Search clients…"
+              options={form.role === "Sub" ? clientOrFirmOptions : clientOptions}
+              placeholder={form.role === "Sub" ? "Search clients or firms…" : "Search clients…"}
               onChange={v => set("client_id", v || "")}
             />
           </Field>
@@ -616,8 +634,8 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
           <Field label="Client">
             <SearchableSelect
               value={form.client_id || ""}
-              options={clientOptions}
-              placeholder="Search clients…"
+              options={form.role === "Sub" ? clientOrFirmOptions : clientOptions}
+              placeholder={form.role === "Sub" ? "Search clients or firms…" : "Search clients…"}
               onChange={v => set("client_id", v || "")}
             />
           </Field>

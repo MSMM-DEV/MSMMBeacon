@@ -17,6 +17,7 @@ import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
+  routeClientPick,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
 } from "./data.js";
@@ -596,22 +597,27 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // pmIds, attendees — handled separately). PMs + event attendees are diffed
   // and mirrored to their join tables. Subs edits are still local-only today.
   // =====================================================================
+  // NOTE on `clientId`: deliberately NOT in any *_COLS map. The UI's
+  // clientId field is unified (adapter: client_id || prime_company_id) and
+  // needs routing based on whether the picked UUID is actually a client or
+  // a prime firm. Each updater calls routeClientPick(patch.clientId) and
+  // merges the result into dbPatch after buildDbPatch runs.
   const POTENTIAL_COLS = {
     year: "year", name: "project_name", role: "role",
-    clientId: "client_id", amount: "total_contract_amount", msmm: "msmm_amount",
+    amount: "total_contract_amount", msmm: "msmm_amount",
     notes: "notes", dates: "next_action_note", nextActionDate: "next_action_date",
     projectNumber: "project_number", probability: "probability",
     anticipatedInvoiceStartMonth: "anticipated_invoice_start_month",
   };
   const AWAITING_COLS = {
-    year: "year", name: "project_name", clientId: "client_id",
+    year: "year", name: "project_name",
     notes: "notes", projectNumber: "project_number",
     dateSubmitted: "date_submitted", anticipatedResultDate: "anticipated_result_date",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
     msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
   };
   const AWARDED_COLS = {
-    year: "year", name: "project_name", clientId: "client_id",
+    year: "year", name: "project_name",
     projectNumber: "project_number", dateSubmitted: "date_submitted",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
     msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
@@ -621,14 +627,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // persist; re-create from Move Forward to pick a new stage instead.
   };
   const CLOSED_COLS = {
-    year: "year", name: "project_name", clientId: "client_id",
+    year: "year", name: "project_name",
     notes: "notes", projectNumber: "project_number",
     dateSubmitted: "date_submitted",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
     dateClosed: "date_closed", reason: "reason_for_closure",
   };
   const SOQ_COLS = {
-    year: "year", name: "project_name", clientId: "client_id",
+    year: "year", name: "project_name",
     notes: "notes", projectNumber: "project_number",
     dateSubmitted: "date_submitted",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
@@ -726,6 +732,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // the check doesn't fire; Sub requires a prime company set via drawer.
     const dbPatch = buildDbPatch(patch, POTENTIAL_COLS);
     if ("role" in patch && patch.role === "Prime") dbPatch.prime_company_id = null;
+    // Route the unified UI clientId to client_id or prime_company_id based
+    // on whether the picked UUID is actually a client or a firm. See
+    // routeClientPick in data.js.
+    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
     patchTable("potential_projects", id, dbPatch);
 
     if ("pmIds" in patch) {
@@ -783,7 +793,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const existing = awaiting.find(r => r.id === id);
     if (!existing) return;
     setAwaiting(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    patchTable("awaiting_verdict", id, buildDbPatch(patch, AWAITING_COLS));
+    const dbPatch = buildDbPatch(patch, AWAITING_COLS);
+    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
+    patchTable("awaiting_verdict", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
         "awaiting_verdict_pms", "awaiting_verdict_id");
@@ -794,7 +806,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const existing = awarded.find(r => r.id === id);
     if (!existing) return;
     setAwarded(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    patchTable("awarded_projects", id, buildDbPatch(patch, AWARDED_COLS));
+    const dbPatch = buildDbPatch(patch, AWARDED_COLS);
+    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
+    patchTable("awarded_projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
         "awarded_project_pms", "awarded_project_id");
@@ -805,7 +819,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const existing = closed.find(r => r.id === id);
     if (!existing) return;
     setClosed(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    patchTable("closed_out_projects", id, buildDbPatch(patch, CLOSED_COLS));
+    const dbPatch = buildDbPatch(patch, CLOSED_COLS);
+    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
+    patchTable("closed_out_projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
         "closed_out_project_pms", "closed_out_project_id");
@@ -816,7 +832,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const existing = soq.find(r => r.id === id);
     if (!existing) return;
     setSoq(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    patchTable("soq", id, buildDbPatch(patch, SOQ_COLS));
+    const dbPatch = buildDbPatch(patch, SOQ_COLS);
+    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
+    patchTable("soq", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds, "soq_pms", "soq_id");
     }

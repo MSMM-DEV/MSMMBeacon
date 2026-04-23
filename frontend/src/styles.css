@@ -1045,10 +1045,12 @@ html, body { overflow-x: clip; }
   position: relative;
   width: 100%;
 }
+/* Menu is rendered via a React portal into document.body, so its own
+   positioning context is the viewport. Top/left/width are set inline from
+   the input's getBoundingClientRect; CSS just handles appearance + stack
+   order. z-index sits above drawers (60) and modals (60–80) so a combobox
+   opened from inside a drawer still paints over the drawer chrome. */
 .searchable-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0; right: 0;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1056,8 +1058,14 @@ html, body { overflow-x: clip; }
   padding: 4px;
   max-height: 260px;
   overflow-y: auto;
-  z-index: 100;
-  animation: pop .14s;
+  z-index: 200;
+  /* Avoid the shared `pop` animation — it uses translate(-50%,-50%) for
+     modal centering and would fight our inline top/left positioning. */
+  animation: searchable-in .14s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes searchable-in {
+  from { transform: translateY(-4px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
 }
 .searchable-item {
   display: flex;

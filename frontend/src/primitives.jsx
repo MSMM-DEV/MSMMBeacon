@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons.jsx";
 import { companyById, userById, fmtMoney } from "./data.js";
 
@@ -395,8 +396,10 @@ export const SearchableSelect = ({
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const [menuPos, setMenuPos] = useState(null);
   const containerRef = useRef();
   const inputRef = useRef();
+  const menuRef = useRef();
 
   const opts = Array.isArray(options) ? options : [];
   const selected = opts.find(o => String(o.value) === String(value ?? ""));
@@ -414,17 +417,50 @@ export const SearchableSelect = ({
     }
   }, [autoFocus]);
 
+  // Recompute menu position whenever it opens. The menu lives in a portal
+  // (document.body), so it needs an absolute top/left in viewport space.
+  // Snapshotting on open is good enough for a transient dropdown — scroll
+  // listeners below close it rather than chase the input, so position
+  // never drifts during its lifetime.
+  useEffect(() => {
+    if (!open || !inputRef.current) { setMenuPos(null); return; }
+    const rect = inputRef.current.getBoundingClientRect();
+    // If near the bottom of the viewport and the preferred 260px wouldn't
+    // fit, flip upward so the menu doesn't get clipped below the fold.
+    const below = window.innerHeight - rect.bottom;
+    const flipUp = below < 200 && rect.top > below;
+    setMenuPos({
+      top:  flipUp ? rect.top - 4 : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      flipUp,
+    });
+  }, [open]);
+
+  // Dismiss on: (a) click outside both the input container AND the menu,
+  // (b) any scroll in an ancestor (use capture-phase to catch .table-scroll,
+  // the page itself, etc.), (c) window resize.
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e) => {
-      if (!containerRef.current?.contains(e.target)) {
-        setOpen(false);
-        setQ("");
-        onDismiss?.();
-      }
+    const dismiss = () => {
+      setOpen(false);
+      setQ("");
+      onDismiss?.();
     };
+    const onDoc = (e) => {
+      if (containerRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      dismiss();
+    };
+    const onScroll = () => dismiss();
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", dismiss);
+    };
   }, [open, onDismiss]);
 
   useEffect(() => { setHighlighted(0); }, [filtered.length]);
@@ -454,6 +490,55 @@ export const SearchableSelect = ({
     }
   };
 
+  // Rendered menu — lives in document.body so it escapes the table's
+  // overflow: hidden / stacking contexts. Position is viewport-fixed.
+  const menu = open && menuPos ? createPortal(
+    <div
+      ref={menuRef}
+      className="searchable-menu"
+      style={{
+        position: "fixed",
+        top: menuPos.flipUp ? "auto" : menuPos.top,
+        bottom: menuPos.flipUp ? (window.innerHeight - menuPos.top) : "auto",
+        left: menuPos.left,
+        width: menuPos.width,
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {allowClear && selected && (
+        <button type="button" className="searchable-item searchable-clear"
+                onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
+          <Icon name="x" size={11}/><span>Clear selection</span>
+        </button>
+      )}
+      {filtered.length === 0 ? (
+        <div className="searchable-empty">No matches</div>
+      ) : (
+        filtered.slice(0, 200).map((o, i) => {
+          const isSel = String(o.value) === String(value ?? "");
+          const isHi  = i === highlighted;
+          return (
+            <button
+              key={String(o.value) + ":" + i}
+              type="button"
+              className={
+                "searchable-item"
+                + (isHi  ? " searchable-hi" : "")
+                + (isSel ? " searchable-sel" : "")
+              }
+              onMouseDown={(e) => { e.preventDefault(); pick(o.value); }}
+              onMouseEnter={() => setHighlighted(i)}
+            >
+              {isSel && <Icon name="check" size={11}/>}
+              <span className="searchable-label">{o.label}</span>
+            </button>
+          );
+        })
+      )}
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <div ref={containerRef} className="searchable-select">
       <input
@@ -466,44 +551,9 @@ export const SearchableSelect = ({
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onKeyDown={handleKey}
         onClick={() => setOpen(true)}
-        // Stop row-level events so clicking the input doesn't open the drawer.
         onMouseDown={(e) => e.stopPropagation()}
       />
-      {open && (
-        <div className="searchable-menu"
-             onMouseDown={(e) => e.stopPropagation()}>
-          {allowClear && selected && (
-            <button type="button" className="searchable-item searchable-clear"
-                    onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
-              <Icon name="x" size={11}/><span>Clear selection</span>
-            </button>
-          )}
-          {filtered.length === 0 ? (
-            <div className="searchable-empty">No matches</div>
-          ) : (
-            filtered.slice(0, 200).map((o, i) => {
-              const isSel = String(o.value) === String(value ?? "");
-              const isHi  = i === highlighted;
-              return (
-                <button
-                  key={String(o.value) + ":" + i}
-                  type="button"
-                  className={
-                    "searchable-item"
-                    + (isHi  ? " searchable-hi" : "")
-                    + (isSel ? " searchable-sel" : "")
-                  }
-                  onMouseDown={(e) => { e.preventDefault(); pick(o.value); }}
-                  onMouseEnter={() => setHighlighted(i)}
-                >
-                  {isSel && <Icon name="check" size={11}/>}
-                  <span className="searchable-label">{o.label}</span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      )}
+      {menu}
     </div>
   );
 };

@@ -5,6 +5,7 @@ import {
 } from "./primitives.jsx";
 import {
   getCompanies, getClientsOnly, getCompaniesOnly, getUsers,
+  buildClientOrCompanyOptions,
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
   MONTHS, TODAY_MONTH, THIS_YEAR,
@@ -837,22 +838,24 @@ const renderOrderedCells = (visibleColumns, cells) =>
 // Built at the top of each table body. We rebuild per-render so newly added
 // users/companies show up — the lookup arrays are cheap (<~200 items).
 const buildOptions = () => {
-  // clientOptions is used for the inline-edit "Client" dropdown on every
-  // project table. It MUST be clients-only because the DB column
-  // `<project>.client_id` is a FK to beacon.clients — writing a company
-  // UUID here fires `client_id_fkey` (409). Sub-rows where the UI
-  // displays a prime-firm fallback via adapter's `r.client_id ||
-  // r.prime_company_id` still RENDER correctly (companyById() reads the
-  // merged list), but the EDIT list is restricted to real clients so
-  // picking a value always yields a valid client_id.
+  // clientOptions (clients only) is the default for Prime-role rows —
+  // matches the client_id → beacon.clients FK so picks can't violate it.
+  // Sub-role rows get a merged Client-or-Firm list (see clientOptionsForRow
+  // below) because their "Client" cell can carry either a client or a
+  // prime firm, and updatePotential/etc. route the pick to either
+  // client_id or prime_company_id accordingly.
   const clientOptions     = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
   const clientsOnlyOpts   = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
   const companiesOnlyOpts = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
+  // Combined list used when the current row is role='Sub'. Companies get
+  // a " · Firm" suffix so users can tell the two pools apart visually.
+  const clientOrFirmOpts  = buildClientOrCompanyOptions();
   const userOptions       = getUsers().map(u => ({ value: u.id, label: u.name }));
   return {
     clientOptions,
     clientsOnlyOpts,
     companiesOnlyOpts,
+    clientOrFirmOpts,
     userOptions,
     orgTypeOptions:      ["City", "State", "Federal", "Local", "Parish", "Regional", "Other"],
     probOptions:         ["High", "Medium", "Low", "Orange"],
@@ -891,7 +894,7 @@ export const PotentialTable = ({
     { label: "__actions", w: "110px", locked: true },
   ];
 
-  const { clientOptions, userOptions, roleOptions, probOptions } = buildOptions();
+  const { clientOptions, clientOrFirmOpts, userOptions, roleOptions, probOptions } = buildOptions();
 
   // Potential rows are always grouped primarily by probability (High → Medium
   // → Low → unset) and secondarily by role (Prime → Sub → other). The user's
@@ -1040,7 +1043,7 @@ export const PotentialTable = ({
           ),
           "Client": (
             <div className="td subtle" style={{ overflow: "hidden" }}>
-              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1192,7 +1195,7 @@ export const AwaitingTable = ({
     { label: "__actions", w: "140px", locked: true },
   ];
 
-  const { clientOptions, userOptions, roleOptions } = buildOptions();
+  const { clientOptions, clientOrFirmOpts, userOptions, roleOptions } = buildOptions();
 
   // Primary sort by org-type keeps rows grouped (user sort slots in as secondary).
   const primarySort = [{ key: "orgType", dir: "asc" }];
@@ -1242,7 +1245,7 @@ export const AwaitingTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1388,7 +1391,7 @@ export const AwardedTable = ({
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
 
-  const { clientOptions, userOptions, roleOptions, stageOptions } = buildOptions();
+  const { clientOptions, clientOrFirmOpts, userOptions, roleOptions, stageOptions } = buildOptions();
 
   // Primary sort by org-type keeps rows grouped (user sort slots in as secondary).
   const primarySort = [{ key: "orgType", dir: "asc" }];
@@ -1442,7 +1445,7 @@ export const AwardedTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1620,7 +1623,7 @@ export const SoqTable = ({
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
   const recurringColor = r => ({ "Yes": "sage", "In Talks": "accent", "Maybe": "blue", "No": "rose" }[r] || "muted");
 
-  const { clientOptions, userOptions, roleOptions, stageOptions } = buildOptions();
+  const { clientOptions, clientOrFirmOpts, userOptions, roleOptions, stageOptions } = buildOptions();
   const recurringOptions = ["Yes", "No", "Maybe", "In Talks"];
 
   const primarySort = [{ key: "orgType", dir: "asc" }];
@@ -1673,7 +1676,7 @@ export const SoqTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1837,7 +1840,7 @@ export const ClosedTable = ({
     { label: "__actions", w: "80px", locked: true },
   ];
 
-  const { clientOptions, userOptions, roleOptions } = buildOptions();
+  const { clientOptions, clientOrFirmOpts, userOptions, roleOptions } = buildOptions();
 
   return (
     <TableView
@@ -1869,7 +1872,7 @@ export const ClosedTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
