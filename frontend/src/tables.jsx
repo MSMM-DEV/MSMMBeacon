@@ -1040,7 +1040,7 @@ export const PotentialTable = ({
           ),
           "Client": (
             <div className="td subtle" style={{ overflow: "hidden" }}>
-              <EditableCell value={r.clientId} type="select" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1242,7 +1242,7 @@ export const AwaitingTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="select" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1442,7 +1442,7 @@ export const AwardedTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="select" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1673,7 +1673,7 @@ export const SoqTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="select" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
@@ -1869,7 +1869,7 @@ export const ClosedTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="select" options={clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>

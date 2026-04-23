@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Icon } from "./icons.jsx";
 import { supabase, THIS_YEAR, MONTHS, fmtMoney } from "./data.js";
+import { SearchableSelect } from "./primitives.jsx";
 
 // ============ CREATE MODAL ============
 // "New X" flow for potential / events / clients / companies.
@@ -167,7 +168,10 @@ const REQUIRED = {
 // Same pattern the DetailDrawer uses. Companies dropdown excludes Client-type.
 function SubsEditor({ value, companies, onChange }) {
   const subs = value || [];
-  const subCompanies = (companies || []).filter(c => c.type !== "Client");
+  const subOptions = useMemo(() => (companies || [])
+    .filter(c => c.type !== "Client")
+    .map(c => ({ value: c.id, label: c.name })),
+  [companies]);
   const update = (i, patch) => onChange(subs.map((s, j) => j === i ? { ...s, ...patch } : s));
   const remove = (i) => onChange(subs.filter((_, j) => j !== i));
   const add = () => onChange([...subs, { cId: null, desc: "", amt: 0 }]);
@@ -185,12 +189,12 @@ function SubsEditor({ value, companies, onChange }) {
       {subs.map((s, i) => (
         <div key={i} className="subrow"
              style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr) 110px 30px" }}>
-          <select className="input" value={s.cId || ""}
-                  onChange={e => update(i, { cId: e.target.value || null })}
-                  style={{ minWidth: 0 }}>
-            <option value="">— Company —</option>
-            {subCompanies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={s.cId || ""}
+            options={subOptions}
+            placeholder="Search companies…"
+            onChange={v => update(i, { cId: v || null })}
+          />
           <input className="input" placeholder="Discipline (e.g. Survey)"
                  value={s.desc || ""} onChange={e => update(i, { desc: e.target.value })}/>
           <input className="input mono" type="number" placeholder="$" min="0"
@@ -271,6 +275,13 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
   const dbTable = DB_TABLES[table];
   const titleCfg = TITLES[table];
   const required = REQUIRED[table] || [];
+
+  // The `clients` prop is passed as-adapted UI rows — `c.name` is already
+  // the merged "${base} — ${district}" display form (see adaptClient). The
+  // combobox option label just uses it verbatim; no extra concatenation.
+  const clientOptions = useMemo(() =>
+    (clients || []).map(c => ({ value: c.id, label: c.name })),
+  [clients]);
 
   const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}) }));
   const [pending, setPending] = useState(false);
@@ -447,15 +458,12 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
             </select>
           </Field>
           <Field label="Client">
-            <select className="select" value={form.client_id}
-                    onChange={e => set("client_id", e.target.value)}>
-              <option value="">—</option>
-              {(clients || []).map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.district ? `${c.name} — ${c.district}` : c.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOptions}
+              placeholder="Search clients…"
+              onChange={v => set("client_id", v || "")}
+            />
           </Field>
           <Field label="Total Contract Amount">
             <input className="input" type="number" value={form.total_contract_amount}
@@ -532,15 +540,12 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
                    style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
           <Field label="Client">
-            <select className="select" value={form.client_id}
-                    onChange={e => set("client_id", e.target.value)}>
-              <option value="">—</option>
-              {(clients || []).map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.district ? `${c.name} — ${c.district}` : c.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOptions}
+              placeholder="Search clients…"
+              onChange={v => set("client_id", v || "")}
+            />
           </Field>
           <Field label="Subs" multiline>
             <SubsEditor value={form.subs} companies={companies}
@@ -609,15 +614,12 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
                    style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
           <Field label="Client">
-            <select className="select" value={form.client_id}
-                    onChange={e => set("client_id", e.target.value)}>
-              <option value="">—</option>
-              {(clients || []).map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.district ? `${c.name} — ${c.district}` : c.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOptions}
+              placeholder="Search clients…"
+              onChange={v => set("client_id", v || "")}
+            />
           </Field>
           <Field label="Start Date">
             <input className="input" type="date" value={form.start_date}

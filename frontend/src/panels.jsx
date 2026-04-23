@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip } from "./primitives.jsx";
-import { getClientsOnly, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
+import { getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
+import { SearchableSelect } from "./primitives.jsx";
 
 // Multi-user picker used by both the PMs field and Events attendees.
 // Search-as-you-type dropdown; selected users render as chips with remove-x.
@@ -53,13 +54,15 @@ function UsersField({ value, onChange, placeholder = "Pick users…" }) {
 export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert }) => {
   if (!row) return null;
 
-  // type="company" in the drawer field configs is (by current usage) always
-  // a Client reference — the target column on every project table is
-  // `client_id` → beacon.clients. Feed the dropdown from clients-only so a
-  // selection can't violate the FK. (The field-type name "company" is a
-  // legacy artifact of the merged list; not renaming to avoid a cascade
-  // of unrelated edits.)
-  const COMPANIES = getClientsOnly();
+  // Two distinct lists:
+  //   CLIENT_OPTIONS — beacon.clients rows only. Used by the drawer's
+  //     f.type === "company" renderer (every such field is a clientId FK).
+  //   SUB_OPTIONS — beacon.companies rows only (external firms). Used by
+  //     the Subs editor inside f.type === "subs".
+  // Before splitting these, the Subs picker was filtering a clients-only
+  // list looking for non-clients — always returned empty.
+  const CLIENT_OPTIONS = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
+  const SUB_OPTIONS    = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
   const USERS = getUsers();
 
   // Every column that appears in the corresponding table in tables.jsx must have
@@ -210,10 +213,12 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       </select>
     );
     if (f.type === "company") return (
-      <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
-        <option value="">—</option>
-        {COMPANIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-      </select>
+      <SearchableSelect
+        value={val || ""}
+        options={CLIENT_OPTIONS}
+        placeholder="Search clients…"
+        onChange={v => set(v || null)}
+      />
     );
     if (f.type === "user") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
@@ -249,7 +254,6 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
     );
     if (f.type === "subs") {
       const subs = val || [];
-      const subCompanies = COMPANIES.filter(c => c.type !== "Client");
       const updateSub = (i, patch) => {
         const next = subs.map((s, j) => j === i ? { ...s, ...patch } : s);
         set(next);
@@ -270,17 +274,12 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           {subs.map((s, i) => (
             <div key={i} className="subrow"
                  style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr) 110px 30px" }}>
-              <select
-                className="input"
+              <SearchableSelect
                 value={s.cId || ""}
-                onChange={e => updateSub(i, { cId: e.target.value || null })}
-                style={{ minWidth: 0 }}
-              >
-                <option value="">— Company —</option>
-                {subCompanies.map(c =>
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                )}
-              </select>
+                options={SUB_OPTIONS}
+                placeholder="Search companies…"
+                onChange={v => updateSub(i, { cId: v || null })}
+              />
               <input
                 className="input"
                 placeholder="Discipline (e.g. Survey)"

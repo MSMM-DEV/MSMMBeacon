@@ -1030,6 +1030,84 @@ html, body { overflow-x: clip; }
 .menu-item.danger { color: var(--rose); }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
+/* ========== Searchable combobox ==========
+   Single-select picker with typeahead. Used for every clientId field and
+   every sub-company picker. Keyboard-navigable via the underlying input +
+   onKeyDown handler in primitives.jsx.
+
+   Design: the input is whatever className the caller passes in (.input
+   for drawers/forms, .cell-edit inside table cells). The dropdown is an
+   absolutely-positioned panel anchored to the bottom of the input,
+   scrollable when the option list is long, with a subtle selected/highlight
+   distinction so the user can see both "what I'd pick with Enter" and
+   "what's currently committed". */
+.searchable-select {
+  position: relative;
+  width: 100%;
+}
+.searchable-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 100;
+  animation: pop .14s;
+}
+.searchable-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.searchable-item:hover,
+.searchable-item.searchable-hi {
+  background: var(--surface-hover);
+}
+.searchable-item.searchable-sel {
+  /* Currently-committed row gets a subtle amber tint + checkmark so it's
+     distinguishable from a keyboard-highlight hover. */
+  background: var(--accent-softer);
+  color: var(--accent-ink);
+}
+.searchable-item.searchable-sel.searchable-hi {
+  background: var(--accent-soft);
+}
+.searchable-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.searchable-clear {
+  color: var(--text-soft);
+  font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 3px;
+  border-radius: 6px 6px 0 0;
+}
+.searchable-clear:hover { color: var(--rose); background: var(--rose-soft); }
+.searchable-empty {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-soft);
+  text-align: center;
+}
+
 /* ========== Invoice table ========== */
 /* Horizontal scroll is contained to the table itself — the page never
    horizontal-scrolls. `overflow-y: clip` (not `visible`) prevents the

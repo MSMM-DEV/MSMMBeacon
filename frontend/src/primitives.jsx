@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Icon } from "./icons.jsx";
 import { companyById, userById, fmtMoney } from "./data.js";
 
@@ -224,6 +224,27 @@ export const EditableCell = ({
     onDoubleClick: (e) => e.stopPropagation(),
   };
 
+  if (type === "combobox") {
+    // Searchable single-select. onChange fires on pick (commits + exits
+    // edit mode); onDismiss (ESC / click-outside) restores display mode
+    // without change. The combobox autoFocuses its internal input.
+    const raw = Array.isArray(options) ? options.map(normOption) : [];
+    return (
+      <div onMouseDown={(e) => e.stopPropagation()}
+           onClick={(e) => e.stopPropagation()}
+           style={{ width: "100%" }}>
+        <SearchableSelect
+          value={draft ?? ""}
+          options={raw}
+          autoFocus
+          inputClassName="cell-edit"
+          onChange={(v) => commitValue(v)}
+          onDismiss={closeNoChange}
+        />
+      </div>
+    );
+  }
+
   if (type === "select") {
     const raw = Array.isArray(options) ? options.map(normOption) : [];
     // Ensure the current value is represented so React doesn't warn about
@@ -326,6 +347,164 @@ export const EditableCell = ({
       style={{ textAlign: align }}
       {...stopRowEvents}
     />
+  );
+};
+
+// ----------------------------------------------------------------------
+// SearchableSelect — single-select combobox with typeahead.
+//
+// Replaces the native <select> in two places:
+//   • Client cells on every project table (via EditableCell type="combobox")
+//   • Any clientId / sub-company picker in drawers and create forms
+// Native selects become unwieldy past ~15 options and give zero search —
+// typing a letter only cycles through first-letter matches.
+//
+// Behavior:
+//   • Input field doubles as the current-selection display (placeholder
+//     shows the selected label) and a type-to-filter search box.
+//   • Dropdown opens on focus / click / ArrowDown; closes on click-outside,
+//     ESC, or a successful pick.
+//   • ArrowUp/Down move the highlight; Enter commits the highlighted row.
+//   • The currently-selected value is marked in the list so users never
+//     wonder "is this still the selected client?".
+//   • Option list renders the first 200 matches — keeps the DOM light on
+//     roster-sized lists without ever hiding "a few" visible matches.
+//
+// Props:
+//   value       : current id (string) or null
+//   options     : [{ value, label }, …]
+//   onChange(v) : called on pick; v="" means "cleared"
+//   onDismiss   : optional — called when the user closes without picking
+//                 (ESC / click-outside). EditableCell uses this to exit
+//                 edit mode when the user backs out.
+//   autoFocus   : focus the input on mount
+//   allowClear  : show a "Clear selection" row when a value is selected
+//   placeholder : shown when no value is selected
+//   inputClassName : override "input" for styling inside a table cell
+// ----------------------------------------------------------------------
+export const SearchableSelect = ({
+  value,
+  options,
+  onChange,
+  onDismiss,
+  autoFocus = false,
+  allowClear = true,
+  placeholder = "Search…",
+  inputClassName = "input",
+}) => {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const containerRef = useRef();
+  const inputRef = useRef();
+
+  const opts = Array.isArray(options) ? options : [];
+  const selected = opts.find(o => String(o.value) === String(value ?? ""));
+
+  const filtered = useMemo(() => {
+    if (!q) return opts;
+    const needle = q.toLowerCase();
+    return opts.filter(o => (o.label || "").toLowerCase().includes(needle));
+  }, [q, opts]);
+
+  useEffect(() => {
+    if (autoFocus) {
+      inputRef.current?.focus();
+      setOpen(true);
+    }
+  }, [autoFocus]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (!containerRef.current?.contains(e.target)) {
+        setOpen(false);
+        setQ("");
+        onDismiss?.();
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open, onDismiss]);
+
+  useEffect(() => { setHighlighted(0); }, [filtered.length]);
+
+  const pick = (v) => {
+    setQ("");
+    setOpen(false);
+    onChange?.(v);
+  };
+
+  const handleKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      setQ("");
+      onDismiss?.();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setOpen(true);
+      setHighlighted(h => Math.min(h + 1, Math.max(0, filtered.length - 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted(h => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (filtered[highlighted]) pick(filtered[highlighted].value);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="searchable-select">
+      <input
+        ref={inputRef}
+        type="text"
+        className={inputClassName}
+        value={q}
+        placeholder={selected?.label || placeholder}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onKeyDown={handleKey}
+        onClick={() => setOpen(true)}
+        // Stop row-level events so clicking the input doesn't open the drawer.
+        onMouseDown={(e) => e.stopPropagation()}
+      />
+      {open && (
+        <div className="searchable-menu"
+             onMouseDown={(e) => e.stopPropagation()}>
+          {allowClear && selected && (
+            <button type="button" className="searchable-item searchable-clear"
+                    onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
+              <Icon name="x" size={11}/><span>Clear selection</span>
+            </button>
+          )}
+          {filtered.length === 0 ? (
+            <div className="searchable-empty">No matches</div>
+          ) : (
+            filtered.slice(0, 200).map((o, i) => {
+              const isSel = String(o.value) === String(value ?? "");
+              const isHi  = i === highlighted;
+              return (
+                <button
+                  key={String(o.value) + ":" + i}
+                  type="button"
+                  className={
+                    "searchable-item"
+                    + (isHi  ? " searchable-hi" : "")
+                    + (isSel ? " searchable-sel" : "")
+                  }
+                  onMouseDown={(e) => { e.preventDefault(); pick(o.value); }}
+                  onMouseEnter={() => setHighlighted(i)}
+                >
+                  {isSel && <Icon name="check" size={11}/>}
+                  <span className="searchable-label">{o.label}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 
