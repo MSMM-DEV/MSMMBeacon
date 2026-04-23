@@ -1100,7 +1100,7 @@ export const PotentialTable = ({
               <RowActions
                 onForward={() => onForward(r)}
                 onAlert={() => onAlert(r)}
-                forwardTitle="Submit → Awaiting Verdict"
+                forwardTitle="Move → Invoice"
               />
             </div>
           ),
@@ -1348,7 +1348,7 @@ export const AwaitingTable = ({
 
 // ---------- Awarded Projects ----------
 export const AwardedTable = ({
-  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters,
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onMoveToPotential, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
 }) => {
   const cols = [
@@ -1540,10 +1540,21 @@ export const AwardedTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end" }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
+                {onMoveToPotential && (
+                  <button className="row-btn" title="Move → Potential (billing candidate)"
+                          onClick={() => onMoveToPotential(r)}>
+                    <Icon name="briefcase" size={14}/>
+                  </button>
+                )}
+                {onForward && (
+                  <button className="row-btn forward" title="Move → Invoice"
+                          onClick={() => onForward(r)}>
+                    <Icon name="forward" size={14}/>
+                  </button>
+                )}
                 <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                   <Icon name="bell" size={14}/>
                 </button>
-                <button className="row-btn" title="More"><Icon name="more" size={14}/></button>
               </div>
             </div>
           ),
@@ -2210,7 +2221,10 @@ export const InvoiceTable = ({
 };
 
 // ---------- Events and Other ----------
-export const EventsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters }) => {
+export const EventsTable = ({
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters,
+  yearOptions, yearValue, onYearChange,
+}) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
     { label: "Status", w: "120px", sortKey: "status" },
@@ -2265,6 +2279,7 @@ export const EventsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, 
       columns={cols} rows={rows}
       primarySort={primarySort}
       postProcess={injectTypeHeaders}
+      yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No events logged yet"
       emptyHint="Track partner touchpoints, conferences, and meetings here."
       emptyIcon="calendar"

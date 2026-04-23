@@ -19,9 +19,11 @@ import {
 // interactive panel). Content scrolls inside a panel if it overflows.
 // ============================================================================
 
-export const QuadSheet = ({ invoice, events, awaiting, soq, onOpen }) => {
+// `soq` prop is accepted but unused — kept in the signature so App.jsx can
+// pass it without a warning while the SOQ quadrant is hidden from the UI.
+export const QuadSheet = ({ invoice, events, awaiting, soq: _soqUnused, onOpen }) => {
   return (
-    <div className="quad">
+    <div className="quad quad-3up">
       <QuadCard
         eyebrow="01 · Cash Flow"
         title="Anticipated Invoice"
@@ -47,15 +49,6 @@ export const QuadSheet = ({ invoice, events, awaiting, soq, onOpen }) => {
         accent="await"
         className="quad-q3">
         <AwaitingList awaiting={awaiting} onOpen={r => onOpen("awaiting", r)}/>
-      </QuadCard>
-
-      <QuadCard
-        eyebrow="04 · Qualifications"
-        title="Statements of Qualifications"
-        sub={`${soq.length} on file · start → expiration`}
-        accent="soq"
-        className="quad-q4">
-        <SoqTimeline soq={soq} onOpen={r => onOpen("soq", r)}/>
       </QuadCard>
     </div>
   );

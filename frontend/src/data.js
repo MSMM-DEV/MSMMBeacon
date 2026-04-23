@@ -549,12 +549,50 @@ export async function loadBeacon() {
     ...companies.map(c => adaptCompany(c, typeMap)),
   ];
 
+  // Reconcile the invariant: every probability=Orange Potential must have a
+  // linked anticipated_invoice row for the current year. Seed data and
+  // pre-fix edits can leave Orange potentials without a corresponding
+  // Invoice row; this pass back-fills them silently on load so the Invoice
+  // tab's orange-tinted entries are always in sync with the Potential tab.
+  // Uniqueness on (source_potential_id, year) means concurrent loads can't
+  // race into duplicates — a second insert would fail with a 409 and we
+  // swallow that case without surfacing it.
+  let reconciledInvoices = invoice;
+  const linkedPotentialIds = new Set(
+    invoice.map(r => r.source_potential_id).filter(Boolean)
+  );
+  const orphanOranges = potential.filter(p =>
+    p.probability === "Orange" &&
+    p.year === THIS_YEAR &&
+    !linkedPotentialIds.has(p.id)
+  );
+  if (orphanOranges.length > 0) {
+    const payloads = orphanOranges.map(p => ({
+      source_potential_id: p.id,
+      project_name: p.project_name,
+      year: p.year,
+      project_number: p.project_number || null,
+      contract_amount: p.total_contract_amount ?? null,
+    }));
+    const { data: inserted, error } = await supabase
+      .from("anticipated_invoice")
+      .insert(payloads)
+      .select("*, pms:anticipated_invoice_pms(user_id)");
+    if (!error && inserted) {
+      reconciledInvoices = [...invoice, ...inserted];
+    } else if (error) {
+      // Partial failures (e.g. a duplicate key race) still let the app boot;
+      // the user will just see the pre-existing invoice list until next load.
+      console.warn("[beacon] Orange Invoice reconciliation skipped:", error.message);
+    }
+  }
+
   return {
     potential: potential.map(adaptPotential),
     awaiting:  awaiting.map(adaptAwaiting),
     awarded:   awarded.map(adaptAwarded),
     closed:    closed.map(adaptClosed),
-    invoices:  invoice.map(adaptInvoice),
+    invoices:  reconciledInvoices.map(adaptInvoice),
     events:    events.map(adaptEvent),
     soq:       soq.map(adaptSoq),
     clients:   _companies,

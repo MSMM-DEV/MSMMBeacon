@@ -169,7 +169,11 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
     clients: [
-      { k: "name",           label: "Client Name" },
+      // Edit baseName (not the merged display `name`) so the PATCH sends
+      // just the raw name to beacon.clients.name. updateClients() in App.jsx
+      // recomputes the merged display locally so project rows' Client cells
+      // stay consistent without a reload.
+      { k: "baseName",       label: "Client Name" },
       { k: "district",       label: "District / State" },
       { k: "orgType",        label: "Org Type",                type: "select", options: ["City","State","Federal","Local","Parish","Regional","Other"] },
       { k: "contact",        label: "Contact Person" },
@@ -384,22 +388,9 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
 // ============ MOVE-FORWARD SLIDE PANEL ============
 export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
   const configs = {
-    "potential→awaiting": {
-      title: "Submit project for verdict",
-      subtitle: "Moving to Awaiting Verdict · new fields only",
-      carried: ["year","name","clientId","role","subs","notes","projectNumber"],
-      newFields: [
-        { k: "status", label: "Status", type: "pill", value: "Awaiting Verdict" },
-        { k: "dateSubmitted", label: "Date Submitted", type: "date", value: new Date().toISOString().substr(0,10) },
-        { k: "clientContract", label: "Client Contract #", placeholder: "e.g. POSL-2026-045" },
-        { k: "msmmContract", label: "MSMM Contract #", placeholder: "e.g. MSMM-2026-045" },
-        { k: "msmmUsed", label: "MSMM Used", type: "money", value: 0 },
-        { k: "msmmRemaining", label: "MSMM Remaining", type: "money", value: row.msmm },
-      ]
-    },
     "awaiting→awarded": {
       title: "Mark project as Awarded",
-      subtitle: "Carries to Awarded Projects · also auto-creates Invoice row",
+      subtitle: "Carries to Awarded Projects",
       carried: ["year","name","clientId","role","subs","dateSubmitted","clientContract","msmmContract","msmmUsed","msmmRemaining","projectNumber","pmIds"],
       newFields: [
         { k: "status", label: "Status", type: "pill", value: "Awarded" },
@@ -407,8 +398,6 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "details", label: "Details", type: "textarea", placeholder: "Key notes, scope, team…" },
         { k: "pools", label: "Pools", placeholder: "e.g. IDIQ Pool C" },
         { k: "contractExpiry", label: "Contract Expiry", type: "date" },
-        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
-          hint: "Determines how billing is categorized in Anticipated Invoice." },
       ]
     },
     "awaiting→closed": {
@@ -419,6 +408,40 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "status", label: "Status", type: "pill", value: "Closed Out" },
         { k: "dateClosed", label: "Date Closed", type: "date", value: new Date().toISOString().substr(0,10) },
         { k: "reason", label: "Reason for Closure", type: "textarea", placeholder: "e.g. Client descope, lost bid, cancelled…" },
+      ]
+    },
+    // Awarded → Potential: COPY semantics (Awarded row stays as the
+    // historical log; the new Potential row represents it as a billing
+    // candidate in the pipeline).
+    "awarded→potential": {
+      title: "Track as Potential billing candidate",
+      subtitle: "Creates a Potential row linked to this Awarded project · Awarded row stays",
+      carried: ["year","name","clientId","role","subs","pmIds","notes","projectNumber","msmmUsed","msmmRemaining"],
+      newFields: [
+        { k: "probability", label: "Probability", type: "select", options: ["High","Medium","Low","Orange"], value: "High" },
+        { k: "nextActionDate", label: "Next Action Date", type: "date" },
+        { k: "dates", label: "Dates and Comments", placeholder: "e.g. decision on 4/2/26" },
+      ]
+    },
+    // Awarded → Invoice: COPY semantics. Prompts for the invoice-only
+    // fields (type = ENG/PM) that don't live on the Awarded row.
+    "awarded→invoice": {
+      title: "Create Invoice row from Awarded",
+      subtitle: "Carries to Anticipated Invoice · Awarded row stays",
+      carried: ["year","name","projectNumber","pmIds","msmmRemaining"],
+      newFields: [
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+          hint: "Determines how billing is categorized in Anticipated Invoice." },
+      ]
+    },
+    // Potential → Invoice: COPY semantics. Same invoice-only prompt.
+    "potential→invoice": {
+      title: "Create Invoice row from Potential",
+      subtitle: "Carries to Anticipated Invoice · Potential row stays",
+      carried: ["year","name","projectNumber","pmIds"],
+      newFields: [
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+          hint: "Determines how billing is categorized in Anticipated Invoice." },
       ]
     },
   };

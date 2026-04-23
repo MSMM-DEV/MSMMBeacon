@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
-  PotentialTable, AwaitingTable, AwardedTable, SoqTable, ClosedTable,
+  PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
   InvoiceTable, EventsTable, ClientsTable, CompaniesTable,
 } from "./tables.jsx";
 import { QuadSheet } from "./quadsheet.jsx";
@@ -41,8 +41,11 @@ const TAB_META = [
   { key: "potential", label: "Potential",        stage: "stage-potential", group: "pipeline" },
   { key: "awaiting",  label: "Awaiting Verdict", stage: "stage-awaiting",  group: "pipeline" },
   { key: "awarded",   label: "Awarded",          stage: "stage-awarded",   group: "pipeline" },
-  { key: "soq",       label: "SOQ",              stage: "stage-awarded",   group: "pipeline" },
   { key: "closed",    label: "Closed Out",       stage: "stage-closed",    group: "pipeline" },
+  // SOQ tab hidden from navigation per product direction — the `soq` table
+  // and its data still exist in Supabase; we just don't surface them. To
+  // bring the tab back, restore this entry + the {tab === "soq" && ...}
+  // render block below, and re-add the SoqTable import.
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "clients",   label: "Clients",          stage: "stage-clients",   group: "side" },
   { key: "companies", label: "Companies",        stage: "stage-clients",   group: "side" },
@@ -50,9 +53,9 @@ const TAB_META = [
 ];
 
 const PAGE_META = {
-  potential: { title: "Potential Projects", desc: "Opportunities being scoped and proposed. Move forward to submit." },
-  awaiting:  { title: "Awaiting Verdict", desc: "Submitted proposals pending client decision. Mark as Awarded or Closed Out." },
-  awarded:   { title: "Awarded Projects", desc: "Active engagements. Each has a matching row in the Anticipated Invoice." },
+  potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
+  awaiting:  { title: "Awaiting Verdict", desc: "Entry point for submitted proposals. Add here, then mark as Awarded or Closed Out when the verdict lands." },
+  awarded:   { title: "Awarded Projects", desc: "Won contracts. Move to Potential to track as a billing candidate, or directly to Invoice when billing starts." },
   soq:       { title: "SOQ", desc: "Statements of Qualifications — parallel to the pipeline. Grouped by org type." },
   closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date." },
@@ -362,6 +365,29 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       anticipatedInvoiceStartMonth: dbRow.anticipated_invoice_start_month ?? null,
     };
   }
+  if (table === "awaiting") {
+    return {
+      id: dbRow.id,
+      year: dbRow.year,
+      name: dbRow.project_name,
+      role: dbRow.prime_company_id ? "Sub" : (dbRow.role || "Prime"),
+      clientId: dbRow.client_id || null,
+      amount: null,
+      msmm: dbRow.msmm_remaining || 0,
+      subs: extras.subs || [],
+      pmIds: extras.pmIds || [],
+      notes: dbRow.notes || "",
+      dates: "",
+      projectNumber: dbRow.project_number || "",
+      status: "Awaiting Verdict",
+      dateSubmitted: dbRow.date_submitted || "",
+      anticipatedResultDate: dbRow.anticipated_result_date || "",
+      clientContract: dbRow.client_contract_number || "",
+      msmmContract: dbRow.msmm_contract_number || "",
+      msmmUsed: dbRow.msmm_used || 0,
+      msmmRemaining: dbRow.msmm_remaining || 0,
+    };
+  }
   if (table === "events") {
     return {
       id: dbRow.id,
@@ -537,9 +563,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     events: "all", clients: "all", companies: "all",
   });
 
-  // Year filter state. null = All years; number = filter to that year.
+  // Year filter state. null = All years; number = filter to that year. Default
+  // is THIS_YEAR for every pipeline table so users see current-year data on
+  // first load — clicking "All" in the Year menu clears to null.
   const [yearFilter, setYearFilter] = useState({
-    potential: null, awaiting: null, awarded: null, soq: null, closed: null, invoice: null,
+    potential: THIS_YEAR, awaiting: THIS_YEAR, awarded: THIS_YEAR, soq: THIS_YEAR,
+    closed: THIS_YEAR, invoice: THIS_YEAR, events: THIS_YEAR,
   });
   const setYear = (t, y) => setYearFilter(f => ({ ...f, [t]: y }));
 
@@ -558,17 +587,278 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setTimeout(() => setToast(null), 3200);
   };
 
-  // Local mutations — Supabase writes deferred for a later pass.
-  const makeUpdate = (setter) => (id, patch) =>
-    setter(rows => rows.map(r => r.id === id ? { ...r, ...patch } : r));
-  const updatePotential = makeUpdate(setPotential);
-  const updateAwaiting  = makeUpdate(setAwaiting);
-  const updateAwarded   = makeUpdate(setAwarded);
-  const updateSoq       = makeUpdate(setSoq);
-  const updateClosed    = makeUpdate(setClosed);
-  const updateEvents    = makeUpdate(setEvents);
-  const updateClients   = makeUpdate(setClients);
-  const updateCompanies = makeUpdate(setCompanies);
+  // =====================================================================
+  // PERSISTENCE LAYER — every inline/drawer edit flows through these maps
+  // and the patchTable / syncJoinUsers helpers, so changes survive a reload.
+  // Fields not listed in a *_COLS map update local React state only; typical
+  // exceptions are derived values (row.role on awaiting/awarded/closed/soq,
+  // row.status, row.type on companies) and join-table relationships (subs,
+  // pmIds, attendees — handled separately). PMs + event attendees are diffed
+  // and mirrored to their join tables. Subs edits are still local-only today.
+  // =====================================================================
+  const POTENTIAL_COLS = {
+    year: "year", name: "project_name", role: "role",
+    clientId: "client_id", amount: "total_contract_amount", msmm: "msmm_amount",
+    notes: "notes", dates: "next_action_note", nextActionDate: "next_action_date",
+    projectNumber: "project_number", probability: "probability",
+    anticipatedInvoiceStartMonth: "anticipated_invoice_start_month",
+  };
+  const AWAITING_COLS = {
+    year: "year", name: "project_name", clientId: "client_id",
+    notes: "notes", projectNumber: "project_number",
+    dateSubmitted: "date_submitted", anticipatedResultDate: "anticipated_result_date",
+    clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
+    msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
+  };
+  const AWARDED_COLS = {
+    year: "year", name: "project_name", clientId: "client_id",
+    projectNumber: "project_number", dateSubmitted: "date_submitted",
+    clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
+    msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
+    details: "details", pools: "pool", contractExpiry: "contract_expiry_date",
+    // stage is stored as stage_id (FK to awarded_stages); editing by name
+    // would need a lookup. Skipped for now — edit via the drawer triggers no
+    // persist; re-create from Move Forward to pick a new stage instead.
+  };
+  const CLOSED_COLS = {
+    year: "year", name: "project_name", clientId: "client_id",
+    notes: "notes", projectNumber: "project_number",
+    dateSubmitted: "date_submitted",
+    clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
+    dateClosed: "date_closed", reason: "reason_for_closure",
+  };
+  const SOQ_COLS = {
+    year: "year", name: "project_name", clientId: "client_id",
+    notes: "notes", projectNumber: "project_number",
+    dateSubmitted: "date_submitted",
+    clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
+    msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
+    details: "details", pools: "pool",
+    startDate: "start_date", contractExpiry: "contract_expiry_date",
+    recurring: "recurring",
+    // stage skipped (same reason as AWARDED).
+  };
+  const EVENTS_COLS = {
+    title: "title", status: "status", type: "type",
+    date: "event_date", dateTime: "event_datetime", notes: "notes",
+  };
+  const CLIENTS_COLS = {
+    baseName: "name", district: "district", orgType: "org_type",
+    contact: "contact_person", email: "email", phone: "phone",
+    address: "address", notes: "notes",
+  };
+  const COMPANIES_COLS = {
+    name: "name", contact: "contact_person", email: "email",
+    phone: "phone", address: "address", notes: "notes",
+    // `type` on companies is derived at load time from observed Prime/Sub
+    // usage across rows — not a column on `beacon.companies`. Intentionally
+    // skipped so drawer edits don't error.
+  };
+
+  // Columns that reject empty string at the DB level (dates, numerics, UUIDs,
+  // enums). An empty string in a patch for any of these becomes SQL NULL.
+  const NULL_IF_EMPTY_COLS = new Set([
+    "next_action_date", "date_submitted", "anticipated_result_date",
+    "date_closed", "start_date", "contract_expiry_date",
+    "event_date", "event_datetime",
+    "year", "total_contract_amount", "msmm_amount",
+    "anticipated_invoice_start_month", "msmm_used", "msmm_remaining",
+    "client_id",
+    "role", "probability", "org_type", "status", "type", "recurring",
+  ]);
+
+  const buildDbPatch = (patch, colMap) => {
+    const dbPatch = {};
+    for (const [uiKey, dbCol] of Object.entries(colMap)) {
+      if (!(uiKey in patch)) continue;
+      let v = patch[uiKey];
+      if ((v === "" || v === undefined) && NULL_IF_EMPTY_COLS.has(dbCol)) v = null;
+      dbPatch[dbCol] = v;
+    }
+    return dbPatch;
+  };
+
+  const patchTable = (tableName, id, dbPatch) => {
+    if (Object.keys(dbPatch).length === 0) return;
+    supabase.from(tableName).update(dbPatch).eq("id", id)
+      .then(({ error }) => {
+        if (error) showToast(`Save failed: ${error.message}`, "x");
+      });
+  };
+
+  // Diff old vs new user-id arrays and mirror the delta into a join table.
+  // Covers PMs on every project table + attendees on events.
+  const syncJoinUsers = async (parentId, oldIds, newIds, joinTable, parentCol) => {
+    const oldSet = new Set(oldIds || []);
+    const newSet = new Set(newIds || []);
+    const toAdd    = [...newSet].filter(x => !oldSet.has(x));
+    const toRemove = [...oldSet].filter(x => !newSet.has(x));
+    try {
+      if (toRemove.length > 0) {
+        const { error } = await supabase.from(joinTable).delete()
+          .eq(parentCol, parentId).in("user_id", toRemove);
+        if (error) throw error;
+      }
+      if (toAdd.length > 0) {
+        const { error } = await supabase.from(joinTable).insert(
+          toAdd.map(uid => ({ [parentCol]: parentId, user_id: uid }))
+        );
+        if (error) throw error;
+      }
+    } catch (e) {
+      showToast(`User tag save failed: ${e.message || e}`, "x");
+    }
+  };
+
+  // --- Per-table update functions ---------------------------------------
+  // Each one: (1) optimistic local state update, (2) scalar column PATCH via
+  // buildDbPatch, (3) join-table sync where applicable. Potential layers
+  // Orange auto-Invoice-create on top as an additional side-effect.
+
+  const updatePotential = (id, patch) => {
+    const existing = potential.find(r => r.id === id);
+    if (!existing) return;
+    setPotential(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+
+    // Scalar writeback. potential_role_prime_consistency check requires that
+    // role=Prime implies prime_company_id IS NULL, and role=Sub requires it
+    // to be set. Auto-nullify prime_company_id when switching to Prime so
+    // the check doesn't fire; Sub requires a prime company set via drawer.
+    const dbPatch = buildDbPatch(patch, POTENTIAL_COLS);
+    if ("role" in patch && patch.role === "Prime") dbPatch.prime_company_id = null;
+    patchTable("potential_projects", id, dbPatch);
+
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds,
+        "potential_project_pms", "potential_project_id");
+    }
+
+    // Orange invariant: if probability transitions into Orange and no Invoice
+    // row is linked yet, spawn one. Unique index on (source_potential_id,
+    // year) guards against concurrent duplicates.
+    if ("probability" in patch && patch.probability !== existing.probability) {
+      const wasOrange = existing.probability === "Orange";
+      const isNowOrange = patch.probability === "Orange";
+      if (isNowOrange && !wasOrange) {
+        const alreadyLinked = invoice.some(r => r.sourcePotentialId === id);
+        if (!alreadyLinked) {
+          (async () => {
+            try {
+              const invPayload = {
+                source_potential_id: id,
+                project_name: existing.name,
+                year: existing.year,
+                project_number: existing.projectNumber || null,
+                contract_amount: existing.amount ?? null,
+              };
+              const { data: invRow, error } = await supabase
+                .from("anticipated_invoice").insert(invPayload).select().single();
+              if (error) throw error;
+              setInvoice(rs => [{
+                id: invRow.id,
+                sourceId: null,
+                sourcePotentialId: invRow.source_potential_id,
+                projectNumber: invRow.project_number || "",
+                name: invRow.project_name,
+                pmIds: [...(existing.pmIds || [])],
+                amount: invRow.contract_amount ?? 0,
+                type: invRow.type || "ENG",
+                remainingStart: invRow.msmm_remaining_to_bill_year_start || 0,
+                values: Array(12).fill(0),
+                year: invRow.year,
+                ytdActualOverride:   invRow.ytd_actual_override   ?? null,
+                rollforwardOverride: invRow.rollforward_override  ?? null,
+              }, ...rs]);
+              showToast("Orange tagged · Invoice row auto-created", "check");
+            } catch (e) {
+              showToast(`Orange Invoice creation failed: ${e.message || e}`, "x");
+            }
+          })();
+        }
+      }
+    }
+  };
+
+  const updateAwaiting = (id, patch) => {
+    const existing = awaiting.find(r => r.id === id);
+    if (!existing) return;
+    setAwaiting(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    patchTable("awaiting_verdict", id, buildDbPatch(patch, AWAITING_COLS));
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds,
+        "awaiting_verdict_pms", "awaiting_verdict_id");
+    }
+  };
+
+  const updateAwarded = (id, patch) => {
+    const existing = awarded.find(r => r.id === id);
+    if (!existing) return;
+    setAwarded(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    patchTable("awarded_projects", id, buildDbPatch(patch, AWARDED_COLS));
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds,
+        "awarded_project_pms", "awarded_project_id");
+    }
+  };
+
+  const updateClosed = (id, patch) => {
+    const existing = closed.find(r => r.id === id);
+    if (!existing) return;
+    setClosed(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    patchTable("closed_out_projects", id, buildDbPatch(patch, CLOSED_COLS));
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds,
+        "closed_out_project_pms", "closed_out_project_id");
+    }
+  };
+
+  const updateSoq = (id, patch) => {
+    const existing = soq.find(r => r.id === id);
+    if (!existing) return;
+    setSoq(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    patchTable("soq", id, buildDbPatch(patch, SOQ_COLS));
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds, "soq_pms", "soq_id");
+    }
+  };
+
+  const updateEvents = (id, patch) => {
+    const existing = events.find(r => r.id === id);
+    if (!existing) return;
+    setEvents(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    patchTable("events", id, buildDbPatch(patch, EVENTS_COLS));
+    if ("attendees" in patch) {
+      syncJoinUsers(id, existing.attendees, patch.attendees,
+        "event_attendees", "event_id");
+    }
+  };
+
+  const updateClients = (id, patch) => {
+    const existing = clients.find(r => r.id === id);
+    if (!existing) return;
+    // clients.name in the UI is the merged display `${name} — ${district}`.
+    // Drawer/table edits target baseName / district individually; keep the
+    // merged `name` derived in local state so consumers (project rows'
+    // Client cell, dropdowns) stay consistent without a full reload.
+    let p = patch;
+    if ("baseName" in patch || "district" in patch) {
+      const newBase = "baseName" in patch ? patch.baseName : existing.baseName;
+      const newDist = "district" in patch ? patch.district : existing.district;
+      p = { ...patch, name: newDist ? `${newBase} — ${newDist}` : newBase };
+    }
+    setClients(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
+    patchTable("clients", id, buildDbPatch(patch, CLIENTS_COLS));
+  };
+
+  const updateCompanies = (id, patch) => {
+    const existing = companies.find(r => r.id === id);
+    if (!existing) return;
+    setCompanies(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    // `type` on a company is derived from observed Prime/Sub usage at load
+    // time — not a beacon.companies column. Only scalars in COMPANIES_COLS
+    // persist; everything else is local state only.
+    patchTable("companies", id, buildDbPatch(patch, COMPANIES_COLS));
+  };
 
   // Monthly value edits (Jan–Dec cells in the Invoice table) write through
   // to the corresponding per-month column on beacon.anticipated_invoice.
@@ -643,31 +933,27 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   }, [pendingFocusRowId, tab, potential, awaiting, awarded, soq, closed, invoice, events, clients, companies]);
 
+  // Pipeline transitions. New flow (2026-04):
+  //   Awaiting Verdict → Awarded (MOVE: row leaves Awaiting, appears in Awarded)
+  //   Awaiting Verdict → Closed Out (MOVE)
+  //   Awarded → Potential (COPY: Awarded stays as historical log; Potential
+  //                        gets a new row representing it as a billing candidate)
+  //   Awarded → Invoice  (COPY: Awarded stays; new Invoice row spawned)
+  //   Potential → Invoice (COPY: Potential stays as a pipeline tracker;
+  //                        new Invoice row spawned)
+  // Orange-probability Potentials still auto-spawn an Invoice row at create
+  // time (special-case shortcut — see handleCreated() below).
   const confirmMove = (newData) => {
     const { row, from, to } = moving;
     const newRow = { ...row, ...newData, id: mkId(), sourceId: row.id };
 
-    if (from === "potential" && to === "awaiting") {
-      setAwaiting(rs => [newRow, ...rs]);
-      setPotential(rs => rs.filter(r => r.id !== row.id));
-      setFlashId(newRow.id);
-      showToast("Submitted · carried to Awaiting Verdict");
-      setTab("awaiting");
-    } else if (from === "awaiting" && to === "awarded") {
-      const { _invoiceType, ...rest } = newRow;
-      setAwarded(rs => [rest, ...rs]);
+    if (from === "awaiting" && to === "awarded") {
+      // MOVE: Awaiting row leaves; Awarded row lands. No auto-Invoice — user
+      // explicitly moves from Awarded → Invoice when ready to bill.
+      setAwarded(rs => [newRow, ...rs]);
       setAwaiting(rs => rs.filter(r => r.id !== row.id));
-      const invRow = {
-        id: mkId(), sourceId: rest.id,
-        projectNumber: rest.projectNumber, name: rest.name,
-        pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
-        type: _invoiceType || "ENG",
-        remainingStart: rest.msmmRemaining || 0,
-        values: Array(12).fill(0),
-      };
-      setInvoice(rs => [invRow, ...rs]);
-      setFlashId(rest.id);
-      showToast("Awarded · Invoice row auto-created");
+      setFlashId(newRow.id);
+      showToast("Awarded · carried to Awarded Projects");
       setTab("awarded");
     } else if (from === "awaiting" && to === "closed") {
       setClosed(rs => [newRow, ...rs]);
@@ -675,6 +961,42 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setFlashId(newRow.id);
       showToast("Closed out · carried to Closed Out Projects");
       setTab("closed");
+    } else if (from === "awarded" && to === "potential") {
+      // COPY: Potential row gets its own id; sourceId points back to Awarded.
+      setPotential(rs => [newRow, ...rs]);
+      setFlashId(newRow.id);
+      showToast("Tracked as Potential billing candidate");
+      setTab("potential");
+    } else if (from === "awarded" && to === "invoice") {
+      // COPY: Awarded stays; mint an Invoice row with Awarded-carried fields.
+      const { _invoiceType, ...rest } = newRow;
+      const invRow = {
+        id: rest.id, sourceId: row.id,
+        projectNumber: rest.projectNumber, name: rest.name,
+        pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
+        type: _invoiceType || "ENG",
+        remainingStart: rest.msmmRemaining || 0,
+        values: Array(12).fill(0),
+      };
+      setInvoice(rs => [invRow, ...rs]);
+      setFlashId(invRow.id);
+      showToast("Invoice row created from Awarded project");
+      setTab("invoice");
+    } else if (from === "potential" && to === "invoice") {
+      // COPY: Potential stays as a pipeline tracker; Invoice row spawned.
+      const { _invoiceType, ...rest } = newRow;
+      const invRow = {
+        id: rest.id, sourceId: row.id, sourcePotentialId: row.id,
+        projectNumber: rest.projectNumber, name: rest.name,
+        pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
+        type: _invoiceType || "ENG",
+        remainingStart: rest.msmm || 0,
+        values: Array(12).fill(0),
+      };
+      setInvoice(rs => [invRow, ...rs]);
+      setFlashId(invRow.id);
+      showToast("Invoice row created from Potential");
+      setTab("invoice");
     }
     setMoving(null);
     setTimeout(() => setFlashId(null), 1500);
@@ -754,6 +1076,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const handleCreated = (table, dbRow, extras = {}) => {
     const uiRow = adaptInsertedRow(table, dbRow, extras);
     if (table === "potential")  setPotential(rs => [uiRow, ...rs]);
+    if (table === "awaiting")   setAwaiting(rs => [uiRow, ...rs]);
     if (table === "soq")        setSoq(rs => [uiRow, ...rs]);
     if (table === "events")     setEvents(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
@@ -849,6 +1172,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Available years per tab (derived from data; descending)
   const availableYears = useMemo(() => {
     const uniq = (rows) => [...new Set(rows.map(r => r.year).filter(v => v != null))].sort((a, b) => b - a);
+    // Events don't carry a standalone year column — derive it from the ISO
+    // event_date (first 4 chars). Empty dates contribute nothing.
+    const uniqFromDate = (rows) => [...new Set(
+      rows.map(r => r.date ? Number(String(r.date).slice(0, 4)) : null)
+          .filter(v => v != null && !Number.isNaN(v))
+    )].sort((a, b) => b - a);
     return {
       potential: uniq(potential),
       awaiting:  uniq(awaiting),
@@ -856,14 +1185,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       soq:       uniq(soq),
       closed:    uniq(closed),
       invoice:   uniq(invoice),
+      events:    uniqFromDate(events),
     };
-  }, [potential, awaiting, awarded, soq, closed, invoice]);
+  }, [potential, awaiting, awarded, soq, closed, invoice, events]);
 
-  // Apply year filter, then category filter.
+  // Apply year filter, then category filter. Events filter against the year
+  // component of the ISO event_date, not a dedicated year column.
   const filtered = useMemo(() => {
     const applyYear = (key, rows) => {
       const y = yearFilter[key];
-      return y == null ? rows : rows.filter(r => r.year === y);
+      if (y == null) return rows;
+      if (key === "events") {
+        return rows.filter(r => r.date && Number(String(r.date).slice(0, 4)) === y);
+      }
+      return rows.filter(r => r.year === y);
     };
     const apply = (key, rows) => {
       const yr = applyYear(key, rows);
@@ -935,13 +1270,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
   const currentMeta = PAGE_META[tab];
 
-  // Does the current tab support "New X"? (awaiting/awarded/closed come from move-forward; invoice is auto-created)
-  const newForTab = { potential: "potential", soq: "soq", events: "events", clients: "clients", companies: "companies" };
+  // Does the current tab support "New X"? Awaiting Verdict is a first-class
+  // entry point (projects can start here without a prior Potential row).
+  // Potential is ALSO an entry (opportunities scoped directly / billing
+  // candidates added without going through the proposal stage). Awarded /
+  // Closed Out / Invoice are only reached via Move Forward from an earlier
+  // stage — no direct "New" button for those.
+  const newForTab = { awaiting: "awaiting", potential: "potential", events: "events", clients: "clients", companies: "companies" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
                  : tab === "clients" ? "New client"
                  : tab === "companies" ? "New company"
-                 : tab === "soq" ? "New SOQ"
+                 : tab === "awaiting" ? "New awaiting verdict"
                  : "New project";
 
   return (
@@ -1074,7 +1414,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {tab === "potential" && (
           <PotentialTable rows={filtered.potential} updateRow={updatePotential}
             onOpenDrawer={r => openDrawer(r, "potential")}
-            onForward={r => triggerForward(r, "potential", "awaiting")}
+            onForward={r => triggerForward(r, "potential", "invoice")}
             onAlert={r => setAlertObj({ row: r, tab: "potential" })}
             flashId={flashId}
             filters={chipsFor("potential")}
@@ -1099,6 +1439,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {tab === "awarded" && (
           <AwardedTable rows={filtered.awarded} updateRow={updateAwarded}
             onOpenDrawer={r => openDrawer(r, "awarded")}
+            onForward={r => triggerForward(r, "awarded", "invoice")}
+            onMoveToPotential={r => triggerForward(r, "awarded", "potential")}
             onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
             flashId={flashId}
             filters={chipsFor("awarded")}
@@ -1107,17 +1449,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.awarded}
             onYearChange={(y) => setYear("awarded", y)}/>
         )}
-        {tab === "soq" && (
-          <SoqTable rows={filtered.soq} updateRow={updateSoq}
-            onOpenDrawer={r => openDrawer(r, "soq")}
-            onAlert={r => setAlertObj({ row: r, tab: "soq" })}
-            flashId={flashId}
-            filters={chipsFor("soq")}
-            tab="soq"
-            yearOptions={availableYears.soq}
-            yearValue={yearFilter.soq}
-            onYearChange={(y) => setYear("soq", y)}/>
-        )}
+        {/* SOQ tab render removed from UI (see TAB_META comment above). */}
         {tab === "closed" && (
           <ClosedTable rows={filtered.closed}
             updateRow={updateClosed}
@@ -1150,7 +1482,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onAlert={r => setAlertObj({ row: r, tab: "events" })}
             flashId={flashId}
             filters={chipsFor("events")}
-            tab="events"/>
+            tab="events"
+            yearOptions={availableYears.events}
+            yearValue={yearFilter.events}
+            onYearChange={(y) => setYear("events", y)}/>
         )}
         {tab === "clients" && (
           <ClientsTable rows={filtered.clients}
@@ -1216,8 +1551,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             () => {}
           }
           onForward={
-            drawer.table === "potential" ? () => { triggerForward(liveRow, "potential", "awaiting"); setDrawer(null); } :
             drawer.table === "awaiting"  ? () => { triggerForward(liveRow, "awaiting", "awarded"); setDrawer(null); } :
+            drawer.table === "awarded"   ? () => { triggerForward(liveRow, "awarded", "invoice"); setDrawer(null); } :
+            drawer.table === "potential" ? () => { triggerForward(liveRow, "potential", "invoice"); setDrawer(null); } :
             null
           }
           onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
