@@ -199,8 +199,12 @@ const InvoiceChart = ({ invoice }) => {
     return { totalsBase, totalsAll, yMax };
   }, [invoice]);
 
-  const W = 960, H = 620;
-  const padL = 48, padR = 20, padT = 20, padB = 36;
+  // viewBox aspect is tuned to match the full-width Q1 card so the SVG
+  // fills horizontally without letterbox. Internal geometry keys off
+  // W/H (step, area fill, hover box, today marker) so bumping the view-
+  // port auto-rescales.
+  const W = 1600, H = 400;
+  const padL = 56, padR = 24, padT = 20, padB = 40;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const step = plotW / 11;

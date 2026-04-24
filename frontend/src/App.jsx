@@ -287,14 +287,34 @@ const EXPORT_COLUMNS = {
     { label: "Notes",                       get: r => r.notes || "" },
     { label: "Status",            wMm: 26,  get: r => r.status || "Closed Out" },
   ],
+  // Invoice exports on A3 landscape (see handleExport) because 17 columns +
+  // full dollar amounts don't fit on A4 without crushing the money cells to
+  // an ellipsized "$1,234,5…". Every money column sets `wrap: true` + right
+  // halign: `wrap` guarantees the full value prints even if the cell is
+  // narrower than expected (falls back to a 2-line linebreak instead of a
+  // truncated "…"), and the right halign mirrors the Invoice table's
+  // tabular-numeric alignment in the app.
+  // Every column declares a `wMm` so the planner uses its "no flex
+  // columns" branch and scales all widths proportionally against the A3
+  // landscape page (400 mm usable) — instead of reserving 25% of the page
+  // for a single flex Project column, which would starve the money cells
+  // back to an ellipsized state. Project sets `wrap: true` so long
+  // project names still wrap (instead of truncating "…"); money columns
+  // set `wrap: true` + `halign: right` so full `$1,234,567.89` values
+  // render in full (possibly on 2 lines for multi-million amounts) and
+  // align tabular-numeric like the UI.
   invoice: [
-    { label: "Project",                     get: r => r.name },
-    { label: "Type",              wMm: 14,  get: r => r.type || "" },
-    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
-    { label: "Contract",          wMm: 24,  get: r => fmtMoney(r.amount) },
-    { label: "Remaining Jan 1",   wMm: 26,  get: r => fmtMoney(r.remainingStart) },
-    ...MONTHS.map((m, i) => ({ label: m, wMm: 16, get: r => r.values[i] ? fmtMoney(r.values[i]) : "" })),
-    { label: "YTD Actual",        wMm: 22,  get: r => fmtMoney(r.ytdActualOverride != null ? r.ytdActualOverride : r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a+(b||0), 0)) },
+    { label: "Project",           wMm: 52, wrap: true,                 get: r => r.name },
+    { label: "Type",              wMm: 14,                             get: r => r.type || "" },
+    { label: "PM",                wMm: 24, wrap: true,                 get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
+    { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(r.amount) },
+    { label: "Remaining Jan 1",   wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
+    ...MONTHS.map((m, i) => ({
+      label: m, wMm: 20, wrap: true, halign: "right",
+      get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
+    })),
+    { label: "YTD Actual",        wMm: 24, wrap: true, halign: "right", get: r => fmtMoney(r.ytdActualOverride != null ? r.ytdActualOverride : r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a+(b||0), 0)) },
+    { label: "Rollforward",       wMm: 24, wrap: true, halign: "right", get: r => fmtMoney(r.rollforwardOverride != null ? r.rollforwardOverride : Math.max(0, (r.remainingStart || 0) - r.values.reduce((a,b) => a+(b||0), 0))) },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
@@ -1216,6 +1236,38 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         }
       : undefined;
 
+    // Invoice export needs per-cell colors that track the Invoice UI's
+    // class cascade (actual/projection/total override orange-row tint):
+    //   • Actual month cells (Jan…current)  → accent-softer bg (amber)
+    //   • Projection month cells (next…Dec) → subtle cream with muted text
+    //   • YTD Actual / Rollforward cells    → bg-elev (neutral "total") + bold
+    //   • Orange rows, non-month/total cells → prob-orange-bg tint
+    // Colors are the exact RGB equivalents of the CSS variables composited
+    // over white, so the export reads as a printed snapshot of the UI.
+    const INVOICE_PALETTE = {
+      ORANGE_TINT:   [249, 234, 220], // --prob-orange-bg over white
+      AMBER_ACTUAL:  [248, 236, 214], // --accent-softer
+      CREAM_PROJ:    [250, 247, 240], // neutralized stripe (PDF can't do diagonal)
+      TOTAL_BG:      [251, 248, 242], // --bg-elev
+      ACCENT_INK:    [107,  63,  16], // --accent-ink (amber text on actual cells)
+      PROJ_INK:      [110, 102,  89], // --text-muted (dim text on projection)
+    };
+    const invoiceCellStyle = tab === "invoice"
+      ? (row, _colIndex, col) => {
+          const isOrangeRow = row?.sourcePotentialId && orangeSourceIds.has(row.sourcePotentialId);
+          const label = col?.label;
+          const monthIdx = MONTHS.indexOf(label);
+          const isActualMonth = monthIdx >= 0 && monthIdx <= TODAY_MONTH;
+          const isProjMonth   = monthIdx >= 0 && monthIdx > TODAY_MONTH;
+          const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
+          if (isActualMonth) return { fillColor: INVOICE_PALETTE.AMBER_ACTUAL, textColor: INVOICE_PALETTE.ACCENT_INK };
+          if (isProjMonth)   return { fillColor: INVOICE_PALETTE.CREAM_PROJ,   textColor: INVOICE_PALETTE.PROJ_INK };
+          if (isTotalCol)    return { fillColor: INVOICE_PALETTE.TOTAL_BG,     fontStyle: "bold" };
+          if (isOrangeRow)   return { fillColor: INVOICE_PALETTE.ORANGE_TINT };
+          return null;
+        }
+      : undefined;
+
     // Build subtitle describing active filter/year/search so the PDF footer
     // communicates what the user was looking at.
     const annotations = [];
@@ -1230,6 +1282,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         title: `MSMM Beacon — ${meta.title || tab}`,
         subtitle,
         rowColor,
+        cellStyle: invoiceCellStyle,
+        // A3 landscape gives Invoice's 17 columns (12 months + totals)
+        // enough width to render full dollar amounts without ellipsizing.
+        // Other tabs stay on A4 — fewer columns, more text-oriented.
+        format: tab === "invoice" ? "a3" : "a4",
+        // Zebra striping fights the Invoice's per-cell fill palette
+        // (actual amber, projection cream, orange tint) — turn it off
+        // on Invoice so the colors read cleanly.
+        alternateRows: tab !== "invoice",
       });
       showToast(`Exported ${rows.length} rows`, "export");
     } catch (err) {
