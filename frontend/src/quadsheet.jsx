@@ -199,11 +199,29 @@ const InvoiceChart = ({ invoice }) => {
     return { totalsBase, totalsAll, yMax };
   }, [invoice]);
 
-  // viewBox aspect is tuned to match the full-width Q1 card so the SVG
-  // fills horizontally without letterbox. Internal geometry keys off
-  // W/H (step, area fill, hover box, today marker) so bumping the view-
-  // port auto-rescales.
-  const W = 1600, H = 400;
+  // viewBox tracks the SVG's actual rendered pixel box via ResizeObserver,
+  // so the chart fills the full card width regardless of viewport — no
+  // letterbox from a mismatched fixed aspect ratio. All internal geometry
+  // (step, area fill, hover box, Y-axis ticks, month labels) keys off
+  // W / H and auto-reflows. Fallback dims apply before the observer fires
+  // on first paint.
+  const svgRef = useRef(null);
+  const [box, setBox] = useState({ w: 1600, h: 400 });
+  useEffect(() => {
+    const node = svgRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const { width, height } = e.contentRect;
+        if (width > 0 && height > 0) {
+          setBox({ w: Math.round(width), h: Math.round(height) });
+        }
+      }
+    });
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+  const W = box.w, H = box.h;
   const padL = 56, padR = 24, padT = 20, padB = 40;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
@@ -280,8 +298,9 @@ const InvoiceChart = ({ invoice }) => {
       </div>
 
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="xMidYMid meet"
+        preserveAspectRatio="none"
         className="flow-chart"
         onMouseMove={onMove}
         onMouseLeave={() => setHoverIdx(null)}

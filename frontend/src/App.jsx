@@ -326,6 +326,7 @@ const EXPORT_COLUMNS = {
     { label: "Notes",                       get: r => r.notes || "" },
   ],
   hotleads: [
+    { label: "Status",            wMm: 24,  get: r => r.status || "" },
     { label: "Title",                       get: r => r.title || "", wrap: true },
     { label: "Client / Firm",               get: r => companyById(r.clientId)?.name || "" },
     { label: "Date & Time",       wMm: 36,  get: r => fmtDateTime(r.dateTime) },
@@ -444,6 +445,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
     return {
       id: dbRow.id,
       title: dbRow.title,
+      status: dbRow.status || "Scheduled",
       dateTime: dbRow.date_time || "",
       clientId: dbRow.client_id || dbRow.prime_company_id || null,
       notes: dbRow.notes || "",
@@ -705,6 +707,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // based on which pool the UUID belongs to).
   const HOT_LEADS_COLS = {
     title: "title",
+    status: "status",
     dateTime: "date_time",
     notes: "notes",
   };
@@ -1015,7 +1018,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!pendingFocusRowId) return;
     const rowsByTab = {
       potential, awaiting, awarded, soq, closed,
-      invoice, events, clients, companies,
+      invoice, events, hotleads: hotLeads, clients, companies,
     };
     const rows = rowsByTab[tab] || [];
     const match = rows.find(r => r.id === pendingFocusRowId);
@@ -1023,7 +1026,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       openDrawer(match, tab);
       setPendingFocusRowId(null);
     }
-  }, [pendingFocusRowId, tab, potential, awaiting, awarded, soq, closed, invoice, events, clients, companies]);
+  }, [pendingFocusRowId, tab, potential, awaiting, awarded, soq, closed, invoice, events, hotLeads, clients, companies]);
 
   // Pipeline transitions. New flow (2026-04):
   //   Awaiting Verdict → Awarded (MOVE: row leaves Awaiting, appears in Awarded)
@@ -1632,6 +1635,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <HotLeadsTable rows={filtered.hotleads}
             updateRow={updateHotLeads}
             onOpenDrawer={r => openDrawer(r, "hotleads")}
+            onAlert={r => setAlertObj({ row: r, tab: "hotleads" })}
             flashId={flashId}
             filters={chipsFor("hotleads")}
             tab="hotleads"

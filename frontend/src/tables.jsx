@@ -862,6 +862,7 @@ const buildOptions = () => {
     roleOptions:         ["Prime", "Sub"],
     eventStatusOptions:  ["Booked", "Happened"],
     eventTypeOptions:    ["Partner", "AI", "Project", "Meetings", "Board Meetings", "Event"],
+    hotLeadStatusOptions:["Scheduled", "Happened"],
     invoiceTypeOptions:  ["ENG", "PM"],
     companyTypeOptions:  ["Prime", "Sub", "Multiple"],
     stageOptions:        ["Multi-Use Contract", "Single Use Contract (Project)", "AE Selected List"],
@@ -2380,21 +2381,22 @@ export const EventsTable = ({
 // prime_company_id on the underlying row via routeClientPick (handled in
 // updateHotLeads in App.jsx). Chronological, sorted newest-first.
 export const HotLeadsTable = ({
-  tab, rows, updateRow = _noopUpdate, onOpenDrawer, flashId, filters,
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
+    { label: "Status",      w: "120px", sortKey: "status" },
     { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
     { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Date & Time", w: "170px", sortKey: "dateTime" },
     { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
-    { label: "__actions",   w: "60px", locked: true },
+    { label: "__actions",   w: "80px", locked: true },
   ];
 
-  const { clientOrFirmOpts } = buildOptions();
+  const { clientOrFirmOpts, hotLeadStatusOptions } = buildOptions();
 
   // Newest-first is the most intuitive default for a running lead list.
   const primarySort = [{ key: "dateTime", dir: "desc" }];
@@ -2414,6 +2416,13 @@ export const HotLeadsTable = ({
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
               <input type="checkbox"/>
+            </div>
+          ),
+          "Status": (
+            <div className="td">
+              <EditableCell value={r.status} type="select" options={hotLeadStatusOptions}
+                onChange={v => updateRow(r.id, { status: v })}
+                render={v => <StatusChip status={v}/>}/>
             </div>
           ),
           "Title": (
@@ -2447,7 +2456,9 @@ export const HotLeadsTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end" }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
-                <button className="row-btn" title="More"><Icon name="more" size={14}/></button>
+                <button className="row-btn alert" title="Set alert" onClick={() => onAlert && onAlert(r)}>
+                  <Icon name="bell" size={14}/>
+                </button>
               </div>
             </div>
           ),

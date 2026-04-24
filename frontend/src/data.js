@@ -244,6 +244,9 @@ const TAB_ANCHORS = {
     { field: "event_datetime",          uiField: "dateTime",              label: "Event time", hasTime: true },
     { field: "event_date",              uiField: "date",                  label: "Event date" },
   ],
+  hotleads: [
+    { field: "date_time",               uiField: "dateTime",              label: "Lead time",  hasTime: true },
+  ],
   invoice: [],
 };
 
@@ -266,6 +269,7 @@ export const TAB_TO_SUBJECT_TABLE = {
   closed:    "closed_out",
   invoice:   "invoice",
   events:    "event",
+  hotleads:  "hotlead",
 };
 
 // ----------------------------------------------------------------------
@@ -498,6 +502,7 @@ function adaptHotLead(r) {
   return {
     id: r.id,
     title: r.title,
+    status: r.status || "Scheduled",
     dateTime: r.date_time || "",
     // Unified "Client or Firm" picker on Hot Leads: the adapter prefers the
     // real client_id when set, else falls back to prime_company_id so the

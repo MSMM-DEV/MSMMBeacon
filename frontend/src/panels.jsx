@@ -179,6 +179,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
     ],
     hotleads: [
       { k: "title",          label: "Title" },
+      { k: "status",         label: "Status",                  type: "select", options: ["Scheduled","Happened"] },
       // `company` field type feeds from the Clients list. For Hot Leads we
       // want BOTH clients AND companies available, so this drawer swaps in
       // the merged list via the `hotleadsCompany` custom type below.

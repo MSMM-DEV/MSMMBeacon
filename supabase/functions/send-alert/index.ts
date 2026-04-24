@@ -64,6 +64,7 @@ const SUBJECT_TABLE: Record<string, string> = {
   closed_out:  "closed_out_projects",
   invoice:     "anticipated_invoice",
   event:       "events",
+  hotlead:     "hot_leads",
 };
 
 // Friendly labels for anchor_field keys when phrased in an email.
@@ -76,6 +77,7 @@ const ANCHOR_LABEL: Record<string, string> = {
   date_closed:             "the close date",
   event_date:              "the event date",
   event_datetime:          "the event",
+  date_time:               "the lead time",
 };
 
 // --------------------------------------------------------------------------
@@ -190,6 +192,15 @@ function render(subjectTable: string, row: any): Rendered {
         row.event_datetime ? `When: ${fmtDate(row.event_datetime)}` : (row.event_date ? `Date: ${fmtDate(row.event_date)}` : null),
         row.status ? `Status: ${row.status}` : null,
         row.type ? `Type: ${row.type}` : null,
+      ].filter(Boolean) as string[],
+    };
+    case "hotlead": return {
+      subject:      `Beacon · Hot lead: "${row.title}"${row.date_time ? ` (${fmtDate(row.date_time)})` : ""}`,
+      deepLinkTab:  "hotleads",
+      summaryLines: [
+        row.date_time ? `When: ${fmtDate(row.date_time)}` : null,
+        row.status ? `Status: ${row.status}` : null,
+        row.notes ? `Notes: ${row.notes}` : null,
       ].filter(Boolean) as string[],
     };
     default: return {

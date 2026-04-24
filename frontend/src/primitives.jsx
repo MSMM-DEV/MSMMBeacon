@@ -79,6 +79,7 @@ export const StatusChip = ({ status }) => {
     "Closed Out":       { cls: "rose",    dot: "closed" },
     "Happened":         { cls: "muted",   dot: "happened" },
     "Booked":           { cls: "blue",    dot: "booked" },
+    "Scheduled":        { cls: "accent",  dot: "booked" },
   };
   const s = map[status] || map["Potential"];
   return <span className={`chip ${s.cls}`}><span className={`status-dot ${s.dot}`}/>{status}</span>;

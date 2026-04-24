@@ -64,7 +64,7 @@ const DB_COLUMNS = {
     "title", "status", "type", "event_datetime", "notes",
   ],
   hot_leads: [
-    "title", "client_id", "date_time", "notes",
+    "title", "status", "client_id", "date_time", "notes",
   ],
   clients: [
     "name", "district", "org_type",
@@ -141,6 +141,7 @@ const INITIAL = {
   },
   hotleads: {
     title: "",
+    status: "Scheduled",
     client_id: "",
     date_time: "",
     notes: "",
@@ -786,6 +787,13 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
           <Field label="Title *">
             <input className="input" autoFocus value={form.title}
                    onChange={e => set("title", e.target.value)}/>
+          </Field>
+          <Field label="Status">
+            <select className="input" value={form.status || "Scheduled"}
+                    onChange={e => set("status", e.target.value)}>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Happened">Happened</option>
+            </select>
           </Field>
           <Field label="Client / Firm">
             <SearchableSelect
