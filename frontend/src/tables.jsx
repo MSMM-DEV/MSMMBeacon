@@ -2244,7 +2244,6 @@ export const EventsTable = ({
     { label: "Title", w: "minmax(260px, 2.5fr)", sortKey: "title" },
     { label: "Date & Time", w: "160px", sortKey: "dateTime" },
     { label: "Attendees", w: "minmax(160px, 1.2fr)" },
-    { label: "Date", w: "120px", sortKey: "date", defaultHidden: true },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "__actions", w: "80px", locked: true },
   ];
@@ -2340,17 +2339,10 @@ export const EventsTable = ({
             <div className="td mono subtle">
               <EditableCell value={r.dateTime} type="datetime-local"
                 onChange={v => updateRow(r.id, { dateTime: v })}
-                format={v => fmtDateTime(v)}/>
+                format={v => v ? fmtDateTime(v) : (r.date ? fmtDate(r.date) : fmtDateTime(v))}/>
             </div>
           ),
           "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,
-          "Date": (
-            <div className="td mono subtle">
-              <EditableCell value={r.date} type="date"
-                onChange={v => updateRow(r.id, { date: v })}
-                format={v => fmtDate(v)}/>
-            </div>
-          ),
           "Notes": (
             <div className="td subtle" style={{ fontSize: 12.5 }}>
               <EditableCell value={r.notes} type="textarea"

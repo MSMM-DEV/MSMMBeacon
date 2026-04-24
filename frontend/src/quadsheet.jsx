@@ -19,57 +19,145 @@ import {
 // interactive panel). Content scrolls inside a panel if it overflows.
 // ============================================================================
 
+// How many items each list component renders inside the card. Picked so
+// every list fits the 400px-tall quad card without internal scrolling —
+// the Expand button uncaps this for the overlay modal.
+const CARD_LIMIT = 6;
+
 export const QuadSheet = ({ invoice, events, awaiting, hotLeads, onOpen }) => {
+  // `expanded` names which card is currently zoomed into the modal.
+  // null = no modal open. Only list-type cards can be expanded (the
+  // Invoice chart has intrinsic sizing and doesn't benefit from expand).
+  const [expanded, setExpanded] = useState(null);
+
+  // Close modal on ESC.
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e) => { if (e.key === "Escape") setExpanded(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
+
+  const cfgs = {
+    events: {
+      eyebrow: "02 · Calendar",
+      title: "Events",
+      sub: `${events.length} tracked · sorted by date`,
+      accent: "cal",
+    },
+    awaiting: {
+      eyebrow: "03 · Pipeline",
+      title: "Awaiting Verdict",
+      sub: `${awaiting.length} in review · anticipated result`,
+      accent: "await",
+    },
+    hotleads: {
+      eyebrow: "04 · Pre-Pipeline",
+      title: "Hot Leads",
+      sub: `${(hotLeads || []).length} tracked · early-stage`,
+      accent: "soq",
+    },
+  };
+
+  const renderList = (key, { limit }) => {
+    if (key === "events")   return <EventLedger  events={events}   onOpen={r => onOpen("events", r)}   limit={limit}/>;
+    if (key === "awaiting") return <AwaitingList awaiting={awaiting} onOpen={r => onOpen("awaiting", r)} limit={limit}/>;
+    if (key === "hotleads") return <HotLeadsList hotLeads={hotLeads || []} onOpen={r => onOpen("hotleads", r)} limit={limit}/>;
+    return null;
+  };
+
   return (
-    <div className="quad">
-      <QuadCard
-        eyebrow="01 · Cash Flow"
-        title="Anticipated Invoice"
-        sub={`${THIS_YEAR} · monthly actual vs. projection`}
-        accent="flow"
-        className="quad-q1">
-        <InvoiceChart invoice={invoice}/>
-      </QuadCard>
+    <>
+      <div className="quad">
+        <QuadCard
+          eyebrow="01 · Cash Flow"
+          title="Anticipated Invoice"
+          sub={`${THIS_YEAR} · monthly actual vs. projection`}
+          accent="flow"
+          className="quad-q1">
+          <InvoiceChart invoice={invoice}/>
+        </QuadCard>
 
-      <QuadCard
-        eyebrow="02 · Calendar"
-        title="Events"
-        sub={`${events.length} tracked · sorted by date`}
-        accent="cal"
-        className="quad-q2">
-        <EventLedger events={events} onOpen={r => onOpen("events", r)}/>
-      </QuadCard>
+        <QuadCard
+          {...cfgs.events}
+          className="quad-q2"
+          onExpand={() => setExpanded("events")}>
+          {renderList("events", { limit: CARD_LIMIT })}
+        </QuadCard>
 
-      <QuadCard
-        eyebrow="03 · Pipeline"
-        title="Awaiting Verdict"
-        sub={`${awaiting.length} in review · anticipated result`}
-        accent="await"
-        className="quad-q3">
-        <AwaitingList awaiting={awaiting} onOpen={r => onOpen("awaiting", r)}/>
-      </QuadCard>
+        <QuadCard
+          {...cfgs.awaiting}
+          className="quad-q3"
+          onExpand={() => setExpanded("awaiting")}>
+          {renderList("awaiting", { limit: CARD_LIMIT })}
+        </QuadCard>
 
-      <QuadCard
-        eyebrow="04 · Pre-Pipeline"
-        title="Hot Leads"
-        sub={`${(hotLeads || []).length} tracked · early-stage`}
-        accent="soq"
-        className="quad-q4">
-        <HotLeadsList hotLeads={hotLeads || []} onOpen={r => onOpen("hotleads", r)}/>
-      </QuadCard>
-    </div>
+        <QuadCard
+          {...cfgs.hotleads}
+          className="quad-q4"
+          onExpand={() => setExpanded("hotleads")}>
+          {renderList("hotleads", { limit: CARD_LIMIT })}
+        </QuadCard>
+      </div>
+
+      {expanded && (
+        <QuadExpandModal
+          eyebrow={cfgs[expanded].eyebrow}
+          title={cfgs[expanded].title}
+          sub={cfgs[expanded].sub}
+          onClose={() => setExpanded(null)}>
+          {renderList(expanded, { limit: Infinity })}
+        </QuadExpandModal>
+      )}
+    </>
   );
 };
+
+// Centered modal that renders a quadrant's list at a larger size with
+// internal scrolling so every item is reachable. Opens on Expand-button
+// click; closes on ESC, overlay click, or × button.
+const QuadExpandModal = ({ eyebrow, title, sub, onClose, children }) => (
+  <>
+    <div className="quad-expand-overlay" onClick={onClose}/>
+    <div className="quad-expand-modal" role="dialog" aria-modal="true">
+      <div className="quad-expand-head">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="quad-eyebrow">{eyebrow}</div>
+          <h3>{title}</h3>
+          {sub && <div className="quad-sub" style={{ marginTop: 3 }}>{sub}</div>}
+        </div>
+        <button className="drawer-close" onClick={onClose} aria-label="Close">
+          <Icon name="x" size={16}/>
+        </button>
+      </div>
+      <div className="quad-expand-body">{children}</div>
+    </div>
+  </>
+);
 
 // ----------------------------------------------------------------------------
 // Card shell — shared chrome for every quadrant.
 // ----------------------------------------------------------------------------
-const QuadCard = ({ eyebrow, title, sub, accent, className, children }) => (
+const QuadCard = ({ eyebrow, title, sub, accent, className, onExpand, children }) => (
   <section className={`quad-card ${className || ""}`} data-accent={accent}>
     <header className="quad-head">
       <div className="quad-eyebrow">{eyebrow}</div>
       <h2 className="quad-title">{title}</h2>
-      {sub && <div className="quad-sub">{sub}</div>}
+      {/* Sub-row: count/description on the left + optional Expand button
+          on the right. Expand opens a modal that renders the same content
+          uncapped; cards with no onExpand (Invoice chart) just show the
+          sub text. */}
+      {(sub || onExpand) && (
+        <div className="quad-sub-row">
+          {sub && <div className="quad-sub">{sub}</div>}
+          {onExpand && (
+            <button type="button" className="quad-expand-btn" onClick={onExpand}
+                    aria-label={`Expand ${title}`}>
+              Expand <Icon name="forward" size={10}/>
+            </button>
+          )}
+        </div>
+      )}
     </header>
     <div className="quad-body">{children}</div>
   </section>
@@ -308,7 +396,7 @@ const InvoiceChart = ({ invoice }) => {
 // Sorted by anchor date (datetime first, then date). Future events are
 // highlighted; past events subdued. Click opens the event in its drawer.
 // ----------------------------------------------------------------------------
-const EventLedger = ({ events, onOpen }) => {
+const EventLedger = ({ events, onOpen, limit = 40 }) => {
   const anchored = useMemo(() => {
     const now = Date.now();
     return events
@@ -328,7 +416,8 @@ const EventLedger = ({ events, onOpen }) => {
   // Future first, then past-reverse-chronological so the most recent is next.
   const future = anchored.filter(e => e._future);
   const past   = anchored.filter(e => !e._future).reverse();
-  const ordered = [...future, ...past].slice(0, 40);
+  const cap = limit === Infinity ? anchored.length : Math.min(limit, 40);
+  const ordered = [...future, ...past].slice(0, cap);
 
   return (
     <ul className="event-ledger">
@@ -371,7 +460,7 @@ const typeColor = (t) => ({
 // date fall to the bottom. The row shows days-until if the date is in the
 // future, or the elapsed time if overdue.
 // ----------------------------------------------------------------------------
-const AwaitingList = ({ awaiting, onOpen }) => {
+const AwaitingList = ({ awaiting, onOpen, limit = Infinity }) => {
   const rows = useMemo(() => {
     const withDate = [];
     const withoutDate = [];
@@ -392,10 +481,11 @@ const AwaitingList = ({ awaiting, onOpen }) => {
   if (rows.length === 0) {
     return <div className="quad-empty">No projects awaiting verdict.</div>;
   }
+  const capped = limit === Infinity ? rows : rows.slice(0, limit);
 
   return (
     <ul className="await-list">
-      {rows.map(r => {
+      {capped.map(r => {
         const client = companyById(r.clientId)?.name || "";
         const d = r._daysOut;
         const tone =
@@ -434,7 +524,7 @@ const AwaitingList = ({ awaiting, onOpen }) => {
 // distinct — left date-tile + right body (title + client/firm name). Future
 // leads first, then recent past. Click routes to the drawer.
 // ----------------------------------------------------------------------------
-const HotLeadsList = ({ hotLeads, onOpen }) => {
+const HotLeadsList = ({ hotLeads, onOpen, limit = 40 }) => {
   const anchored = useMemo(() => {
     const now = Date.now();
     return (hotLeads || [])
@@ -453,7 +543,8 @@ const HotLeadsList = ({ hotLeads, onOpen }) => {
 
   const future = anchored.filter(h => h._future);
   const past   = anchored.filter(h => !h._future).reverse();
-  const ordered = [...future, ...past].slice(0, 40);
+  const cap = limit === Infinity ? anchored.length : Math.min(limit, 40);
+  const ordered = [...future, ...past].slice(0, cap);
 
   return (
     <ul className="event-ledger">

@@ -61,7 +61,7 @@ const DB_COLUMNS = {
     "client_contract_number", "msmm_contract_number",
   ],
   events: [
-    "title", "status", "type", "event_date", "event_datetime", "notes",
+    "title", "status", "type", "event_datetime", "notes",
   ],
   hot_leads: [
     "title", "client_id", "date_time", "notes",
@@ -135,7 +135,6 @@ const INITIAL = {
     title: "",
     status: "Booked",
     type: "",
-    event_date: "",
     event_datetime: "",
     attendees: [],
     notes: "",
@@ -762,11 +761,6 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
               <option value="Board Meetings">Board Meetings</option>
               <option value="Event">Event</option>
             </select>
-          </Field>
-          <Field label="Event Date">
-            <input className="input" type="date" value={form.event_date}
-                   onChange={e => set("event_date", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
           <Field label="Date & Time">
             <input className="input" type="datetime-local" value={form.event_datetime}

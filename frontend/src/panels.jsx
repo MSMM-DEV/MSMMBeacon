@@ -173,7 +173,6 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "title",          label: "Title" },
       { k: "status",         label: "Status",                  type: "select", options: ["Booked","Happened"] },
       { k: "type",           label: "Type",                    type: "select", options: ["Partner","AI","Project","Meetings","Board Meetings","Event"] },
-      { k: "date",           label: "Date",                    type: "date" },
       { k: "dateTime",       label: "Date & Time",             type: "datetime" },
       { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },

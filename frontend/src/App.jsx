@@ -305,6 +305,13 @@ const EXPORT_COLUMNS = {
     { label: "Attendees",                   get: r => (r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ") },
     { label: "Notes",                       get: r => r.notes || "" },
   ],
+  hotleads: [
+    { label: "Title",                       get: r => r.title || "", wrap: true },
+    { label: "Client / Firm",               get: r => companyById(r.clientId)?.name || "" },
+    { label: "Date & Time",       wMm: 36,  get: r => fmtDateTime(r.dateTime) },
+    { label: "Attendees",                   get: r => (r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ") },
+    { label: "Notes",                       get: r => r.notes || "" },
+  ],
   clients: [
     { label: "Name",                        get: r => r.baseName || r.name },
     { label: "District",                    get: r => r.district || "" },

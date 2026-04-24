@@ -511,29 +511,29 @@ html, body { overflow-x: clip; }
    lifted in luminance so they hold on dark surfaces. */
 :root {
   --prob-high:    #2F7548;   /* forest green */
-  --prob-medium:  #C89B1C;   /* warm gold */
+  --prob-medium:  #A89200;   /* dark dijon — clearly yellow against cadmium orange */
   --prob-low:     #A3302E;   /* crimson */
-  --prob-orange:  #D97418;   /* cadmium orange */
+  --prob-orange:  #D97418;   /* cadmium orange — shared with Invoice Orange rows */
   --prob-high-bg:   rgba(47, 117, 72, 0.14);
-  --prob-medium-bg: rgba(200, 155, 28, 0.16);
+  --prob-medium-bg: rgba(168, 146, 0, 0.20);
   --prob-low-bg:    rgba(163, 48, 46, 0.13);
   --prob-orange-bg: rgba(217, 116, 24, 0.15);
   --prob-high-bg-hover:   rgba(47, 117, 72, 0.24);
-  --prob-medium-bg-hover: rgba(200, 155, 28, 0.26);
+  --prob-medium-bg-hover: rgba(168, 146, 0, 0.30);
   --prob-low-bg-hover:    rgba(163, 48, 46, 0.22);
   --prob-orange-bg-hover: rgba(217, 116, 24, 0.25);
 }
 [data-theme="dark"] {
   --prob-high:    #7EB889;   /* moss green */
-  --prob-medium:  #E4C35F;   /* honey gold */
+  --prob-medium:  #F0D03D;   /* bright lemon-gold — lifts off the dark bg cleanly */
   --prob-low:     #E07A78;   /* soft coral-red */
-  --prob-orange:  #F3A064;   /* warm mandarin */
+  --prob-orange:  #F3A064;   /* warm mandarin — shared with Invoice Orange rows */
   --prob-high-bg:   rgba(126, 184, 137, 0.16);
-  --prob-medium-bg: rgba(228, 195, 95, 0.15);
+  --prob-medium-bg: rgba(240, 208, 61, 0.19);
   --prob-low-bg:    rgba(224, 122, 120, 0.16);
   --prob-orange-bg: rgba(243, 160, 100, 0.18);
   --prob-high-bg-hover:   rgba(126, 184, 137, 0.26);
-  --prob-medium-bg-hover: rgba(228, 195, 95, 0.25);
+  --prob-medium-bg-hover: rgba(240, 208, 61, 0.30);
   --prob-low-bg-hover:    rgba(224, 122, 120, 0.26);
   --prob-orange-bg-hover: rgba(243, 160, 100, 0.28);
 }
@@ -1381,33 +1381,30 @@ html, body { overflow-x: clip; }
  * Designed to read at a glance by board members: large numerics, generous
  * whitespace, a distinctive accent stripe per quadrant.
  * ====================================================================== */
+/* 2×2 grid of equal-sized quadrants. The previous layout gave Q1 (Invoice
+   chart) 1.35× width + 360px row height to establish visual dominance;
+   product direction is now "every quadrant the same size" so they read as
+   peers, with an Expand affordance on list quadrants for when the content
+   overflows the card. Row height is a fixed 400px so the grid is stable
+   and every card body has the exact same vertical budget — no card
+   grows taller because it has more content. */
 .quad {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  grid-template-rows: minmax(360px, auto) minmax(280px, auto);
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 400px 400px;
   gap: 18px;
   padding: 4px 2px 24px;
 }
-.quad-q1 { grid-column: 1; grid-row: 1; }
-.quad-q2 { grid-column: 2; grid-row: 1; }
-.quad-q3 { grid-column: 1; grid-row: 2; }
-.quad-q4 { grid-column: 2; grid-row: 2; }
-
-/* 3-up variant — SOQ quadrant hidden from UI. Q1 (invoice chart) spans the
-   whole left column, Q2 (events) and Q3 (awaiting) stack on the right.
-   Keeps Q1's visual dominance from the 2×2 layout without leaving an empty
-   cell where Q4 used to be. */
-.quad.quad-3up {
-  grid-template-rows: minmax(280px, 1fr) minmax(280px, 1fr);
-}
-.quad.quad-3up .quad-q1 { grid-column: 1; grid-row: 1 / span 2; }
-.quad.quad-3up .quad-q2 { grid-column: 2; grid-row: 1; }
-.quad.quad-3up .quad-q3 { grid-column: 2; grid-row: 2; }
+.quad-q1, .quad-q2, .quad-q3, .quad-q4 { grid-column: auto; grid-row: auto; }
 
 @media (max-width: 1080px) {
-  .quad { grid-template-columns: 1fr; grid-template-rows: auto; }
-  .quad-q1, .quad-q2, .quad-q3, .quad-q4 { grid-column: 1; grid-row: auto; }
-  .quad.quad-3up .quad-q1 { grid-row: auto; }
+  /* On tablet/phone, stack vertically — keep the fixed-height-per-card
+     contract so stacking doesn't produce a short card above a tall one. */
+  .quad {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-auto-rows: 400px;
+  }
 }
 
 .quad-card {
@@ -1460,6 +1457,100 @@ html, body { overflow-x: clip; }
   font-size: 12.5px;
   color: var(--text-soft);
   font-weight: 400;
+}
+/* Sub-row carries the card's dynamic count on the left + optional Expand
+   button on the right. flex: row puts them on the same baseline. */
+.quad-sub-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.quad-sub-row .quad-sub { flex: 1; min-width: 0; }
+
+.quad-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.quad-expand-btn:hover { background: var(--surface-2); color: var(--accent-ink); }
+.quad-expand-btn svg { opacity: .7; }
+
+/* Fade-out indicator at the bottom of a list body hints there's more
+   content than fits. Only shown when the underlying list reports overflow
+   (data-overflow="true" set from JS). Purely cosmetic — the user gets to
+   the full content via the Expand button. */
+.quad-body[data-overflow="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 28px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--surface));
+}
+.quad-body { position: relative; }
+
+/* Expand modal — shows a quadrant's list at a larger size when the user
+   clicks Expand. Uses the same dim-the-page pattern as the detail
+   drawer, but centered so it reads as a "zoom into this one card"
+   rather than "edit a row." The body scrolls internally. */
+.quad-expand-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 25, 18, 0.35);
+  backdrop-filter: blur(3px);
+  z-index: 70;
+  animation: fadeIn .18s ease;
+}
+[data-theme="dark"] .quad-expand-overlay { background: rgba(0, 0, 0, 0.55); }
+
+.quad-expand-modal {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(720px, 94vw);
+  height: min(80vh, 720px);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: pop .22s cubic-bezier(.2,.8,.2,1);
+}
+.quad-expand-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.quad-expand-head h3 {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+.quad-expand-head .quad-eyebrow { margin-top: 4px; }
+.quad-expand-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 16px 14px;
 }
 .quad-body {
   flex: 1; min-height: 0;
@@ -3140,8 +3231,11 @@ html, body { overflow-x: clip; }
   /* Toast stays centered but away from notch. */
   .toast { bottom: max(20px, env(safe-area-inset-bottom) + 10px); }
 
-  /* Quad Sheet stacks + trims padding. */
-  .quad { grid-template-columns: 1fr; grid-template-rows: auto; gap: 14px; padding: 0 0 20px; }
+  /* Quad Sheet stacks + trims padding. Keep the fixed-height-per-card
+     contract from the desktop layout so all cards remain visually equal
+     when stacked on a phone. 360px is a touch shorter than desktop to
+     fit a list + title comfortably on small screens. */
+  .quad { grid-template-columns: 1fr; grid-template-rows: auto; grid-auto-rows: 360px; gap: 14px; padding: 0 0 20px; }
   .quad-q1, .quad-q2, .quad-q3, .quad-q4 { grid-column: 1; grid-row: auto; }
   .quad-card { padding: 18px 18px 16px; border-radius: 12px; }
   .quad-title { font-size: 19px; }
