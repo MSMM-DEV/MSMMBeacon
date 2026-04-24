@@ -1391,7 +1391,7 @@ html, body { overflow-x: clip; }
 .quad {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 400px 400px;
+  grid-template-rows: 600px 600px;
   gap: 18px;
   padding: 4px 2px 24px;
 }
@@ -1403,7 +1403,7 @@ html, body { overflow-x: clip; }
   .quad {
     grid-template-columns: 1fr;
     grid-template-rows: auto;
-    grid-auto-rows: 400px;
+    grid-auto-rows: 600px;
   }
 }
 
@@ -1592,7 +1592,7 @@ html, body { overflow-x: clip; }
 .flow-chart {
   width: 100%;
   height: auto;
-  max-height: 320px;
+  max-height: 480px;
   user-select: none;
   cursor: crosshair;
 }
@@ -3235,7 +3235,7 @@ html, body { overflow-x: clip; }
      contract from the desktop layout so all cards remain visually equal
      when stacked on a phone. 360px is a touch shorter than desktop to
      fit a list + title comfortably on small screens. */
-  .quad { grid-template-columns: 1fr; grid-template-rows: auto; grid-auto-rows: 360px; gap: 14px; padding: 0 0 20px; }
+  .quad { grid-template-columns: 1fr; grid-template-rows: auto; grid-auto-rows: 540px; gap: 14px; padding: 0 0 20px; }
   .quad-q1, .quad-q2, .quad-q3, .quad-q4 { grid-column: 1; grid-row: auto; }
   .quad-card { padding: 18px 18px 16px; border-radius: 12px; }
   .quad-title { font-size: 19px; }
