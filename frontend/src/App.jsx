@@ -38,20 +38,20 @@ const countRefs = (id) => {
 // tab sits in its own "head" group separated by a gap so no arrow implies
 // a bogus Invoice → Potential flow.
 const TAB_META = [
-  { key: "invoice",   label: "Invoice",          stage: "stage-invoice",   group: "head" },
-  { key: "potential", label: "Potential",        stage: "stage-potential", group: "pipeline" },
+  { key: "quad",      label: "Quad Sheet",       stage: "stage-quad",      group: "head" },
   { key: "awaiting",  label: "Awaiting Verdict", stage: "stage-awaiting",  group: "pipeline" },
   { key: "awarded",   label: "Awarded",          stage: "stage-awarded",   group: "pipeline" },
   { key: "closed",    label: "Closed Out",       stage: "stage-closed",    group: "pipeline" },
+  { key: "potential", label: "Potential",        stage: "stage-potential", group: "pipeline" },
+  { key: "invoice",   label: "Invoice",          stage: "stage-invoice",   group: "pipeline" },
   // SOQ tab hidden from navigation per product direction — the `soq` table
   // and its data still exist in Supabase; we just don't surface them. To
   // bring the tab back, restore this entry + the {tab === "soq" && ...}
   // render block below, and re-add the SoqTable import.
-  { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
+  { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "clients",   label: "Clients",          stage: "stage-clients",   group: "side" },
   { key: "companies", label: "Companies",        stage: "stage-clients",   group: "side" },
-  { key: "quad",      label: "Quad Sheet",       stage: "stage-quad",      group: "side" },
 ];
 
 const PAGE_META = {
@@ -554,7 +554,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // after the admin panel mutates the roster. The value is read via a data
   // attribute below so unused-var lint stays happy; re-render is the goal.
   const [rosterTick, setRosterTick] = useState(0);
-  const [tab, setTab] = useState(() => localStorage.getItem("beacon-tab") || "potential");
+  const [tab, setTab] = useState(() => localStorage.getItem("beacon-tab") || "quad");
   // Deep-link landing: if the URL carries ?tab=X&rowId=Y (from an alert email),
   // record the row id until the target tab's rows are available, then auto-open
   // the detail drawer on it. Cleared after consumption so tab-switches don't

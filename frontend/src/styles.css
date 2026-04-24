@@ -205,8 +205,23 @@ html, body { overflow-x: clip; }
 }
 .pipeline {
   display: flex; align-items: stretch; gap: 4px;
-  flex-wrap: wrap;
+  /* Single row always — 10 tabs + 2 pipeline-separator arrows can't fit
+     every viewport, so horizontal scroll is the correct overflow channel
+     (the App.jsx `scrollIntoView` effect on the active tab keeps it in
+     view automatically). flex-wrap:wrap was dropping "Companies" and
+     "Quad Sheet" onto a second row on typical laptop widths. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+  padding-bottom: 2px;
 }
+.pipeline::-webkit-scrollbar { height: 4px; }
+.pipeline::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+/* Tabs must not shrink below their intrinsic content size; otherwise on
+   narrow viewports flex would distribute available width and squish them. */
+.tab { flex-shrink: 0; }
 .tab {
   display: inline-flex; align-items: center; gap: 9px;
   padding: 10px 14px 12px;
@@ -3122,19 +3137,8 @@ html, body { overflow-x: clip; }
   .top-actions { gap: 6px; }
 
   .tabwrap { padding: 14px 18px 0; }
-  /* Let the tab row scroll horizontally instead of wrapping — wrapping on
-     laptops steals vertical real estate from the table. */
-  .pipeline {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-    scroll-behavior: smooth;
-    padding-bottom: 2px;
-  }
-  .pipeline::-webkit-scrollbar { height: 4px; }
-  .pipeline::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
-  .tab { flex-shrink: 0; }
+  /* Pipeline nowrap + horizontal scroll now lives in the base `.pipeline`
+     rule (applies at every breakpoint), so nothing to override here. */
 
   .page { padding: 22px 18px 56px; }
   .page-title { font-size: 23px; }
