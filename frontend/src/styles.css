@@ -1131,7 +1131,27 @@ html, body { overflow-x: clip; }
   max-width: 100%;
 }
 
-.invoice-wrap { overflow-x: auto; overflow-y: clip; }
+/* Two-axis scroll container for the Anticipated Invoice table. The table
+   is dense (17 project columns × N rows), and historically the wrap only
+   scrolled horizontally — vertical scroll happened at the page level,
+   carrying the sticky <thead> off-screen along with the rest of the
+   table. Now the wrap scrolls both axes, bounded by max-height, so:
+     • the <thead> pins to the wrap's top edge and stays visible no
+       matter how far down the user scrolls the invoice
+     • the sticky-left Proj #/Project Name columns pin to the wrap's
+       left edge (unchanged — same scroll container)
+     • horizontal column scroll still works exactly as before
+   max-height leaves headroom for the topbar + tabs + page-head + stats
+   strip + toolbar + invoice-legend; tuned for ~900-1080px desktop tall,
+   with a floor so short viewports still show a usable row count. */
+.invoice-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 320px);
+  min-height: 340px;
+  /* Prevent scroll from bleeding into the page once the user reaches the
+     top/bottom of the invoice — keeps momentum scrolls predictable. */
+  overscroll-behavior: contain;
+}
 .invoice-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -3170,6 +3190,27 @@ html, body { overflow-x: clip; }
   .table-scroll::-webkit-scrollbar, .invoice-wrap::-webkit-scrollbar { height: 6px; }
   .table-scroll::-webkit-scrollbar-thumb,
   .invoice-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+
+  /* Invoice spreadsheet — on desktop the two leftmost columns (Proj # +
+     Project Name) are sticky-pinned so the name stays readable while
+     scrolling horizontally across the 12 months. On a phone those pinned
+     columns total ~350px, wider than the viewport itself, so they cover
+     the month cells even while scrolling — the user can horizontally drag
+     forever and never see the numbers. Release the horizontal pin here;
+     the whole row scrolls as one unit. Vertical top-stick on the header
+     row is kept so column labels remain visible while scrolling rows. */
+  .invoice-table th.sticky-1, .invoice-table td.sticky-1,
+  .invoice-table th.sticky-2, .invoice-table td.sticky-2 {
+    position: static;
+    left: auto;
+    z-index: auto;
+  }
+  .invoice-table thead th.sticky-1,
+  .invoice-table thead th.sticky-2 {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+  }
 
   /* Sparkline would collide with a seven-figure stat value on narrow cards.
      The value is the data; the spark is decoration. Drop it on phones. */

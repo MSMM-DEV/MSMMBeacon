@@ -494,6 +494,21 @@ function adaptEvent(r) {
   };
 }
 
+function adaptHotLead(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    dateTime: r.date_time || "",
+    // Unified "Client or Firm" picker on Hot Leads: the adapter prefers the
+    // real client_id when set, else falls back to prime_company_id so the
+    // Client column always shows something the UI can resolve. Writes go
+    // through routeClientPick (see App.jsx) which targets the right column.
+    clientId: r.client_id || r.prime_company_id || null,
+    notes: r.notes || "",
+    attendees: (r.attendees || []).map(a => a.user_id),
+  };
+}
+
 // ----------------------------------------------------------------------
 // loadBeacon — fetches everything in parallel, shapes into UI rows.
 // ----------------------------------------------------------------------
@@ -504,7 +519,7 @@ async function pget(builder, label) {
 }
 
 export async function loadBeacon() {
-  const [users, clients, companies, potential, awaiting, awarded, closed, invoice, events, soq] = await Promise.all([
+  const [users, clients, companies, potential, awaiting, awarded, closed, invoice, events, soq, hotLeads] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
     pget(supabase.from("companies").select("*").order("name"), "companies"),
@@ -554,6 +569,22 @@ export async function loadBeacon() {
         .order("project_name"),
       "soq"
     ),
+    // `hot_leads` and `hot_lead_attendees` are created by migration
+     // 20260425120000_hot_leads.sql. If the migration hasn't been applied
+     // yet (e.g. deploying the frontend before running the SQL) the fetch
+     // would fail and crash loadBeacon. Swallow that specific error so the
+     // rest of the app boots; the Hot Leads tab/quadrant show empty until
+     // the SQL is run.
+    supabase.from("hot_leads")
+      .select("*, attendees:hot_lead_attendees(user_id)")
+      .order("date_time", { ascending: false, nullsFirst: false })
+      .then(({ data, error }) => {
+        if (error) {
+          console.warn("[beacon] hot_leads fetch skipped:", error.message);
+          return [];
+        }
+        return data || [];
+      }),
   ]);
 
   _users = users.map(adaptUser);
@@ -580,15 +611,18 @@ export async function loadBeacon() {
     ...companies.map(c => adaptCompany(c, typeMap)),
   ];
 
-  // Reconcile the invariant: every probability=Orange Potential must have a
-  // linked anticipated_invoice row for the current year. Seed data and
-  // pre-fix edits can leave Orange potentials without a corresponding
-  // Invoice row; this pass back-fills them silently on load so the Invoice
-  // tab's orange-tinted entries are always in sync with the Potential tab.
-  // Uniqueness on (source_potential_id, year) means concurrent loads can't
-  // race into duplicates — a second insert would fail with a 409 and we
-  // swallow that case without surfacing it.
+  // DISABLED: the automatic Orange-Invoice reconciliation previously ran
+  // on every load to back-fill invoices for Orange potentials missing a
+  // linked anticipated_invoice row. In the new "spreadsheet is the source
+  // of truth" model (see scripts/sync_2026_invoice.py) this is actively
+  // harmful: the xlsx may tag only a subset of Orange potentials as
+  // billable for the current year, and the reconciliation kept spawning
+  // invoice rows for every other Orange potential in the Potential tab,
+  // drifting the invoice list away from the sheet. If you need a
+  // one-shot back-fill, run the sync script (it's idempotent and aware
+  // of what the sheet considers current).
   let reconciledInvoices = invoice;
+  if (false) {
   const linkedPotentialIds = new Set(
     invoice.map(r => r.source_potential_id).filter(Boolean)
   );
@@ -617,6 +651,7 @@ export async function loadBeacon() {
       console.warn("[beacon] Orange Invoice reconciliation skipped:", error.message);
     }
   }
+  } // end DISABLED reconciliation gate
 
   return {
     potential: potential.map(adaptPotential),
@@ -626,6 +661,7 @@ export async function loadBeacon() {
     invoices:  reconciledInvoices.map(adaptInvoice),
     events:    events.map(adaptEvent),
     soq:       soq.map(adaptSoq),
+    hotLeads:  hotLeads.map(adaptHotLead),
     clients:   _companies,
     users:     _users,
   };

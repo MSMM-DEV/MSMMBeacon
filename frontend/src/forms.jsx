@@ -21,6 +21,7 @@ const DB_TABLES = {
   awaiting:  "awaiting_verdict",
   soq:       "soq",
   events:    "events",
+  hotleads:  "hot_leads",
   clients:   "clients",
   companies: "companies",
 };
@@ -30,6 +31,7 @@ const TITLES = {
   awaiting:  { title: "New awaiting verdict",   icon: "clock"     },
   soq:       { title: "New SOQ",                 icon: "briefcase" },
   events:    { title: "New event",               icon: "calendar"  },
+  hotleads:  { title: "New hot lead",            icon: "trend"     },
   clients:   { title: "New client",              icon: "users"     },
   companies: { title: "New company",             icon: "briefcase" },
 };
@@ -60,6 +62,9 @@ const DB_COLUMNS = {
   ],
   events: [
     "title", "status", "type", "event_date", "event_datetime", "notes",
+  ],
+  hot_leads: [
+    "title", "client_id", "date_time", "notes",
   ],
   clients: [
     "name", "district", "org_type",
@@ -135,6 +140,13 @@ const INITIAL = {
     attendees: [],
     notes: "",
   },
+  hotleads: {
+    title: "",
+    client_id: "",
+    date_time: "",
+    notes: "",
+    attendees: [],
+  },
   clients: {
     name: "",
     district: "",
@@ -160,6 +172,7 @@ const REQUIRED = {
   awaiting:  ["project_name"],
   soq:       ["project_name"],
   events:    ["title"],
+  hotleads:  ["title"],
   clients:   ["name"],
   companies: ["name"],
 };
@@ -337,7 +350,7 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
     // picker for Sub-role rows includes both clients AND companies; if the
     // user picked a company, send it to prime_company_id instead (and
     // blank client_id) to avoid the client_id_fkey violation on insert.
-    const projectTables = new Set(["potential_projects", "awaiting_verdict", "soq"]);
+    const projectTables = new Set(["potential_projects", "awaiting_verdict", "soq", "hot_leads"]);
     if (projectTables.has(dbTable) && payload.client_id && !clientIdSet.has(payload.client_id)) {
       payload.prime_company_id = payload.client_id;
       delete payload.client_id;
@@ -439,6 +452,15 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
             .from("event_attendees")
             .insert(att.map(uid => ({ event_id: row.id, user_id: uid })));
           if (e3) throw e3;
+          extras.attendees = att;
+        }
+      } else if (table === "hotleads") {
+        const att = form.attendees || [];
+        if (att.length > 0) {
+          const { error: eH } = await supabase
+            .from("hot_lead_attendees")
+            .insert(att.map(uid => ({ hot_lead_id: row.id, user_id: uid })));
+          if (eH) throw eH;
           extras.attendees = att;
         }
       }
@@ -749,6 +771,39 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
           <Field label="Date & Time">
             <input className="input" type="datetime-local" value={form.event_datetime}
                    onChange={e => set("event_datetime", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Attendees" multiline>
+            <UserMultiPicker value={form.attendees} users={users}
+                             onChange={next => set("attendees", next)}
+                             placeholder="Pick MSMM users…"/>
+          </Field>
+          <Field label="Notes" multiline>
+            <textarea className="textarea" value={form.notes}
+                      onChange={e => set("notes", e.target.value)}/>
+          </Field>
+        </>
+      );
+    }
+
+    if (table === "hotleads") {
+      return (
+        <>
+          <Field label="Title *">
+            <input className="input" autoFocus value={form.title}
+                   onChange={e => set("title", e.target.value)}/>
+          </Field>
+          <Field label="Client / Firm">
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOrFirmOptions}
+              placeholder="Search clients or firms…"
+              onChange={v => set("client_id", v || "")}
+            />
+          </Field>
+          <Field label="Date & Time">
+            <input className="input" type="datetime-local" value={form.date_time}
+                   onChange={e => set("date_time", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
           <Field label="Attendees" multiline>

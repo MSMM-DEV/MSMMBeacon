@@ -178,6 +178,16 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
+    hotleads: [
+      { k: "title",          label: "Title" },
+      // `company` field type feeds from the Clients list. For Hot Leads we
+      // want BOTH clients AND companies available, so this drawer swaps in
+      // the merged list via the `hotleadsCompany` custom type below.
+      { k: "clientId",       label: "Client / Firm",           type: "clientOrFirm" },
+      { k: "dateTime",       label: "Date & Time",             type: "datetime" },
+      { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
+      { k: "notes",          label: "Notes",                   type: "textarea" },
+    ],
     clients: [
       // Edit baseName (not the merged display `name`) so the PATCH sends
       // just the raw name to beacon.clients.name. updateClients() in App.jsx
@@ -228,6 +238,17 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
         />
       );
     }
+    // Hot Leads have no role concept, but still want the merged list so
+    // early-stage leads can reference either an actual client or an
+    // external firm. updateHotLeads in App.jsx routes via routeClientPick.
+    if (f.type === "clientOrFirm") return (
+      <SearchableSelect
+        value={val || ""}
+        options={CLIENT_OR_FIRM_OPTIONS}
+        placeholder="Search clients or firms…"
+        onChange={v => set(v || null)}
+      />
+    );
     if (f.type === "user") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
         <option value="">—</option>

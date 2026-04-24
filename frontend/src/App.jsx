@@ -3,7 +3,7 @@ import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
-  InvoiceTable, EventsTable, ClientsTable, CompaniesTable,
+  InvoiceTable, EventsTable, HotLeadsTable, ClientsTable, CompaniesTable,
 } from "./tables.jsx";
 import { QuadSheet } from "./quadsheet.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
@@ -48,6 +48,7 @@ const TAB_META = [
   // bring the tab back, restore this entry + the {tab === "soq" && ...}
   // render block below, and re-add the SoqTable import.
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
+  { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
   { key: "clients",   label: "Clients",          stage: "stage-clients",   group: "side" },
   { key: "companies", label: "Companies",        stage: "stage-clients",   group: "side" },
   { key: "quad",      label: "Quad Sheet",       stage: "stage-quad",      group: "side" },
@@ -61,6 +62,7 @@ const PAGE_META = {
   closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
+  hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   clients:   { title: "Clients", desc: "Organizations that hire us. Referenced by every project row's Client field." },
   companies: { title: "Companies", desc: "Firms we team with as Primes or Subs. Referenced by project Prime and Subs fields." },
   quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and SOQs at a glance." },
@@ -119,6 +121,11 @@ const FILTERS = {
     upcoming: r => r.status === "Booked",
     happened: r => r.status === "Happened",
   },
+  hotleads: {
+    all: () => true,
+    upcoming: r => r.dateTime && new Date(r.dateTime) >= new Date(),
+    past:     r => r.dateTime && new Date(r.dateTime) <  new Date(),
+  },
   clients: {
     all: () => true,
     federal: r => r.orgType === "Federal",
@@ -164,6 +171,11 @@ const FILTER_CHIPS = {
     { key: "all",      label: "All" },
     { key: "upcoming", label: "Upcoming", icon: "calendar" },
     { key: "happened", label: "Happened" },
+  ],
+  hotleads: [
+    { key: "all",      label: "All" },
+    { key: "upcoming", label: "Upcoming", icon: "clock" },
+    { key: "past",     label: "Past" },
   ],
   clients: [
     { key: "all",     label: "All" },
@@ -401,6 +413,16 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       notes: dbRow.notes || "",
     };
   }
+  if (table === "hotleads") {
+    return {
+      id: dbRow.id,
+      title: dbRow.title,
+      dateTime: dbRow.date_time || "",
+      clientId: dbRow.client_id || dbRow.prime_company_id || null,
+      notes: dbRow.notes || "",
+      attendees: extras.attendees || [],
+    };
+  }
   if (table === "clients") {
     return {
       id: dbRow.id,
@@ -555,13 +577,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [closed,    setClosed]    = useState(initial.closed);
   const [invoice,   setInvoice]   = useState(initial.invoices);
   const [events,    setEvents]    = useState(initial.events);
+  const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
   const [clients,   setClients]   = useState(() => getClientsOnly());
   const [companies, setCompanies] = useState(() => getCompaniesOnly());
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
     potential: "all", awaiting: "all", awarded: "all", soq: "all", closed: "all",
-    events: "all", clients: "all", companies: "all",
+    events: "all", hotleads: "all", clients: "all", companies: "all",
   });
 
   // Year filter state. null = All years; number = filter to that year. Default
@@ -570,6 +593,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [yearFilter, setYearFilter] = useState({
     potential: THIS_YEAR, awaiting: THIS_YEAR, awarded: THIS_YEAR, soq: THIS_YEAR,
     closed: THIS_YEAR, invoice: THIS_YEAR, events: THIS_YEAR,
+    hotleads: THIS_YEAR,
   });
   const setYear = (t, y) => setYearFilter(f => ({ ...f, [t]: y }));
 
@@ -648,6 +672,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     title: "title", status: "status", type: "type",
     date: "event_date", dateTime: "event_datetime", notes: "notes",
   };
+  // Hot Leads — like Events but with a client/company picker. `clientId` is
+  // intentionally OMITTED from this map for the same reason as the project
+  // tables (routed through routeClientPick to client_id or prime_company_id
+  // based on which pool the UUID belongs to).
+  const HOT_LEADS_COLS = {
+    title: "title",
+    dateTime: "date_time",
+    notes: "notes",
+  };
   const CLIENTS_COLS = {
     baseName: "name", district: "district", orgType: "org_type",
     contact: "contact_person", email: "email", phone: "phone",
@@ -666,7 +699,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const NULL_IF_EMPTY_COLS = new Set([
     "next_action_date", "date_submitted", "anticipated_result_date",
     "date_closed", "start_date", "contract_expiry_date",
-    "event_date", "event_datetime",
+    "event_date", "event_datetime", "date_time",
     "year", "total_contract_amount", "msmm_amount",
     "anticipated_invoice_start_month", "msmm_used", "msmm_remaining",
     "client_id",
@@ -848,6 +881,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if ("attendees" in patch) {
       syncJoinUsers(id, existing.attendees, patch.attendees,
         "event_attendees", "event_id");
+    }
+  };
+
+  const updateHotLeads = (id, patch) => {
+    const existing = hotLeads.find(r => r.id === id);
+    if (!existing) return;
+    setHotLeads(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    const dbPatch = buildDbPatch(patch, HOT_LEADS_COLS);
+    // Client-or-Firm picker: route the unified clientId to the right column.
+    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
+    patchTable("hot_leads", id, dbPatch);
+    if ("attendees" in patch) {
+      syncJoinUsers(id, existing.attendees, patch.attendees,
+        "hot_lead_attendees", "hot_lead_id");
     }
   };
 
@@ -1097,6 +1144,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (table === "awaiting")   setAwaiting(rs => [uiRow, ...rs]);
     if (table === "soq")        setSoq(rs => [uiRow, ...rs]);
     if (table === "events")     setEvents(rs => [uiRow, ...rs]);
+    if (table === "hotleads")   setHotLeads(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
     if (table === "companies")  setCompanies(rs => [uiRow, ...rs]);
     // Orange potential auto-creates an Anticipated Invoice row tagged with
@@ -1190,10 +1238,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Available years per tab (derived from data; descending)
   const availableYears = useMemo(() => {
     const uniq = (rows) => [...new Set(rows.map(r => r.year).filter(v => v != null))].sort((a, b) => b - a);
-    // Events don't carry a standalone year column — derive it from the ISO
-    // event_date (first 4 chars). Empty dates contribute nothing.
-    const uniqFromDate = (rows) => [...new Set(
-      rows.map(r => r.date ? Number(String(r.date).slice(0, 4)) : null)
+    // Events/Hot Leads don't carry a standalone year column — derive it from
+    // the ISO date string (first 4 chars). Empty dates contribute nothing.
+    const uniqFromDate = (rows, key) => [...new Set(
+      rows.map(r => r[key] ? Number(String(r[key]).slice(0, 4)) : null)
           .filter(v => v != null && !Number.isNaN(v))
     )].sort((a, b) => b - a);
     return {
@@ -1203,9 +1251,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       soq:       uniq(soq),
       closed:    uniq(closed),
       invoice:   uniq(invoice),
-      events:    uniqFromDate(events),
+      events:    uniqFromDate(events, "date"),
+      hotleads:  uniqFromDate(hotLeads, "dateTime"),
     };
-  }, [potential, awaiting, awarded, soq, closed, invoice, events]);
+  }, [potential, awaiting, awarded, soq, closed, invoice, events, hotLeads]);
 
   // Apply year filter, then category filter. Events filter against the year
   // component of the ISO event_date, not a dedicated year column.
@@ -1215,6 +1264,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       if (y == null) return rows;
       if (key === "events") {
         return rows.filter(r => r.date && Number(String(r.date).slice(0, 4)) === y);
+      }
+      if (key === "hotleads") {
+        return rows.filter(r => r.dateTime && Number(String(r.dateTime).slice(0, 4)) === y);
       }
       return rows.filter(r => r.year === y);
     };
@@ -1231,10 +1283,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       closed:    apply("closed",    closed),
       invoice:   applyYear("invoice", invoice),
       events:    apply("events",    events),
+      hotleads:  apply("hotleads",  hotLeads),
       clients:   apply("clients",   clients),
       companies: apply("companies", companies),
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, soq, closed, invoice, events, clients, companies]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, soq, closed, invoice, events, hotLeads, clients, companies]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -1259,7 +1312,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     count: tabKey === tab
       ? (chip.key === "all"
           ? (filtered[tabKey]?.length ?? 0)
-          : (({potential,awaiting,awarded,closed,events,clients,companies})[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
+          : (({potential,awaiting,awarded,closed,events,hotleads:hotLeads,clients,companies})[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
       : null,
     active: filterKey[tabKey] === chip.key,
     onClick: () => setFilterKey(f => ({ ...f, [tabKey]: chip.key })),
@@ -1282,6 +1335,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     potential: potential.length, awaiting: awaiting.length,
     awarded: awarded.length, soq: soq.length, closed: closed.length,
     invoice: invoice.length, events: events.length,
+    hotleads: hotLeads.length,
     clients: clients.length, companies: companies.length,
     quad: null,
   };
@@ -1294,9 +1348,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // candidates added without going through the proposal stage). Awarded /
   // Closed Out / Invoice are only reached via Move Forward from an earlier
   // stage — no direct "New" button for those.
-  const newForTab = { awaiting: "awaiting", potential: "potential", events: "events", clients: "clients", companies: "companies" };
+  const newForTab = { awaiting: "awaiting", potential: "potential", events: "events", hotleads: "hotleads", clients: "clients", companies: "companies" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
+                 : tab === "hotleads" ? "New hot lead"
                  : tab === "clients" ? "New client"
                  : tab === "companies" ? "New company"
                  : tab === "awaiting" ? "New awaiting verdict"
@@ -1505,6 +1560,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.events}
             onYearChange={(y) => setYear("events", y)}/>
         )}
+        {tab === "hotleads" && (
+          <HotLeadsTable rows={filtered.hotleads}
+            updateRow={updateHotLeads}
+            onOpenDrawer={r => openDrawer(r, "hotleads")}
+            flashId={flashId}
+            filters={chipsFor("hotleads")}
+            tab="hotleads"
+            yearOptions={availableYears.hotleads}
+            yearValue={yearFilter.hotleads}
+            onYearChange={(y) => setYear("hotleads", y)}/>
+        )}
         {tab === "clients" && (
           <ClientsTable rows={filtered.clients}
             updateRow={updateClients}
@@ -1528,7 +1594,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             invoice={invoice}
             events={events}
             awaiting={awaiting}
-            soq={soq}
+            hotLeads={hotLeads}
             onOpen={(t, r) => openDrawer(r, t)}
           />
         )}
@@ -1546,6 +1612,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           drawer.table === "closed"    ? closed    :
           drawer.table === "invoice"   ? invoice   :
           drawer.table === "events"    ? events    :
+          drawer.table === "hotleads"  ? hotLeads  :
           drawer.table === "clients"   ? clients   :
           drawer.table === "companies" ? companies :
           []
@@ -1564,6 +1631,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "closed"    ? updateClosed    :
             drawer.table === "invoice"   ? updateInvoice   :
             drawer.table === "events"    ? updateEvents    :
+            drawer.table === "hotleads"  ? updateHotLeads  :
             drawer.table === "clients"   ? updateClients   :
             drawer.table === "companies" ? updateCompanies :
             () => {}

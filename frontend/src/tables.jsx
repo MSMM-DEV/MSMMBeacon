@@ -2380,6 +2380,98 @@ export const EventsTable = ({
   );
 };
 
+// ---------- Hot Leads ----------
+// Lightweight tracker for early-stage opportunities (partner chats, trade
+// shows, pre-RFP conversations) before they become Potential Projects.
+// Structurally similar to Events: title + datetime + attendees + notes,
+// plus a Client-or-Firm picker that routes to either client_id or
+// prime_company_id on the underlying row via routeClientPick (handled in
+// updateHotLeads in App.jsx). Chronological, sorted newest-first.
+export const HotLeadsTable = ({
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, flashId, filters,
+  yearOptions, yearValue, onYearChange,
+}) => {
+  const cols = [
+    { label: "__select", w: "42px", locked: true },
+    { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
+    { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
+      sortValue: r => companyById(r.clientId)?.name || "" },
+    { label: "Date & Time", w: "170px", sortKey: "dateTime" },
+    { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
+    { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
+    { label: "__actions",   w: "60px", locked: true },
+  ];
+
+  const { clientOrFirmOpts } = buildOptions();
+
+  // Newest-first is the most intuitive default for a running lead list.
+  const primarySort = [{ key: "dateTime", dir: "desc" }];
+
+  return (
+    <TableView
+      tab={tab}
+      filters={filters}
+      columns={cols} rows={rows}
+      primarySort={primarySort}
+      yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
+      emptyTitle="No hot leads yet"
+      emptyHint="Log early-stage opportunities here — partner intros, conference chats, warm pre-RFPs."
+      emptyIcon="trend"
+      renderRow={(r, _i, gridCols, visibleColumns) => {
+        const cells = {
+          "__select": (
+            <div className="td row-check" onClick={e => e.stopPropagation()}>
+              <input type="checkbox"/>
+            </div>
+          ),
+          "Title": (
+            <div className="td" style={{ fontWeight: 500 }}>
+              <EditableCell value={r.title}
+                onChange={v => updateRow(r.id, { title: v })}/>
+            </div>
+          ),
+          "Client / Firm": (
+            <div className="td subtle" style={{ overflow: "hidden" }}>
+              <EditableCell value={r.clientId} type="combobox" options={clientOrFirmOpts}
+                onChange={v => updateRow(r.id, { clientId: v })}
+                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Date & Time": (
+            <div className="td mono subtle">
+              <EditableCell value={r.dateTime} type="datetime-local"
+                onChange={v => updateRow(r.id, { dateTime: v })}
+                format={v => fmtDateTime(v)}/>
+            </div>
+          ),
+          "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,
+          "Notes": (
+            <div className="td subtle" style={{ fontSize: 12.5 }}>
+              <EditableCell value={r.notes} type="textarea"
+                onChange={v => updateRow(r.id, { notes: v })}
+                format={v => truncCell(v)}/>
+            </div>
+          ),
+          "__actions": (
+            <div className="td" style={{ justifyContent: "flex-end" }}>
+              <div className="row-actions" onClick={e => e.stopPropagation()}>
+                <button className="row-btn" title="More"><Icon name="more" size={14}/></button>
+              </div>
+            </div>
+          ),
+        };
+        return (
+          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               style={{ gridTemplateColumns: gridCols, cursor: "default" }}
+               onDoubleClick={() => onOpenDrawer(r)}>
+            {renderOrderedCells(visibleColumns, cells)}
+          </div>
+        );
+      }}
+    />
+  );
+};
+
 // ---------- Clients (clients only, with Org Type) ----------
 export const ClientsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, flashId, filters }) => {
   const cols = [

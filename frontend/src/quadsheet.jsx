@@ -12,18 +12,16 @@ import {
 //   Q1  Invoice flow — interactive line chart over 12 months (Actual + Proj).
 //   Q2  Events ledger — chronological list of upcoming + recent events.
 //   Q3  Awaiting docket — project name + anticipated result date.
-//   Q4  SOQ timeline — start → expiry as horizontal gantt-style bars.
+//   Q4  Hot Leads — chronological list of early-stage opportunities.
 //
 // Styling: editorial / executive — generous whitespace, mono numerics, an
 // asymmetric 2x2 grid where Q1 gets extra visual weight (it's the only
 // interactive panel). Content scrolls inside a panel if it overflows.
 // ============================================================================
 
-// `soq` prop is accepted but unused — kept in the signature so App.jsx can
-// pass it without a warning while the SOQ quadrant is hidden from the UI.
-export const QuadSheet = ({ invoice, events, awaiting, soq: _soqUnused, onOpen }) => {
+export const QuadSheet = ({ invoice, events, awaiting, hotLeads, onOpen }) => {
   return (
-    <div className="quad quad-3up">
+    <div className="quad">
       <QuadCard
         eyebrow="01 · Cash Flow"
         title="Anticipated Invoice"
@@ -49,6 +47,15 @@ export const QuadSheet = ({ invoice, events, awaiting, soq: _soqUnused, onOpen }
         accent="await"
         className="quad-q3">
         <AwaitingList awaiting={awaiting} onOpen={r => onOpen("awaiting", r)}/>
+      </QuadCard>
+
+      <QuadCard
+        eyebrow="04 · Pre-Pipeline"
+        title="Hot Leads"
+        sub={`${(hotLeads || []).length} tracked · early-stage`}
+        accent="soq"
+        className="quad-q4">
+        <HotLeadsList hotLeads={hotLeads || []} onOpen={r => onOpen("hotleads", r)}/>
       </QuadCard>
     </div>
   );
@@ -163,20 +170,20 @@ const InvoiceChart = ({ invoice }) => {
       <div className="chart-kpis">
         <div className="kpi">
           <div className="kpi-label">YTD Actual</div>
-          <div className="kpi-val">{fmtMoney(ytdActualAll)}</div>
-          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase)}</div>
+          <div className="kpi-val">{fmtMoney(ytdActualAll, false)}</div>
+          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase, false)}</div>
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
           <div className="kpi-label">Projection remaining</div>
-          <div className="kpi-val ink-soft">{fmtMoney(projRemAll)}</div>
-          <div className="kpi-sub">w/o Orange · {fmtMoney(projRemBase)}</div>
+          <div className="kpi-val ink-soft">{fmtMoney(projRemAll, false)}</div>
+          <div className="kpi-sub">w/o Orange · {fmtMoney(projRemBase, false)}</div>
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
           <div className="kpi-label">Full year</div>
-          <div className="kpi-val mono-xl">{fmtMoney(ytdActualAll + projRemAll)}</div>
-          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase + projRemBase)}</div>
+          <div className="kpi-val mono-xl">{fmtMoney(ytdActualAll + projRemAll, false)}</div>
+          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase + projRemBase, false)}</div>
         </div>
       </div>
 
@@ -273,10 +280,10 @@ const InvoiceChart = ({ invoice }) => {
                     {MONTHS[hoverIdx]} {THIS_YEAR} · {hoverIdx <= TODAY_MONTH ? "Actual" : "Projection"}
                   </text>
                   <text x={12} y={38} className="chart-tip-val">
-                    {fmtMoney(totalsAll[hoverIdx])}
+                    {fmtMoney(totalsAll[hoverIdx], false)}
                   </text>
                   <text x={12} y={56} className="chart-tip-sub">
-                    w/o Orange · {fmtMoney(totalsBase[hoverIdx])}
+                    w/o Orange · {fmtMoney(totalsBase[hoverIdx], false)}
                   </text>
                 </g>
               );
@@ -421,7 +428,65 @@ const AwaitingList = ({ awaiting, onOpen }) => {
 };
 
 // ============================================================================
-// Q4 — SOQ timeline: gantt-style bars from start → expiration
+// Q4 — Hot Leads: chronological list of early-stage opportunities
+// ============================================================================
+// Mirrors the EventLedger visual vocabulary so Q2 and Q4 feel related but
+// distinct — left date-tile + right body (title + client/firm name). Future
+// leads first, then recent past. Click routes to the drawer.
+// ----------------------------------------------------------------------------
+const HotLeadsList = ({ hotLeads, onOpen }) => {
+  const anchored = useMemo(() => {
+    const now = Date.now();
+    return (hotLeads || [])
+      .map(h => {
+        const iso = h.dateTime || null;
+        const t = iso ? new Date(iso).getTime() : null;
+        return { ...h, _t: t, _future: t != null && t >= now };
+      })
+      .filter(h => h._t != null)
+      .sort((a, b) => a._t - b._t);
+  }, [hotLeads]);
+
+  if (anchored.length === 0) {
+    return <div className="quad-empty">No dated hot leads yet.</div>;
+  }
+
+  const future = anchored.filter(h => h._future);
+  const past   = anchored.filter(h => !h._future).reverse();
+  const ordered = [...future, ...past].slice(0, 40);
+
+  return (
+    <ul className="event-ledger">
+      {ordered.map(h => {
+        const firm = companyById(h.clientId);
+        return (
+          <li key={h.id}
+              className={"evt" + (h._future ? " future" : " past")}
+              onClick={() => onOpen(h)}>
+            <div className="evt-date">
+              <div className="evt-mo">{monthShort(h._t)}</div>
+              <div className="evt-day">{dayOf(h._t)}</div>
+            </div>
+            <div className="evt-body">
+              <div className="evt-title">{h.title}</div>
+              <div className="evt-meta">
+                {firm && <span className="chip accent">{firm.name}</span>}
+                <span className="evt-when">
+                  {new Date(h._t).toLocaleTimeString("en-US",
+                    { hour: "numeric", minute: "2-digit" })}
+                </span>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
+
+// ============================================================================
+// SOQ timeline: gantt-style bars from start → expiration (kept for
+// reference — currently not rendered; SOQ quadrant replaced by Hot Leads).
 // ============================================================================
 // Computes the global [minStart, maxEnd] window across all SOQs, then draws
 // each bar proportionally. Today's position is marked with a vertical line.
