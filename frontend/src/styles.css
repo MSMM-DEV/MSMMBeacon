@@ -204,12 +204,13 @@ html, body { overflow-x: clip; }
   background: var(--bg-elev);
 }
 .pipeline {
-  display: flex; align-items: stretch; gap: 4px;
-  /* Single row always — 10 tabs + 2 pipeline-separator arrows can't fit
-     every viewport, so horizontal scroll is the correct overflow channel
-     (the App.jsx `scrollIntoView` effect on the active tab keeps it in
-     view automatically). flex-wrap:wrap was dropping "Companies" and
-     "Quad Sheet" onto a second row on typical laptop widths. */
+  display: flex; align-items: stretch; gap: 2px;
+  /* Tuned so all 10 tabs + 2 pipeline-separator arrows fit a single
+     line at typical desktop widths (≥1280px) without horizontal
+     scroll. Below that, overflow-x:auto still activates so content
+     stays reachable on tablets/phones (the App.jsx scrollIntoView
+     effect on the active tab keeps it in view automatically).
+     flex-wrap:nowrap guarantees we never stack onto two rows. */
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -223,12 +224,12 @@ html, body { overflow-x: clip; }
    narrow viewports flex would distribute available width and squish them. */
 .tab { flex-shrink: 0; }
 .tab {
-  display: inline-flex; align-items: center; gap: 9px;
-  padding: 10px 14px 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 11px 10px;
   border-radius: 10px 10px 0 0;
   color: var(--text-muted);
   font-weight: 500;
-  font-size: 13.5px;
+  font-size: 13px;
   position: relative;
   transition: color .15s, background .15s;
   border: 1px solid transparent;
@@ -254,8 +255,8 @@ html, body { overflow-x: clip; }
 .tab.stage-clients.active .dot { background: var(--text); }
 .tab .count {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  padding: 1px 6px;
+  font-size: 10px;
+  padding: 1px 5px;
   border-radius: 999px;
   background: var(--surface-2);
   border: 1px solid var(--border);

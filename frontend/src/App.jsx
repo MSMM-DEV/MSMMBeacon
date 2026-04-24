@@ -1493,7 +1493,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               <span className="count">{tabCounts[t.key]}</span>
             </button>
           ))}
-          {TAB_META.some(t => t.group === "head") && <div style={{ width: 24 }}/>}
+          {TAB_META.some(t => t.group === "head") && <div style={{ width: 14 }}/>}
           {TAB_META.filter(t => t.group === "pipeline").map((t, i, arr) => (
             <React.Fragment key={t.key}>
               <button
@@ -1508,7 +1508,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               {i < arr.length - 1 && <span className="tab-sep">→</span>}
             </React.Fragment>
           ))}
-          <div style={{ width: 24 }}/>
+          <div style={{ width: 14 }}/>
           {TAB_META.filter(t => t.group === "side").map(t => (
             <button key={t.key}
               className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}
