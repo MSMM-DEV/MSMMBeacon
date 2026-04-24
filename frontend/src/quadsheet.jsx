@@ -199,7 +199,7 @@ const InvoiceChart = ({ invoice }) => {
     return { totalsBase, totalsAll, yMax };
   }, [invoice]);
 
-  const W = 760, H = 620;
+  const W = 960, H = 620;
   const padL = 48, padR = 20, padT = 20, padB = 36;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
