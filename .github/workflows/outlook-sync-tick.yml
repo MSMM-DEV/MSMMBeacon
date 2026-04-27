@@ -1,0 +1,42 @@
+name: outlook-sync-tick
+
+# Every 15 minutes, POST to the Supabase Edge Function `outlook-sync` so it
+# can pull a Microsoft Graph delta page-set for the beacon@msmmeng.com
+# mailbox and land changes in beacon.events. 15 min keeps Graph rate-limit
+# headroom and is well within calendar-latency tolerance.
+#
+# Two repo secrets required (Settings → Secrets and variables → Actions):
+#   OUTLOOK_SYNC_URL   https://<project-ref>.supabase.co/functions/v1/outlook-sync
+#   OUTLOOK_SYNC_AUTH  the Supabase service-role key for this project
+#
+# Kill switch: set OUTLOOK_SYNC_ENABLED=false as a function secret to stop
+# dispatch without touching this workflow.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: outlook-sync-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST to outlook-sync
+        env:
+          OUTLOOK_SYNC_URL:  ${{ secrets.OUTLOOK_SYNC_URL }}
+          OUTLOOK_SYNC_AUTH: ${{ secrets.OUTLOOK_SYNC_AUTH }}
+        run: |
+          if [ -z "$OUTLOOK_SYNC_URL" ] || [ -z "$OUTLOOK_SYNC_AUTH" ]; then
+            echo "Missing OUTLOOK_SYNC_URL or OUTLOOK_SYNC_AUTH repo secret." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$OUTLOOK_SYNC_URL" \
+            -H "Authorization: Bearer $OUTLOOK_SYNC_AUTH" \
+            -H "Content-Type: application/json" \
+            --max-time 240 \
+            -d '{}'

@@ -284,7 +284,7 @@ function UserMultiPicker({ value, users, onChange, placeholder = "Pick users…"
 }
 
 // --------------------- main component ---------------------
-export const CreateModal = ({ table, clients, companies, users, onClose, onCreated }) => {
+export const CreateModal = ({ table, seed = null, clients, companies, users, onClose, onCreated }) => {
   const dbTable = DB_TABLES[table];
   const titleCfg = TITLES[table];
   const required = REQUIRED[table] || [];
@@ -305,7 +305,7 @@ export const CreateModal = ({ table, clients, companies, users, onClose, onCreat
   // Set of real-client ids for payload routing (see onSubmit below).
   const clientIdSet = useMemo(() => new Set((clients || []).map(c => c.id)), [clients]);
 
-  const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}) }));
+  const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}), ...(seed || {}) }));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 

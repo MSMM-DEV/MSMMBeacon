@@ -494,7 +494,16 @@ function adaptEvent(r) {
     type: r.type || "",
     title: r.title,
     dateTime: r.event_datetime || "",
+    notes: r.notes || "",
     attendees: (r.attendees || []).map(a => a.user_id),
+    source:                    r.source || "manual",
+    outlookEventId:            r.outlook_event_id || "",
+    outlookEndDateTime:        r.outlook_end_datetime || "",
+    outlookExternalAttendees:  r.outlook_external_attendees || [],
+    outlookOrganizer:          r.outlook_organizer || null,
+    outlookWebLink:            r.outlook_web_link || "",
+    outlookIsCancelled:        !!r.outlook_is_cancelled,
+    outlookLastSyncedAt:       r.outlook_last_synced_at || "",
   };
 }
 
@@ -784,4 +793,28 @@ export async function runAlertTickNow() {
     throw new Error(detail);
   }
   return data; // { ok, processed, sent, failed, skipped, disabled? }
+}
+
+export async function runOutlookSyncNow() {
+  const { data, error } = await supabase.functions.invoke("outlook-sync", { body: {} });
+  if (error) {
+    let detail = error.message || "sync failed";
+    try {
+      const ctx = error.context;
+      const text = ctx && typeof ctx.text === "function" ? await ctx.text() : null;
+      if (text) { try { detail = JSON.parse(text).error || text; } catch { detail = text; } }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return data; // { ok, processed, inserted, updated, cancelled, skipped, disabled? }
+}
+
+// Refetch the events list after an Outlook sync (or any external change) so
+// the UI reflects new/updated/cancelled rows without a full loadBeacon().
+export async function reloadEvents() {
+  const { data, error } = await supabase.from("events")
+    .select("*, attendees:event_attendees(user_id)")
+    .order("event_date", { ascending: false, nullsFirst: false });
+  if (error) throw new Error(`events reload: ${error.message}`);
+  return (data || []).map(adaptEvent);
 }

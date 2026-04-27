@@ -6,6 +6,7 @@ import {
   InvoiceTable, EventsTable, HotLeadsTable, ClientsTable, CompaniesTable,
 } from "./tables.jsx";
 import { QuadSheet } from "./quadsheet.jsx";
+import { EventsCalendar } from "./events-calendar.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
@@ -20,6 +21,7 @@ import {
   routeClientPick,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
+  runOutlookSyncNow, reloadEvents,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -631,8 +633,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [moving, setMoving] = useState(null);
   const [alert, setAlertObj] = useState(null);
   const [createTable, setCreateTable] = useState(null); // 'potential' | 'events' | 'clients' | 'companies' | null
+  const [createSeed, setCreateSeed] = useState(null);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
+  const [eventsViewMode, setEventsViewModeState] = useState(() => {
+    try { return localStorage.getItem("beacon.eventsViewMode") || "list"; }
+    catch { return "list"; }
+  });
+  const [calendarViewMode, setCalendarViewModeState] = useState(() => {
+    try { return localStorage.getItem("beacon.calendarViewMode") || "month"; }
+    catch { return "month"; }
+  });
+  const [outlookSyncing, setOutlookSyncing] = useState(false);
+  const setEventsViewMode = (v) => {
+    setEventsViewModeState(v);
+    try { localStorage.setItem("beacon.eventsViewMode", v); } catch {}
+  };
+  const setCalendarViewMode = (v) => {
+    setCalendarViewModeState(v);
+    try { localStorage.setItem("beacon.calendarViewMode", v); } catch {}
+  };
 
   const setTweak = (k, v) => setTweaks(t => ({ ...t, [k]: v }));
 
@@ -906,11 +926,51 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateEvents = (id, patch) => {
     const existing = events.find(r => r.id === id);
     if (!existing) return;
-    setEvents(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    patchTable("events", id, buildDbPatch(patch, EVENTS_COLS));
-    if ("attendees" in patch) {
-      syncJoinUsers(id, existing.attendees, patch.attendees,
+    // Outlook-sourced events: synced fields (title, datetime, attendees) are
+    // overwritten by Graph on every tick — silently strip them from the patch
+    // so a stray inline edit doesn't appear to stick.
+    let safe = patch;
+    if (existing.source === "outlook") {
+      const { title: _t, dateTime: _dt, date: _d, attendees: _a, ...rest } = patch;
+      safe = rest;
+      if (Object.keys(safe).length === 0) {
+        showToast("Synced from Outlook — edit there to change this field.", "lock");
+        return;
+      }
+    }
+    setEvents(rs => rs.map(r => r.id === id ? { ...r, ...safe } : r));
+    patchTable("events", id, buildDbPatch(safe, EVENTS_COLS));
+    if ("attendees" in safe) {
+      syncJoinUsers(id, existing.attendees, safe.attendees,
         "event_attendees", "event_id");
+    }
+  };
+
+  const handleOutlookSync = async () => {
+    if (outlookSyncing) return;
+    setOutlookSyncing(true);
+    try {
+      const res = await runOutlookSyncNow();
+      if (res?.disabled) {
+        showToast("Outlook sync is disabled.", "ban");
+      } else {
+        const parts = [];
+        if (res?.processed != null) parts.push(`${res.processed} processed`);
+        if (res?.inserted)  parts.push(`${res.inserted} new`);
+        if (res?.updated)   parts.push(`${res.updated} updated`);
+        if (res?.cancelled) parts.push(`${res.cancelled} cancelled`);
+        showToast(parts.length ? `Outlook · ${parts.join(" · ")}` : "Outlook sync complete", "bolt");
+        try {
+          const fresh = await reloadEvents();
+          setEvents(fresh);
+        } catch (e) {
+          showToast(`Reload failed: ${e.message || e}`, "x");
+        }
+      }
+    } catch (e) {
+      showToast(`Sync failed: ${e.message || e}`, "x");
+    } finally {
+      setOutlookSyncing(false);
     }
   };
 
@@ -1620,16 +1680,56 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onYearChange={(y) => setYear("invoice", y)}/>
         )}
         {tab === "events" && (
-          <EventsTable rows={filtered.events}
-            updateRow={updateEvents}
-            onOpenDrawer={r => openDrawer(r, "events")}
-            onAlert={r => setAlertObj({ row: r, tab: "events" })}
-            flashId={flashId}
-            filters={chipsFor("events")}
-            tab="events"
-            yearOptions={availableYears.events}
-            yearValue={yearFilter.events}
-            onYearChange={(y) => setYear("events", y)}/>
+          <>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+              <div className="events-view-toggle" role="tablist" aria-label="Events view">
+                <button
+                  className={eventsViewMode === "list" ? "active" : ""}
+                  onClick={() => setEventsViewMode("list")}
+                  role="tab"
+                  aria-selected={eventsViewMode === "list"}
+                >
+                  <Icon name="columns" size={12}/> List
+                </button>
+                <button
+                  className={eventsViewMode === "calendar" ? "active" : ""}
+                  onClick={() => setEventsViewMode("calendar")}
+                  role="tab"
+                  aria-selected={eventsViewMode === "calendar"}
+                >
+                  <Icon name="calendar" size={12}/> Calendar
+                </button>
+              </div>
+            </div>
+            {eventsViewMode === "list" ? (
+              <EventsTable rows={filtered.events}
+                updateRow={updateEvents}
+                onOpenDrawer={r => openDrawer(r, "events")}
+                onAlert={r => setAlertObj({ row: r, tab: "events" })}
+                flashId={flashId}
+                filters={chipsFor("events")}
+                tab="events"
+                yearOptions={availableYears.events}
+                yearValue={yearFilter.events}
+                onYearChange={(y) => setYear("events", y)}/>
+            ) : (
+              <EventsCalendar
+                events={events}
+                onOpenDrawer={r => openDrawer(r, "events")}
+                onCreateAtSlot={({ start }) => {
+                  const pad = (n) => String(n).padStart(2, "0");
+                  const iso = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`;
+                  setCreateSeed({ event_datetime: iso });
+                  setCreateTable("events");
+                }}
+                viewMode={calendarViewMode}
+                setViewMode={setCalendarViewMode}
+                isAdmin={isAdmin}
+                onSyncNow={handleOutlookSync}
+                syncing={outlookSyncing}
+              />
+            )}
+          </>
         )}
         {tab === "hotleads" && (
           <HotLeadsTable rows={filtered.hotleads}
@@ -1739,10 +1839,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {createTable && (
         <CreateModal
           table={createTable}
+          seed={createSeed}
           clients={clients}
           companies={companies}
           users={getUsers()}
-          onClose={() => setCreateTable(null)}
+          onClose={() => { setCreateTable(null); setCreateSeed(null); }}
           onCreated={(dbRow, extras) => handleCreated(createTable, dbRow, extras)}/>
       )}
 

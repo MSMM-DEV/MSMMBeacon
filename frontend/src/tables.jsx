@@ -2332,15 +2332,28 @@ export const EventsTable = ({
           ),
           "Title": (
             <div className="td" style={{ fontWeight: 500 }}>
-              <EditableCell value={r.title}
-                onChange={v => updateRow(r.id, { title: v })}/>
+              {r.source === "outlook" ? (
+                <span className="td-readonly" title={r.outlookWebLink ? "Synced from Outlook · Edit in Outlook" : "Synced from Outlook"}>
+                  <span className="src-mark"><Icon name="link" size={9} stroke={2}/></span>
+                  <span className="td-readonly-text">{r.title}</span>
+                </span>
+              ) : (
+                <EditableCell value={r.title}
+                  onChange={v => updateRow(r.id, { title: v })}/>
+              )}
             </div>
           ),
           "Date & Time": (
             <div className="td mono subtle">
-              <EditableCell value={r.dateTime} type="datetime-local"
-                onChange={v => updateRow(r.id, { dateTime: v })}
-                format={v => v ? fmtDateTime(v) : (r.date ? fmtDate(r.date) : fmtDateTime(v))}/>
+              {r.source === "outlook" ? (
+                <span className="td-readonly-text">
+                  {r.dateTime ? fmtDateTime(r.dateTime) : (r.date ? fmtDate(r.date) : "—")}
+                </span>
+              ) : (
+                <EditableCell value={r.dateTime} type="datetime-local"
+                  onChange={v => updateRow(r.id, { dateTime: v })}
+                  format={v => v ? fmtDateTime(v) : (r.date ? fmtDate(r.date) : fmtDateTime(v))}/>
+              )}
             </div>
           ),
           "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,

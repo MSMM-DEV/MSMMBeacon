@@ -170,11 +170,11 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "remainingStart", label: "Remaining to Bill (Jan 1)", type: "money" },
     ],
     events: [
-      { k: "title",          label: "Title" },
+      { k: "title",          label: "Title",                                           readOnlyIf: (r) => r.source === "outlook" },
       { k: "status",         label: "Status",                  type: "select", options: ["Booked","Happened"] },
       { k: "type",           label: "Type",                    type: "select", options: ["Partner","AI","Project","Meetings","Board Meetings","Event"] },
-      { k: "dateTime",       label: "Date & Time",             type: "datetime" },
-      { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
+      { k: "dateTime",       label: "Date & Time",             type: "datetime",       readOnlyIf: (r) => r.source === "outlook" },
+      { k: "attendees",      label: "Attendees from MSMM",     type: "users",          readOnlyIf: (r) => r.source === "outlook" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
     hotleads: [
@@ -216,6 +216,34 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
   const renderInput = (f) => {
     const val = row[f.k];
     const set = (v) => onUpdate(row.id, { [f.k]: v });
+    const readOnly = !!(f.readOnlyIf && f.readOnlyIf(row));
+    if (readOnly) {
+      if (f.type === "users") {
+        const ids = val || [];
+        if (ids.length === 0) {
+          return <div className="field-readonly muted">— no MSMM attendees</div>;
+        }
+        return (
+          <div className="field-readonly">
+            <div className="readonly-userlist">
+              {ids.map(uid => {
+                const u = userById(uid); if (!u) return null;
+                return (
+                  <span key={uid} className="readonly-user">
+                    <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+                    {u.name}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+      if (f.type === "datetime") {
+        return <div className="field-readonly mono">{val || "—"}</div>;
+      }
+      return <div className="field-readonly">{val || <span className="muted">—</span>}</div>;
+    }
     if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
     if (f.type === "select") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
@@ -390,6 +418,26 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           </div>
         </div>
         <div className="drawer-body">
+          {table === "events" && row.source === "outlook" && (
+            <div className="drawer-outlook-banner">
+              <span className="outlook-banner-mark"><Icon name="mail" size={11}/></span>
+              <span className="outlook-banner-text">
+                Synced from Outlook
+                {row.outlookOrganizer?.email && (
+                  <span className="muted"> · organized by {row.outlookOrganizer.name || row.outlookOrganizer.email}</span>
+                )}
+              </span>
+              {row.outlookWebLink && (
+                <a className="outlook-banner-link"
+                   href={row.outlookWebLink}
+                   target="_blank"
+                   rel="noreferrer noopener">
+                  Edit in Outlook
+                  <Icon name="link" size={10}/>
+                </a>
+              )}
+            </div>
+          )}
           {fields.filter(f => !f.showIf || f.showIf(row)).map(f => (
             <div key={f.k} className="field">
               <div className="field-label">{f.label}</div>
@@ -398,6 +446,24 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
               </div>
             </div>
           ))}
+          {table === "events" && (row.outlookExternalAttendees || []).length > 0 && (
+            <>
+              <div className="section-title" style={{ marginTop: 22 }}>
+                <Icon name="users" size={12}/>
+                External invitees · {row.outlookExternalAttendees.length}
+              </div>
+              <div className="ext-chips">
+                {row.outlookExternalAttendees.map((a, i) => (
+                  <span key={`${a.email}-${i}`}
+                        className={"ext-chip" + (a.response === "declined" ? " declined" : a.response === "accepted" ? " accepted" : "")}
+                        title={`${a.name || a.email} · ${a.response || "no response"}`}>
+                    {a.name && <span className="ext-chip-name">{a.name}</span>}
+                    <span className="ext-chip-email mono">{a.email}</span>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
           {row.sourceId && (
             <>
               <div className="section-title" style={{ marginTop: 22 }}><Icon name="link" size={12}/>Linked history</div>
