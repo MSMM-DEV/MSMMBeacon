@@ -14,7 +14,7 @@ if (!URL || !KEY) {
 }
 
 export const supabase = createClient(URL, KEY, {
-  db: { schema: "beacon" },
+  db: { schema: "beacon_v2" },
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -231,11 +231,6 @@ const TAB_ANCHORS = {
     { field: "contract_expiry_date",    uiField: "contractExpiry",        label: "Contract expiry" },
     { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
   ],
-  soq: [
-    { field: "contract_expiry_date",    uiField: "contractExpiry",        label: "Contract expiry" },
-    { field: "start_date",              uiField: "startDate",             label: "Start date" },
-    { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
-  ],
   closed: [
     { field: "date_closed",             uiField: "dateClosed",            label: "Closed" },
     { field: "date_submitted",          uiField: "dateSubmitted",         label: "Submitted" },
@@ -260,16 +255,17 @@ export function getRowAnchors(tab, row) {
     .filter(a => a.value);
 }
 
-// UI tab key → beacon.alert_subject_enum value.
+// UI tab key → beacon_v2.alert_subject_enum value. v2 collapsed the 8-value
+// v1 enum to 4: every project status maps to 'project'; hot-leads maps to
+// 'lead'; invoice/event keep their values; SOQ is dropped.
 export const TAB_TO_SUBJECT_TABLE = {
-  potential: "potential",
-  awaiting:  "awaiting",
-  awarded:   "awarded",
-  soq:       "soq",
-  closed:    "closed_out",
+  potential: "project",
+  awaiting:  "project",
+  awarded:   "project",
+  closed:    "project",
   invoice:   "invoice",
   events:    "event",
-  hotleads:  "hotlead",
+  hotleads:  "lead",
 };
 
 // ----------------------------------------------------------------------
@@ -384,35 +380,6 @@ function adaptAwaiting(r) {
   };
 }
 
-function adaptSoq(r) {
-  return {
-    id: r.id,
-    year: r.year,
-    name: r.project_name,
-    role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id || r.prime_company_id || null,
-    amount: null,
-    msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
-    subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
-    pmIds: allPms(r.pms),
-    notes: r.notes || "",
-    dates: "",
-    projectNumber: r.project_number || "",
-    status: "SOQ",
-    dateSubmitted: r.date_submitted || "",
-    clientContract: r.client_contract_number || "",
-    msmmContract: r.msmm_contract_number || "",
-    msmmUsed: r.msmm_used || 0,
-    msmmRemaining: r.msmm_remaining || 0,
-    stage: r.stage?.name || "",
-    details: r.details || "",
-    pools: r.pool || "",
-    startDate: r.start_date || "",
-    contractExpiry: r.contract_expiry_date || "",
-    recurring: r.recurring || "",
-  };
-}
-
 function adaptAwarded(r) {
   return {
     id: r.id,
@@ -466,8 +433,10 @@ function adaptClosed(r) {
 function adaptInvoice(r) {
   return {
     id: r.id,
-    sourceId: r.source_awarded_id,
-    sourcePotentialId: r.source_potential_id || null,
+    // v2 collapsed source_awarded_id + source_potential_id into a single
+    // source_project_id. The UI keeps a `sourceId` field that points at any
+    // upstream project (potential or awarded — both live in beacon_v2.projects).
+    sourceId: r.source_project_id || null,
     projectNumber: r.project_number || "",
     name: r.project_name,
     pmIds: allPms(r.pms),
@@ -533,35 +502,22 @@ async function pget(builder, label) {
 }
 
 export async function loadBeacon() {
-  const [users, clients, companies, potential, awaiting, awarded, closed, invoice, events, soq, hotLeads] = await Promise.all([
+  // v2 collapsed the 5 v1 pipeline tables (potential_projects, awaiting_verdict,
+  // awarded_projects, closed_out_projects, soq) into a single beacon_v2.projects
+  // table keyed on a `status` column. We pull all projects in one query and
+  // split into the same 4 React state slices the UI already expects (SOQ is
+  // dropped). PMs and subs use the consolidated project_pms / project_subs
+  // join tables.
+  const [users, clients, companies, projects, invoice, events, hotLeads] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
     pget(supabase.from("companies").select("*").order("name"), "companies"),
     pget(
-      supabase.from("potential_projects")
-        .select("*, subs:potential_project_subs(ord,company_id,discipline,amount), pms:potential_project_pms(user_id)")
+      supabase.from("projects")
+        .select("*, subs:project_subs(ord,company_id,discipline,amount), pms:project_pms(user_id), stage:stage_id(name)")
         .order("year", { ascending: false })
         .order("project_name"),
-      "potential_projects"
-    ),
-    pget(
-      supabase.from("awaiting_verdict")
-        .select("*, subs:awaiting_verdict_subs(company_id), pms:awaiting_verdict_pms(user_id)")
-        .order("date_submitted", { ascending: false, nullsFirst: false }),
-      "awaiting_verdict"
-    ),
-    pget(
-      supabase.from("awarded_projects")
-        .select("*, stage:stage_id(name), subs:awarded_project_subs(company_id), pms:awarded_project_pms(user_id)")
-        .order("year", { ascending: false })
-        .order("project_name"),
-      "awarded_projects"
-    ),
-    pget(
-      supabase.from("closed_out_projects")
-        .select("*, pms:closed_out_project_pms(user_id)")
-        .order("date_closed", { ascending: false, nullsFirst: false }),
-      "closed_out_projects"
+      "projects"
     ),
     pget(
       supabase.from("anticipated_invoice")
@@ -576,41 +532,36 @@ export async function loadBeacon() {
         .order("event_date", { ascending: false, nullsFirst: false }),
       "events"
     ),
-    pget(
-      supabase.from("soq")
-        .select("*, stage:stage_id(name), subs:soq_subs(company_id), pms:soq_pms(user_id)")
-        .order("year", { ascending: false })
-        .order("project_name"),
-      "soq"
-    ),
-    // `hot_leads` and `hot_lead_attendees` are created by migration
-     // 20260425120000_hot_leads.sql. If the migration hasn't been applied
-     // yet (e.g. deploying the frontend before running the SQL) the fetch
-     // would fail and crash loadBeacon. Swallow that specific error so the
-     // rest of the app boots; the Hot Leads tab/quadrant show empty until
-     // the SQL is run.
-    supabase.from("hot_leads")
-      .select("*, attendees:hot_lead_attendees(user_id)")
+    // `leads` (renamed from v1 `hot_leads`) + `lead_attendees`. If the
+    // schema migration hasn't been applied yet (e.g. frontend deployed
+    // ahead of the SQL), swallow the error so the rest of the app boots.
+    supabase.from("leads")
+      .select("*, attendees:lead_attendees(user_id)")
       .order("date_time", { ascending: false, nullsFirst: false })
       .then(({ data, error }) => {
         if (error) {
-          console.warn("[beacon] hot_leads fetch skipped:", error.message);
+          console.warn("[beacon_v2] leads fetch skipped:", error.message);
           return [];
         }
         return data || [];
       }),
   ]);
 
+  // Split the consolidated projects array into status-keyed slices so the
+  // rest of the app sees the same shape it always has.
+  const potential = projects.filter(r => r.status === "potential");
+  const awaiting  = projects.filter(r => r.status === "awaiting");
+  const awarded   = projects.filter(r => r.status === "awarded");
+  const closed    = projects.filter(r => r.status === "closed_out");
+
   _users = users.map(adaptUser);
 
-  // Infer company role (Prime / Sub / Multiple) from observed usage across stages.
+  // Infer company role (Prime / Sub / Multiple) from observed usage across
+  // every project, regardless of status. v2's single projects table makes
+  // this a single iteration instead of 3 separate ones.
   const primeIds = new Set();
   const subIds = new Set();
-  [...awarded, ...awaiting].forEach(r => {
-    if (r.prime_company_id) primeIds.add(r.prime_company_id);
-    (r.subs || []).forEach(s => subIds.add(s.company_id));
-  });
-  potential.forEach(r => {
+  projects.forEach(r => {
     if (r.prime_company_id) primeIds.add(r.prime_company_id);
     (r.subs || []).forEach(s => { if (s.company_id) subIds.add(s.company_id); });
   });
@@ -638,7 +589,7 @@ export async function loadBeacon() {
   let reconciledInvoices = invoice;
   if (false) {
   const linkedPotentialIds = new Set(
-    invoice.map(r => r.source_potential_id).filter(Boolean)
+    invoice.map(r => r.source_project_id).filter(Boolean)
   );
   const orphanOranges = potential.filter(p =>
     p.probability === "Orange" &&
@@ -647,7 +598,7 @@ export async function loadBeacon() {
   );
   if (orphanOranges.length > 0) {
     const payloads = orphanOranges.map(p => ({
-      source_potential_id: p.id,
+      source_project_id: p.id,
       project_name: p.project_name,
       year: p.year,
       project_number: p.project_number || null,
@@ -674,7 +625,6 @@ export async function loadBeacon() {
     closed:    closed.map(adaptClosed),
     invoices:  reconciledInvoices.map(adaptInvoice),
     events:    events.map(adaptEvent),
-    soq:       soq.map(adaptSoq),
     hotLeads:  hotLeads.map(adaptHotLead),
     clients:   _companies,
     users:     _users,

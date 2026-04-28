@@ -5,6 +5,7 @@ import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
   InvoiceTable, EventsTable, HotLeadsTable, ClientsTable, CompaniesTable,
 } from "./tables.jsx";
+// Note: SoqTable was removed — SOQ is no longer surfaced in v2.
 import { QuadSheet } from "./quadsheet.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
@@ -46,10 +47,7 @@ const TAB_META = [
   { key: "closed",    label: "Closed Out",       stage: "stage-closed",    group: "pipeline" },
   { key: "potential", label: "Potential",        stage: "stage-potential", group: "pipeline" },
   { key: "invoice",   label: "Invoice",          stage: "stage-invoice",   group: "pipeline" },
-  // SOQ tab hidden from navigation per product direction — the `soq` table
-  // and its data still exist in Supabase; we just don't surface them. To
-  // bring the tab back, restore this entry + the {tab === "soq" && ...}
-  // render block below, and re-add the SoqTable import.
+  // SOQ was removed entirely in beacon_v2 (no table, no data).
   { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "clients",   label: "Clients",          stage: "stage-clients",   group: "side" },
@@ -60,14 +58,13 @@ const PAGE_META = {
   potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
   awaiting:  { title: "Awaiting Verdict", desc: "Entry point for submitted proposals. Add here, then mark as Awarded or Closed Out when the verdict lands." },
   awarded:   { title: "Awarded Projects", desc: "Won contracts. Move to Potential to track as a billing candidate, or directly to Invoice when billing starts." },
-  soq:       { title: "SOQ", desc: "Statements of Qualifications — parallel to the pipeline. Grouped by org type." },
   closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   clients:   { title: "Clients", desc: "Organizations that hire us. Referenced by every project row's Client field." },
   companies: { title: "Companies", desc: "Firms we team with as Primes or Subs. Referenced by project Prime and Subs fields." },
-  quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and SOQs at a glance." },
+  quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and hot leads at a glance." },
 };
 
 const DEFAULT_TWEAKS = {
@@ -103,15 +100,6 @@ const FILTERS = {
       return days > 0 && days < 180;
     },
     low: r => (r.msmmUsed + r.msmmRemaining) > 0 && (r.msmmRemaining / (r.msmmUsed + r.msmmRemaining)) < 0.2,
-  },
-  soq: {
-    all:       () => true,
-    recurring: r => r.recurring === "Yes" || r.recurring === "In Talks",
-    expiring:  r => {
-      if (!r.contractExpiry) return false;
-      const days = (new Date(r.contractExpiry).getTime() - Date.now()) / 86400000;
-      return days > 0 && days < 180;
-    },
   },
   closed: {
     all: () => true,
@@ -158,11 +146,6 @@ const FILTER_CHIPS = {
     { key: "all",      label: "All" },
     { key: "expiring", label: "Expiring soon", icon: "clock" },
     { key: "low",      label: "Low remaining", icon: "trend" },
-  ],
-  soq: [
-    { key: "all",       label: "All" },
-    { key: "recurring", label: "Recurring", icon: "clock" },
-    { key: "expiring",  label: "Expiring soon", icon: "clock" },
   ],
   closed: [
     { key: "all",      label: "All" },
@@ -258,20 +241,6 @@ const EXPORT_COLUMNS = {
     { label: "Status",            wMm: 26,  get: r => r.status || "Awarded" },
     { label: "Details",                     get: r => r.details || "" },
   ],
-  soq: [
-    { label: "Year",              wMm: 14,  get: r => r.year },
-    { label: "Project",                     get: r => r.name },
-    { label: "Client",                      get: r => companyById(r.clientId)?.name || "" },
-    { label: "Start Date",        wMm: 22,  get: r => fmtDate(r.startDate) },
-    { label: "Expiry",            wMm: 22,  get: r => fmtDate(r.contractExpiry) },
-    { label: "Recurring",         wMm: 22,  get: r => r.recurring || "" },
-    { label: "Stage",                       get: r => r.stage || "" },
-    { label: "Pool",                        get: r => r.pools || "" },
-    { label: "Contract",          wMm: 26,  get: r => fmtMoney((r.msmmUsed || 0) + (r.msmmRemaining || 0)) },
-    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
-    { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
-    { label: "Details",                     get: r => r.details || "" },
-  ],
   closed: [
     { label: "Year",              wMm: 14,  get: r => r.year },
     { label: "Project",                     get: r => r.name },
@@ -360,34 +329,6 @@ const EXPORT_COLUMNS = {
 
 // DB row → UI row adapter for newly-inserted rows from CreateModal
 function adaptInsertedRow(table, dbRow, extras = {}) {
-  if (table === "soq") {
-    return {
-      id: dbRow.id,
-      year: dbRow.year,
-      name: dbRow.project_name,
-      role: dbRow.prime_company_id ? "Sub" : "Prime",
-      clientId: dbRow.client_id || null,
-      amount: null,
-      msmm: (dbRow.msmm_used || 0) + (dbRow.msmm_remaining || 0),
-      subs: extras.subs || [],
-      pmIds: extras.pmIds || [],
-      notes: dbRow.notes || "",
-      dates: "",
-      projectNumber: dbRow.project_number || "",
-      status: "SOQ",
-      dateSubmitted: dbRow.date_submitted || "",
-      clientContract: dbRow.client_contract_number || "",
-      msmmContract: dbRow.msmm_contract_number || "",
-      msmmUsed: dbRow.msmm_used || 0,
-      msmmRemaining: dbRow.msmm_remaining || 0,
-      stage: "",
-      details: dbRow.details || "",
-      pools: dbRow.pool || "",
-      startDate: dbRow.start_date || "",
-      contractExpiry: dbRow.contract_expiry_date || "",
-      recurring: dbRow.recurring || "",
-    };
-  }
   if (table === "potential") {
     return {
       id: dbRow.id,
@@ -511,7 +452,7 @@ function LoadingScreen({ error }) {
           Beacon
         </div>
         <div style={{ color: "var(--text-muted, #6E6659)", fontSize: 13, marginTop: 6 }}>
-          {error ? "Couldn't load project data" : "Loading from beacon.*…"}
+          {error ? "Couldn't load project data" : "Loading from beacon_v2.*…"}
         </div>
         {error && (
           <pre style={{
@@ -604,7 +545,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [potential, setPotential] = useState(initial.potential);
   const [awaiting,  setAwaiting]  = useState(initial.awaiting);
   const [awarded,   setAwarded]   = useState(initial.awarded);
-  const [soq,       setSoq]       = useState(initial.soq || []);
   const [closed,    setClosed]    = useState(initial.closed);
   const [invoice,   setInvoice]   = useState(initial.invoices);
   const [events,    setEvents]    = useState(initial.events);
@@ -614,7 +554,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
-    potential: "all", awaiting: "all", awarded: "all", soq: "all", closed: "all",
+    potential: "all", awaiting: "all", awarded: "all", closed: "all",
     events: "all", hotleads: "all", clients: "all", companies: "all",
   });
 
@@ -622,7 +562,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // is THIS_YEAR for every pipeline table so users see current-year data on
   // first load — clicking "All" in the Year menu clears to null.
   const [yearFilter, setYearFilter] = useState({
-    potential: THIS_YEAR, awaiting: THIS_YEAR, awarded: THIS_YEAR, soq: THIS_YEAR,
+    potential: THIS_YEAR, awaiting: THIS_YEAR, awarded: THIS_YEAR,
     closed: THIS_YEAR, invoice: THIS_YEAR, events: THIS_YEAR,
     hotleads: THIS_YEAR,
   });
@@ -665,7 +605,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // PERSISTENCE LAYER — every inline/drawer edit flows through these maps
   // and the patchTable / syncJoinUsers helpers, so changes survive a reload.
   // Fields not listed in a *_COLS map update local React state only; typical
-  // exceptions are derived values (row.role on awaiting/awarded/closed/soq,
+  // exceptions are derived values (row.role on awaiting/awarded/closed,
   // row.status, row.type on companies) and join-table relationships (subs,
   // pmIds, attendees — handled separately). PMs + event attendees are diffed
   // and mirrored to their join tables. Subs edits are still local-only today.
@@ -706,17 +646,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
     dateClosed: "date_closed", reason: "reason_for_closure",
   };
-  const SOQ_COLS = {
-    year: "year", name: "project_name",
-    notes: "notes", projectNumber: "project_number",
-    dateSubmitted: "date_submitted",
-    clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
-    msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
-    details: "details", pools: "pool",
-    startDate: "start_date", contractExpiry: "contract_expiry_date",
-    recurring: "recurring",
-    // stage skipped (same reason as AWARDED).
-  };
   const EVENTS_COLS = {
     title: "title", status: "status", type: "type",
     date: "event_date", dateTime: "event_datetime", notes: "notes",
@@ -748,12 +677,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // enums). An empty string in a patch for any of these becomes SQL NULL.
   const NULL_IF_EMPTY_COLS = new Set([
     "next_action_date", "date_submitted", "anticipated_result_date",
-    "date_closed", "start_date", "contract_expiry_date",
+    "date_closed", "contract_expiry_date",
     "event_date", "event_datetime", "date_time",
     "year", "total_contract_amount", "msmm_amount",
     "anticipated_invoice_start_month", "msmm_used", "msmm_remaining",
     "client_id",
-    "role", "probability", "org_type", "status", "type", "recurring",
+    "role", "probability", "org_type", "status", "type",
   ]);
 
   const buildDbPatch = (patch, colMap) => {
@@ -819,11 +748,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // on whether the picked UUID is actually a client or a firm. See
     // routeClientPick in data.js.
     if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    patchTable("potential_projects", id, dbPatch);
+    patchTable("projects", id, dbPatch);
 
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
-        "potential_project_pms", "potential_project_id");
+        "project_pms", "project_id");
     }
 
     // Orange invariant: if probability transitions into Orange and no Invoice
@@ -833,12 +762,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const wasOrange = existing.probability === "Orange";
       const isNowOrange = patch.probability === "Orange";
       if (isNowOrange && !wasOrange) {
-        const alreadyLinked = invoice.some(r => r.sourcePotentialId === id);
+        const alreadyLinked = invoice.some(r => r.sourceId === id);
         if (!alreadyLinked) {
           (async () => {
             try {
               const invPayload = {
-                source_potential_id: id,
+                source_project_id: id,
                 project_name: existing.name,
                 year: existing.year,
                 project_number: existing.projectNumber || null,
@@ -849,8 +778,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               if (error) throw error;
               setInvoice(rs => [{
                 id: invRow.id,
-                sourceId: null,
-                sourcePotentialId: invRow.source_potential_id,
+                sourceId: invRow.source_project_id,
                 projectNumber: invRow.project_number || "",
                 name: invRow.project_name,
                 pmIds: [...(existing.pmIds || [])],
@@ -878,10 +806,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setAwaiting(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, AWAITING_COLS);
     if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    patchTable("awaiting_verdict", id, dbPatch);
+    patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
-        "awaiting_verdict_pms", "awaiting_verdict_id");
+        "project_pms", "project_id");
     }
   };
 
@@ -891,10 +819,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setAwarded(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, AWARDED_COLS);
     if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    patchTable("awarded_projects", id, dbPatch);
+    patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
-        "awarded_project_pms", "awarded_project_id");
+        "project_pms", "project_id");
     }
   };
 
@@ -904,22 +832,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setClosed(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, CLOSED_COLS);
     if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    patchTable("closed_out_projects", id, dbPatch);
+    patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
-        "closed_out_project_pms", "closed_out_project_id");
-    }
-  };
-
-  const updateSoq = (id, patch) => {
-    const existing = soq.find(r => r.id === id);
-    if (!existing) return;
-    setSoq(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    const dbPatch = buildDbPatch(patch, SOQ_COLS);
-    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    patchTable("soq", id, dbPatch);
-    if ("pmIds" in patch) {
-      syncJoinUsers(id, existing.pmIds, patch.pmIds, "soq_pms", "soq_id");
+        "project_pms", "project_id");
     }
   };
 
@@ -981,10 +897,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const dbPatch = buildDbPatch(patch, HOT_LEADS_COLS);
     // Client-or-Firm picker: route the unified clientId to the right column.
     if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    patchTable("hot_leads", id, dbPatch);
+    patchTable("leads", id, dbPatch);
     if ("attendees" in patch) {
       syncJoinUsers(id, existing.attendees, patch.attendees,
-        "hot_lead_attendees", "hot_lead_id");
+        "lead_attendees", "lead_id");
     }
   };
 
@@ -1077,7 +993,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   useEffect(() => {
     if (!pendingFocusRowId) return;
     const rowsByTab = {
-      potential, awaiting, awarded, soq, closed,
+      potential, awaiting, awarded, closed,
       invoice, events, hotleads: hotLeads, clients, companies,
     };
     const rows = rowsByTab[tab] || [];
@@ -1086,7 +1002,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       openDrawer(match, tab);
       setPendingFocusRowId(null);
     }
-  }, [pendingFocusRowId, tab, potential, awaiting, awarded, soq, closed, invoice, events, hotLeads, clients, companies]);
+  }, [pendingFocusRowId, tab, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
 
   // Pipeline transitions. New flow (2026-04):
   //   Awaiting Verdict → Awarded (MOVE: row leaves Awaiting, appears in Awarded)
@@ -1141,7 +1057,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       // COPY: Potential stays as a pipeline tracker; Invoice row spawned.
       const { _invoiceType, ...rest } = newRow;
       const invRow = {
-        id: rest.id, sourceId: row.id, sourcePotentialId: row.id,
+        id: rest.id, sourceId: row.id,
         projectNumber: rest.projectNumber, name: rest.name,
         pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
         type: _invoiceType || "ENG",
@@ -1232,7 +1148,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const uiRow = adaptInsertedRow(table, dbRow, extras);
     if (table === "potential")  setPotential(rs => [uiRow, ...rs]);
     if (table === "awaiting")   setAwaiting(rs => [uiRow, ...rs]);
-    if (table === "soq")        setSoq(rs => [uiRow, ...rs]);
     if (table === "events")     setEvents(rs => [uiRow, ...rs]);
     if (table === "hotleads")   setHotLeads(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
@@ -1243,8 +1158,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const ir = extras.invoiceRow;
       const invUiRow = {
         id: ir.id,
-        sourceId: null,
-        sourcePotentialId: ir.source_potential_id || uiRow.id,
+        sourceId: ir.source_project_id || uiRow.id,
         projectNumber: ir.project_number || uiRow.projectNumber || "",
         name: ir.project_name || uiRow.name,
         pmIds: [...(uiRow.pmIds || [])],
@@ -1379,13 +1293,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       potential: uniq(potential),
       awaiting:  uniq(awaiting),
       awarded:   uniq(awarded),
-      soq:       uniq(soq),
       closed:    uniq(closed),
       invoice:   uniq(invoice),
       events:    uniqFromDate(events, "date"),
       hotleads:  uniqFromDate(hotLeads, "dateTime"),
     };
-  }, [potential, awaiting, awarded, soq, closed, invoice, events, hotLeads]);
+  }, [potential, awaiting, awarded, closed, invoice, events, hotLeads]);
 
   // Apply year filter, then category filter. Events filter against the year
   // component of the ISO event_date, not a dedicated year column.
@@ -1410,7 +1323,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       potential: apply("potential", potential),
       awaiting:  apply("awaiting",  awaiting),
       awarded:   apply("awarded",   awarded),
-      soq:       apply("soq",       soq),
       closed:    apply("closed",    closed),
       invoice:   applyYear("invoice", invoice),
       events:    apply("events",    events),
@@ -1418,7 +1330,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       clients:   apply("clients",   clients),
       companies: apply("companies", companies),
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, soq, closed, invoice, events, hotLeads, clients, companies]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -1464,7 +1376,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
   const tabCounts = {
     potential: potential.length, awaiting: awaiting.length,
-    awarded: awarded.length, soq: soq.length, closed: closed.length,
+    awarded: awarded.length, closed: closed.length,
     invoice: invoice.length, events: events.length,
     hotleads: hotLeads.length,
     clients: clients.length, companies: companies.length,
@@ -1653,7 +1565,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.awarded}
             onYearChange={(y) => setYear("awarded", y)}/>
         )}
-        {/* SOQ tab render removed from UI (see TAB_META comment above). */}
         {tab === "closed" && (
           <ClosedTable rows={filtered.closed}
             updateRow={updateClosed}
@@ -1780,7 +1691,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           drawer.table === "potential" ? potential :
           drawer.table === "awaiting"  ? awaiting  :
           drawer.table === "awarded"   ? awarded   :
-          drawer.table === "soq"       ? soq       :
           drawer.table === "closed"    ? closed    :
           drawer.table === "invoice"   ? invoice   :
           drawer.table === "events"    ? events    :
@@ -1799,7 +1709,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "potential" ? updatePotential :
             drawer.table === "awaiting"  ? updateAwaiting  :
             drawer.table === "awarded"   ? updateAwarded   :
-            drawer.table === "soq"       ? updateSoq       :
             drawer.table === "closed"    ? updateClosed    :
             drawer.table === "invoice"   ? updateInvoice   :
             drawer.table === "events"    ? updateEvents    :
@@ -1866,16 +1775,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             // topbar / isAdmin gate to reflect the new state right away.
             onRefreshCurrentUser?.();
           }}
-          // Keyed by beacon.alert_subject_enum value; AlertsAdmin looks up
-          // each alert's subject row to render its name/number.
+          // Keyed by beacon_v2.alert_subject_enum value (4 values: project,
+          // invoice, event, lead). AlertsAdmin looks up each alert's subject
+          // row to render its name/number; for `project` alerts it also reads
+          // the project's `status` to deep-link to the right pipeline tab.
           alertSubjectLookup={{
-            potential:  Object.fromEntries((potential || []).map(r => [r.id, r])),
-            awaiting:   Object.fromEntries((awaiting  || []).map(r => [r.id, r])),
-            awarded:    Object.fromEntries((awarded   || []).map(r => [r.id, r])),
-            soq:        Object.fromEntries((soq       || []).map(r => [r.id, r])),
-            closed_out: Object.fromEntries((closed    || []).map(r => [r.id, r])),
-            invoice:    Object.fromEntries((invoice   || []).map(r => [r.id, r])),
-            event:      Object.fromEntries((events    || []).map(r => [r.id, r])),
+            project:    Object.fromEntries(
+              [...(potential || []), ...(awaiting || []), ...(awarded || []), ...(closed || [])]
+                .map(r => [r.id, r])
+            ),
+            invoice:    Object.fromEntries((invoice  || []).map(r => [r.id, r])),
+            event:      Object.fromEntries((events   || []).map(r => [r.id, r])),
+            lead:       Object.fromEntries((hotLeads || []).map(r => [r.id, r])),
           }}
         />
       )}

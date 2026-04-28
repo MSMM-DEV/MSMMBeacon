@@ -16,16 +16,24 @@ import {
 // signal, not a decoration.
 // ============================================================================
 
-// Map beacon.alert_subject_enum → {UI tab key, friendly label} so we can
-// resolve subject rows (held in App.jsx) and label the "from where" chip.
+// Map beacon_v2.alert_subject_enum → {UI tab key, friendly label}. v2
+// collapsed the 8-value v1 enum to 4: every project status maps to
+// 'project'; 'hotlead' became 'lead'; 'invoice' and 'event' are unchanged.
+// For 'project' subjects, the friendly label is refined per-row by
+// looking at the underlying project's UI-status field (see AlertDispatchCard).
 const SUBJECT_META = {
-  potential:  { tab: "potential", label: "Potential"  },
-  awaiting:   { tab: "awaiting",  label: "Awaiting"   },
-  awarded:    { tab: "awarded",   label: "Awarded"    },
-  soq:        { tab: "soq",       label: "SOQ"        },
-  closed_out: { tab: "closed",    label: "Closed Out" },
-  invoice:    { tab: "invoice",   label: "Invoice"    },
-  event:      { tab: "events",    label: "Event"      },
+  project:  { tab: "project", label: "Project"  },
+  invoice:  { tab: "invoice", label: "Invoice"  },
+  event:    { tab: "events",  label: "Event"    },
+  lead:     { tab: "hotleads", label: "Lead"    },
+};
+
+// Project status → user-facing label. Mirrors how the adapters in data.js
+// stamp `status` on each adapted UI row (Potential rows leave it unset).
+const PROJECT_STATUS_LABEL = {
+  "Awaiting Verdict": "Awaiting",
+  "Awarded":          "Awarded",
+  "Closed Out":       "Closed Out",
 };
 
 const RECUR_LABEL = {
@@ -225,7 +233,14 @@ function AlertDispatchCard({ alert: a, subjectRow, users, onChanged, flash }) {
   const [editingRec, setEditingRec] = useState(false);
   const [busy, setBusy]             = useState(false);
 
-  const meta = SUBJECT_META[a.subject_table] || { label: a.subject_table, tab: "" };
+  // For 'project' subjects, refine the label by looking at the underlying
+  // project's UI-status. Potential rows have no `status` field on the
+  // adapted UI row, so they fall back to the generic "Project" label.
+  let meta = SUBJECT_META[a.subject_table] || { label: a.subject_table, tab: "" };
+  if (a.subject_table === "project" && subjectRow) {
+    const refined = PROJECT_STATUS_LABEL[subjectRow.status];
+    meta = { ...meta, label: refined || "Potential" };
+  }
   const subjName = subjectRow?.name || subjectRow?.title || "(missing row)";
   const subjNumber = subjectRow?.projectNumber || "";
   const recipients = a.recipients || [];

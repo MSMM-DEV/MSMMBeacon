@@ -516,7 +516,7 @@ const DeleteUserModal = ({ row, onClose, onConfirm }) => {
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 13, lineHeight: 1.55, color: "var(--text)" }}>
-            This removes <strong>{displayName(row)}</strong> from <span className="mono">beacon.users</span> and their Supabase auth record. All PM / attendee links they held are unlinked. This cannot be undone.
+            This removes <strong>{displayName(row)}</strong> from <span className="mono">beacon_v2.users</span> and their Supabase auth record. All PM / attendee links they held are unlinked. This cannot be undone.
           </p>
           <div className="field" style={{ marginTop: 14 }}>
             <div className="field-label">Type the email to confirm</div>

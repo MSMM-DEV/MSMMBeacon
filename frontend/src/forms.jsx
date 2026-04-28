@@ -16,12 +16,14 @@ import { SearchableSelect } from "./primitives.jsx";
 //
 // Errors after step 1 are reported inline; the main row stays in the DB.
 
+// In v2, both Potential and Awaiting INSERT into the same `projects` table —
+// they differ only in the `status` column (set in onSubmit). Hot Leads is
+// the renamed `leads` table.
 const DB_TABLES = {
-  potential: "potential_projects",
-  awaiting:  "awaiting_verdict",
-  soq:       "soq",
+  potential: "projects",
+  awaiting:  "projects",
   events:    "events",
-  hotleads:  "hot_leads",
+  hotleads:  "leads",
   clients:   "clients",
   companies: "companies",
 };
@@ -29,7 +31,6 @@ const DB_TABLES = {
 const TITLES = {
   potential: { title: "New potential project",  icon: "briefcase" },
   awaiting:  { title: "New awaiting verdict",   icon: "clock"     },
-  soq:       { title: "New SOQ",                 icon: "briefcase" },
   events:    { title: "New event",               icon: "calendar"  },
   hotleads:  { title: "New hot lead",            icon: "trend"     },
   clients:   { title: "New client",              icon: "users"     },
@@ -39,31 +40,28 @@ const TITLES = {
 // Columns that the DB accepts directly. Anything NOT in this list is
 // treated as an "extra" (PM / subs / attendees) and inserted via a second
 // write against the child/join table.
+//
+// Keyed by the UI `table` parameter (not the DB table name) because v2
+// collapsed the project pipeline tables into one — Potential and Awaiting
+// both target `projects` but with different valid column subsets.
 const DB_COLUMNS = {
-  potential_projects: [
+  potential: [
     "project_name", "year", "role", "client_id",
     "total_contract_amount", "msmm_amount", "probability",
     "notes", "next_action_note", "next_action_date", "project_number",
     "anticipated_invoice_start_month",
   ],
-  awaiting_verdict: [
+  awaiting: [
     "project_name", "year", "client_id",
     "date_submitted", "anticipated_result_date",
     "client_contract_number", "msmm_contract_number",
     "msmm_used", "msmm_remaining",
     "notes", "project_number",
   ],
-  soq: [
-    "project_name", "year", "client_id",
-    "project_number", "pool", "details", "notes",
-    "date_submitted", "start_date", "contract_expiry_date",
-    "recurring", "msmm_used", "msmm_remaining",
-    "client_contract_number", "msmm_contract_number",
-  ],
   events: [
     "title", "status", "type", "event_datetime", "notes",
   ],
-  hot_leads: [
+  hotleads: [
     "title", "status", "client_id", "date_time", "notes",
   ],
   clients: [
@@ -81,25 +79,6 @@ const NUMERIC_COLS = new Set([
 ]);
 
 const INITIAL = {
-  soq: {
-    project_name: "",
-    year: THIS_YEAR,
-    client_id: "",
-    project_number: "",
-    pool: "",
-    details: "",
-    notes: "",
-    date_submitted: "",
-    start_date: "",
-    contract_expiry_date: "",
-    recurring: "",
-    msmm_used: "",
-    msmm_remaining: "",
-    client_contract_number: "",
-    msmm_contract_number: "",
-    pm_user_ids: [],
-    subs: [],
-  },
   potential: {
     project_name: "",
     year: THIS_YEAR,
@@ -170,7 +149,6 @@ const INITIAL = {
 const REQUIRED = {
   potential: ["project_name"],
   awaiting:  ["project_name"],
-  soq:       ["project_name"],
   events:    ["title"],
   hotleads:  ["title"],
   clients:   ["name"],
@@ -324,7 +302,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
   // Build the payload by picking only real DB columns. Omit empty values
   // so default/NULL-able columns stay untouched. Coerce numerics.
   const buildPayload = () => {
-    const cols = DB_COLUMNS[dbTable] || [];
+    const cols = DB_COLUMNS[table] || [];
     const payload = {};
     for (const k of cols) {
       const v = form[k];
@@ -350,11 +328,15 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
     // picker for Sub-role rows includes both clients AND companies; if the
     // user picked a company, send it to prime_company_id instead (and
     // blank client_id) to avoid the client_id_fkey violation on insert.
-    const projectTables = new Set(["potential_projects", "awaiting_verdict", "soq", "hot_leads"]);
+    const projectTables = new Set(["projects", "leads"]);
     if (projectTables.has(dbTable) && payload.client_id && !clientIdSet.has(payload.client_id)) {
       payload.prime_company_id = payload.client_id;
       delete payload.client_id;
     }
+    // v2: the projects table is keyed on a `status` column. Inject the
+    // appropriate status for the UI tab.
+    if (table === "potential") payload.status = "potential";
+    if (table === "awaiting")  payload.status = "awaiting";
     const { data: row, error: err } = await supabase
       .from(dbTable).insert(payload).select().single();
     if (err) {
@@ -370,34 +352,32 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
         const pmIds = (form.pm_user_ids || []).filter(Boolean);
         if (pmIds.length > 0) {
           const { error: e1 } = await supabase
-            .from("potential_project_pms")
-            .insert(pmIds.map(uid => ({ potential_project_id: row.id, user_id: uid })));
+            .from("project_pms")
+            .insert(pmIds.map(uid => ({ project_id: row.id, user_id: uid })));
           if (e1) throw e1;
           extras.pmIds = pmIds;
         }
         const subs = (form.subs || []).filter(s => s.cId || s.desc || s.amt);
         if (subs.length > 0) {
           const subsPayload = subs.map((s, i) => ({
-            potential_project_id: row.id,
+            project_id: row.id,
             ord: i + 1,
             company_id: s.cId || null,
             discipline: s.desc || null,
             amount: s.amt != null && s.amt !== "" ? Number(s.amt) : null,
           }));
           const { error: e2 } = await supabase
-            .from("potential_project_subs").insert(subsPayload);
+            .from("project_subs").insert(subsPayload);
           if (e2) throw e2;
           extras.subs = subs;
         }
         // Orange → auto-create a linked anticipated_invoice row so the
         // pre-awarded project shows up on the Invoice tab immediately.
-        // anticipated_invoice is intentionally minimal — only the columns
-        // listed below exist on it. Don't send role/client_id/msmm_amount/
-        // notes here; they live on the potential row and are looked up via
-        // source_potential_id when needed.
+        // v2 collapsed source_awarded_id + source_potential_id into one
+        // source_project_id FK; we point it at this potential row's id.
         if (form.probability === "Orange") {
           const invPayload = {
-            source_potential_id: row.id,
+            source_project_id: row.id,
             project_name: row.project_name,
             year: row.year,
             project_number: row.project_number || null,
@@ -408,40 +388,22 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           if (e4) throw e4;
           extras.invoiceRow = invRow;
         }
-      } else if (table === "soq") {
-        const pmIds = (form.pm_user_ids || []).filter(Boolean);
-        if (pmIds.length > 0) {
-          const { error: eSP } = await supabase
-            .from("soq_pms")
-            .insert(pmIds.map(uid => ({ soq_id: row.id, user_id: uid })));
-          if (eSP) throw eSP;
-          extras.pmIds = pmIds;
-        }
-        const subs = (form.subs || []).filter(s => s.cId);
-        if (subs.length > 0) {
-          const { error: eSS } = await supabase
-            .from("soq_subs")
-            .insert(subs.map(s => ({ soq_id: row.id, company_id: s.cId })));
-          if (eSS) throw eSS;
-          extras.subs = subs;
-        }
       } else if (table === "awaiting") {
-        // Direct entry into Awaiting Verdict: insert PM join rows + sub rows
-        // against the awaiting_verdict_pms / _subs tables, same pattern as
-        // potential.
+        // Direct entry into Awaiting Verdict: same project_pms/project_subs
+        // join tables as Potential — only the parent row's `status` differs.
         const pmIds = (form.pm_user_ids || []).filter(Boolean);
         if (pmIds.length > 0) {
           const { error: eAP } = await supabase
-            .from("awaiting_verdict_pms")
-            .insert(pmIds.map(uid => ({ awaiting_verdict_id: row.id, user_id: uid })));
+            .from("project_pms")
+            .insert(pmIds.map(uid => ({ project_id: row.id, user_id: uid })));
           if (eAP) throw eAP;
           extras.pmIds = pmIds;
         }
         const subs = (form.subs || []).filter(s => s.cId);
         if (subs.length > 0) {
           const { error: eAS } = await supabase
-            .from("awaiting_verdict_subs")
-            .insert(subs.map(s => ({ awaiting_verdict_id: row.id, company_id: s.cId })));
+            .from("project_subs")
+            .insert(subs.map(s => ({ project_id: row.id, company_id: s.cId })));
           if (eAS) throw eAS;
           extras.subs = subs;
         }
@@ -458,8 +420,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
         const att = form.attendees || [];
         if (att.length > 0) {
           const { error: eH } = await supabase
-            .from("hot_lead_attendees")
-            .insert(att.map(uid => ({ hot_lead_id: row.id, user_id: uid })));
+            .from("lead_attendees")
+            .insert(att.map(uid => ({ lead_id: row.id, user_id: uid })));
           if (eH) throw eH;
           extras.attendees = att;
         }
@@ -636,102 +598,6 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             <input className="input" value={form.project_number}
                    onChange={e => set("project_number", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-        </>
-      );
-    }
-
-    if (table === "soq") {
-      return (
-        <>
-          <Field label="Project Name *">
-            <input className="input" autoFocus value={form.project_name}
-                   onChange={e => set("project_name", e.target.value)}/>
-          </Field>
-          <Field label="Year">
-            <input className="input" type="number" value={form.year}
-                   onChange={e => set("year", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Client">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={form.role === "Sub" ? clientOrFirmOptions : clientOptions}
-              placeholder={form.role === "Sub" ? "Search clients or firms…" : "Search clients…"}
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Start Date">
-            <input className="input" type="date" value={form.start_date}
-                   onChange={e => set("start_date", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Expiration Date">
-            <input className="input" type="date" value={form.contract_expiry_date}
-                   onChange={e => set("contract_expiry_date", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Recurring">
-            <select className="select" value={form.recurring}
-                    onChange={e => set("recurring", e.target.value)}>
-              <option value="">—</option>
-              <option value="Yes">Yes</option>
-              <option value="In Talks">In Talks</option>
-              <option value="Maybe">Maybe</option>
-              <option value="No">No</option>
-            </select>
-          </Field>
-          <Field label="PMs" multiline>
-            <UserMultiPicker value={form.pm_user_ids} users={users}
-                             onChange={next => set("pm_user_ids", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Subs" multiline>
-            <SubsEditor value={form.subs} companies={companies}
-                        onChange={next => set("subs", next)}/>
-          </Field>
-          <Field label="Pool">
-            <input className="input" value={form.pool}
-                   onChange={e => set("pool", e.target.value)}
-                   placeholder="e.g. IDIQ Pool C"/>
-          </Field>
-          <Field label="Details" multiline>
-            <textarea className="textarea" value={form.details}
-                      onChange={e => set("details", e.target.value)}/>
-          </Field>
-          <Field label="MSMM Used">
-            <input className="input" type="number" value={form.msmm_used}
-                   onChange={e => set("msmm_used", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="MSMM Remaining">
-            <input className="input" type="number" value={form.msmm_remaining}
-                   onChange={e => set("msmm_remaining", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="Date Submitted">
-            <input className="input" type="date" value={form.date_submitted}
-                   onChange={e => set("date_submitted", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Client Contract #">
-            <input className="input" value={form.client_contract_number}
-                   onChange={e => set("client_contract_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="MSMM Contract #">
-            <input className="input" value={form.msmm_contract_number}
-                   onChange={e => set("msmm_contract_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="Project Number">
-            <input className="input" value={form.project_number}
-                   onChange={e => set("project_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
           </Field>
         </>
       );
