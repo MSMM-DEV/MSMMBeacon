@@ -63,7 +63,7 @@ const STATUS_CHIP = {
 };
 const STATUS_ORDER = { awaiting: 1, awarded: 2, potential: 3, closed: 4 };
 
-function LinkedProjectsSection({ projects, onOpenProject }) {
+export function LinkedProjectsSection({ projects, onOpenProject }) {
   const sorted = [...(projects || [])].sort((a, b) => {
     const sA = STATUS_ORDER[a.statusKey] ?? 99;
     const sB = STATUS_ORDER[b.statusKey] ?? 99;

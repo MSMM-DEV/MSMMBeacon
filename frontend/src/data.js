@@ -493,6 +493,53 @@ function adaptHotLead(r) {
 }
 
 // ----------------------------------------------------------------------
+// Linked-projects resolver — used by both the Directory drawer (panels.jsx)
+// and the inline expand row in DirectoryTable (tables.jsx). Walks every
+// pipeline state slice, tags each match with the entity's role on that
+// project (Client / Prime / Sub), and flags rows that have a linked
+// anticipated_invoice.
+//
+// Role resolution: adapters fold prime_company_id into clientId, so
+// `p.clientId === entity.id` covers both "this client is the project's
+// client" and "this company is the project's prime". We disambiguate by
+// entity.type: Client-typed entity → "Client"; otherwise → "Prime".
+// Sub matches always come second.
+// ----------------------------------------------------------------------
+export function linkedProjectsFor(entity, projectsByType, invoice) {
+  if (!entity) return [];
+  const isClient = entity.type === "Client";
+  const STATUS_KEYS = ["awaiting", "awarded", "potential", "closed"];
+  const invoiceBySource = new Map();
+  for (const inv of (invoice || [])) {
+    if (inv.sourceId) invoiceBySource.set(inv.sourceId, inv);
+  }
+  const out = [];
+  for (const statusKey of STATUS_KEYS) {
+    const list = projectsByType?.[statusKey] || [];
+    for (const p of list) {
+      const isPrimaryMatch = p.clientId === entity.id;
+      const subMatch = (p.subs || []).some(s => s.cId === entity.id);
+      if (!isPrimaryMatch && !subMatch) continue;
+      const role = isPrimaryMatch ? (isClient ? "Client" : "Prime") : "Sub";
+      const inv  = invoiceBySource.get(p.id);
+      out.push({
+        id: p.id,
+        statusKey,
+        name: p.name || "",
+        projectNumber: p.projectNumber || "",
+        year: p.year || null,
+        role,
+        hasInvoice: !!inv,
+        invoiceTooltip: inv
+          ? `Invoice · ${inv.year} · ${inv.type || ""}`.trim()
+          : null,
+      });
+    }
+  }
+  return out;
+}
+
+// ----------------------------------------------------------------------
 // loadBeacon — fetches everything in parallel, shapes into UI rows.
 // ----------------------------------------------------------------------
 async function pget(builder, label) {

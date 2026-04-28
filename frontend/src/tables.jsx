@@ -9,7 +9,9 @@ import {
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
   MONTHS, TODAY_MONTH, THIS_YEAR,
+  linkedProjectsFor,
 } from "./data.js";
+import { LinkedProjectsSection } from "./panels.jsx";
 import { setCurrentTableSnapshot } from "./table-state.js";
 
 // ---------- Shared empty state ----------
@@ -2294,10 +2296,28 @@ export const HotLeadsTable = ({
 // One table for both kinds. Section headers (clients first, companies second)
 // come from injectKindHeaders. Columns are a UNION — irrelevant cells render
 // an em-dash for the wrong kind so the visual rhythm holds.
+//
+// Each entity row is *expandable* — a chevron in the leftmost column toggles
+// an inline expand row beneath the parent containing the same Linked Projects
+// list the drawer shows. Multiple rows can be open at once. The drawer is
+// still reachable via double-click (existing behavior preserved).
 export const DirectoryTable = ({
-  tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, flashId, filters,
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, invoice, flashId, filters,
+  onOpenProject,
 }) => {
+  // Set of entity ids currently expanded. Set so multiple can be open.
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const toggleExpand = (id) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const cols = [
+    { label: "__expand", w: "30px", locked: true },
     { label: "__select", w: "42px", locked: true },
     { label: "Name", w: "minmax(220px, 2fr)", sortKey: "name",
       sortValue: r => (r.type === "Client" ? (r.baseName || r.name) : r.name) || "" },
@@ -2344,7 +2364,20 @@ export const DirectoryTable = ({
           );
         }
         const isClient = r.type === "Client";
+        const isExpanded = expandedIds.has(r.id);
         const cells = {
+          "__expand": (
+            <div className="td td-expand" onClick={e => e.stopPropagation()}>
+              <button
+                type="button"
+                className={"directory-expand-btn" + (isExpanded ? " open" : "")}
+                aria-expanded={isExpanded}
+                aria-label={isExpanded ? "Collapse linked projects" : "Expand linked projects"}
+                onClick={(e) => { e.stopPropagation(); toggleExpand(r.id); }}>
+                <Icon name="chevronRight" size={12}/>
+              </button>
+            </div>
+          ),
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
               <input type="checkbox"/>
@@ -2432,17 +2465,39 @@ export const DirectoryTable = ({
           ),
           "Projects": (
             <div className="td mono">
-              <span className="chip muted">{countRefsFor(r.id, projectsByType)}</span>
+              <button
+                type="button"
+                className="chip muted directory-projects-chip"
+                title={isExpanded ? "Collapse linked projects" : "Expand linked projects"}
+                onClick={(e) => { e.stopPropagation(); toggleExpand(r.id); }}>
+                {countRefsFor(r.id, projectsByType)}
+              </button>
             </div>
           ),
         };
+        const linked = isExpanded
+          ? linkedProjectsFor(r, projectsByType, invoice)
+          : null;
         return (
-          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
-               data-kind={isClient ? "client" : "company"}
-               style={{ gridTemplateColumns: gridCols, cursor: "default" }}
-               onDoubleClick={() => onOpenDrawer(r)}>
-            {renderOrderedCells(visibleColumns, cells)}
-          </div>
+          <React.Fragment key={r.id}>
+            <div className={"trow" + (flashId === r.id ? " flash" : "") + (isExpanded ? " expanded" : "")}
+                 data-kind={isClient ? "client" : "company"}
+                 style={{ gridTemplateColumns: gridCols, cursor: "default" }}
+                 onDoubleClick={() => onOpenDrawer(r)}>
+              {renderOrderedCells(visibleColumns, cells)}
+            </div>
+            {isExpanded && (
+              <div className="directory-expand-row"
+                   data-kind={isClient ? "client" : "company"}
+                   role="region"
+                   aria-label={`Linked projects for ${r.baseName || r.name}`}>
+                <LinkedProjectsSection
+                  projects={linked}
+                  onOpenProject={onOpenProject}
+                />
+              </div>
+            )}
+          </React.Fragment>
         );
       }}
     />

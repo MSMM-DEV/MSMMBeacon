@@ -20,7 +20,7 @@ import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
-  routeClientPick,
+  routeClientPick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
@@ -36,53 +36,8 @@ const countRefs = (id) => {
   return list.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
 };
 
-// Build the "Linked Projects" list for a Directory drawer row. Walks every
-// pipeline state slice and tags each match with this entity's role on the
-// project (Client / Prime / Sub) plus a hasInvoice flag if anticipated_invoice
-// has a row sourcing from this project.
-//
-// Role resolution: the adapters fold `prime_company_id` into `clientId`, so
-// `p.clientId === entity.id` covers both "this client is the project's client"
-// and "this company is the project's prime". We disambiguate by entity.type:
-// Client-typed entity → role "Client"; otherwise → role "Prime".
-function linkedProjectsFor(entity, projectsByType, invoice) {
-  const isClient = entity?.type === "Client";
-  const STATUS_KEYS = [
-    ["awaiting", "Awaiting"],
-    ["awarded",  "Awarded"],
-    ["potential","Potential"],
-    ["closed",   "Closed"],
-  ];
-  const invoiceBySource = new Map();
-  for (const inv of (invoice || [])) {
-    if (inv.sourceId) invoiceBySource.set(inv.sourceId, inv);
-  }
-  const out = [];
-  for (const [statusKey] of STATUS_KEYS) {
-    const list = projectsByType?.[statusKey] || [];
-    for (const p of list) {
-      const isPrimaryMatch = p.clientId === entity.id;
-      const subMatch = (p.subs || []).some(s => s.cId === entity.id);
-      if (!isPrimaryMatch && !subMatch) continue;
-      // Prefer Prime / Client over Sub when both apply.
-      const role = isPrimaryMatch ? (isClient ? "Client" : "Prime") : "Sub";
-      const inv  = invoiceBySource.get(p.id);
-      out.push({
-        id: p.id,
-        statusKey,
-        name: p.name || "",
-        projectNumber: p.projectNumber || "",
-        year: p.year || null,
-        role,
-        hasInvoice: !!inv,
-        invoiceTooltip: inv
-          ? `Invoice · ${inv.year} · ${inv.type || ""}`.trim()
-          : null,
-      });
-    }
-  }
-  return out;
-}
+// linkedProjectsFor moved to data.js so both the Directory drawer (panels.jsx)
+// and the inline expand row (DirectoryTable in tables.jsx) can use it.
 
 // Display order differs from the move-forward flow: Invoice is shown first
 // because it's what leadership looks at most. The actual pipeline (Potential
@@ -1559,7 +1514,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             <button className="btn sm" onClick={handleExport}>
               <Icon name="export" size={13}/>Export PDF
             </button>
-            {newTarget && (
+            {tab === "directory" ? (
+              <>
+                <button className="btn primary" onClick={() => setCreateTable("clients")}>
+                  <Icon name="plus" size={13}/>New client
+                </button>
+                <button className="btn" onClick={() => setCreateTable("companies")}>
+                  <Icon name="plus" size={13}/>New company
+                </button>
+              </>
+            ) : newTarget && (
               <button className="btn primary" onClick={() => setCreateTable(newTarget)}>
                 <Icon name="plus" size={13}/>{newLabel}
               </button>
@@ -1719,6 +1683,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             }}
             onOpenDrawer={r => openDrawer(r, "directory")}
             projectsByType={{ potential, awaiting, awarded, closed }}
+            invoice={invoice}
+            onOpenProject={(projectId, statusKey) => {
+              const slice =
+                statusKey === "potential" ? potential :
+                statusKey === "awaiting"  ? awaiting  :
+                statusKey === "awarded"   ? awarded   :
+                statusKey === "closed"    ? closed    : [];
+              const target = slice.find(p => p.id === projectId);
+              if (!target) return;
+              setTab(statusKey);
+              setDrawer({ row: target, table: statusKey });
+            }}
             flashId={flashId}
             filters={chipsFor("directory")}
             tab="directory"/>

@@ -4220,3 +4220,109 @@ html, body { overflow-x: clip; }
   .linked-project-num                        { grid-area: num;    }
   .linked-project .chip-mini.invoice-badge   { grid-area: badge; justify-self: end; }
 }
+
+/* ============================================================
+ * Directory · inline row expansion
+ * ----------------------------------------------------------------
+ * Chevron toggle in the leftmost column. Click → row expands inline
+ * with the same Linked-Projects list the drawer shows. Multiple
+ * rows can be open simultaneously.
+ * ============================================================ */
+.td.td-expand {
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.directory-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: transform 150ms ease, background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.directory-expand-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.directory-expand-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.directory-expand-btn.open {
+  transform: rotate(90deg);
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Projects-count chip becomes a secondary toggle. Looks identical to
+   the muted chip, just clickable + with a subtle hover ring. */
+.directory-projects-chip {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.directory-projects-chip:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* The expand row sits directly beneath its parent. Tinted by kind so the
+   visual reads "this expansion belongs to that section". The animation
+   is a tiny opacity + 2px slide-down — restrained and matches the rest
+   of the app's motion language. */
+.trow.expanded {
+  border-bottom-color: transparent;
+}
+.directory-expand-row {
+  position: relative;
+  padding: 14px 16px 16px 44px; /* 44px left = align with row content past chevron+checkbox */
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  animation: directory-expand-in 160ms ease forwards;
+}
+.directory-expand-row::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+}
+.directory-expand-row[data-kind="client"]::before  { background: var(--sage); }
+.directory-expand-row[data-kind="company"]::before { background: var(--accent); }
+.directory-expand-row[data-kind="client"]  {
+  background: color-mix(in srgb, var(--sage) 6%, var(--surface-2));
+}
+.directory-expand-row[data-kind="company"] {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-2));
+}
+
+/* Tighten the LinkedProjectsSection header inside the inline expand */
+.directory-expand-row .drawer-section.linked-projects {
+  margin-top: 0;
+}
+.directory-expand-row .section-title {
+  margin-top: 0;
+}
+
+@keyframes directory-expand-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Mobile: shrink padding, drop the icon-aligned indent. */
+@media (max-width: 640px) {
+  .directory-expand-row { padding: 12px 14px; }
+}
