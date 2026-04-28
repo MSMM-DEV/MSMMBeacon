@@ -4326,3 +4326,148 @@ html, body { overflow-x: clip; }
 @media (max-width: 640px) {
   .directory-expand-row { padding: 12px 14px; }
 }
+
+/* ============================================================
+ * Invoice tab · expand toggle + sub rows + per-cell file clip
+ * ----------------------------------------------------------------
+ * Each project's invoice row gets a chevron in the new leftmost
+ * column. Click to reveal the project's subs as italic rows beneath
+ * with their own 12 monthly amount cells. Each cell (prime or sub)
+ * gets a hover-revealed paperclip that opens InvoiceFilesModal.
+ * ============================================================ */
+
+/* New leftmost column for chevron toggle */
+.invoice-table th.invoice-expand-col,
+.invoice-table td.invoice-expand-col {
+  width: 30px;
+  min-width: 30px;
+  padding: 0 4px;
+  text-align: center;
+}
+.invoice-table th.invoice-expand-col {
+  background: var(--bg-elev);
+}
+
+/* Sub-row treatment — italic name, indented sticky-2, tinted background */
+.invoice-table tr.invoice-sub-row td {
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--accent-softer));
+  font-size: 12px;
+}
+.invoice-table tr.invoice-sub-row td.sticky-1 {
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--accent-softer));
+}
+.invoice-table tr.invoice-sub-row td.sticky-2 {
+  font-style: italic;
+  color: var(--text-soft);
+  padding-left: 28px;
+  position: sticky;
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--accent-softer));
+}
+.invoice-table tr.invoice-sub-row td.sticky-2::before {
+  content: "↳";
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 600;
+}
+.invoice-sub-name {
+  font-weight: 500;
+  color: var(--text);
+  font-style: normal;
+}
+.invoice-sub-discipline {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+/* Sub-row month cells use a slightly muted variant of the prime tints */
+.invoice-table tr.invoice-sub-row td.month-actual {
+  background: color-mix(in srgb, var(--accent-softer) 65%, var(--surface-2));
+}
+.invoice-table tr.invoice-sub-row td.month-proj {
+  background: color-mix(in srgb, var(--surface-2) 80%, var(--surface));
+}
+
+/* Per-cell paperclip overlay: faintly visible by default if the cell has
+   files attached, fully revealed on cell hover, brightens on its own hover. */
+.invoice-table td.invoice-cell {
+  position: relative;
+}
+.invoice-cell-clip {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.invoice-table td.invoice-cell:hover .invoice-cell-clip {
+  opacity: 0.65;
+}
+.invoice-cell-clip.has-files {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.invoice-cell-clip:hover {
+  opacity: 1 !important;
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.invoice-cell-clip-count {
+  letter-spacing: 0;
+}
+
+/* InvoiceFilesModal · existing-files list */
+.invoice-files-modal-list {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.invoice-files-modal-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.invoice-files-modal-list .invoice-file-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.invoice-files-modal-list .invoice-file-date {
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+@media (max-width: 640px) {
+  .invoice-files-modal-list li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

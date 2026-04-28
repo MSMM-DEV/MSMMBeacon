@@ -1,7 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip } from "./primitives.jsx";
-import { getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions, getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS } from "./data.js";
+import {
+  getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions,
+  getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
+  uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
+  ensureSubInvoiceRow, monthFolder,
+} from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
 // Multi-user picker used by both the PMs field and Events attendees.
@@ -900,6 +905,206 @@ export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
               });
             }}>
               <Icon name="bell" size={13}/>Schedule alert
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ INVOICE FILES MODAL ============
+// Triggered from the paperclip overlay on any month cell in the Invoice tab.
+// Lists every PDF currently attached to that (project, kind, month) cell with
+// open + delete actions, and lets the user upload a new file. For sub
+// invoices, a sub_invoices row is auto-created via ensureSubInvoiceRow if
+// none exists yet — so users can upload without first having to type in an
+// amount.
+//
+// Props:
+//   kind          'prime' | 'sub'
+//   projectId     uuid of the project (= source_project_id on prime)
+//   projectName   string (for the modal header)
+//   year          int
+//   monthIdx      0..11
+//   files         current attachment array — re-fetched after each
+//                 successful upload/delete via onChanged()
+//   primeInvoiceId   (kind='prime' only) anticipated_invoice.id
+//   subInvoiceId     (kind='sub' only)   nullable; ensureSubInvoiceRow auto-creates if null
+//   companyId        (kind='sub' only)
+//   companyName      (kind='sub' only)
+//   amount           current cell amount — shown in the header echo
+export const InvoiceFilesModal = ({
+  kind, projectId, projectName,
+  year, monthIdx,
+  files = [],
+  primeInvoiceId, subInvoiceId, companyId, companyName,
+  amount,
+  onClose, onChanged,
+}) => {
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState("");
+  const [notes, setNotes] = useState("");
+  const fileRef = useRef(null);
+  const [picked, setPicked] = useState(null);
+
+  const monthLabel = monthFolder(year, monthIdx);
+  const headerTitle = kind === "sub"
+    ? `Sub invoices · ${projectName} · ${monthLabel}`
+    : `Prime invoice · ${projectName} · ${monthLabel}`;
+  const subhead = kind === "sub"
+    ? `Sub: ${companyName || "—"}${amount != null ? ` · ${fmtMoney(amount)}` : ""}`
+    : amount != null ? fmtMoney(amount) : "—";
+
+  const handleOpen = async (filePath) => {
+    try {
+      const url = await getInvoiceFileSignedUrl(filePath, 60);
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setError(e?.message || "Couldn't open file");
+    }
+  };
+
+  const handleDelete = async (file) => {
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      await deleteInvoiceFile({ kind, fileId: file.id, filePath: file.file_path });
+      await onChanged?.();
+    } catch (e) {
+      setError(e?.message || "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (busy) return;
+    if (!picked) { setError("Choose a file first"); return; }
+    setBusy(true); setError("");
+    try {
+      let parentSubInvoiceId = subInvoiceId;
+      if (kind === "sub" && !parentSubInvoiceId) {
+        const row = await ensureSubInvoiceRow({
+          projectId, companyId, year, month: monthIdx + 1,
+        });
+        parentSubInvoiceId = row.id;
+      }
+      await uploadInvoiceFile({
+        kind, projectId, year, monthIdx,
+        file: picked,
+        notes,
+        primeInvoiceId,
+        subInvoiceId: parentSubInvoiceId,
+        companyId, companyName,
+      });
+      setPicked(null);
+      setNotes("");
+      if (fileRef.current) fileRef.current.value = "";
+      await onChanged?.();
+    } catch (e) {
+      setError(e?.message || "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="modal" style={{ width: 580, maxHeight: "86vh", display: "flex", flexDirection: "column" }}>
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="link" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Invoice files</div>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>{headerTitle}</h3>
+            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+              {subhead}
+            </div>
+          </div>
+          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
+        </div>
+
+        <div className="modal-body" style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <div className="section-title" style={{ marginTop: 0 }}>
+              <Icon name="briefcase" size={12}/>
+              Existing files · {files.length}
+            </div>
+            {files.length === 0 ? (
+              <div className="drawer-section-empty" style={{ marginTop: 4 }}>
+                No files attached yet.
+              </div>
+            ) : (
+              <ul className="invoice-files-modal-list">
+                {files.map(f => (
+                  <li key={f.id}>
+                    <span className="invoice-file-name mono" title={f.file_name}>
+                      {f.file_name}
+                    </span>
+                    <span className="invoice-file-date mono subtle">
+                      {fmtDate(f.uploaded_at)}
+                    </span>
+                    <button type="button" className="btn ghost sm"
+                            onClick={() => handleOpen(f.file_path)}
+                            disabled={busy}>
+                      <Icon name="link" size={12}/>Open
+                    </button>
+                    <button type="button" className="btn ghost sm"
+                            style={{ color: "var(--rose)" }}
+                            onClick={() => handleDelete(f)}
+                            disabled={busy}>
+                      <Icon name="trash" size={12}/>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <div className="section-title">
+              <Icon name="plus" size={12}/>
+              Add a file
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              className="input"
+              onChange={(e) => setPicked(e.target.files?.[0] || null)}
+              disabled={busy}
+              style={{ width: "100%" }}
+            />
+            <div className="field" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
+              <div className="field-label">Notes (optional)</div>
+              <div className="field-value">
+                <textarea className="textarea" rows={2}
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          disabled={busy}
+                          placeholder="Anything worth remembering about this invoice…"/>
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{ color: "var(--rose)", fontSize: 12 }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
+            Bucket: <span className="mono">invoices</span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={onClose} disabled={busy}>Close</button>
+            <button className="btn primary sm"
+                    onClick={handleUpload}
+                    disabled={busy || !picked}>
+              <Icon name="check" size={13}/>
+              {busy ? "Uploading…" : "Upload"}
             </button>
           </div>
         </div>

@@ -9,7 +9,7 @@ import {
 // ClientsTable + CompaniesTable were merged into DirectoryTable.
 import { QuadSheet } from "./quadsheet.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
-import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
+import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
@@ -24,6 +24,7 @@ import {
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
+  upsertSubInvoiceAmount, reloadInvoiceArtifacts,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -545,6 +546,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [awaiting,  setAwaiting]  = useState(initial.awaiting);
   const [awarded,   setAwarded]   = useState(initial.awarded);
   const [closed,    setClosed]    = useState(initial.closed);
+  // Sub-invoice matrix per project: Map<project_id, sub_entry[]>. Updated
+  // after every subAmount upsert / file upload / file delete via reloadInvoiceArtifacts.
+  const [subInvoices, setSubInvoices] = useState(initial.subInvoices || new Map());
   const [invoice,   setInvoice]   = useState(initial.invoices);
   const [events,    setEvents]    = useState(initial.events);
   const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
@@ -573,6 +577,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [alert, setAlertObj] = useState(null);
   const [createTable, setCreateTable] = useState(null); // 'potential' | 'events' | 'clients' | 'companies' | null
   const [createSeed, setCreateSeed] = useState(null);
+  // Invoice file-attachment modal — { kind, projectRow, monthIdx, sub? } or null.
+  const [filesModal, setFilesModal] = useState(null);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -981,6 +987,43 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .then(({ error }) => {
         if (error) showToast(`Save failed: ${error.message}`, "x");
       });
+  };
+
+  // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
+  // The invoice rows + sub matrix get re-fetched together so primeFiles/files
+  // stay in sync with whatever the user just saved.
+  const refreshInvoiceArtifacts = async () => {
+    try {
+      const allProjects = [...potential, ...awaiting, ...awarded, ...closed];
+      const allCompaniesOrClients = [...clients, ...companies];
+      const { primeFilesByKey, subInvoicesMatrix } =
+        await reloadInvoiceArtifacts(allProjects, allCompaniesOrClients);
+      // Re-annotate primeFiles on existing invoice rows.
+      setInvoice(rows => rows.map(inv => ({
+        ...inv,
+        primeFiles: Array.from({ length: 12 }, (_, i) =>
+          primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
+        ),
+      })));
+      setSubInvoices(subInvoicesMatrix);
+    } catch (e) {
+      showToast(`Reload failed: ${e?.message || e}`, "x");
+    }
+  };
+
+  const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value) => {
+    try {
+      const cleaned = value === "" || value == null ? null : Number(value);
+      await upsertSubInvoiceAmount({
+        projectId, companyId,
+        year: THIS_YEAR,
+        month: monthIdx + 1,
+        amount: cleaned,
+      });
+      await refreshInvoiceArtifacts();
+    } catch (e) {
+      showToast(`Sub invoice save failed: ${e?.message || e}`, "x");
+    }
   };
 
   const openDrawer = (row, table) => setDrawer({ row, table });
@@ -1603,6 +1646,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             flashId={flashId}
             tab="invoice"
             orangeSourceIds={orangeSourceIds}
+            subInvoices={subInvoices}
+            onUpdateSubAmount={updateSubInvoiceCell}
+            onOpenFiles={(payload) => setFilesModal(payload)}
             yearOptions={availableYears.invoice}
             yearValue={yearFilter.invoice}
             onYearChange={(y) => setYear("invoice", y)}/>
@@ -1809,6 +1855,34 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           onClose={() => { setCreateTable(null); setCreateSeed(null); }}
           onCreated={(dbRow, extras) => handleCreated(createTable, dbRow, extras)}/>
       )}
+
+      {filesModal && (() => {
+        const { kind, projectRow, monthIdx, sub } = filesModal;
+        const isSub = kind === "sub";
+        const filesForCell = isSub
+          ? (sub?.files?.[monthIdx] || [])
+          : (projectRow?.primeFiles?.[monthIdx] || []);
+        const cellAmount = isSub
+          ? (sub?.amounts?.[monthIdx] ?? null)
+          : (projectRow?.values?.[monthIdx] ?? null);
+        return (
+          <InvoiceFilesModal
+            kind={kind}
+            projectId={projectRow.sourceId}
+            projectName={projectRow.name}
+            year={projectRow.year || THIS_YEAR}
+            monthIdx={monthIdx}
+            files={filesForCell}
+            amount={cellAmount}
+            primeInvoiceId={!isSub ? projectRow.id : undefined}
+            subInvoiceId={isSub ? sub.subInvoiceIds?.[monthIdx] : undefined}
+            companyId={isSub ? sub.companyId : undefined}
+            companyName={isSub ? sub.companyName : undefined}
+            onClose={() => setFilesModal(null)}
+            onChanged={refreshInvoiceArtifacts}
+          />
+        );
+      })()}
 
       {toast && (
         <div className="toast">

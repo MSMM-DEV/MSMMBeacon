@@ -255,6 +255,48 @@ export function getRowAnchors(tab, row) {
     .filter(a => a.value);
 }
 
+// ----------------------------------------------------------------------
+// Storage path helpers — file binaries live in the `invoices` bucket under
+// human-readable folders matching the user's mental model:
+//   invoices/<project_id>/prime/<Month YYYY>/<file>
+//   invoices/<project_id>/sub/<sub-name-slug>/<Month YYYY>/<file>
+// ----------------------------------------------------------------------
+export const slugCompanyName = (name) =>
+  String(name || "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    || "unknown";
+
+export const monthFolder = (year, monthIdx) => {
+  const idx = Math.max(0, Math.min(11, monthIdx | 0));
+  return `${MONTH_FULL_NAMES[idx]} ${year}`;
+};
+
+const MONTH_FULL_NAMES = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+
+// Pre-pad the upload filename with a sortable timestamp so two PDFs uploaded
+// for the same cell don't collide.
+const uploadFilename = (originalName) => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  // Replace any path separators or unsafe chars in the original name.
+  const safe = String(originalName || "file").replace(/[/\\?%*:|"<>]+/g, "-");
+  return `${stamp}-${safe}`;
+};
+
+export function buildInvoiceStoragePath({ kind, projectId, companyName, year, monthIdx, originalName }) {
+  const monthDir = monthFolder(year, monthIdx);
+  const fileName = uploadFilename(originalName);
+  if (kind === "prime") {
+    return `${projectId}/prime/${monthDir}/${fileName}`;
+  }
+  return `${projectId}/sub/${slugCompanyName(companyName)}/${monthDir}/${fileName}`;
+}
+
 // UI tab key → beacon_v2.alert_subject_enum value. v2 collapsed the 8-value
 // v1 enum to 4: every project status maps to 'project'; hot-leads maps to
 // 'lead'; invoice/event keep their values; SOQ is dropped.
@@ -555,7 +597,10 @@ export async function loadBeacon() {
   // split into the same 4 React state slices the UI already expects (SOQ is
   // dropped). PMs and subs use the consolidated project_pms / project_subs
   // join tables.
-  const [users, clients, companies, projects, invoice, events, hotLeads] = await Promise.all([
+  const [
+    users, clients, companies, projects, invoice, events, hotLeads,
+    subInvRows, subInvFileRows, primeInvFileRows,
+  ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
     pget(supabase.from("companies").select("*").order("name"), "companies"),
@@ -590,6 +635,23 @@ export async function loadBeacon() {
           console.warn("[beacon_v2] leads fetch skipped:", error.message);
           return [];
         }
+        return data || [];
+      }),
+    // Sub invoices + their attached files; if the migration isn't applied
+    // yet, gracefully degrade to empty arrays so the rest of the app boots.
+    supabase.from("sub_invoices").select("*").eq("year", THIS_YEAR)
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] sub_invoices fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    supabase.from("sub_invoice_files").select("*")
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] sub_invoice_files fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    supabase.from("prime_invoice_files").select("*")
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] prime_invoice_files fetch skipped:", error.message); return []; }
         return data || [];
       }),
   ]);
@@ -665,16 +727,80 @@ export async function loadBeacon() {
   }
   } // end DISABLED reconciliation gate
 
+  // Build the prime file lookup keyed on (anticipated_invoice.id, month).
+  // Each invoice row gets a `primeFiles[12]` annotation — index = month-1.
+  const primeFilesByKey = new Map();
+  for (const f of (primeInvFileRows || [])) {
+    const key = `${f.invoice_id}:${f.month}`;
+    const arr = primeFilesByKey.get(key) || [];
+    arr.push(f);
+    primeFilesByKey.set(key, arr);
+  }
+  const adaptedInvoices = reconciledInvoices.map(adaptInvoice).map(inv => ({
+    ...inv,
+    primeFiles: Array.from({ length: 12 }, (_, i) =>
+      primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
+    ),
+  }));
+
+  // Build the per-project sub matrix. For each project that has subs in
+  // project_subs, list every sub with their 12-month amounts (from
+  // sub_invoices) + 12-month file lists (from sub_invoice_files). Subs
+  // with no sub_invoice rows still appear — empty cells.
+  const subInvoicesByProjectCompany = new Map(); // "projectId:companyId" → sub_invoice row
+  const subInvoiceById = new Map();              // sub_invoice.id → row (for files lookup)
+  for (const r of (subInvRows || [])) {
+    subInvoicesByProjectCompany.set(`${r.project_id}:${r.company_id}:${r.month}`, r);
+    subInvoiceById.set(r.id, r);
+  }
+  const subFilesBySubInvoice = new Map();
+  for (const f of (subInvFileRows || [])) {
+    const arr = subFilesBySubInvoice.get(f.sub_invoice_id) || [];
+    arr.push(f);
+    subFilesBySubInvoice.set(f.sub_invoice_id, arr);
+  }
+  const subInvoicesMatrix = new Map();   // project_id → [{ companyId, companyName, contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12] }]
+  for (const p of projects) {
+    const subs = (p.subs || [])
+      .slice()
+      .sort((a, b) => (a.ord || 0) - (b.ord || 0));
+    if (subs.length === 0) continue;
+    const entries = subs.map(s => {
+      const company = companies.find(c => c.id === s.company_id);
+      const amounts = Array(12).fill(null);
+      const files   = Array(12).fill(null).map(() => []);
+      const subInvoiceIds = Array(12).fill(null);
+      for (let m = 1; m <= 12; m++) {
+        const key = `${p.id}:${s.company_id}:${m}`;
+        const row = subInvoicesByProjectCompany.get(key);
+        if (row) {
+          amounts[m - 1] = row.amount != null ? Number(row.amount) : null;
+          subInvoiceIds[m - 1] = row.id;
+          files[m - 1] = subFilesBySubInvoice.get(row.id) || [];
+        }
+      }
+      return {
+        companyId: s.company_id,
+        companyName: company?.name || "Unknown company",
+        contractAmount: s.amount || 0,
+        discipline: s.discipline || "",
+        amounts, files, subInvoiceIds,
+      };
+    });
+    subInvoicesMatrix.set(p.id, entries);
+  }
+
   return {
     potential: potential.map(adaptPotential),
     awaiting:  awaiting.map(adaptAwaiting),
     awarded:   awarded.map(adaptAwarded),
     closed:    closed.map(adaptClosed),
-    invoices:  reconciledInvoices.map(adaptInvoice),
+    invoices:  adaptedInvoices,
     events:    events.map(adaptEvent),
     hotLeads:  hotLeads.map(adaptHotLead),
     clients:   _companies,
     users:     _users,
+    subInvoices: subInvoicesMatrix,
   };
 }
 
@@ -814,4 +940,182 @@ export async function reloadEvents() {
     .order("event_date", { ascending: false, nullsFirst: false });
   if (error) throw new Error(`events reload: ${error.message}`);
   return (data || []).map(adaptEvent);
+}
+
+// ----------------------------------------------------------------------
+// Sub invoices + invoice file attachments
+// ----------------------------------------------------------------------
+// The amount cell on a sub row is editable inline. This upserts the row
+// keyed on (project_id, company_id, year, month). Returns the row id so
+// callers can attach file rows to it.
+export async function upsertSubInvoiceAmount({ projectId, companyId, year, month, amount }) {
+  // ON CONFLICT update — Postgres uses the unique (project_id, company_id, year, month) index.
+  const payload = {
+    project_id: projectId,
+    company_id: companyId,
+    year,
+    month,
+    amount: amount === "" || amount == null ? null : Number(amount),
+  };
+  const { data, error } = await supabase
+    .from("sub_invoices")
+    .upsert(payload, { onConflict: "project_id,company_id,year,month" })
+    .select("id, amount")
+    .single();
+  if (error) throw new Error(`sub invoice upsert: ${error.message}`);
+  return data;
+}
+
+// Find or create the sub_invoice row for the given coordinates. Used by the
+// upload modal: we may need to create a 0-amount row before attaching files.
+export async function ensureSubInvoiceRow({ projectId, companyId, year, month }) {
+  const existing = await supabase.from("sub_invoices")
+    .select("id, amount")
+    .eq("project_id", projectId)
+    .eq("company_id", companyId)
+    .eq("year", year)
+    .eq("month", month)
+    .maybeSingle();
+  if (existing.data) return existing.data;
+  const { data, error } = await supabase.from("sub_invoices")
+    .insert({ project_id: projectId, company_id: companyId, year, month })
+    .select("id, amount")
+    .single();
+  if (error) throw new Error(`sub invoice ensure: ${error.message}`);
+  return data;
+}
+
+// Upload a file to the `invoices` bucket and write a metadata row in the
+// matching files table. `kind` is 'prime' or 'sub'; the parent reference
+// differs accordingly.
+//   prime: { kind, projectId, year, monthIdx, file, primeInvoiceId }
+//   sub:   { kind, projectId, companyId, companyName, year, monthIdx, file, subInvoiceId }
+export async function uploadInvoiceFile(opts) {
+  const { kind, projectId, companyName, year, monthIdx, file, notes } = opts;
+  const path = buildInvoiceStoragePath({
+    kind, projectId, companyName, year, monthIdx,
+    originalName: file?.name || "file",
+  });
+  const up = await supabase.storage.from("invoices").upload(path, file, {
+    upsert: false,
+    cacheControl: "3600",
+  });
+  if (up.error) throw new Error(`storage upload: ${up.error.message}`);
+  const session = await supabase.auth.getSession();
+  const uploadedBy = session.data?.session?.user?.id || null;
+  // Resolve uploaded_by to a beacon_v2.users.id by auth_user_id (best effort).
+  let beaconUserId = null;
+  if (uploadedBy) {
+    const u = _users.find(x => x.id === uploadedBy) || null;
+    // _users holds adapted UI users — the .id field is the beacon_v2.users.id
+    // already, since adaptUser preserves the DB id. If the auth user isn't in
+    // _users (e.g. service-role or unrostered), beaconUserId stays null.
+    beaconUserId = u?.id || null;
+  }
+
+  if (kind === "prime") {
+    const { data, error } = await supabase.from("prime_invoice_files")
+      .insert({
+        invoice_id: opts.primeInvoiceId,
+        month: monthIdx + 1,
+        file_path: path,
+        file_name: file.name,
+        notes: notes || null,
+        uploaded_by: beaconUserId,
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`prime file insert: ${error.message}`);
+    return data;
+  } else {
+    const { data, error } = await supabase.from("sub_invoice_files")
+      .insert({
+        sub_invoice_id: opts.subInvoiceId,
+        file_path: path,
+        file_name: file.name,
+        notes: notes || null,
+        uploaded_by: beaconUserId,
+      })
+      .select("*")
+      .single();
+    if (error) throw new Error(`sub file insert: ${error.message}`);
+    return data;
+  }
+}
+
+export async function deleteInvoiceFile({ kind, fileId, filePath }) {
+  // Delete the binary first so a successful DB delete + failed storage
+  // delete doesn't leave orphan rows pointing at a missing path. If the
+  // storage delete fails, the DB row stays (safer than the inverse).
+  const rm = await supabase.storage.from("invoices").remove([filePath]);
+  if (rm.error) throw new Error(`storage remove: ${rm.error.message}`);
+  const table = kind === "prime" ? "prime_invoice_files" : "sub_invoice_files";
+  const { error } = await supabase.from(table).delete().eq("id", fileId);
+  if (error) throw new Error(`${table} delete: ${error.message}`);
+}
+
+export async function getInvoiceFileSignedUrl(filePath, expiresInSeconds = 60) {
+  const { data, error } = await supabase.storage.from("invoices")
+    .createSignedUrl(filePath, expiresInSeconds);
+  if (error) throw new Error(`signed url: ${error.message}`);
+  return data?.signedUrl;
+}
+
+// Refetch sub_invoices + sub_invoice_files + prime_invoice_files after an
+// upload/delete. Returns the same shape loadBeacon assembles for these
+// pieces so App.jsx can replace its slices in one call.
+export async function reloadInvoiceArtifacts(projects, companies) {
+  const [subInvRows, subInvFileRows, primeInvFileRows] = await Promise.all([
+    supabase.from("sub_invoices").select("*").eq("year", THIS_YEAR)
+      .then(({ data, error }) => { if (error) return []; return data || []; }),
+    supabase.from("sub_invoice_files").select("*")
+      .then(({ data, error }) => { if (error) return []; return data || []; }),
+    supabase.from("prime_invoice_files").select("*")
+      .then(({ data, error }) => { if (error) return []; return data || []; }),
+  ]);
+  // Re-build same maps as loadBeacon.
+  const primeFilesByKey = new Map();
+  for (const f of primeInvFileRows) {
+    const k = `${f.invoice_id}:${f.month}`;
+    const arr = primeFilesByKey.get(k) || [];
+    arr.push(f); primeFilesByKey.set(k, arr);
+  }
+  const subInvoicesByProjectCompany = new Map();
+  for (const r of subInvRows) {
+    subInvoicesByProjectCompany.set(`${r.project_id}:${r.company_id}:${r.month}`, r);
+  }
+  const subFilesBySubInvoice = new Map();
+  for (const f of subInvFileRows) {
+    const arr = subFilesBySubInvoice.get(f.sub_invoice_id) || [];
+    arr.push(f); subFilesBySubInvoice.set(f.sub_invoice_id, arr);
+  }
+  const subInvoicesMatrix = new Map();
+  for (const p of projects) {
+    const subs = (p.subs || []).slice().sort((a,b) => (a.ord||0)-(b.ord||0));
+    if (subs.length === 0) continue;
+    const entries = subs.map(s => {
+      const company = companies.find(c => c.id === s.cId || c.id === s.company_id);
+      const amounts = Array(12).fill(null);
+      const files = Array(12).fill(null).map(() => []);
+      const subInvoiceIds = Array(12).fill(null);
+      const cId = s.cId || s.company_id;
+      for (let m = 1; m <= 12; m++) {
+        const row = subInvoicesByProjectCompany.get(`${p.id}:${cId}:${m}`);
+        if (row) {
+          amounts[m-1] = row.amount != null ? Number(row.amount) : null;
+          subInvoiceIds[m-1] = row.id;
+          files[m-1] = subFilesBySubInvoice.get(row.id) || [];
+        }
+      }
+      return {
+        companyId: cId,
+        companyName: company?.name || "Unknown company",
+        contractAmount: s.amt || s.amount || 0,
+        discipline: s.desc || s.discipline || "",
+        amounts, files, subInvoiceIds,
+      };
+    });
+    subInvoicesMatrix.set(p.id, entries);
+  }
+  return { primeFilesByKey, subInvoicesMatrix };
 }

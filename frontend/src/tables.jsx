@@ -1779,6 +1779,11 @@ export const InvoiceTable = ({
   onOpenDrawer, onAlert, flashId,
   yearOptions, yearValue, onYearChange,
   orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
+  // Sub-invoices feature: per-project list of {companyId, companyName,
+  // contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12]}
+  subInvoices,       // Map<project_id, sub_entry[]>
+  onUpdateSubAmount, // (projectId, companyId, monthIdx, value) => void
+  onOpenFiles,       // ({kind, projectRow, monthIdx, sub?}) => void
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -1800,6 +1805,14 @@ export const InvoiceTable = ({
   const nonOrangeRows = rows.filter(r => !isOrange(r));
   const orangeRows    = rows.filter(isOrange);
   const orderedRows   = [...nonOrangeRows, ...orangeRows];
+
+  // Set of invoice-row ids whose sub list is currently expanded inline.
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const toggleExpand = (id) => setExpandedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const yearBtnRef = useRef(null);
@@ -1880,6 +1893,7 @@ export const InvoiceTable = ({
             <table className="invoice-table">
               <thead>
                 <tr>
+                  <th className="invoice-expand-col"/>
                   <th className="sticky-1">Proj #</th>
                   <th className="sticky-2" style={{ minWidth: 260 }}>Project Name</th>
                   <th style={{ minWidth: 70 }}>Type</th>
@@ -1900,12 +1914,29 @@ export const InvoiceTable = ({
                 </tr>
               </thead>
               <tbody>
-                {orderedRows.map((r) => (
-                  <tr key={r.id}
-                      className={flashId === r.id ? "flash" : ""}
+                {orderedRows.map((r) => {
+                  const isExpanded = expandedIds.has(r.id);
+                  const subList    = (subInvoices?.get(r.sourceId) || []);
+                  const hasSubs    = subList.length > 0;
+                  return (
+                  <React.Fragment key={r.id}>
+                  <tr className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
                       data-prob={isOrange(r) ? "orange" : undefined}
                       onDoubleClick={() => onOpenDrawer?.(r)}
                       style={{ cursor: "default" }}>
+                    <td className="invoice-expand-col" onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
+                      {hasSubs ? (
+                        <button
+                          type="button"
+                          className={"directory-expand-btn" + (isExpanded ? " open" : "")}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? "Collapse subs" : "Expand subs"}
+                          title={isExpanded ? "Hide subs" : `${subList.length} sub${subList.length === 1 ? "" : "s"} on this project`}
+                          onClick={() => toggleExpand(r.id)}>
+                          <Icon name="chevronRight" size={12}/>
+                        </button>
+                      ) : <span className="empty-cell" style={{ fontSize: 11, opacity: 0.3 }}>—</span>}
+                    </td>
                     <td className="sticky-1 mono" style={{ fontSize: 12 }}>
                       <EditableCell value={r.projectNumber || ""}
                         onChange={v => updateRow(r.id, { projectNumber: v })}/>
@@ -1938,15 +1969,32 @@ export const InvoiceTable = ({
                         onChange={v => updateRow(r.id, { remainingStart: v })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
-                    {r.values.map((v, i) => (
+                    {r.values.map((v, i) => {
+                      const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
+                      const hasFiles = filesForCell.length > 0;
+                      return (
                       <td key={i}
-                          className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "")}>
+                          className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
                         <EditableCell value={v} type="number"
                           onChange={nv => updateInvoice(r.id, i, nv)}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                         />
+                        <button
+                          type="button"
+                          className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
+                          title={hasFiles
+                            ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                            : "Attach prime invoice file"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                          }}>
+                          <Icon name="link" size={11}/>
+                          {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                        </button>
                       </td>
-                    ))}
+                      );
+                    })}
                     <td className={"total-cell" + (isYtdOverride(r) ? " inv-override" : "")}
                         title={isYtdOverride(r) ? "Manually overridden — clear the cell to reset to auto-calc" : "Auto-calculated — click to override"}>
                       <EditableCell value={ytdActualShown(r)} type="number"
@@ -1966,11 +2014,64 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  {isExpanded && subList.map((s) => (
+                    <tr key={`${r.id}:${s.companyId}`} className="invoice-sub-row">
+                      <td className="invoice-expand-col"/>
+                      <td className="sticky-1 mono subtle" style={{ fontSize: 11 }}/>
+                      <td className="sticky-2">
+                        <span className="invoice-sub-name">{s.companyName}</span>
+                        {s.discipline && (
+                          <span className="invoice-sub-discipline mono">· {s.discipline}</span>
+                        )}
+                      </td>
+                      <td className="subtle"><span className="empty-cell">—</span></td>
+                      <td className="subtle"><span className="empty-cell">—</span></td>
+                      <td className="mono">
+                        {s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>}
+                      </td>
+                      <td className="subtle"><span className="empty-cell">—</span></td>
+                      {s.amounts.map((amt, i) => {
+                        const filesForCell = s.files[i] || [];
+                        const hasFiles = filesForCell.length > 0;
+                        return (
+                        <td key={i}
+                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
+                          <EditableCell value={amt} type="number"
+                            onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv)}
+                            format={v => v != null && v !== 0
+                              ? fmtMoney(v)
+                              : <span style={{ opacity: 0.4 }}>—</span>}/>
+                          <button
+                            type="button"
+                            className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
+                            title={hasFiles
+                              ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                              : `Attach invoice from ${s.companyName}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: i, sub: s });
+                            }}>
+                            <Icon name="link" size={11}/>
+                            {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                          </button>
+                        </td>
+                        );
+                      })}
+                      <td className="total-cell mono">
+                        {fmtMoney(s.amounts.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b||0), 0)) || <span className="empty-cell">—</span>}
+                      </td>
+                      <td className="total-cell"><span className="empty-cell">—</span></td>
+                      <td/>
+                    </tr>
+                  ))}
+                  </React.Fragment>
+                  );
+                })}
                 {rows.length > 0 && (
                   <>
                     {/* Total excluding orange (non-orange invoice rows only) */}
                     <tr>
+                      <td className="invoice-expand-col total-cell"/>
                       <td className="sticky-1 total-cell"/>
                       <td className="sticky-2 total-cell" style={{ fontWeight: 600 }}>
                         Total — excl. Orange
@@ -1994,6 +2095,7 @@ export const InvoiceTable = ({
                     </tr>
                     {/* Total including orange (everything) */}
                     <tr>
+                      <td className="invoice-expand-col total-cell"/>
                       <td className="sticky-1 total-cell"/>
                       <td className="sticky-2 total-cell" style={{ fontWeight: 700, color: "var(--prob-orange)" }}>
                         Total — incl. Orange
