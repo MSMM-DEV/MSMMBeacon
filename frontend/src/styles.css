@@ -704,6 +704,17 @@ html, body { overflow-x: clip; }
 .trow.org-header[data-org="regional"]  { background-color: var(--org-regional-bg); }
 .trow.org-header[data-org="other"]     { background-color: var(--org-other-bg); }
 .trow.org-header[data-org="unknown"]   { background-color: var(--surface-2); }
+/* Directory tab kind-headers — sage stripe for Clients, accent stripe for
+   Companies. Background tint pulls from the existing accent-softer/sage
+   variables so the rhythm matches every other table's section bar. */
+.trow.org-header[data-org="clients"]   {
+  background-color: color-mix(in srgb, var(--sage) 12%, var(--surface));
+  border-left: 3px solid var(--sage);
+}
+.trow.org-header[data-org="companies"] {
+  background-color: var(--accent-softer);
+  border-left: 3px solid var(--accent);
+}
 
 /* ---- Group-total rows (Potential only) ---- */
 .trow.total-row {
@@ -4087,4 +4098,125 @@ html, body { overflow-x: clip; }
   background: var(--accent-soft);
   color: var(--accent-ink);
   flex-shrink: 0;
+}
+
+/* ============================================================
+ * Linked Projects · Directory drawer subsection
+ * ----------------------------------------------------------------
+ * One flat list of every project this client/company is attached
+ * to, status-coded by chip color. Click a row to swap the drawer
+ * to that project's detail view.
+ * ============================================================ */
+.drawer-section.linked-projects {
+  padding-top: 4px;
+}
+.linked-projects-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.linked-projects-breakdown {
+  font-size: 11px;
+  color: var(--text-soft);
+  letter-spacing: 0.02em;
+}
+.linked-projects-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.linked-project {
+  display: grid;
+  grid-template-columns:
+    max-content   /* status chip   */
+    44px          /* year (mono)   */
+    minmax(0,1fr) /* project name  */
+    max-content   /* INV badge / spacer */
+    max-content   /* proj # (mono, subtle) */
+    max-content;  /* role chip     */
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.linked-project:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.linked-project:active {
+  transform: translateY(0.5px);
+}
+/* Subtle left-edge tint matching the project's status — turns the row
+   into a tiny color-coded card without overwhelming the list rhythm. */
+.linked-project[data-status="awaiting"]  { box-shadow: inset 2px 0 0 var(--blue); }
+.linked-project[data-status="awarded"]   { box-shadow: inset 2px 0 0 var(--sage); }
+.linked-project[data-status="potential"] { box-shadow: inset 2px 0 0 var(--accent); }
+.linked-project[data-status="closed"]    { box-shadow: inset 2px 0 0 var(--text-muted); }
+.linked-project-year {
+  font-size: 12px;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.linked-project-name {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.linked-project-num {
+  font-size: 11.5px;
+}
+.linked-project-role.chip {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  letter-spacing: 0.04em;
+}
+.chip-mini.invoice-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--prob-orange) 18%, transparent);
+  color: var(--prob-orange);
+  border: 1px solid color-mix(in srgb, var(--prob-orange) 32%, transparent);
+}
+.drawer-section-empty {
+  font-size: 12.5px;
+  color: var(--text-soft);
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+/* Mobile: collapse the linked-project row to two lines so the chip+name
+   stay scannable at narrow widths. */
+@media (max-width: 640px) {
+  .linked-project {
+    grid-template-columns: max-content 1fr max-content;
+    grid-template-areas:
+      "status name role"
+      "year   num  badge";
+    row-gap: 2px;
+  }
+  .linked-project > .chip:first-child       { grid-area: status; }
+  .linked-project-name                       { grid-area: name;   }
+  .linked-project-role                       { grid-area: role;   }
+  .linked-project-year                       { grid-area: year;   }
+  .linked-project-num                        { grid-area: num;    }
+  .linked-project .chip-mini.invoice-badge   { grid-area: badge; justify-self: end; }
 }

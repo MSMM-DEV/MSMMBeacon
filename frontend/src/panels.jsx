@@ -50,8 +50,78 @@ function UsersField({ value, onChange, placeholder = "Pick users…" }) {
   );
 }
 
+// ============ LINKED PROJECTS (drawer subsection for Directory rows) ============
+// Renders a flat list of projects this client/company is associated with, each
+// row chip-coded by status (Potential / Awaiting / Awarded / Closed) plus a
+// small INV badge when the project has a linked anticipated_invoice row.
+// Sort: Awaiting → Awarded → Potential → Closed Out, then year DESC inside.
+const STATUS_CHIP = {
+  potential:  { label: "Potential",  cls: "accent" },
+  awaiting:   { label: "Awaiting",   cls: "blue"   },
+  awarded:    { label: "Awarded",    cls: "sage"   },
+  closed:     { label: "Closed",     cls: "muted"  },
+};
+const STATUS_ORDER = { awaiting: 1, awarded: 2, potential: 3, closed: 4 };
+
+function LinkedProjectsSection({ projects, onOpenProject }) {
+  const sorted = [...(projects || [])].sort((a, b) => {
+    const sA = STATUS_ORDER[a.statusKey] ?? 99;
+    const sB = STATUS_ORDER[b.statusKey] ?? 99;
+    if (sA !== sB) return sA - sB;
+    return (b.year || 0) - (a.year || 0);
+  });
+  const projectCount = sorted.length;
+  const invoiceCount = sorted.filter(p => p.hasInvoice).length;
+
+  return (
+    <div className="drawer-section linked-projects" style={{ marginTop: 22 }}>
+      <div className="linked-projects-head">
+        <div className="section-title" style={{ margin: 0 }}>
+          <Icon name="briefcase" size={12}/>
+          Linked Projects · {projectCount}
+        </div>
+        {invoiceCount > 0 && (
+          <span className="linked-projects-breakdown mono">
+            {invoiceCount} {invoiceCount === 1 ? "invoice" : "invoices"}
+          </span>
+        )}
+      </div>
+      {projectCount === 0 ? (
+        <div className="drawer-section-empty">
+          No projects link to this {/* eslint-disable-next-line */}
+          entry yet.
+        </div>
+      ) : (
+        <ul className="linked-projects-list">
+          {sorted.map(p => {
+            const meta = STATUS_CHIP[p.statusKey] || { label: p.statusKey, cls: "muted" };
+            return (
+              <li key={p.id}
+                  className="linked-project"
+                  data-status={p.statusKey}
+                  onClick={() => onOpenProject?.(p.id, p.statusKey)}>
+                <span className={`chip ${meta.cls}`}>{meta.label}</span>
+                <span className="linked-project-year mono">{p.year || "—"}</span>
+                <span className="linked-project-name">{p.name}</span>
+                {p.hasInvoice && (
+                  <span className="chip-mini invoice-badge"
+                        title={p.invoiceTooltip || "Linked anticipated_invoice row"}>
+                    INV
+                  </span>
+                )}
+                <span className="linked-project-num mono subtle">{p.projectNumber || "—"}</span>
+                <span className="linked-project-role chip muted">{p.role}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert }) => {
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, linkedProjects, onOpenProject }) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -65,6 +135,12 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
   const CLIENT_OR_FIRM_OPTIONS = buildClientOrCompanyOptions();
   const SUB_OPTIONS            = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
   const USERS = getUsers();
+
+  // The Directory tab merges Clients + Companies into one table. The drawer
+  // routes to the right field block based on the row's `type` discriminator.
+  const fieldsKey = table === "directory"
+    ? (row.type === "Client" ? "clients" : "companies")
+    : table;
 
   // Every column that appears in the corresponding table in tables.jsx must have
   // a field here so the drawer is the complete editor for the row.
@@ -190,7 +266,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "address",        label: "Address" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
-  }[table] || [];
+  }[fieldsKey] || [];
 
   const renderInput = (f) => {
     const val = row[f.k];
@@ -375,6 +451,9 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
     clients:   "Client",
     companies: "Company",
   };
+  const titleLabel = table === "directory"
+    ? (row.type === "Client" ? "Client" : "Company")
+    : titleMap[table];
 
   return (
     <>
@@ -384,7 +463,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           <div>
             <div className="drawer-eyebrow">
               <Icon name="briefcase" size={12}/>
-              {titleMap[table]}
+              {titleLabel}
               {row.projectNumber && <span className="mono" style={{ marginLeft: 6, color: "var(--text-soft)" }}>· {row.projectNumber}</span>}
             </div>
             <h3 className="drawer-title">{row.name || row.title}</h3>
@@ -450,6 +529,12 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
                 Carried forward from previous stage · {row.sourceId}
               </div>
             </>
+          )}
+          {table === "directory" && linkedProjects && (
+            <LinkedProjectsSection
+              projects={linkedProjects}
+              onOpenProject={onOpenProject}
+            />
           )}
         </div>
         <div className="drawer-foot">

@@ -1165,6 +1165,35 @@ const injectOrgHeaders = (unitLabel = "row") => (sortedRows) => {
   return out;
 };
 
+// Same shape as injectOrgHeaders, but groups rows by entity *kind* —
+// "Clients" first (rows where r.type === "Client"), then "Companies"
+// (everything else). Used by the combined DirectoryTable.
+const injectKindHeaders = (sortedRows) => {
+  if (!sortedRows || sortedRows.length === 0) return sortedRows;
+  const clients   = sortedRows.filter(r => r.type === "Client");
+  const companies = sortedRows.filter(r => r.type !== "Client");
+  const out = [];
+  if (clients.length > 0) {
+    out.push({
+      id: "_kindheader_clients",
+      _kindHeader: "Clients",
+      _count: clients.length,
+      _unit:  clients.length === 1 ? "client" : "clients",
+    });
+    for (const r of clients) out.push(r);
+  }
+  if (companies.length > 0) {
+    out.push({
+      id: "_kindheader_companies",
+      _kindHeader: "Companies",
+      _count: companies.length,
+      _unit:  companies.length === 1 ? "company" : "companies",
+    });
+    for (const r of companies) out.push(r);
+  }
+  return out;
+};
+
 export const AwaitingTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, onCloseOut, flashId, filters,
   yearOptions, yearValue, onYearChange,
@@ -2260,15 +2289,24 @@ export const HotLeadsTable = ({
   );
 };
 
-// ---------- Clients (clients only, with Org Type) ----------
-export const ClientsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, flashId, filters }) => {
+
+// ---------- Directory (Clients + Companies) ----------
+// One table for both kinds. Section headers (clients first, companies second)
+// come from injectKindHeaders. Columns are a UNION — irrelevant cells render
+// an em-dash for the wrong kind so the visual rhythm holds.
+export const DirectoryTable = ({
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, flashId, filters,
+}) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
     { label: "Name", w: "minmax(220px, 2fr)", sortKey: "name",
-      sortValue: r => r.baseName || r.name || "" },
+      sortValue: r => (r.type === "Client" ? (r.baseName || r.name) : r.name) || "" },
     { label: "District", w: "140px", sortKey: "district",
       sortValue: r => r.district || "" },
-    { label: "Org Type", w: "140px", sortKey: "orgType" },
+    { label: "Org Type", w: "140px", sortKey: "orgType",
+      sortValue: r => r.orgType || "" },
+    { label: "Type", w: "120px", sortKey: "type",
+      sortValue: r => r.type === "Client" ? "" : (r.type || "") },
     { label: "Contact", w: "minmax(150px, 1.2fr)", sortKey: "contact" },
     { label: "Email", w: "minmax(180px, 1.5fr)", sortKey: "email" },
     { label: "Phone", w: "140px", sortKey: "phone" },
@@ -2278,24 +2316,41 @@ export const ClientsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer,
       sortValue: r => countRefsFor(r.id, projectsByType) },
   ];
 
-  const { orgTypeOptions } = buildOptions();
+  const { orgTypeOptions, companyTypeOptions } = buildOptions();
+  const typeColor = t => ({ "Prime": "blue", "Sub": "accent", "Multiple": "rose" }[t] || "muted");
+  const dash = <span className="empty-cell">—</span>;
 
   return (
     <TableView
       tab={tab}
       filters={filters}
       columns={cols} rows={rows}
-      emptyTitle="No clients yet"
-      emptyHint="Clients are organizations you contract with directly. Add one to start associating projects."
+      postProcess={injectKindHeaders}
+      emptyTitle="No directory entries yet"
+      emptyHint="Clients (organizations you contract with) and companies (firms you team with) live here. Add either to start."
       emptyIcon="users"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        // Section header (clients/companies). Same shape as injectOrgHeaders' row.
+        if (r._kindHeader) {
+          const orgKey = r._kindHeader.toLowerCase();
+          return (
+            <div key={r.id} className="trow org-header"
+                 data-org={orgKey}
+                 style={{ gridTemplateColumns: gridCols }}>
+              <div className="td" style={{ color: "var(--text)" }}>
+                {r._kindHeader} · {r._count} {r._unit}
+              </div>
+            </div>
+          );
+        }
+        const isClient = r.type === "Client";
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
               <input type="checkbox"/>
             </div>
           ),
-          "Name": (
+          "Name": isClient ? (
             <div className="td" style={{ fontWeight: 500 }}>
               <EditableCell value={r.baseName || r.name}
                 onChange={v => {
@@ -2306,8 +2361,13 @@ export const ClientsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer,
                   });
                 }}/>
             </div>
+          ) : (
+            <div className="td" style={{ fontWeight: 500 }}>
+              <EditableCell value={r.name}
+                onChange={v => updateRow(r.id, { name: v })}/>
+            </div>
           ),
-          "District": (
+          "District": isClient ? (
             <div className="td subtle">
               <EditableCell value={r.district}
                 onChange={v => {
@@ -2318,8 +2378,8 @@ export const ClientsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer,
                   });
                 }}/>
             </div>
-          ),
-          "Org Type": (
+          ) : (<div className="td">{dash}</div>),
+          "Org Type": isClient ? (
             <div className="td">
               <EditableCell value={r.orgType} type="select" options={orgTypeOptions}
                 onChange={v => updateRow(r.id, { orgType: v })}
@@ -2327,99 +2387,10 @@ export const ClientsTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer,
                   ? <span className="chip muted">{v}</span>
                   : <span className="empty-cell">—</span>}/>
             </div>
-          ),
-          "Contact": (
-            <div className="td subtle">
-              <EditableCell value={r.contact}
-                onChange={v => updateRow(r.id, { contact: v })}/>
-            </div>
-          ),
-          "Email": (
-            <div className="td mono subtle" style={{ fontSize: 12 }}>
-              <EditableCell value={r.email}
-                onChange={v => updateRow(r.id, { email: v })}/>
-            </div>
-          ),
-          "Phone": (
-            <div className="td mono subtle" style={{ fontSize: 12 }}>
-              <EditableCell value={r.phone}
-                onChange={v => updateRow(r.id, { phone: v })}/>
-            </div>
-          ),
-          "Location": (
-            <div className="td subtle">
-              <EditableCell value={r.address}
-                onChange={v => updateRow(r.id, { address: v })}/>
-            </div>
-          ),
-          "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
-              <EditableCell value={r.notes} type="textarea"
-                onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
-            </div>
-          ),
-          "Projects": (
-            <div className="td mono">
-              <span className="chip muted">{countRefsFor(r.id, projectsByType)}</span>
-            </div>
-          ),
-        };
-        return (
-          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
-               style={{ gridTemplateColumns: gridCols, cursor: "default" }}
-               onDoubleClick={() => onOpenDrawer(r)}>
-            {renderOrderedCells(visibleColumns, cells)}
-          </div>
-        );
-      }}
-    />
-  );
-};
-
-// ---------- Companies (Prime/Sub/Multiple) ----------
-export const CompaniesTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, flashId, filters }) => {
-  const cols = [
-    { label: "__select", w: "42px", locked: true },
-    { label: "Company", w: "minmax(220px, 2fr)", sortKey: "name" },
-    { label: "Type", w: "130px", sortKey: "type" },
-    { label: "Contact", w: "minmax(150px, 1.2fr)", sortKey: "contact" },
-    { label: "Email", w: "minmax(180px, 1.5fr)", sortKey: "email" },
-    { label: "Phone", w: "140px", sortKey: "phone" },
-    { label: "Location", w: "minmax(140px, 1fr)", sortKey: "address" },
-    { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
-    { label: "Projects", w: "90px", sortKey: "projectCount",
-      sortValue: r => countRefsFor(r.id, projectsByType) },
-  ];
-  const typeColor = t => ({ "Prime": "blue", "Sub": "accent", "Multiple": "rose" }[t] || "muted");
-
-  const { companyTypeOptions } = buildOptions();
-
-  return (
-    <TableView
-      tab={tab}
-      filters={filters}
-      columns={cols} rows={rows}
-      emptyTitle="No companies yet"
-      emptyHint="Primes, subs, and partners you work with across projects show up here."
-      emptyIcon="briefcase"
-      renderRow={(r, _i, gridCols, visibleColumns) => {
-        const cells = {
-          "__select": (
-            <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
-            </div>
-          ),
-          "Company": (
-            <div className="td" style={{ gap: 8 }}>
-              <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
-                <EditableCell value={r.name}
-                  onChange={v => updateRow(r.id, { name: v })}/>
-              </span>
-              {r.type && <span className={`chip ${typeColor(r.type)}`} style={{ fontSize: 11 }}>{r.type}</span>}
-            </div>
-          ),
-          "Type": (
+          ) : (<div className="td">{dash}</div>),
+          "Type": isClient ? (
+            <div className="td">{dash}</div>
+          ) : (
             <div className="td">
               <EditableCell value={r.type} type="select" options={companyTypeOptions}
                 onChange={v => updateRow(r.id, { type: v })}
@@ -2467,6 +2438,7 @@ export const CompaniesTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawe
         };
         return (
           <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-kind={isClient ? "client" : "company"}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}
@@ -2477,7 +2449,7 @@ export const CompaniesTable = ({ tab, rows, updateRow = _noopUpdate, onOpenDrawe
   );
 };
 
-// ---------- shared counter for ClientsTable and CompaniesTable ----------
+// ---------- shared helpers for the Directory ----------
 function countRefsFor(id, projectsByType) {
   const all = [
     ...(projectsByType?.potential || []),

@@ -3,9 +3,10 @@ import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
-  InvoiceTable, EventsTable, HotLeadsTable, ClientsTable, CompaniesTable,
+  InvoiceTable, EventsTable, HotLeadsTable, DirectoryTable,
 } from "./tables.jsx";
 // Note: SoqTable was removed — SOQ is no longer surfaced in v2.
+// ClientsTable + CompaniesTable were merged into DirectoryTable.
 import { QuadSheet } from "./quadsheet.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal } from "./panels.jsx";
@@ -35,6 +36,54 @@ const countRefs = (id) => {
   return list.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
 };
 
+// Build the "Linked Projects" list for a Directory drawer row. Walks every
+// pipeline state slice and tags each match with this entity's role on the
+// project (Client / Prime / Sub) plus a hasInvoice flag if anticipated_invoice
+// has a row sourcing from this project.
+//
+// Role resolution: the adapters fold `prime_company_id` into `clientId`, so
+// `p.clientId === entity.id` covers both "this client is the project's client"
+// and "this company is the project's prime". We disambiguate by entity.type:
+// Client-typed entity → role "Client"; otherwise → role "Prime".
+function linkedProjectsFor(entity, projectsByType, invoice) {
+  const isClient = entity?.type === "Client";
+  const STATUS_KEYS = [
+    ["awaiting", "Awaiting"],
+    ["awarded",  "Awarded"],
+    ["potential","Potential"],
+    ["closed",   "Closed"],
+  ];
+  const invoiceBySource = new Map();
+  for (const inv of (invoice || [])) {
+    if (inv.sourceId) invoiceBySource.set(inv.sourceId, inv);
+  }
+  const out = [];
+  for (const [statusKey] of STATUS_KEYS) {
+    const list = projectsByType?.[statusKey] || [];
+    for (const p of list) {
+      const isPrimaryMatch = p.clientId === entity.id;
+      const subMatch = (p.subs || []).some(s => s.cId === entity.id);
+      if (!isPrimaryMatch && !subMatch) continue;
+      // Prefer Prime / Client over Sub when both apply.
+      const role = isPrimaryMatch ? (isClient ? "Client" : "Prime") : "Sub";
+      const inv  = invoiceBySource.get(p.id);
+      out.push({
+        id: p.id,
+        statusKey,
+        name: p.name || "",
+        projectNumber: p.projectNumber || "",
+        year: p.year || null,
+        role,
+        hasInvoice: !!inv,
+        invoiceTooltip: inv
+          ? `Invoice · ${inv.year} · ${inv.type || ""}`.trim()
+          : null,
+      });
+    }
+  }
+  return out;
+}
+
 // Display order differs from the move-forward flow: Invoice is shown first
 // because it's what leadership looks at most. The actual pipeline (Potential
 // → Awaiting Verdict → Awarded / Closed Out) keeps its → arrows; the Invoice
@@ -50,8 +99,7 @@ const TAB_META = [
   // SOQ was removed entirely in beacon_v2 (no table, no data).
   { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
-  { key: "clients",   label: "Clients",          stage: "stage-clients",   group: "side" },
-  { key: "companies", label: "Companies",        stage: "stage-clients",   group: "side" },
+  { key: "directory", label: "Directory",        stage: "stage-clients",   group: "side" },
 ];
 
 const PAGE_META = {
@@ -62,8 +110,7 @@ const PAGE_META = {
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
-  clients:   { title: "Clients", desc: "Organizations that hire us. Referenced by every project row's Client field." },
-  companies: { title: "Companies", desc: "Firms we team with as Primes or Subs. Referenced by project Prime and Subs fields." },
+  directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and hot leads at a glance." },
 };
 
@@ -116,19 +163,18 @@ const FILTERS = {
     upcoming: r => r.dateTime && new Date(r.dateTime) >= new Date(),
     past:     r => r.dateTime && new Date(r.dateTime) <  new Date(),
   },
-  clients: {
-    all: () => true,
-    federal: r => r.orgType === "Federal",
-    state:   r => r.orgType === "State",
-    city:    r => r.orgType === "City",
-    parish:  r => r.orgType === "Parish",
-    other:   r => !["Federal","State","City","Parish"].includes(r.orgType),
-  },
-  companies: {
-    all: () => true,
-    prime:    r => r.type === "Prime",
-    sub:      r => r.type === "Sub",
-    multiple: r => r.type === "Multiple",
+  // The Directory merges Clients + Companies. Filter chips cover both
+  // the kind axis (clients vs companies) and the sub-attribute axis
+  // (Federal/State for clients; Prime/Sub/Multiple for companies).
+  directory: {
+    all:       () => true,
+    clients:   r => r.type === "Client",
+    companies: r => r.type !== "Client",
+    federal:   r => r.type === "Client" && r.orgType === "Federal",
+    state:     r => r.type === "Client" && r.orgType === "State",
+    prime:     r => r.type === "Prime",
+    sub:       r => r.type === "Sub",
+    multiple:  r => r.type === "Multiple",
   },
 };
 
@@ -162,19 +208,17 @@ const FILTER_CHIPS = {
     { key: "upcoming", label: "Upcoming", icon: "clock" },
     { key: "past",     label: "Past" },
   ],
-  clients: [
-    { key: "all",     label: "All" },
-    { key: "federal", label: "Federal" },
-    { key: "state",   label: "State" },
-    { key: "city",    label: "City" },
-    { key: "parish",  label: "Parish" },
-    { key: "other",   label: "Other" },
-  ],
-  companies: [
-    { key: "all",      label: "All" },
-    { key: "prime",    label: "Primes" },
-    { key: "sub",      label: "Subs" },
-    { key: "multiple", label: "Multiple" },
+  // Two visual groupings on the Directory: kind (clients vs companies)
+  // then sub-attribute (org-type for clients; company-type for companies).
+  directory: [
+    { key: "all",       label: "All" },
+    { key: "clients",   label: "Clients",   icon: "users" },
+    { key: "companies", label: "Companies", icon: "briefcase" },
+    { key: "federal",   label: "Federal" },
+    { key: "state",     label: "State" },
+    { key: "prime",     label: "Primes" },
+    { key: "sub",       label: "Subs" },
+    { key: "multiple",  label: "Multiple" },
   ],
 };
 
@@ -304,20 +348,12 @@ const EXPORT_COLUMNS = {
     { label: "Attendees",                   get: r => (r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ") },
     { label: "Notes",                       get: r => r.notes || "" },
   ],
-  clients: [
-    { label: "Name",                        get: r => r.baseName || r.name },
+  directory: [
+    { label: "Name",                        get: r => r.type === "Client" ? (r.baseName || r.name) : r.name },
+    { label: "Kind",              wMm: 22,  get: r => r.type === "Client" ? "Client" : "Company" },
     { label: "District",                    get: r => r.district || "" },
     { label: "Org Type",          wMm: 22,  get: r => r.orgType || "" },
-    { label: "Contact",                     get: r => r.contact || "" },
-    { label: "Email",                       get: r => r.email || "" },
-    { label: "Phone",             wMm: 28,  get: r => r.phone || "" },
-    { label: "Location",                    get: r => r.address || "" },
-    { label: "Notes",                       get: r => r.notes || "" },
-    { label: "Projects",          wMm: 20,  get: r => countRefs(r.id) },
-  ],
-  companies: [
-    { label: "Company",                     get: r => r.name },
-    { label: "Type",              wMm: 22,  get: r => r.type || "" },
+    { label: "Type",              wMm: 22,  get: r => r.type === "Client" ? "" : (r.type || "") },
     { label: "Contact",                     get: r => r.contact || "" },
     { label: "Email",                       get: r => r.email || "" },
     { label: "Phone",             wMm: 28,  get: r => r.phone || "" },
@@ -395,7 +431,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       attendees: extras.attendees || [],
     };
   }
-  if (table === "clients") {
+  if (table === "clients" || table === "directory-client") {
     return {
       id: dbRow.id,
       name: dbRow.district ? `${dbRow.name} — ${dbRow.district}` : dbRow.name,
@@ -410,7 +446,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       orgType: dbRow.org_type || "",
     };
   }
-  if (table === "companies") {
+  if (table === "companies" || table === "directory-company") {
     return {
       id: dbRow.id,
       name: dbRow.name,
@@ -499,7 +535,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // after the admin panel mutates the roster. The value is read via a data
   // attribute below so unused-var lint stays happy; re-render is the goal.
   const [rosterTick, setRosterTick] = useState(0);
-  const [tab, setTab] = useState(() => localStorage.getItem("beacon-tab") || "quad");
+  const [tab, setTab] = useState(() => {
+    const saved = localStorage.getItem("beacon-tab") || "quad";
+    // Migrate legacy values: the v2 UI merged clients + companies into
+    // "directory" and dropped soq. Anyone whose last-used tab was one of
+    // those lands on the new combined tab (or quad for soq).
+    if (saved === "clients" || saved === "companies") return "directory";
+    if (saved === "soq") return "quad";
+    return saved;
+  });
   // Deep-link landing: if the URL carries ?tab=X&rowId=Y (from an alert email),
   // record the row id until the target tab's rows are available, then auto-open
   // the detail drawer on it. Cleared after consumption so tab-switches don't
@@ -555,7 +599,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
     potential: "all", awaiting: "all", awarded: "all", closed: "all",
-    events: "all", hotleads: "all", clients: "all", companies: "all",
+    events: "all", hotleads: "all", directory: "all",
   });
 
   // Year filter state. null = All years; number = filter to that year. Default
@@ -994,7 +1038,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!pendingFocusRowId) return;
     const rowsByTab = {
       potential, awaiting, awarded, closed,
-      invoice, events, hotleads: hotLeads, clients, companies,
+      invoice, events, hotleads: hotLeads,
+      directory: [...clients, ...companies],
     };
     const rows = rowsByTab[tab] || [];
     const match = rows.find(r => r.id === pendingFocusRowId);
@@ -1319,6 +1364,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const predicate = FILTERS[key]?.[filterKey[key]];
       return predicate ? yr.filter(predicate) : yr;
     };
+    // Directory merges clients + companies into one feed; the type
+    // discriminator ("Client" vs "Prime"/"Sub"/"Multiple") drives section
+    // headers + filter chips inside DirectoryTable.
     return {
       potential: apply("potential", potential),
       awaiting:  apply("awaiting",  awaiting),
@@ -1327,8 +1375,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       invoice:   applyYear("invoice", invoice),
       events:    apply("events",    events),
       hotleads:  apply("hotleads",  hotLeads),
-      clients:   apply("clients",   clients),
-      companies: apply("companies", companies),
+      directory: apply("directory", [...clients, ...companies]),
     };
   }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
 
@@ -1355,7 +1402,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     count: tabKey === tab
       ? (chip.key === "all"
           ? (filtered[tabKey]?.length ?? 0)
-          : (({potential,awaiting,awarded,closed,events,hotleads:hotLeads,clients,companies})[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
+          : (({
+              potential, awaiting, awarded, closed,
+              events, hotleads: hotLeads,
+              directory: [...clients, ...companies],
+            })[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
       : null,
     active: filterKey[tabKey] === chip.key,
     onClick: () => setFilterKey(f => ({ ...f, [tabKey]: chip.key })),
@@ -1379,7 +1430,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     awarded: awarded.length, closed: closed.length,
     invoice: invoice.length, events: events.length,
     hotleads: hotLeads.length,
-    clients: clients.length, companies: companies.length,
+    directory: clients.length + companies.length,
     quad: null,
   };
 
@@ -1391,12 +1442,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // candidates added without going through the proposal stage). Awarded /
   // Closed Out / Invoice are only reached via Move Forward from an earlier
   // stage — no direct "New" button for those.
-  const newForTab = { awaiting: "awaiting", potential: "potential", events: "events", hotleads: "hotleads", clients: "clients", companies: "companies" };
+  // Directory's primary "New X" defaults to client (the more common entry).
+  // Companies are typically created via the sub-picker on a project rather
+  // than from this tab.
+  const newForTab = { awaiting: "awaiting", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
                  : tab === "hotleads" ? "New hot lead"
-                 : tab === "clients" ? "New client"
-                 : tab === "companies" ? "New company"
+                 : tab === "directory" ? "New client"
                  : tab === "awaiting" ? "New awaiting verdict"
                  : "New project";
 
@@ -1654,23 +1707,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.hotleads}
             onYearChange={(y) => setYear("hotleads", y)}/>
         )}
-        {tab === "clients" && (
-          <ClientsTable rows={filtered.clients}
-            updateRow={updateClients}
-            onOpenDrawer={r => openDrawer(r, "clients")}
+        {tab === "directory" && (
+          <DirectoryTable rows={filtered.directory}
+            updateRow={(id, patch) => {
+              // Route to the right updater by row.type. Looking up the row
+              // in clients vs companies state slices keeps the existing
+              // updater contracts unchanged.
+              const inClients = clients.some(c => c.id === id);
+              if (inClients) updateClients(id, patch);
+              else updateCompanies(id, patch);
+            }}
+            onOpenDrawer={r => openDrawer(r, "directory")}
             projectsByType={{ potential, awaiting, awarded, closed }}
             flashId={flashId}
-            filters={chipsFor("clients")}
-            tab="clients"/>
-        )}
-        {tab === "companies" && (
-          <CompaniesTable rows={filtered.companies}
-            updateRow={updateCompanies}
-            onOpenDrawer={r => openDrawer(r, "companies")}
-            projectsByType={{ potential, awaiting, awarded, closed }}
-            flashId={flashId}
-            filters={chipsFor("companies")}
-            tab="companies"/>
+            filters={chipsFor("directory")}
+            tab="directory"/>
         )}
         {tab === "quad" && (
           <QuadSheet
@@ -1696,11 +1747,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           drawer.table === "invoice"   ? invoice   :
           drawer.table === "events"    ? events    :
           drawer.table === "hotleads"  ? hotLeads  :
-          drawer.table === "clients"   ? clients   :
-          drawer.table === "companies" ? companies :
+          drawer.table === "directory" ? [...clients, ...companies] :
           []
         );
         const liveRow = pool.find(r => r.id === drawer.row.id) || drawer.row;
+
+        // For Directory rows, compute the linked-projects list once per
+        // open and pass it into the drawer. Includes invoice linkage so the
+        // drawer can render the small INV badge on rows that have one.
+        const linkedProjects = drawer.table === "directory"
+          ? linkedProjectsFor(liveRow, { potential, awaiting, awarded, closed }, invoice)
+          : null;
+
         return (
         <DetailDrawer
           row={liveRow}
@@ -1714,9 +1772,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "invoice"   ? updateInvoice   :
             drawer.table === "events"    ? updateEvents    :
             drawer.table === "hotleads"  ? updateHotLeads  :
-            drawer.table === "clients"   ? updateClients   :
-            drawer.table === "companies" ? updateCompanies :
-            () => {}
+            drawer.table === "directory"
+              ? (id, patch) => {
+                  const inClients = clients.some(c => c.id === id);
+                  if (inClients) updateClients(id, patch);
+                  else updateCompanies(id, patch);
+                }
+              : () => {}
           }
           onForward={
             drawer.table === "awaiting"  ? () => { triggerForward(liveRow, "awaiting", "awarded"); setDrawer(null); } :
@@ -1725,6 +1787,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             null
           }
           onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          linkedProjects={linkedProjects}
+          onOpenProject={(projectId, statusKey) => {
+            // Resolve which slice the project lives in, then swap the
+            // drawer to that project + its tab. Switching `tab` keeps the
+            // pipeline rail in sync with what's open.
+            const slice =
+              statusKey === "potential" ? potential :
+              statusKey === "awaiting"  ? awaiting  :
+              statusKey === "awarded"   ? awarded   :
+              statusKey === "closed"    ? closed    : [];
+            const target = slice.find(p => p.id === projectId);
+            if (!target) return;
+            setTab(statusKey);
+            setDrawer({ row: target, table: statusKey });
+          }}
         />
         );
       })()}
