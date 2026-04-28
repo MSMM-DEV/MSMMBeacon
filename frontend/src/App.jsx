@@ -1231,7 +1231,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     };
     const invoiceCellStyle = tab === "invoice"
       ? (row, _colIndex, col) => {
-          const isOrangeRow = row?.sourcePotentialId && orangeSourceIds.has(row.sourcePotentialId);
+          const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
           const label = col?.label;
           const monthIdx = MONTHS.indexOf(label);
           const isActualMonth = monthIdx >= 0 && monthIdx <= TODAY_MONTH;
@@ -1335,9 +1335,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
 
-  // Set of potential_project ids currently tagged probability=Orange. Invoice
-  // rows whose sourcePotentialId is in this set are highlighted orange and
-  // excluded from the "Total — excl. Orange" row.
+  // Set of Potential project ids currently tagged probability=Orange. Invoice
+  // rows whose `sourceId` (= anticipated_invoice.source_project_id) is in
+  // this set are highlighted orange and excluded from the "Total — excl. Orange" row.
   const orangeSourceIds = useMemo(
     () => new Set(potential.filter(p => p.probability === "Orange").map(p => p.id)),
     [potential]
@@ -1678,6 +1678,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             events={events}
             awaiting={awaiting}
             hotLeads={hotLeads}
+            orangeSourceIds={orangeSourceIds}
             onOpen={(t, r) => openDrawer(r, t)}
           />
         )}

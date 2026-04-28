@@ -24,7 +24,7 @@ import {
 // the Expand button uncaps this for the overlay modal.
 const CARD_LIMIT = 6;
 
-export const QuadSheet = ({ invoice, events, awaiting, hotLeads, onOpen }) => {
+export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds, onOpen }) => {
   // `expanded` names which card is currently zoomed into the modal.
   // null = no modal open. Only list-type cards can be expanded (the
   // Invoice chart has intrinsic sizing and doesn't benefit from expand).
@@ -75,7 +75,7 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, onOpen }) => {
           sub={`${THIS_YEAR} · monthly actual vs. projection`}
           accent="flow"
           className="quad-q1">
-          <InvoiceChart invoice={invoice}/>
+          <InvoiceChart invoice={invoice} orangeSourceIds={orangeSourceIds}/>
         </QuadCard>
 
         <QuadCard
@@ -171,7 +171,7 @@ const QuadCard = ({ eyebrow, title, sub, accent, className, onExpand, children }
 // shown as a dashed projection line. Hover snaps to the nearest month and
 // shows a read-out.
 // ----------------------------------------------------------------------------
-const InvoiceChart = ({ invoice }) => {
+const InvoiceChart = ({ invoice, orangeSourceIds }) => {
   // Two parallel 12-month totals:
   //   totalsBase — sum of invoices NOT sourced from an Orange potential row
   //                (i.e. formally awarded work — the "secured" baseline)
@@ -186,7 +186,13 @@ const InvoiceChart = ({ invoice }) => {
     const totalsBase = Array(12).fill(0);
     const totalsAll  = Array(12).fill(0);
     for (const r of invoice) {
-      const isOrange = !!r.sourcePotentialId;
+      // v2: anticipated_invoice.source_project_id (exposed as r.sourceId)
+      // points at any upstream project — potential OR awarded. The Orange
+      // line specifically distinguishes pre-awarded billing (Orange-tagged
+      // potentials), so we lookup against orangeSourceIds (potential ids
+      // tagged probability='Orange'); awarded-source invoices stay in the
+      // base total.
+      const isOrange = !!(r.sourceId && orangeSourceIds?.has(r.sourceId));
       for (let i = 0; i < 12; i++) {
         const v = Number(r.values?.[i] || 0);
         totalsAll[i] += v;

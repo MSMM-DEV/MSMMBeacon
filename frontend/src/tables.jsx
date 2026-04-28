@@ -1761,7 +1761,10 @@ export const InvoiceTable = ({
   const rollforwardShown = (r) => r.rollforwardOverride != null ? r.rollforwardOverride : rollforwardAuto(r);
   const isYtdOverride    = (r) => r.ytdActualOverride   != null;
   const isRfOverride     = (r) => r.rollforwardOverride != null;
-  const isOrange = (r) => !!(r.sourcePotentialId && orangeSourceIds?.has(r.sourcePotentialId));
+  // v2 collapsed source_awarded_id + source_potential_id into a single
+  // source_project_id (exposed as r.sourceId). orangeSourceIds is a Set of
+  // Potential project ids tagged probability='Orange'; only those match.
+  const isOrange = (r) => !!(r.sourceId && orangeSourceIds?.has(r.sourceId));
   const sumBy = (arr, fn) => arr.reduce((a, r) => a + fn(r), 0);
   const nonOrangeRows = rows.filter(r => !isOrange(r));
   const orangeRows    = rows.filter(isOrange);
