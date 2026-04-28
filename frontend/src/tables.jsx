@@ -2087,14 +2087,23 @@ export const InvoiceTable = ({
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1"/>
                       <td className="sticky-2" colSpan={20}>
-                        <button
-                          type="button"
-                          className="invoice-add-sub-btn"
-                          onClick={() => onAddSub?.(r)}
-                          title="Add a sub to this project">
-                          <Icon name="plus" size={11}/>
-                          Add sub
-                        </button>
+                        {r.sourceId ? (
+                          <button
+                            type="button"
+                            className="invoice-add-sub-btn"
+                            onClick={() => onAddSub?.(r)}
+                            title="Add a sub to this project">
+                            <Icon name="plus" size={11}/>
+                            Add sub
+                          </button>
+                        ) : (
+                          <span style={{
+                            fontSize: 11.5, fontStyle: "italic",
+                            color: "var(--text-soft)",
+                          }}>
+                            This invoice isn't linked to a project — open the row drawer to link one before adding subs.
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )}

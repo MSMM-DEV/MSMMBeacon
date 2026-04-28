@@ -1142,10 +1142,14 @@ export const AddSubModal = ({
     .filter(c => c.type !== "Client")
     .map(c => ({ value: c.id, label: c.name }));
 
-  const canSubmit = !!companyId && !busy;
+  const canSubmit = !!companyId && !!projectId && !busy;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    if (!projectId) {
+      setError("This invoice isn't linked to a project. Link it from the row drawer first.");
+      return;
+    }
     setBusy(true); setError("");
     try {
       const inserted = await addProjectSub({
