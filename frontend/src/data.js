@@ -966,6 +966,27 @@ export async function upsertSubInvoiceAmount({ projectId, companyId, year, month
   return data;
 }
 
+// Add a new entry to project_subs. Many existing invoices were created
+// without their sub data tracked (subs were a Potential-stage concept),
+// so the Invoice tab provides an inline "+ Add sub" affordance that calls
+// this. Returns the inserted row so callers can patch local state.
+export async function addProjectSub({ projectId, companyId, discipline, amount, ord }) {
+  const payload = {
+    project_id: projectId,
+    company_id: companyId,
+    discipline: discipline || null,
+    amount: amount === "" || amount == null ? null : Number(amount),
+    ord: ord ?? null,
+  };
+  const { data, error } = await supabase
+    .from("project_subs")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) throw new Error(`add sub: ${error.message}`);
+  return data;
+}
+
 // Find or create the sub_invoice row for the given coordinates. Used by the
 // upload modal: we may need to create a 0-amount row before attaching files.
 export async function ensureSubInvoiceRow({ projectId, companyId, year, month }) {

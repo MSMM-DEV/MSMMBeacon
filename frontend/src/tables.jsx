@@ -1784,6 +1784,7 @@ export const InvoiceTable = ({
   subInvoices,       // Map<project_id, sub_entry[]>
   onUpdateSubAmount, // (projectId, companyId, monthIdx, value) => void
   onOpenFiles,       // ({kind, projectRow, monthIdx, sub?}) => void
+  onAddSub,          // (projectRow) => void  — opens the AddSubModal
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -1917,7 +1918,10 @@ export const InvoiceTable = ({
                 {orderedRows.map((r) => {
                   const isExpanded = expandedIds.has(r.id);
                   const subList    = (subInvoices?.get(r.sourceId) || []);
-                  const hasSubs    = subList.length > 0;
+                  // Every row is expandable — even projects with zero subs
+                  // expand to reveal the "+ Add sub" affordance. Click on
+                  // a sub-less project becomes a discovery point for adding
+                  // missing sub data.
                   return (
                   <React.Fragment key={r.id}>
                   <tr className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
@@ -1925,17 +1929,19 @@ export const InvoiceTable = ({
                       onDoubleClick={() => onOpenDrawer?.(r)}
                       style={{ cursor: "default" }}>
                     <td className="invoice-expand-col" onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
-                      {hasSubs ? (
-                        <button
-                          type="button"
-                          className={"directory-expand-btn" + (isExpanded ? " open" : "")}
-                          aria-expanded={isExpanded}
-                          aria-label={isExpanded ? "Collapse subs" : "Expand subs"}
-                          title={isExpanded ? "Hide subs" : `${subList.length} sub${subList.length === 1 ? "" : "s"} on this project`}
-                          onClick={() => toggleExpand(r.id)}>
-                          <Icon name="chevronRight" size={12}/>
-                        </button>
-                      ) : <span className="empty-cell" style={{ fontSize: 11, opacity: 0.3 }}>—</span>}
+                      <button
+                        type="button"
+                        className={"directory-expand-btn" + (isExpanded ? " open" : "")}
+                        aria-expanded={isExpanded}
+                        aria-label={isExpanded ? "Collapse subs" : "Expand subs"}
+                        title={isExpanded
+                          ? "Hide subs"
+                          : (subList.length > 0
+                              ? `${subList.length} sub${subList.length === 1 ? "" : "s"} on this project`
+                              : "No subs tracked yet — expand to add")}
+                        onClick={() => toggleExpand(r.id)}>
+                        <Icon name="chevronRight" size={12}/>
+                      </button>
                     </td>
                     <td className="sticky-1 mono" style={{ fontSize: 12 }}>
                       <EditableCell value={r.projectNumber || ""}
@@ -2014,6 +2020,18 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                   </tr>
+                  {isExpanded && subList.length === 0 && (
+                    <tr className="invoice-sub-row invoice-sub-empty">
+                      <td className="invoice-expand-col"/>
+                      <td className="sticky-1"/>
+                      <td className="sticky-2" colSpan={3} style={{ paddingLeft: 28 }}>
+                        <span style={{ fontStyle: "italic", color: "var(--text-soft)" }}>
+                          No subs tracked on this project yet.
+                        </span>
+                      </td>
+                      <td colSpan={16}/>
+                    </tr>
+                  )}
                   {isExpanded && subList.map((s) => (
                     <tr key={`${r.id}:${s.companyId}`} className="invoice-sub-row">
                       <td className="invoice-expand-col"/>
@@ -2064,6 +2082,22 @@ export const InvoiceTable = ({
                       <td/>
                     </tr>
                   ))}
+                  {isExpanded && (
+                    <tr className="invoice-sub-add-row">
+                      <td className="invoice-expand-col"/>
+                      <td className="sticky-1"/>
+                      <td className="sticky-2" colSpan={20}>
+                        <button
+                          type="button"
+                          className="invoice-add-sub-btn"
+                          onClick={() => onAddSub?.(r)}
+                          title="Add a sub to this project">
+                          <Icon name="plus" size={11}/>
+                          Add sub
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                   </React.Fragment>
                   );
                 })}

@@ -4471,3 +4471,48 @@ html, body { overflow-x: clip; }
     gap: 4px;
   }
 }
+
+/* "+ Add sub" trigger row at the bottom of an expanded Invoice project */
+.invoice-table tr.invoice-sub-add-row td {
+  background: var(--surface-2);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.invoice-table tr.invoice-sub-add-row .sticky-1 {
+  background: var(--surface-2);
+}
+.invoice-table tr.invoice-sub-add-row .sticky-2 {
+  background: var(--surface-2);
+  padding-left: 28px;
+}
+.invoice-add-sub-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent-ink);
+  background: transparent;
+  border: 1px dashed var(--accent);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-style 120ms ease;
+}
+.invoice-add-sub-btn:hover {
+  background: var(--accent-softer);
+  border-style: solid;
+}
+
+/* Empty-state row when expanded with no subs yet */
+.invoice-table tr.invoice-sub-empty td {
+  background: var(--surface-2);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.invoice-table tr.invoice-sub-empty .sticky-1 {
+  background: var(--surface-2);
+}
+.invoice-table tr.invoice-sub-empty .sticky-2 {
+  background: var(--surface-2);
+}

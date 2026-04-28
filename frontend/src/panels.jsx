@@ -5,7 +5,7 @@ import {
   getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions,
   getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
-  ensureSubInvoiceRow, monthFolder,
+  ensureSubInvoiceRow, monthFolder, addProjectSub,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -1105,6 +1105,131 @@ export const InvoiceFilesModal = ({
                     disabled={busy || !picked}>
               <Icon name="check" size={13}/>
               {busy ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ============ ADD SUB MODAL ============
+// Triggered from the "+ Add sub" row inside an expanded Invoice project.
+// Inserts a project_subs row for the selected company with optional discipline
+// + total contract amount. Returns the inserted row via onAdded so the parent
+// can update the sub matrix in-place without a full reload.
+//
+// Props:
+//   projectId, projectName    — context for the modal header
+//   existingSubsCount         — used to compute the new ord (1-indexed)
+//   companies                 — full _companies list (clients filtered out below)
+//   onClose, onAdded(insertedRow)
+export const AddSubModal = ({
+  projectId, projectName,
+  existingSubsCount = 0,
+  companies,
+  onClose, onAdded,
+}) => {
+  const [companyId, setCompanyId] = useState("");
+  const [discipline, setDiscipline] = useState("");
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // Subs are external firms (Companies, not Clients). Filter the merged
+  // _companies list to non-Client entries — same behavior as SubsEditor.
+  const subOptions = (companies || [])
+    .filter(c => c.type !== "Client")
+    .map(c => ({ value: c.id, label: c.name }));
+
+  const canSubmit = !!companyId && !busy;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setBusy(true); setError("");
+    try {
+      const inserted = await addProjectSub({
+        projectId,
+        companyId,
+        discipline: discipline.trim() || null,
+        amount: amount === "" ? null : Number(amount),
+        ord: existingSubsCount + 1,
+      });
+      onAdded?.(inserted);
+    } catch (e) {
+      setError(e?.message || "Add sub failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="modal" style={{ width: 480 }}>
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="plus" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Add sub</div>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>{projectName || "Project"}</h3>
+            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+              Subs are firms hired on this project. Enter their total contract
+              amount; monthly invoices live on the row that appears beneath.
+            </div>
+          </div>
+          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
+        </div>
+
+        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div className="field">
+            <div className="field-label">Company *</div>
+            <div className="field-value">
+              <SearchableSelect
+                value={companyId}
+                options={subOptions}
+                placeholder="Search firms…"
+                onChange={(v) => setCompanyId(v || "")}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <div className="field-label">Service / discipline</div>
+            <div className="field-value">
+              <input className="input"
+                     placeholder="e.g. Survey, Civil, MEP"
+                     value={discipline}
+                     onChange={(e) => setDiscipline(e.target.value)}
+                     disabled={busy}/>
+            </div>
+          </div>
+          <div className="field">
+            <div className="field-label">Total amount</div>
+            <div className="field-value">
+              <input className="input mono"
+                     type="number" min="0" step="any"
+                     placeholder="$0"
+                     value={amount}
+                     onChange={(e) => setAmount(e.target.value)}
+                     disabled={busy}
+                     style={{ fontFamily: "var(--font-mono)" }}/>
+            </div>
+          </div>
+          {error && (
+            <div style={{ color: "var(--rose)", fontSize: 12, marginTop: 6 }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
+            Need a firm not listed? Add it via the Directory tab.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn primary sm" onClick={handleSubmit} disabled={!canSubmit}>
+              <Icon name="check" size={13}/>
+              {busy ? "Adding…" : "Add sub"}
             </button>
           </div>
         </div>

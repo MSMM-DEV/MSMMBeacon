@@ -9,7 +9,7 @@ import {
 // ClientsTable + CompaniesTable were merged into DirectoryTable.
 import { QuadSheet } from "./quadsheet.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
-import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal } from "./panels.jsx";
+import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
@@ -24,7 +24,7 @@ import {
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
-  upsertSubInvoiceAmount, reloadInvoiceArtifacts,
+  upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -579,6 +579,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [createSeed, setCreateSeed] = useState(null);
   // Invoice file-attachment modal — { kind, projectRow, monthIdx, sub? } or null.
   const [filesModal, setFilesModal] = useState(null);
+  // "Add sub" modal — { projectRow } or null. Triggered from the Invoice expand.
+  const [addSubModal, setAddSubModal] = useState(null);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -1024,6 +1026,48 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     } catch (e) {
       showToast(`Sub invoice save failed: ${e?.message || e}`, "x");
     }
+  };
+
+  // Patch local project + sub-invoice matrix state to reflect a freshly-
+  // inserted project_subs row. The DB INSERT itself is performed inside
+  // AddSubModal (so it can surface inline errors) — this just mirrors that
+  // change into in-memory state so the Invoice tab updates immediately.
+  const applyInsertedSub = (inserted) => {
+    const projectId = inserted.project_id;
+    const companyId = inserted.company_id;
+    // UI sub shape used by adapter / Linked-Projects helper / countRefsFor.
+    const newUiSub = {
+      cId: companyId,
+      desc: inserted.discipline || "",
+      amt: inserted.amount || 0,
+    };
+    const append = (rows) => rows.map(r =>
+      r.id === projectId ? { ...r, subs: [...(r.subs || []), newUiSub] } : r
+    );
+    if (potential.some(p => p.id === projectId)) setPotential(append);
+    else if (awaiting.some(p => p.id === projectId)) setAwaiting(append);
+    else if (awarded.some(p => p.id === projectId)) setAwarded(append);
+    else if (closed.some(p => p.id === projectId))  setClosed(append);
+
+    // Append a fresh sub_entry to the matrix for this project, so the new
+    // row appears beneath the prime row in the Invoice tab.
+    const company = [...companies, ...clients].find(c => c.id === companyId);
+    setSubInvoices(prev => {
+      const next = new Map(prev);
+      const existing = next.get(projectId) || [];
+      next.set(projectId, [...existing, {
+        companyId,
+        companyName: company?.name || "Unknown company",
+        contractAmount: inserted.amount || 0,
+        discipline: inserted.discipline || "",
+        amounts: Array(12).fill(null),
+        files:   Array(12).fill(null).map(() => []),
+        subInvoiceIds: Array(12).fill(null),
+      }]);
+      return next;
+    });
+    setAddSubModal(null);
+    showToast("Sub added");
   };
 
   const openDrawer = (row, table) => setDrawer({ row, table });
@@ -1649,6 +1693,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             subInvoices={subInvoices}
             onUpdateSubAmount={updateSubInvoiceCell}
             onOpenFiles={(payload) => setFilesModal(payload)}
+            onAddSub={(projectRow) => setAddSubModal({ projectRow })}
             yearOptions={availableYears.invoice}
             yearValue={yearFilter.invoice}
             onYearChange={(y) => setYear("invoice", y)}/>
@@ -1855,6 +1900,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           onClose={() => { setCreateTable(null); setCreateSeed(null); }}
           onCreated={(dbRow, extras) => handleCreated(createTable, dbRow, extras)}/>
       )}
+
+      {addSubModal && (() => {
+        const pr = addSubModal.projectRow;
+        // Find the project in any pipeline slice to count existing subs.
+        const project = potential.find(p => p.id === pr.sourceId)
+                     || awaiting.find(p => p.id === pr.sourceId)
+                     || awarded.find(p => p.id === pr.sourceId)
+                     || closed.find(p => p.id === pr.sourceId);
+        const existingSubsCount = project?.subs?.length || 0;
+        return (
+          <AddSubModal
+            projectId={pr.sourceId}
+            projectName={pr.name}
+            existingSubsCount={existingSubsCount}
+            companies={[...clients, ...companies]}
+            onClose={() => setAddSubModal(null)}
+            onAdded={applyInsertedSub}
+          />
+        );
+      })()}
 
       {filesModal && (() => {
         const { kind, projectRow, monthIdx, sub } = filesModal;
