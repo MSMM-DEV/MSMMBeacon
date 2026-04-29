@@ -1780,11 +1780,13 @@ export const InvoiceTable = ({
   yearOptions, yearValue, onYearChange,
   orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
   // Sub-invoices feature: per-project list of {companyId, companyName,
-  // contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12]}
+  // contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12],
+  // paid[12], paidAt[12]}
   subInvoices,       // Map<project_id, sub_entry[]>
   onUpdateSubAmount, // (projectId, companyId, monthIdx, value) => void
   onOpenFiles,       // ({kind, projectRow, monthIdx, sub?}) => void
   onAddSub,          // (projectRow) => void  — opens the AddSubModal
+  onTogglePaid,      // ({projectId, companyId, monthIdx, paid}) => void
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -2051,14 +2053,37 @@ export const InvoiceTable = ({
                       {s.amounts.map((amt, i) => {
                         const filesForCell = s.files[i] || [];
                         const hasFiles = filesForCell.length > 0;
+                        const isPaid   = !!(s.paid && s.paid[i]);
+                        const hasAmount = amt != null && amt !== 0;
+                        const showPaidToggle = hasAmount || isPaid;
                         return (
                         <td key={i}
-                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
+                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
                             onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv)}
                             format={v => v != null && v !== 0
                               ? fmtMoney(v)
                               : <span style={{ opacity: 0.4 }}>—</span>}/>
+                          {showPaidToggle && (
+                            <button
+                              type="button"
+                              className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "")}
+                              title={isPaid
+                                ? `Paid${s.paidAt?.[i] ? ` · ${fmtDate(s.paidAt[i])}` : ""} — click to mark pending`
+                                : "Mark as paid"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTogglePaid?.({
+                                  projectId: r.sourceId,
+                                  companyId: s.companyId,
+                                  monthIdx: i,
+                                  paid: !isPaid,
+                                });
+                              }}>
+                              <Icon name="check" size={11}/>
+                            </button>
+                          )}
                           <button
                             type="button"
                             className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}

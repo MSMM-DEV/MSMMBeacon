@@ -770,6 +770,8 @@ export async function loadBeacon() {
       const amounts = Array(12).fill(null);
       const files   = Array(12).fill(null).map(() => []);
       const subInvoiceIds = Array(12).fill(null);
+      const paid    = Array(12).fill(false);
+      const paidAt  = Array(12).fill(null);
       for (let m = 1; m <= 12; m++) {
         const key = `${p.id}:${s.company_id}:${m}`;
         const row = subInvoicesByProjectCompany.get(key);
@@ -777,6 +779,8 @@ export async function loadBeacon() {
           amounts[m - 1] = row.amount != null ? Number(row.amount) : null;
           subInvoiceIds[m - 1] = row.id;
           files[m - 1] = subFilesBySubInvoice.get(row.id) || [];
+          paid[m - 1] = !!row.paid;
+          paidAt[m - 1] = row.paid_at || null;
         }
       }
       return {
@@ -784,7 +788,7 @@ export async function loadBeacon() {
         companyName: company?.name || "Unknown company",
         contractAmount: s.amount || 0,
         discipline: s.discipline || "",
-        amounts, files, subInvoiceIds,
+        amounts, files, subInvoiceIds, paid, paidAt,
       };
     });
     subInvoicesMatrix.set(p.id, entries);
@@ -1053,6 +1057,21 @@ export async function addProjectSub({ projectId, companyId, discipline, amount, 
   return data;
 }
 
+// Mark a sub_invoice paid (or back to pending). Sets paid_at to now() on the
+// way to true; clears it on the way back. Returns the updated paid_at so
+// callers can patch local state without a refetch.
+export async function setSubInvoicePaid(subInvoiceId, paid) {
+  const update = paid
+    ? { paid: true,  paid_at: new Date().toISOString() }
+    : { paid: false, paid_at: null };
+  const { error } = await supabase
+    .from("sub_invoices")
+    .update(update)
+    .eq("id", subInvoiceId);
+  if (error) throw new Error(`sub invoice paid toggle: ${error.message}`);
+  return update.paid_at;
+}
+
 // Find or create the sub_invoice row for the given coordinates. Used by the
 // upload modal: we may need to create a 0-amount row before attaching files.
 export async function ensureSubInvoiceRow({ projectId, companyId, year, month }) {
@@ -1185,6 +1204,8 @@ export async function reloadInvoiceArtifacts(projects, companies) {
       const amounts = Array(12).fill(null);
       const files = Array(12).fill(null).map(() => []);
       const subInvoiceIds = Array(12).fill(null);
+      const paid    = Array(12).fill(false);
+      const paidAt  = Array(12).fill(null);
       const cId = s.cId || s.company_id;
       for (let m = 1; m <= 12; m++) {
         const row = subInvoicesByProjectCompany.get(`${p.id}:${cId}:${m}`);
@@ -1192,6 +1213,8 @@ export async function reloadInvoiceArtifacts(projects, companies) {
           amounts[m-1] = row.amount != null ? Number(row.amount) : null;
           subInvoiceIds[m-1] = row.id;
           files[m-1] = subFilesBySubInvoice.get(row.id) || [];
+          paid[m-1] = !!row.paid;
+          paidAt[m-1] = row.paid_at || null;
         }
       }
       return {
@@ -1199,7 +1222,7 @@ export async function reloadInvoiceArtifacts(projects, companies) {
         companyName: company?.name || "Unknown company",
         contractAmount: s.amt || s.amount || 0,
         discipline: s.desc || s.discipline || "",
-        amounts, files, subInvoiceIds,
+        amounts, files, subInvoiceIds, paid, paidAt,
       };
     });
     subInvoicesMatrix.set(p.id, entries);

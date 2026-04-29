@@ -25,6 +25,7 @@ import {
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
   upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub,
+  ensureSubInvoiceRow, setSubInvoicePaid,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -1013,6 +1014,40 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // Toggle paid status for a single (project, sub, month) cell. Ensures the
+  // sub_invoice row exists first (so users can mark a cell paid even before
+  // typing an amount), then patches the matrix locally so the cell flips
+  // green immediately without a full reload.
+  const setSubInvoicePaidStatus = async ({ projectId, companyId, monthIdx, paid }) => {
+    try {
+      const row = await ensureSubInvoiceRow({
+        projectId, companyId,
+        year: THIS_YEAR,
+        month: monthIdx + 1,
+      });
+      await setSubInvoicePaid(row.id, paid);
+      setSubInvoices(prev => {
+        const next = new Map(prev);
+        const list = next.get(projectId);
+        if (!list) return prev;
+        const updated = list.map(s => {
+          if (s.companyId !== companyId) return s;
+          const newPaid     = [...(s.paid     || Array(12).fill(false))];
+          const newPaidAt   = [...(s.paidAt   || Array(12).fill(null))];
+          const newSubIds   = [...(s.subInvoiceIds || Array(12).fill(null))];
+          newPaid[monthIdx] = paid;
+          newPaidAt[monthIdx] = paid ? new Date().toISOString() : null;
+          newSubIds[monthIdx] = row.id;
+          return { ...s, paid: newPaid, paidAt: newPaidAt, subInvoiceIds: newSubIds };
+        });
+        next.set(projectId, updated);
+        return next;
+      });
+    } catch (e) {
+      showToast(`Mark ${paid ? "paid" : "pending"} failed: ${e?.message || e}`, "x");
+    }
+  };
+
   const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value) => {
     try {
       const cleaned = value === "" || value == null ? null : Number(value);
@@ -1741,6 +1776,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             orangeSourceIds={orangeSourceIds}
             subInvoices={subInvoices}
             onUpdateSubAmount={updateSubInvoiceCell}
+            onTogglePaid={setSubInvoicePaidStatus}
             onOpenFiles={(payload) => setFilesModal(payload)}
             onAddSub={(projectRow) => setAddSubModal({ projectRow })}
             yearOptions={availableYears.invoice}
@@ -1997,25 +2033,40 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {filesModal && (() => {
         const { kind, projectRow, monthIdx, sub } = filesModal;
         const isSub = kind === "sub";
+        // Resolve the sub fresh from the live matrix on every render so any
+        // uploads / deletes / paid toggles surface immediately. Falls back
+        // to the captured object if the matrix hasn't been refreshed yet.
+        const liveSub = isSub
+          ? (subInvoices.get(projectRow.sourceId) || []).find(s => s.companyId === sub.companyId) || sub
+          : null;
+        // Likewise for the prime row — re-read from the invoice slice so
+        // primeFiles annotations are current.
+        const liveProjectRow = isSub
+          ? projectRow
+          : (invoice.find(r => r.id === projectRow.id) || projectRow);
         const filesForCell = isSub
-          ? (sub?.files?.[monthIdx] || [])
-          : (projectRow?.primeFiles?.[monthIdx] || []);
+          ? (liveSub?.files?.[monthIdx] || [])
+          : (liveProjectRow?.primeFiles?.[monthIdx] || []);
         const cellAmount = isSub
-          ? (sub?.amounts?.[monthIdx] ?? null)
-          : (projectRow?.values?.[monthIdx] ?? null);
+          ? (liveSub?.amounts?.[monthIdx] ?? null)
+          : (liveProjectRow?.values?.[monthIdx] ?? null);
+        const cellPaid   = isSub ? !!(liveSub?.paid?.[monthIdx])    : false;
+        const cellPaidAt = isSub ? (liveSub?.paidAt?.[monthIdx] || null) : null;
         return (
           <InvoiceFilesModal
             kind={kind}
-            projectId={projectRow.sourceId}
-            projectName={projectRow.name}
-            year={projectRow.year || THIS_YEAR}
+            projectId={liveProjectRow.sourceId}
+            projectName={liveProjectRow.name}
+            year={liveProjectRow.year || THIS_YEAR}
             monthIdx={monthIdx}
             files={filesForCell}
             amount={cellAmount}
-            primeInvoiceId={!isSub ? projectRow.id : undefined}
-            subInvoiceId={isSub ? sub.subInvoiceIds?.[monthIdx] : undefined}
-            companyId={isSub ? sub.companyId : undefined}
-            companyName={isSub ? sub.companyName : undefined}
+            paid={cellPaid}
+            paidAt={cellPaidAt}
+            primeInvoiceId={!isSub ? liveProjectRow.id : undefined}
+            subInvoiceId={isSub ? liveSub?.subInvoiceIds?.[monthIdx] : undefined}
+            companyId={isSub ? liveSub?.companyId : undefined}
+            companyName={isSub ? liveSub?.companyName : undefined}
             onClose={() => setFilesModal(null)}
             onChanged={refreshInvoiceArtifacts}
           />

@@ -7,6 +7,7 @@ import {
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
   ensureSubInvoiceRow, monthFolder, addProjectSub,
   linkInvoiceToProject, findOrCreateProjectForInvoice,
+  setSubInvoicePaid,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -1004,6 +1005,8 @@ export const InvoiceFilesModal = ({
   files = [],
   primeInvoiceId, subInvoiceId, companyId, companyName,
   amount,
+  paid: initialPaid = false,
+  paidAt: initialPaidAt = null,
   onClose, onChanged,
 }) => {
   const [busy, setBusy]   = useState(false);
@@ -1011,6 +1014,10 @@ export const InvoiceFilesModal = ({
   const [notes, setNotes] = useState("");
   const fileRef = useRef(null);
   const [picked, setPicked] = useState(null);
+  // Local copy of paid state so the modal feels responsive while the round-trip
+  // happens. Synced back to the parent via onChanged after the DB write.
+  const [paid, setPaid] = useState(!!initialPaid);
+  const [paidAt, setPaidAt] = useState(initialPaidAt);
 
   const monthLabel = monthFolder(year, monthIdx);
   const headerTitle = kind === "sub"
@@ -1019,6 +1026,34 @@ export const InvoiceFilesModal = ({
   const subhead = kind === "sub"
     ? `Sub: ${companyName || "—"}${amount != null ? ` · ${fmtMoney(amount)}` : ""}`
     : amount != null ? fmtMoney(amount) : "—";
+
+  const handleTogglePaid = async (next) => {
+    if (busy) return;
+    if (kind !== "sub") return;
+    if (!subInvoiceId) {
+      // Need a sub_invoice row to attach paid status to. Create one first.
+      try {
+        const row = await ensureSubInvoiceRow({
+          projectId, companyId, year, month: monthIdx + 1,
+        });
+        // Caller's state may not have this id yet — refresh after.
+        await setSubInvoicePaid(row.id, next);
+      } catch (e) {
+        setError(e?.message || "Mark paid failed");
+        return;
+      }
+    } else {
+      try {
+        await setSubInvoicePaid(subInvoiceId, next);
+      } catch (e) {
+        setError(e?.message || "Mark paid failed");
+        return;
+      }
+    }
+    setPaid(next);
+    setPaidAt(next ? new Date().toISOString() : null);
+    await onChanged?.();
+  };
 
   const handleOpen = async (filePath) => {
     try {
@@ -1090,6 +1125,31 @@ export const InvoiceFilesModal = ({
         </div>
 
         <div className="modal-body" style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+          {kind === "sub" && (
+            <label className={"invoice-paid-toggle-row" + (paid ? " paid" : "")}>
+              <input
+                type="checkbox"
+                checked={paid}
+                disabled={busy}
+                onChange={(e) => handleTogglePaid(e.target.checked)}
+              />
+              <div className="invoice-paid-toggle-text">
+                <span className="invoice-paid-toggle-label">
+                  {paid ? "Paid" : "Pending"}
+                </span>
+                {paid && paidAt && (
+                  <span className="invoice-paid-toggle-stamp mono">
+                    marked {fmtDate(paidAt)}
+                  </span>
+                )}
+                {!paid && (
+                  <span className="invoice-paid-toggle-hint">
+                    Tick when this sub's invoice has been paid.
+                  </span>
+                )}
+              </div>
+            </label>
+          )}
           <div>
             <div className="section-title" style={{ marginTop: 0 }}>
               <Icon name="briefcase" size={12}/>
