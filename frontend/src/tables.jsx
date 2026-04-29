@@ -456,14 +456,35 @@ const ChromeToolbar = ({
   // Only surface sortable, user-facing columns in the Sort popover; hide internal (__*) columns.
   const sortableCols = columns.filter(c => c.sortKey && !isInternalLabel(c.label));
   const hasSearch = !!search.trim();
-  const searchLabel = hasSearch
-    ? `Search · "${search.length > 16 ? search.slice(0, 16) + "…" : search}"`
-    : "Add filter";
 
   const hasYear = Array.isArray(yearOptions) && yearOptions.length > 0;
 
   return (
     <div className="toolbar">
+      {/* Search input — primary affordance, leftmost in the chrome */}
+      <div className={"chrome-search" + (hasSearch ? " active" : "")}>
+        <Icon name="search" size={13}/>
+        <input
+          ref={searchInputRef}
+          className="chrome-search-input"
+          placeholder="Search rows…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+        />
+        {hasSearch && (
+          <button
+            type="button"
+            className="chrome-search-clear"
+            title="Clear search"
+            onClick={() => setSearch("")}
+            aria-label="Clear search">
+            <Icon name="x" size={11}/>
+          </button>
+        )}
+      </div>
+
       {filters?.map((f, i) => (
         <button key={i} className={"tool-chip" + (f.active ? " on" : "")} onClick={f.onClick}>
           {f.icon && <Icon name={f.icon} size={13}/>}
@@ -484,15 +505,6 @@ const ChromeToolbar = ({
       )}
 
       <div className="tool-sep"/>
-
-      <button
-        ref={filterBtnRef}
-        className={"tool-chip" + (hasSearch ? " on" : "")}
-        onClick={() => setOpenMenu(openMenu === "filter" ? null : "filter")}
-      >
-        <Icon name="filter" size={13}/>
-        {searchLabel}
-      </button>
 
       <button
         ref={sortBtnRef}
@@ -555,38 +567,6 @@ const ChromeToolbar = ({
               </button>
             );
           })}
-        </Popover>
-      )}
-
-      {openMenu === "filter" && (
-        <Popover anchorRef={filterBtnRef} onClose={() => setOpenMenu(null)} align="left">
-          <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-            Filter rows
-          </div>
-          <div style={{ padding: "4px 8px 8px" }}>
-            <input
-              ref={searchInputRef}
-              className="input"
-              placeholder="Search all columns…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoFocus
-              style={{ width: 260 }}
-            />
-          </div>
-          {hasSearch && (
-            <>
-              <div className="menu-sep"/>
-              <button
-                className="menu-item"
-                onClick={() => setSearch("")}
-                style={{ color: "var(--text-muted)" }}
-              >
-                <Icon name="x" size={13}/>
-                <span style={{ flex: 1 }}>Clear</span>
-              </button>
-            </>
-          )}
         </Popover>
       )}
 
@@ -692,17 +672,29 @@ const TableView = ({
     columnWidths, setColumnWidths,
   } = chrome;
 
+  // Column-walking search predicate. For each non-locked column we extract a
+  // searchable string via the column's `sortValue` (which usually resolves
+  // FKs to readable names — e.g., "USACE" rather than a uuid) or its
+  // `sortKey` (a direct row field). This matches what the user sees in the
+  // table, not raw JSON noise (uuids, internal flags, timestamps).
   const filteredRows = useMemo(() => {
     if (!search.trim()) return rows;
     const q = search.toLowerCase();
     return rows.filter(r => {
-      try {
-        return JSON.stringify(r).toLowerCase().includes(q);
-      } catch {
-        return false;
+      for (const col of (columns || [])) {
+        if (col.locked) continue;
+        let val;
+        try {
+          if (typeof col.sortValue === "function") val = col.sortValue(r);
+          else if (col.sortKey) val = r[col.sortKey];
+          else continue;
+        } catch { continue; }
+        if (val == null) continue;
+        if (String(val).toLowerCase().includes(q)) return true;
       }
+      return false;
     });
-  }, [rows, search]);
+  }, [rows, search, columns]);
 
   // Composite sort: combine the table's fixed primarySort with the user's
   // active column sort. Falls back to the original untouched order when there
@@ -761,6 +753,14 @@ const TableView = ({
         search={search} setSearch={setSearch}
         yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       />
+      {search.trim() && (
+        <div className="chrome-search-summary">
+          {filteredRows.length === 0
+            ? <>No rows match <span className="mono">"{search}"</span>.</>
+            : <><strong>{filteredRows.length}</strong> of <strong>{rows.length}</strong> match <span className="mono">"{search}"</span></>
+          }
+        </div>
+      )}
       {/* Table-only horizontal scroll container. Keeps the toolbar fixed-width
           while the header row + data rows scroll together when total column
           width exceeds viewport. The PAGE never gets a horizontal scrollbar.
@@ -1817,6 +1817,26 @@ export const InvoiceTable = ({
     return next;
   });
 
+  // Search across project name, project number, type, year, and PM names.
+  // Mirrors the column-walking predicate the TableView-based tabs use.
+  const [search, setSearch] = useState("");
+  const hasSearch = !!search.trim();
+  const matchesSearch = (r) => {
+    if (!hasSearch) return true;
+    const q = search.toLowerCase();
+    const haystack = [
+      r.name,
+      r.projectNumber,
+      r.type,
+      String(r.year ?? ""),
+      ...(r.pmIds || []).map(id => userById(id)?.name || ""),
+    ].filter(Boolean).join(" ").toLowerCase();
+    return haystack.includes(q);
+  };
+  const searchedNonOrange = nonOrangeRows.filter(matchesSearch);
+  const searchedOrange    = orangeRows.filter(matchesSearch);
+  const searchedRows      = [...searchedNonOrange, ...searchedOrange];
+
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const yearBtnRef = useRef(null);
   const hasYear = Array.isArray(yearOptions) && yearOptions.length > 0;
@@ -1827,6 +1847,27 @@ export const InvoiceTable = ({
   return (
     <div className="tablewrap">
       <div className="toolbar">
+        <div className={"chrome-search" + (hasSearch ? " active" : "")}>
+          <Icon name="search" size={13}/>
+          <input
+            className="chrome-search-input"
+            placeholder="Search invoices…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          {hasSearch && (
+            <button
+              type="button"
+              className="chrome-search-clear"
+              title="Clear search"
+              onClick={() => setSearch("")}
+              aria-label="Clear search">
+              <Icon name="x" size={11}/>
+            </button>
+          )}
+        </div>
         {hasYear ? (
           <button
             ref={yearBtnRef}
@@ -1892,6 +1933,14 @@ export const InvoiceTable = ({
         />
       ) : (
         <>
+          {hasSearch && (
+            <div className="chrome-search-summary">
+              {searchedRows.length === 0
+                ? <>No invoices match <span className="mono">"{search}"</span>.</>
+                : <><strong>{searchedRows.length}</strong> of <strong>{rows.length}</strong> match <span className="mono">"{search}"</span></>
+              }
+            </div>
+          )}
           <div className="invoice-wrap">
             <table className="invoice-table">
               <thead>
@@ -1917,7 +1966,7 @@ export const InvoiceTable = ({
                 </tr>
               </thead>
               <tbody>
-                {orderedRows.map((r) => {
+                {searchedRows.map((r) => {
                   const isExpanded = expandedIds.has(r.id);
                   const subList    = (subInvoices?.get(r.sourceId) || []);
                   // Every row is expandable — even projects with zero subs
@@ -2126,9 +2175,11 @@ export const InvoiceTable = ({
                   </React.Fragment>
                   );
                 })}
-                {rows.length > 0 && (
+                {searchedRows.length > 0 && (
                   <>
-                    {/* Total excluding orange (non-orange invoice rows only) */}
+                    {/* Total excluding orange (non-orange invoice rows only).
+                        Sums respect the active search filter so the totals
+                        always match the visible rows. */}
                     <tr>
                       <td className="invoice-expand-col total-cell"/>
                       <td className="sticky-1 total-cell"/>
@@ -2137,22 +2188,22 @@ export const InvoiceTable = ({
                       </td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
-                      <td className="total-cell">{fmtMoney(sumBy(nonOrangeRows, r => r.amount || 0))}</td>
-                      <td className="total-cell">{fmtMoney(sumBy(nonOrangeRows, r => r.remainingStart || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.amount || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.remainingStart || 0))}</td>
                       {MONTHS.map((_, i) => (
                         <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
-                          {fmtMoney(sumBy(nonOrangeRows, r => r.values[i] || 0))}
+                          {fmtMoney(sumBy(searchedNonOrange, r => r.values[i] || 0))}
                         </td>
                       ))}
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(nonOrangeRows, ytdActualShown))}
+                        {fmtMoney(sumBy(searchedNonOrange, ytdActualShown))}
                       </td>
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(nonOrangeRows, rollforwardShown))}
+                        {fmtMoney(sumBy(searchedNonOrange, rollforwardShown))}
                       </td>
                       <td className="total-cell"></td>
                     </tr>
-                    {/* Total including orange (everything) */}
+                    {/* Total including orange (everything in the searched set) */}
                     <tr>
                       <td className="invoice-expand-col total-cell"/>
                       <td className="sticky-1 total-cell"/>
@@ -2161,18 +2212,18 @@ export const InvoiceTable = ({
                       </td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
-                      <td className="total-cell">{fmtMoney(sumBy(rows, r => r.amount || 0))}</td>
-                      <td className="total-cell">{fmtMoney(sumBy(rows, r => r.remainingStart || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.amount || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.remainingStart || 0))}</td>
                       {MONTHS.map((_, i) => (
                         <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
-                          {fmtMoney(sumBy(rows, r => r.values[i] || 0))}
+                          {fmtMoney(sumBy(searchedRows, r => r.values[i] || 0))}
                         </td>
                       ))}
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(rows, ytdActualShown))}
+                        {fmtMoney(sumBy(searchedRows, ytdActualShown))}
                       </td>
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(rows, rollforwardShown))}
+                        {fmtMoney(sumBy(searchedRows, rollforwardShown))}
                       </td>
                       <td className="total-cell"></td>
                     </tr>
