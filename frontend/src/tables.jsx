@@ -2091,11 +2091,9 @@ export const InvoiceTable = ({
                           type="button"
                           className="invoice-add-sub-btn"
                           onClick={() => onAddSub?.(r)}
-                          title={r.sourceId
-                            ? "Add a sub to this project"
-                            : "Pick a project and add a sub — the invoice will be linked to it"}>
+                          title="Add a sub to this project">
                           <Icon name="plus" size={11}/>
-                          {r.sourceId ? "Add sub" : "Link project & add sub"}
+                          Add sub
                         </button>
                       </td>
                     </tr>

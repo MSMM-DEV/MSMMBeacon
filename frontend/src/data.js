@@ -966,6 +966,61 @@ export async function upsertSubInvoiceAmount({ projectId, companyId, year, month
   return data;
 }
 
+// Resolve the project a given invoice should be linked to. If the invoice
+// already has a sourceId, we shouldn't be calling this. Otherwise: search
+// for an existing project whose project_number + year matches; if found,
+// return its id with matchType='matched'. If not, create a stub project
+// (status='awarded') from the invoice's own metadata and return its id
+// with matchType='created'.
+//
+// This drives the "invisible auto-link" UX on the AddSubModal: the user
+// never sees a project picker for unlinked invoices — we either match by
+// project_number or auto-create a stub on their behalf.
+export async function findOrCreateProjectForInvoice(invoiceRow) {
+  const { name, projectNumber, year } = invoiceRow || {};
+
+  // Match by (project_number, year) — strongest identity signal we have.
+  if (projectNumber && year) {
+    const { data, error } = await supabase
+      .from("projects")
+      .select("id, project_name, status, year")
+      .eq("project_number", projectNumber)
+      .eq("year", year)
+      .limit(1);
+    if (error) throw new Error(`project lookup: ${error.message}`);
+    if (data && data.length > 0) {
+      return {
+        projectId: data[0].id,
+        projectName: data[0].project_name,
+        matchType: "matched",
+        projectStub: null,
+      };
+    }
+  }
+
+  // No match → mint a stub project. status='awarded' is the safe default
+  // (the row's been invoiced, so it had to have been awarded). The user
+  // can refine via the project's drawer later.
+  const insertPayload = {
+    status: "awarded",
+    year: year || new Date().getFullYear(),
+    project_name: name || "Untitled invoice",
+    project_number: projectNumber || null,
+  };
+  const { data, error } = await supabase
+    .from("projects")
+    .insert(insertPayload)
+    .select("id, project_name, year, project_number, status")
+    .single();
+  if (error) throw new Error(`auto-create project: ${error.message}`);
+  return {
+    projectId: data.id,
+    projectName: data.project_name,
+    matchType: "created",
+    projectStub: data,
+  };
+}
+
 // Wire an anticipated_invoice row to a project after the fact. Used by the
 // AddSubModal when the user wants to add subs to an invoice that was
 // created without an upstream project link.

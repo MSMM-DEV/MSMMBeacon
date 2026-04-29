@@ -1033,15 +1033,48 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // AddSubModal (so it can surface inline errors) — this just mirrors that
   // change into in-memory state so the Invoice tab updates immediately.
   //
-  // When the modal also linked a previously-unlinked invoice to a project
-  // (linkedProjectId + invoiceId), we patch the invoice row's sourceId
-  // locally too so subsequent renders + the Subs section in the drawer
-  // see the new link without a reload.
-  const applyInsertedSub = ({ inserted, linkedProjectId, invoiceId }) => {
+  // When the modal had to link a previously-unlinked invoice to a project,
+  // the auto-link can resolve in two ways:
+  //   * matched   → an existing project was found by (project_number, year)
+  //   * created   → we auto-created a stub project (status='awarded')
+  // Both surface here via autoLinkedProject so we can patch the right state
+  // slice (and add the stub to the awarded slice if it's brand new).
+  const applyInsertedSub = ({ inserted, linkedProjectId, invoiceId, autoLinkedProject }) => {
     if (linkedProjectId && invoiceId) {
       setInvoice(rows => rows.map(inv =>
         inv.id === invoiceId ? { ...inv, sourceId: linkedProjectId } : inv
       ));
+    }
+    // If the modal auto-created a stub project, mirror it into the awarded
+    // slice so the rest of the UI sees it (Awarded tab, Linked Projects in
+    // the Directory drawer, the project_subs lookup that drives the matrix).
+    if (autoLinkedProject?.matchType === "created" && autoLinkedProject.projectStub) {
+      const stub = autoLinkedProject.projectStub;
+      const stubUiRow = {
+        id: stub.id,
+        year: stub.year,
+        name: stub.project_name,
+        role: null,
+        clientId: null,
+        amount: null,
+        msmm: 0,
+        subs: [],
+        pmIds: [],
+        notes: "",
+        dates: "",
+        projectNumber: stub.project_number || "",
+        status: "Awarded",
+        dateSubmitted: "",
+        clientContract: "",
+        msmmContract: "",
+        msmmUsed: 0,
+        msmmRemaining: 0,
+        stage: "",
+        details: "",
+        pools: "",
+        contractExpiry: "",
+      };
+      setAwarded(rows => [stubUiRow, ...rows]);
     }
     const projectId = inserted.project_id;
     const companyId = inserted.company_id;
@@ -1077,7 +1110,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return next;
     });
     setAddSubModal(null);
-    showToast("Sub added");
+    if (autoLinkedProject?.matchType === "matched") {
+      showToast(`Sub added · linked to ${autoLinkedProject.projectName}`);
+    } else if (autoLinkedProject?.matchType === "created") {
+      showToast(`Sub added · created project ${autoLinkedProject.projectName}`);
+    } else {
+      showToast("Sub added");
+    }
   };
 
   const openDrawer = (row, table) => setDrawer({ row, table });
@@ -1931,40 +1970,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {addSubModal && (() => {
         const pr = addSubModal.projectRow;
         // Find the project in any pipeline slice to count existing subs.
-        const project = potential.find(p => p.id === pr.sourceId)
-                     || awaiting.find(p => p.id === pr.sourceId)
-                     || awarded.find(p => p.id === pr.sourceId)
-                     || closed.find(p => p.id === pr.sourceId);
+        // pr.sourceId may be null for unlinked invoices — that's expected;
+        // the modal will auto-link on submit.
+        const project = pr.sourceId && (
+          potential.find(p => p.id === pr.sourceId)
+          || awaiting.find(p => p.id === pr.sourceId)
+          || awarded.find(p => p.id === pr.sourceId)
+          || closed.find(p => p.id === pr.sourceId)
+        );
         const existingSubsCount = project?.subs?.length || 0;
-
-        // For unlinked invoices, build the project picker options from every
-        // project in the loaded pipeline. Each option carries year + status
-        // for disambiguation in the dropdown label.
-        const STATUS_LABEL = {
-          potential: "Potential",
-          awaiting: "Awaiting",
-          awarded: "Awarded",
-          closed: "Closed Out",
-        };
-        const availableProjects = pr.sourceId ? [] : (() => {
-          const out = [];
-          for (const [statusKey, slice] of [
-            ["potential", potential],
-            ["awaiting",  awaiting],
-            ["awarded",   awarded],
-            ["closed",    closed],
-          ]) {
-            for (const p of slice) {
-              out.push({
-                id: p.id,
-                name: p.name,
-                year: p.year,
-                statusLabel: STATUS_LABEL[statusKey],
-              });
-            }
-          }
-          return out;
-        })();
 
         return (
           <AddSubModal
@@ -1973,7 +1987,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             existingSubsCount={existingSubsCount}
             companies={[...clients, ...companies]}
             invoiceId={pr.id}
-            availableProjects={availableProjects}
+            invoiceRow={pr}
             onClose={() => setAddSubModal(null)}
             onAdded={applyInsertedSub}
           />
