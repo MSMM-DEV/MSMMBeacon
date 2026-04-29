@@ -1032,7 +1032,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // inserted project_subs row. The DB INSERT itself is performed inside
   // AddSubModal (so it can surface inline errors) — this just mirrors that
   // change into in-memory state so the Invoice tab updates immediately.
-  const applyInsertedSub = (inserted) => {
+  //
+  // When the modal also linked a previously-unlinked invoice to a project
+  // (linkedProjectId + invoiceId), we patch the invoice row's sourceId
+  // locally too so subsequent renders + the Subs section in the drawer
+  // see the new link without a reload.
+  const applyInsertedSub = ({ inserted, linkedProjectId, invoiceId }) => {
+    if (linkedProjectId && invoiceId) {
+      setInvoice(rows => rows.map(inv =>
+        inv.id === invoiceId ? { ...inv, sourceId: linkedProjectId } : inv
+      ));
+    }
     const projectId = inserted.project_id;
     const companyId = inserted.company_id;
     // UI sub shape used by adapter / Linked-Projects helper / countRefsFor.
@@ -1826,6 +1836,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           ? linkedProjectsFor(liveRow, { potential, awaiting, awarded, closed }, invoice)
           : null;
 
+        // For Invoice rows, look up the linked project's subs so the
+        // drawer can render the LinkedSubsSection. Empty array if the
+        // invoice isn't linked.
+        const linkedSubs = drawer.table === "invoice" && liveRow.sourceId
+          ? (() => {
+              const proj = potential.find(p => p.id === liveRow.sourceId)
+                        || awaiting.find(p => p.id === liveRow.sourceId)
+                        || awarded.find(p => p.id === liveRow.sourceId)
+                        || closed.find(p => p.id === liveRow.sourceId);
+              return proj?.subs || [];
+            })()
+          : [];
+
         return (
         <DetailDrawer
           row={liveRow}
@@ -1854,6 +1877,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             null
           }
           onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          linkedSubs={linkedSubs}
+          onAddSub={drawer.table === "invoice"
+            ? () => { setAddSubModal({ projectRow: liveRow }); }
+            : undefined}
           linkedProjects={linkedProjects}
           onOpenProject={(projectId, statusKey) => {
             // Resolve which slice the project lives in, then swap the
@@ -1909,12 +1936,44 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                      || awarded.find(p => p.id === pr.sourceId)
                      || closed.find(p => p.id === pr.sourceId);
         const existingSubsCount = project?.subs?.length || 0;
+
+        // For unlinked invoices, build the project picker options from every
+        // project in the loaded pipeline. Each option carries year + status
+        // for disambiguation in the dropdown label.
+        const STATUS_LABEL = {
+          potential: "Potential",
+          awaiting: "Awaiting",
+          awarded: "Awarded",
+          closed: "Closed Out",
+        };
+        const availableProjects = pr.sourceId ? [] : (() => {
+          const out = [];
+          for (const [statusKey, slice] of [
+            ["potential", potential],
+            ["awaiting",  awaiting],
+            ["awarded",   awarded],
+            ["closed",    closed],
+          ]) {
+            for (const p of slice) {
+              out.push({
+                id: p.id,
+                name: p.name,
+                year: p.year,
+                statusLabel: STATUS_LABEL[statusKey],
+              });
+            }
+          }
+          return out;
+        })();
+
         return (
           <AddSubModal
             projectId={pr.sourceId}
             projectName={pr.name}
             existingSubsCount={existingSubsCount}
             companies={[...clients, ...companies]}
+            invoiceId={pr.id}
+            availableProjects={availableProjects}
             onClose={() => setAddSubModal(null)}
             onAdded={applyInsertedSub}
           />

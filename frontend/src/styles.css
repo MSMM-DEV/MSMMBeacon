@@ -4516,3 +4516,45 @@ html, body { overflow-x: clip; }
 .invoice-table tr.invoice-sub-empty .sticky-2 {
   background: var(--surface-2);
 }
+
+/* Linked Subs section in the Invoice drawer */
+.drawer-section.linked-subs .linked-projects-head {
+  margin-bottom: 8px;
+}
+.linked-subs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.linked-sub {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) max-content;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.linked-sub-name {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.linked-sub-discipline {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.linked-sub-amount {
+  font-size: 12px;
+  color: var(--accent-ink);
+  font-weight: 500;
+}

@@ -966,6 +966,17 @@ export async function upsertSubInvoiceAmount({ projectId, companyId, year, month
   return data;
 }
 
+// Wire an anticipated_invoice row to a project after the fact. Used by the
+// AddSubModal when the user wants to add subs to an invoice that was
+// created without an upstream project link.
+export async function linkInvoiceToProject(invoiceId, projectId) {
+  const { error } = await supabase
+    .from("anticipated_invoice")
+    .update({ source_project_id: projectId })
+    .eq("id", invoiceId);
+  if (error) throw new Error(`link invoice to project: ${error.message}`);
+}
+
 // Add a new entry to project_subs. Many existing invoices were created
 // without their sub data tracked (subs were a Potential-stage concept),
 // so the Invoice tab provides an inline "+ Add sub" affordance that calls

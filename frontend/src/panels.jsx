@@ -6,6 +6,7 @@ import {
   getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
   ensureSubInvoiceRow, monthFolder, addProjectSub,
+  linkInvoiceToProject,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -125,8 +126,66 @@ export function LinkedProjectsSection({ projects, onOpenProject }) {
   );
 }
 
+// ============ LINKED SUBS (drawer subsection for Invoice rows) ============
+// Shown below the editable fields when an Invoice row is open. Reads the
+// linked project's project_subs (already on the project's `subs` array via
+// the loader) and renders a compact list. Includes an inline "+ Add sub"
+// trigger that opens the AddSubModal — same flow as the table's expand row.
+export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
+  return (
+    <div className="drawer-section linked-subs" style={{ marginTop: 22 }}>
+      <div className="linked-projects-head">
+        <div className="section-title" style={{ margin: 0 }}>
+          <Icon name="briefcase" size={12}/>
+          Linked Subs · {subs.length}
+        </div>
+        <button
+          type="button"
+          className="invoice-add-sub-btn"
+          onClick={onAddSub}
+          title={invoiceLinked
+            ? "Add a sub to this project"
+            : "Pick a project and add a sub — the invoice will be linked to it"}
+          style={{ fontSize: 11 }}>
+          <Icon name="plus" size={11}/>
+          {invoiceLinked ? "Add sub" : "Link & add"}
+        </button>
+      </div>
+      {!invoiceLinked && subs.length === 0 && (
+        <div className="drawer-section-empty">
+          This invoice isn't linked to a project yet — clicking "Link &amp; add"
+          will let you pick one and add the first sub in one step.
+        </div>
+      )}
+      {invoiceLinked && subs.length === 0 && (
+        <div className="drawer-section-empty">
+          No subs tracked on this project yet.
+        </div>
+      )}
+      {subs.length > 0 && (
+        <ul className="linked-subs-list">
+          {subs.map((s, i) => {
+            const company = companyById(s.cId);
+            return (
+              <li key={i} className="linked-sub">
+                <span className="linked-sub-name">{company?.name || "—"}</span>
+                <span className="linked-sub-discipline mono subtle">
+                  {s.desc || "—"}
+                </span>
+                <span className="linked-sub-amount mono">
+                  {s.amt ? fmtMoney(s.amt) : <span className="empty-cell">—</span>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, linkedProjects, onOpenProject }) => {
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -539,6 +598,13 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
             <LinkedProjectsSection
               projects={linkedProjects}
               onOpenProject={onOpenProject}
+            />
+          )}
+          {table === "invoice" && (
+            <LinkedSubsSection
+              subs={linkedSubs || []}
+              invoiceLinked={!!row.sourceId}
+              onAddSub={onAddSub}
             />
           )}
         </div>
@@ -1114,27 +1180,42 @@ export const InvoiceFilesModal = ({
 };
 
 // ============ ADD SUB MODAL ============
-// Triggered from the "+ Add sub" row inside an expanded Invoice project.
-// Inserts a project_subs row for the selected company with optional discipline
-// + total contract amount. Returns the inserted row via onAdded so the parent
-// can update the sub matrix in-place without a full reload.
+// Triggered from the "+ Add sub" row inside an expanded Invoice project, or
+// from the Subs section in the Invoice drawer. Inserts a project_subs row
+// for the selected company with optional discipline + total contract amount.
+//
+// If the source invoice has no project link yet (sourceId is null), the
+// modal also lets the user pick a project from the existing pipeline; on
+// submit it links the invoice to that project AND inserts the sub in one
+// flow. Both updates are surfaced to the caller via onAdded so local state
+// can be patched without a full reload.
 //
 // Props:
-//   projectId, projectName    — context for the modal header
-//   existingSubsCount         — used to compute the new ord (1-indexed)
-//   companies                 — full _companies list (clients filtered out below)
-//   onClose, onAdded(insertedRow)
+//   projectId               null when the invoice isn't linked yet
+//   projectName             header label
+//   existingSubsCount       used to compute the new ord (1-indexed)
+//   companies               full _companies list (clients filtered out)
+//   invoiceId               required when projectId is null (so we can link)
+//   availableProjects       [{id, name, year, statusLabel}] — picker options
+//   onAdded({inserted, linkedProjectId?})
 export const AddSubModal = ({
   projectId, projectName,
   existingSubsCount = 0,
   companies,
+  invoiceId,
+  availableProjects = [],
   onClose, onAdded,
 }) => {
+  const [pickedProjectId, setPickedProjectId] = useState("");
   const [companyId, setCompanyId] = useState("");
   const [discipline, setDiscipline] = useState("");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const needsProjectLink = !projectId;
+  // Use the user's pick when linking; otherwise the existing project on the invoice.
+  const effectiveProjectId = projectId || pickedProjectId;
 
   // Subs are external firms (Companies, not Clients). Filter the merged
   // _companies list to non-Client entries — same behavior as SubsEditor.
@@ -1142,24 +1223,45 @@ export const AddSubModal = ({
     .filter(c => c.type !== "Client")
     .map(c => ({ value: c.id, label: c.name }));
 
-  const canSubmit = !!companyId && !!projectId && !busy;
+  // Sort projects newest-first by year, then by name. Each option's label
+  // includes the project's status so two projects with the same name can
+  // be told apart in the picker.
+  const projectOptions = (availableProjects || [])
+    .slice()
+    .sort((a, b) => {
+      const ya = a.year || 0, yb = b.year || 0;
+      if (ya !== yb) return yb - ya;
+      return (a.name || "").localeCompare(b.name || "");
+    })
+    .map(p => ({
+      value: p.id,
+      label: `${p.name || "Untitled"}${p.year ? ` · ${p.year}` : ""}${p.statusLabel ? ` · ${p.statusLabel}` : ""}`,
+    }));
+
+  const canSubmit = !!companyId && !!effectiveProjectId && !busy
+    && (!needsProjectLink || !!invoiceId);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    if (!projectId) {
-      setError("This invoice isn't linked to a project. Link it from the row drawer first.");
+    if (needsProjectLink && !invoiceId) {
+      setError("Missing invoice id — can't link.");
       return;
     }
     setBusy(true); setError("");
     try {
+      let linkedProjectId = null;
+      if (needsProjectLink) {
+        await linkInvoiceToProject(invoiceId, pickedProjectId);
+        linkedProjectId = pickedProjectId;
+      }
       const inserted = await addProjectSub({
-        projectId,
+        projectId: effectiveProjectId,
         companyId,
         discipline: discipline.trim() || null,
         amount: amount === "" ? null : Number(amount),
         ord: existingSubsCount + 1,
       });
-      onAdded?.(inserted);
+      onAdded?.({ inserted, linkedProjectId, invoiceId });
     } catch (e) {
       setError(e?.message || "Add sub failed");
     } finally {
@@ -1167,15 +1269,23 @@ export const AddSubModal = ({
     }
   };
 
+  // Resolve the picker's currently-selected project's friendly name for the
+  // submit button label — gives the user immediate confirmation of where
+  // this sub will land.
+  const pickedLabel = (availableProjects || [])
+    .find(p => p.id === pickedProjectId)?.name;
+
   return (
     <>
       <div className="overlay" onClick={onClose}/>
-      <div className="modal" style={{ width: 480 }}>
+      <div className="modal" style={{ width: 520 }}>
         <div className="modal-head">
           <div className="icon-badge"><Icon name="plus" size={16}/></div>
           <div style={{ flex: 1 }}>
             <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Add sub</div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>{projectName || "Project"}</h3>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>
+              {needsProjectLink ? (pickedLabel || "Pick a project") : (projectName || "Project")}
+            </h3>
             <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
               Subs are firms hired on this project. Enter their total contract
               amount; monthly invoices live on the row that appears beneath.
@@ -1185,6 +1295,39 @@ export const AddSubModal = ({
         </div>
 
         <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {needsProjectLink && (
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 8,
+              padding: "10px 12px",
+              background: "var(--accent-softer)",
+              border: "1px solid color-mix(in srgb, var(--accent) 28%, transparent)",
+              borderRadius: 6,
+              marginBottom: 8,
+              fontSize: 12, color: "var(--accent-ink)", lineHeight: 1.45,
+            }}>
+              <Icon name="link" size={13}/>
+              <span>
+                <strong>This invoice isn't linked to a project yet.</strong>
+                <span style={{ color: "var(--text-soft)" }}>
+                  {" "}Pick the project this sub will live under — we'll link the
+                  invoice to it for future reference.
+                </span>
+              </span>
+            </div>
+          )}
+          {needsProjectLink && (
+            <div className="field">
+              <div className="field-label">Project *</div>
+              <div className="field-value">
+                <SearchableSelect
+                  value={pickedProjectId}
+                  options={projectOptions}
+                  placeholder="Search projects…"
+                  onChange={(v) => setPickedProjectId(v || "")}
+                />
+              </div>
+            </div>
+          )}
           <div className="field">
             <div className="field-label">Company *</div>
             <div className="field-value">
@@ -1233,7 +1376,7 @@ export const AddSubModal = ({
             <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
             <button className="btn primary sm" onClick={handleSubmit} disabled={!canSubmit}>
               <Icon name="check" size={13}/>
-              {busy ? "Adding…" : "Add sub"}
+              {busy ? "Saving…" : (needsProjectLink ? "Link & add sub" : "Add sub")}
             </button>
           </div>
         </div>
