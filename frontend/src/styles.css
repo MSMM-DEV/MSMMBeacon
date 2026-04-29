@@ -474,6 +474,71 @@ html, body { overflow-x: clip; }
   .chrome-search-input::placeholder { font-size: 11.5px; }
 }
 
+/* Invoice toolbar — total + non-orange count chip alongside search */
+.invoice-count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 30px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.invoice-count-num {
+  font-weight: 600;
+  color: var(--accent-ink);
+  font-size: 13px;
+}
+.invoice-count-label {
+  font-size: 11px;
+  color: var(--text-soft);
+  letter-spacing: 0.02em;
+}
+.invoice-count-sep {
+  color: var(--text-muted);
+  margin: 0 2px;
+}
+@media (max-width: 720px) {
+  .invoice-count-chip { display: none; }
+}
+
+/* Prime entry row in the Invoice expand area — small "PRIME" tag next to
+   the company name and a slightly cooler tint to distinguish from sub
+   rows. The ↳ glyph is overridden to ▲ via ::before for clarity. */
+.invoice-table tr.invoice-sub-row.invoice-prime-row td {
+  background: color-mix(in srgb, var(--blue) 14%, var(--surface-2));
+}
+.invoice-table tr.invoice-sub-row.invoice-prime-row td.sticky-1,
+.invoice-table tr.invoice-sub-row.invoice-prime-row td.sticky-2 {
+  background: color-mix(in srgb, var(--blue) 14%, var(--surface-2));
+}
+.invoice-table tr.invoice-sub-row.invoice-prime-row td.sticky-2::before {
+  content: "▲";
+  color: var(--blue);
+}
+.invoice-table tr.invoice-sub-row.invoice-prime-row td.month-actual {
+  background: color-mix(in srgb, var(--blue) 12%, var(--accent-softer));
+}
+.invoice-table tr.invoice-sub-row.invoice-prime-row td.month-proj {
+  background: color-mix(in srgb, var(--blue) 8%, var(--surface-2));
+}
+.invoice-prime-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, transparent);
+  border-radius: 3px;
+}
+
 .thead, .trow {
   display: grid;
   gap: 0;

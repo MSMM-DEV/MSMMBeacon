@@ -368,7 +368,12 @@ const adaptSubsCosted = (arr) =>
   (arr || [])
     .slice()
     .sort((a, b) => (a.ord || 0) - (b.ord || 0))
-    .map(s => ({ cId: s.company_id, desc: s.discipline || "", amt: s.amount || 0 }));
+    .map(s => ({
+      cId: s.company_id,
+      desc: s.discipline || "",
+      amt: s.amount || 0,
+      kind: s.kind || "sub",
+    }));
 
 // Multi-PM — every join table can carry any number of PMs per project. Preserve
 // join-row order as returned by PostgREST (stable across fetches for the same
@@ -606,7 +611,7 @@ export async function loadBeacon() {
     pget(supabase.from("companies").select("*").order("name"), "companies"),
     pget(
       supabase.from("projects")
-        .select("*, subs:project_subs(ord,company_id,discipline,amount), pms:project_pms(user_id), stage:stage_id(name)")
+        .select("*, subs:project_subs(ord,company_id,discipline,amount,kind), pms:project_pms(user_id), stage:stage_id(name)")
         .order("year", { ascending: false })
         .order("project_name"),
       "projects"
@@ -736,8 +741,18 @@ export async function loadBeacon() {
     arr.push(f);
     primeFilesByKey.set(key, arr);
   }
+  // Resolve role per project so each invoice row knows whether MSMM is
+  // Prime or Sub on the linked project. role can be explicit (potential
+  // rows have it) or derived from prime_company_id (non-Prime if set).
+  const projectRoleById = new Map();
+  for (const p of projects) {
+    let role = p.role;
+    if (!role) role = p.prime_company_id ? "Sub" : "Prime";
+    projectRoleById.set(p.id, role);
+  }
   const adaptedInvoices = reconciledInvoices.map(adaptInvoice).map(inv => ({
     ...inv,
+    role: inv.sourceId ? (projectRoleById.get(inv.sourceId) || "Prime") : "Prime",
     primeFiles: Array.from({ length: 12 }, (_, i) =>
       primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
     ),
@@ -747,10 +762,14 @@ export async function loadBeacon() {
   // project_subs, list every sub with their 12-month amounts (from
   // sub_invoices) + 12-month file lists (from sub_invoice_files). Subs
   // with no sub_invoice rows still appear — empty cells.
-  const subInvoicesByProjectCompany = new Map(); // "projectId:companyId" → sub_invoice row
+  // Key includes kind so the same company can theoretically appear once
+  // per kind per month. Today we only ever look up by (project, company,
+  // month, kind) but the matrix builder respects the kind discriminator.
+  const subInvoicesByProjectCompany = new Map(); // "projectId:kind:companyId:month" → sub_invoice row
   const subInvoiceById = new Map();              // sub_invoice.id → row (for files lookup)
   for (const r of (subInvRows || [])) {
-    subInvoicesByProjectCompany.set(`${r.project_id}:${r.company_id}:${r.month}`, r);
+    const k = r.kind || "sub";
+    subInvoicesByProjectCompany.set(`${r.project_id}:${k}:${r.company_id}:${r.month}`, r);
     subInvoiceById.set(r.id, r);
   }
   const subFilesBySubInvoice = new Map();
@@ -767,13 +786,14 @@ export async function loadBeacon() {
     if (subs.length === 0) continue;
     const entries = subs.map(s => {
       const company = companies.find(c => c.id === s.company_id);
+      const kind = s.kind || "sub";
       const amounts = Array(12).fill(null);
       const files   = Array(12).fill(null).map(() => []);
       const subInvoiceIds = Array(12).fill(null);
       const paid    = Array(12).fill(false);
       const paidAt  = Array(12).fill(null);
       for (let m = 1; m <= 12; m++) {
-        const key = `${p.id}:${s.company_id}:${m}`;
+        const key = `${p.id}:${kind}:${s.company_id}:${m}`;
         const row = subInvoicesByProjectCompany.get(key);
         if (row) {
           amounts[m - 1] = row.amount != null ? Number(row.amount) : null;
@@ -784,6 +804,7 @@ export async function loadBeacon() {
         }
       }
       return {
+        kind,
         companyId: s.company_id,
         companyName: company?.name || "Unknown company",
         contractAmount: s.amount || 0,
@@ -952,18 +973,19 @@ export async function reloadEvents() {
 // The amount cell on a sub row is editable inline. This upserts the row
 // keyed on (project_id, company_id, year, month). Returns the row id so
 // callers can attach file rows to it.
-export async function upsertSubInvoiceAmount({ projectId, companyId, year, month, amount }) {
-  // ON CONFLICT update — Postgres uses the unique (project_id, company_id, year, month) index.
+export async function upsertSubInvoiceAmount({ projectId, companyId, year, month, amount, kind = "sub" }) {
+  // ON CONFLICT update — uses the kind-aware unique (project_id, kind, company_id, year, month).
   const payload = {
     project_id: projectId,
     company_id: companyId,
     year,
     month,
     amount: amount === "" || amount == null ? null : Number(amount),
+    kind,
   };
   const { data, error } = await supabase
     .from("sub_invoices")
-    .upsert(payload, { onConflict: "project_id,company_id,year,month" })
+    .upsert(payload, { onConflict: "project_id,kind,company_id,year,month" })
     .select("id, amount")
     .single();
   if (error) throw new Error(`sub invoice upsert: ${error.message}`);
@@ -1039,22 +1061,48 @@ export async function linkInvoiceToProject(invoiceId, projectId) {
 // Add a new entry to project_subs. Many existing invoices were created
 // without their sub data tracked (subs were a Potential-stage concept),
 // so the Invoice tab provides an inline "+ Add sub" affordance that calls
-// this. Returns the inserted row so callers can patch local state.
-export async function addProjectSub({ projectId, companyId, discipline, amount, ord }) {
+// this. The `kind` discriminator lets the same table also hold the upstream
+// prime firm on a Sub-role project ('prime', max one per project).
+export async function addProjectSub({ projectId, companyId, discipline, amount, ord, kind = "sub" }) {
   const payload = {
     project_id: projectId,
     company_id: companyId,
     discipline: discipline || null,
     amount: amount === "" || amount == null ? null : Number(amount),
     ord: ord ?? null,
+    kind,
   };
   const { data, error } = await supabase
     .from("project_subs")
     .insert(payload)
     .select("*")
     .single();
-  if (error) throw new Error(`add sub: ${error.message}`);
+  if (error) throw new Error(`add ${kind}: ${error.message}`);
   return data;
+}
+
+// Update a project's role explicitly. Switching to Prime also clears
+// prime_company_id (the consistency check requires Prime → no prime firm).
+export async function setProjectRole(projectId, role) {
+  const update = role === "Prime"
+    ? { role: "Prime", prime_company_id: null }
+    : { role: role || null };
+  const { error } = await supabase
+    .from("projects")
+    .update(update)
+    .eq("id", projectId);
+  if (error) throw new Error(`set project role: ${error.message}`);
+}
+
+// Update a project's prime company. Used in the "Add prime" flow so the
+// project's projects.prime_company_id mirrors the project_subs(kind='prime')
+// row's company_id — keeping the schema consistency check happy.
+export async function setProjectPrimeCompany(projectId, primeCompanyId) {
+  const { error } = await supabase
+    .from("projects")
+    .update({ prime_company_id: primeCompanyId })
+    .eq("id", projectId);
+  if (error) throw new Error(`set prime company: ${error.message}`);
 }
 
 // Mark a sub_invoice paid (or back to pending). Sets paid_at to now() on the
@@ -1074,17 +1122,18 @@ export async function setSubInvoicePaid(subInvoiceId, paid) {
 
 // Find or create the sub_invoice row for the given coordinates. Used by the
 // upload modal: we may need to create a 0-amount row before attaching files.
-export async function ensureSubInvoiceRow({ projectId, companyId, year, month }) {
+export async function ensureSubInvoiceRow({ projectId, companyId, year, month, kind = "sub" }) {
   const existing = await supabase.from("sub_invoices")
     .select("id, amount")
     .eq("project_id", projectId)
     .eq("company_id", companyId)
     .eq("year", year)
     .eq("month", month)
+    .eq("kind", kind)
     .maybeSingle();
   if (existing.data) return existing.data;
   const { data, error } = await supabase.from("sub_invoices")
-    .insert({ project_id: projectId, company_id: companyId, year, month })
+    .insert({ project_id: projectId, company_id: companyId, year, month, kind })
     .select("id, amount")
     .single();
   if (error) throw new Error(`sub invoice ensure: ${error.message}`);
@@ -1188,7 +1237,8 @@ export async function reloadInvoiceArtifacts(projects, companies) {
   }
   const subInvoicesByProjectCompany = new Map();
   for (const r of subInvRows) {
-    subInvoicesByProjectCompany.set(`${r.project_id}:${r.company_id}:${r.month}`, r);
+    const k = r.kind || "sub";
+    subInvoicesByProjectCompany.set(`${r.project_id}:${k}:${r.company_id}:${r.month}`, r);
   }
   const subFilesBySubInvoice = new Map();
   for (const f of subInvFileRows) {
@@ -1201,6 +1251,7 @@ export async function reloadInvoiceArtifacts(projects, companies) {
     if (subs.length === 0) continue;
     const entries = subs.map(s => {
       const company = companies.find(c => c.id === s.cId || c.id === s.company_id);
+      const kind = s.kind || "sub";
       const amounts = Array(12).fill(null);
       const files = Array(12).fill(null).map(() => []);
       const subInvoiceIds = Array(12).fill(null);
@@ -1208,7 +1259,7 @@ export async function reloadInvoiceArtifacts(projects, companies) {
       const paidAt  = Array(12).fill(null);
       const cId = s.cId || s.company_id;
       for (let m = 1; m <= 12; m++) {
-        const row = subInvoicesByProjectCompany.get(`${p.id}:${cId}:${m}`);
+        const row = subInvoicesByProjectCompany.get(`${p.id}:${kind}:${cId}:${m}`);
         if (row) {
           amounts[m-1] = row.amount != null ? Number(row.amount) : null;
           subInvoiceIds[m-1] = row.id;
@@ -1218,6 +1269,7 @@ export async function reloadInvoiceArtifacts(projects, companies) {
         }
       }
       return {
+        kind,
         companyId: cId,
         companyName: company?.name || "Unknown company",
         contractAmount: s.amt || s.amount || 0,

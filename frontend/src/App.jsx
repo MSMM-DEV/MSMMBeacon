@@ -26,6 +26,7 @@ import {
   runOutlookSyncNow, reloadEvents,
   upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub,
   ensureSubInvoiceRow, setSubInvoicePaid,
+  setProjectRole, setProjectPrimeCompany,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -1018,12 +1019,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // sub_invoice row exists first (so users can mark a cell paid even before
   // typing an amount), then patches the matrix locally so the cell flips
   // green immediately without a full reload.
-  const setSubInvoicePaidStatus = async ({ projectId, companyId, monthIdx, paid }) => {
+  const setSubInvoicePaidStatus = async ({ projectId, companyId, monthIdx, paid, kind = "sub" }) => {
     try {
       const row = await ensureSubInvoiceRow({
         projectId, companyId,
         year: THIS_YEAR,
         month: monthIdx + 1,
+        kind,
       });
       await setSubInvoicePaid(row.id, paid);
       setSubInvoices(prev => {
@@ -1048,7 +1050,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
-  const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value) => {
+  const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value, kind = "sub") => {
     try {
       const cleaned = value === "" || value == null ? null : Number(value);
       await upsertSubInvoiceAmount({
@@ -1056,10 +1058,46 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         year: THIS_YEAR,
         month: monthIdx + 1,
         amount: cleaned,
+        kind,
       });
       await refreshInvoiceArtifacts();
     } catch (e) {
-      showToast(`Sub invoice save failed: ${e?.message || e}`, "x");
+      showToast(`Invoice save failed: ${e?.message || e}`, "x");
+    }
+  };
+
+  // Toggle a project's Prime/Sub role from the Invoice tab. Switching to
+  // Prime also clears prime_company_id in the DB; switching to Sub leaves
+  // prime_company_id alone (the user picks one in the next "+ Add prime"
+  // step). After the DB write, we patch the project's role + the linked
+  // invoice row's role flag locally so the UI updates without a reload.
+  const setInvoiceRoleHandler = async (invoiceRow, newRole) => {
+    const projectId = invoiceRow?.sourceId;
+    if (!projectId) {
+      showToast("Link this invoice to a project first.", "x");
+      return;
+    }
+    try {
+      await setProjectRole(projectId, newRole);
+      // Patch invoice slice — every invoice on this project gets the new role.
+      setInvoice(rows => rows.map(inv =>
+        inv.sourceId === projectId ? { ...inv, role: newRole } : inv
+      ));
+      // Patch the project slice the project lives in. Switching to Prime
+      // also clears prime_company_id locally (matches the DB clear).
+      const patch = (rows) => rows.map(p =>
+        p.id !== projectId ? p : {
+          ...p,
+          role: newRole,
+          ...(newRole === "Prime" ? { prime_company_id: null } : {}),
+        }
+      );
+      if (potential.some(p => p.id === projectId)) setPotential(patch);
+      else if (awaiting.some(p => p.id === projectId)) setAwaiting(patch);
+      else if (awarded.some(p => p.id === projectId)) setAwarded(patch);
+      else if (closed.some(p => p.id === projectId))   setClosed(patch);
+    } catch (e) {
+      showToast(`Role change failed: ${e?.message || e}`, "x");
     }
   };
 
@@ -1074,7 +1112,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   //   * created   → we auto-created a stub project (status='awarded')
   // Both surface here via autoLinkedProject so we can patch the right state
   // slice (and add the stub to the awarded slice if it's brand new).
-  const applyInsertedSub = ({ inserted, linkedProjectId, invoiceId, autoLinkedProject }) => {
+  //
+  // `kind` is 'sub' (default) or 'prime'. For prime entries, the modal also
+  // updated projects.prime_company_id; we mirror that locally so role/prime
+  // logic in the rest of the UI stays consistent without a reload.
+  const applyInsertedSub = ({ inserted, linkedProjectId, invoiceId, autoLinkedProject, kind }) => {
     if (linkedProjectId && invoiceId) {
       setInvoice(rows => rows.map(inv =>
         inv.id === invoiceId ? { ...inv, sourceId: linkedProjectId } : inv
@@ -1113,15 +1155,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
     const projectId = inserted.project_id;
     const companyId = inserted.company_id;
+    const entryKind = kind || inserted.kind || "sub";
     // UI sub shape used by adapter / Linked-Projects helper / countRefsFor.
     const newUiSub = {
       cId: companyId,
       desc: inserted.discipline || "",
       amt: inserted.amount || 0,
+      kind: entryKind,
     };
-    const append = (rows) => rows.map(r =>
-      r.id === projectId ? { ...r, subs: [...(r.subs || []), newUiSub] } : r
-    );
+    const append = (rows) => rows.map(r => {
+      if (r.id !== projectId) return r;
+      // For a prime entry we also update prime_company_id on the project
+      // (the DB UPDATE was already done by the modal). This keeps the
+      // role/derivation logic consistent across the UI.
+      const updated = { ...r, subs: [...(r.subs || []), newUiSub] };
+      if (entryKind === "prime") updated.prime_company_id = companyId;
+      return updated;
+    });
     if (potential.some(p => p.id === projectId)) setPotential(append);
     else if (awaiting.some(p => p.id === projectId)) setAwaiting(append);
     else if (awarded.some(p => p.id === projectId)) setAwarded(append);
@@ -1134,6 +1184,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const next = new Map(prev);
       const existing = next.get(projectId) || [];
       next.set(projectId, [...existing, {
+        kind: entryKind,
         companyId,
         companyName: company?.name || "Unknown company",
         contractAmount: inserted.amount || 0,
@@ -1141,16 +1192,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         amounts: Array(12).fill(null),
         files:   Array(12).fill(null).map(() => []),
         subInvoiceIds: Array(12).fill(null),
+        paid:    Array(12).fill(false),
+        paidAt:  Array(12).fill(null),
       }]);
       return next;
     });
     setAddSubModal(null);
+    const noun = entryKind === "prime" ? "Prime" : "Sub";
     if (autoLinkedProject?.matchType === "matched") {
-      showToast(`Sub added · linked to ${autoLinkedProject.projectName}`);
+      showToast(`${noun} added · linked to ${autoLinkedProject.projectName}`);
     } else if (autoLinkedProject?.matchType === "created") {
-      showToast(`Sub added · created project ${autoLinkedProject.projectName}`);
+      showToast(`${noun} added · created project ${autoLinkedProject.projectName}`);
     } else {
-      showToast("Sub added");
+      showToast(`${noun} added`);
     }
   };
 
@@ -1778,7 +1832,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onUpdateSubAmount={updateSubInvoiceCell}
             onTogglePaid={setSubInvoicePaidStatus}
             onOpenFiles={(payload) => setFilesModal(payload)}
-            onAddSub={(projectRow) => setAddSubModal({ projectRow })}
+            onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
+            onChangeRole={setInvoiceRoleHandler}
             yearOptions={availableYears.invoice}
             yearValue={yearFilter.invoice}
             onYearChange={(y) => setYear("invoice", y)}/>
@@ -2005,6 +2060,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
       {addSubModal && (() => {
         const pr = addSubModal.projectRow;
+        const modalKind = addSubModal.kind || "sub";
         // Find the project in any pipeline slice to count existing subs.
         // pr.sourceId may be null for unlinked invoices — that's expected;
         // the modal will auto-link on submit.
@@ -2024,6 +2080,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             companies={[...clients, ...companies]}
             invoiceId={pr.id}
             invoiceRow={pr}
+            kind={modalKind}
             onClose={() => setAddSubModal(null)}
             onAdded={applyInsertedSub}
           />

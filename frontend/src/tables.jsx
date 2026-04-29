@@ -1783,10 +1783,11 @@ export const InvoiceTable = ({
   // contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12],
   // paid[12], paidAt[12]}
   subInvoices,       // Map<project_id, sub_entry[]>
-  onUpdateSubAmount, // (projectId, companyId, monthIdx, value) => void
+  onUpdateSubAmount, // (projectId, companyId, monthIdx, value, kind) => void
   onOpenFiles,       // ({kind, projectRow, monthIdx, sub?}) => void
-  onAddSub,          // (projectRow) => void  — opens the AddSubModal
-  onTogglePaid,      // ({projectId, companyId, monthIdx, paid}) => void
+  onAddSub,          // (projectRow, kind) => void  — opens the AddSubModal
+  onTogglePaid,      // ({projectId, companyId, monthIdx, paid, kind}) => void
+  onChangeRole,      // (projectRow, role) => void  — toggles Prime/Sub on the project
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -1868,6 +1869,13 @@ export const InvoiceTable = ({
             </button>
           )}
         </div>
+        <div className="invoice-count-chip" title={`${rows.length} total · ${nonOrangeRows.length} excluding Orange`}>
+          <span className="invoice-count-num mono">{rows.length}</span>
+          <span className="invoice-count-label">{rows.length === 1 ? "project" : "projects"}</span>
+          <span className="invoice-count-sep">·</span>
+          <span className="invoice-count-num mono" style={{ color: "var(--text-soft)" }}>{nonOrangeRows.length}</span>
+          <span className="invoice-count-label">w/o Orange</span>
+        </div>
         {hasYear ? (
           <button
             ref={yearBtnRef}
@@ -1948,6 +1956,7 @@ export const InvoiceTable = ({
                   <th className="invoice-expand-col"/>
                   <th className="sticky-1">Proj #</th>
                   <th className="sticky-2" style={{ minWidth: 260 }}>Project Name</th>
+                  <th style={{ minWidth: 90 }}>Role</th>
                   <th style={{ minWidth: 70 }}>Type</th>
                   <th style={{ minWidth: 80 }}>PM</th>
                   <th>Contract</th>
@@ -1968,11 +1977,15 @@ export const InvoiceTable = ({
               <tbody>
                 {searchedRows.map((r) => {
                   const isExpanded = expandedIds.has(r.id);
-                  const subList    = (subInvoices?.get(r.sourceId) || []);
-                  // Every row is expandable — even projects with zero subs
-                  // expand to reveal the "+ Add sub" affordance. Click on
-                  // a sub-less project becomes a discovery point for adding
-                  // missing sub data.
+                  const allEntries = (subInvoices?.get(r.sourceId) || []);
+                  // Filter the sub matrix by role/kind:
+                  //   Prime project → list of sub firms (kind='sub')
+                  //   Sub project   → at most one prime firm (kind='prime')
+                  const role       = r.role || "Prime";
+                  const isPrimeRow = role === "Prime";
+                  const subList    = isPrimeRow
+                    ? allEntries.filter(s => (s.kind || "sub") === "sub")
+                    : allEntries.filter(s => s.kind === "prime");
                   return (
                   <React.Fragment key={r.id}>
                   <tr className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
@@ -2003,6 +2016,13 @@ export const InvoiceTable = ({
                         <EditableCell value={r.name}
                           onChange={v => updateRow(r.id, { name: v })}/>
                       </div>
+                    </td>
+                    <td>
+                      <EditableCell value={role} type="select" options={["Prime","Sub"]}
+                        onChange={v => onChangeRole?.(r, v)}
+                        render={v => v
+                          ? <span className={`chip ${v === "Prime" ? "blue" : "accent"}`} style={{ fontSize: 11 }}>{v}</span>
+                          : <span className="empty-cell">—</span>}/>
                     </td>
                     <td>
                       <EditableCell value={r.type} type="select" options={invoiceTypeOptions}
@@ -2075,24 +2095,37 @@ export const InvoiceTable = ({
                     <tr className="invoice-sub-row invoice-sub-empty">
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1"/>
-                      <td className="sticky-2" colSpan={3} style={{ paddingLeft: 28 }}>
+                      <td className="sticky-2" colSpan={4} style={{ paddingLeft: 28 }}>
                         <span style={{ fontStyle: "italic", color: "var(--text-soft)" }}>
-                          No subs tracked on this project yet.
+                          {isPrimeRow
+                            ? "No subs tracked on this project yet."
+                            : "No prime firm tracked on this project yet."}
                         </span>
                       </td>
                       <td colSpan={16}/>
                     </tr>
                   )}
-                  {isExpanded && subList.map((s) => (
-                    <tr key={`${r.id}:${s.companyId}`} className="invoice-sub-row">
+                  {isExpanded && subList.map((s) => {
+                    const entryKind = s.kind || "sub";
+                    const isPrimeEntry = entryKind === "prime";
+                    return (
+                    <tr key={`${r.id}:${entryKind}:${s.companyId}`}
+                        className={"invoice-sub-row" + (isPrimeEntry ? " invoice-prime-row" : "")}>
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1 mono subtle" style={{ fontSize: 11 }}/>
                       <td className="sticky-2">
-                        <span className="invoice-sub-name">{s.companyName}</span>
+                        <span className="invoice-sub-name">
+                          {s.companyName}
+                          {isPrimeEntry && (
+                            <span className="invoice-prime-tag mono">PRIME</span>
+                          )}
+                        </span>
                         {s.discipline && (
                           <span className="invoice-sub-discipline mono">· {s.discipline}</span>
                         )}
                       </td>
+                      {/* Role column — empty on sub-rows */}
+                      <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="mono">
@@ -2110,7 +2143,7 @@ export const InvoiceTable = ({
                             className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
-                            onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv)}
+                            onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv, entryKind)}
                             format={v => v != null && v !== 0
                               ? fmtMoney(v)
                               : <span style={{ opacity: 0.4 }}>—</span>}/>
@@ -2128,6 +2161,7 @@ export const InvoiceTable = ({
                                   companyId: s.companyId,
                                   monthIdx: i,
                                   paid: !isPaid,
+                                  kind: entryKind,
                                 });
                               }}>
                               <Icon name="check" size={11}/>
@@ -2138,7 +2172,9 @@ export const InvoiceTable = ({
                             className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
                             title={hasFiles
                               ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
-                              : `Attach invoice from ${s.companyName}`}
+                              : (isPrimeEntry
+                                  ? `Attach invoice to ${s.companyName}`
+                                  : `Attach invoice from ${s.companyName}`)}
                             onClick={(e) => {
                               e.stopPropagation();
                               onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: i, sub: s });
@@ -2155,8 +2191,16 @@ export const InvoiceTable = ({
                       <td className="total-cell"><span className="empty-cell">—</span></td>
                       <td/>
                     </tr>
-                  ))}
-                  {isExpanded && (
+                    );
+                  })}
+                  {isExpanded && (() => {
+                    // For Prime projects, allow many subs. For Sub projects,
+                    // only allow adding a prime if one isn't already set.
+                    const canAddPrime = !isPrimeRow && subList.length === 0;
+                    const showButton  = isPrimeRow || canAddPrime;
+                    if (!showButton) return null;
+                    const addKind = isPrimeRow ? "sub" : "prime";
+                    return (
                     <tr className="invoice-sub-add-row">
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1"/>
@@ -2164,14 +2208,17 @@ export const InvoiceTable = ({
                         <button
                           type="button"
                           className="invoice-add-sub-btn"
-                          onClick={() => onAddSub?.(r)}
-                          title="Add a sub to this project">
+                          onClick={() => onAddSub?.(r, addKind)}
+                          title={isPrimeRow
+                            ? "Add a sub to this project"
+                            : "Add the upstream prime firm for this project"}>
                           <Icon name="plus" size={11}/>
-                          Add sub
+                          {isPrimeRow ? "Add sub" : "Add prime"}
                         </button>
                       </td>
                     </tr>
-                  )}
+                    );
+                  })()}
                   </React.Fragment>
                   );
                 })}
@@ -2186,6 +2233,7 @@ export const InvoiceTable = ({
                       <td className="sticky-2 total-cell" style={{ fontWeight: 600 }}>
                         Total — excl. Orange
                       </td>
+                      <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.amount || 0))}</td>
@@ -2210,6 +2258,7 @@ export const InvoiceTable = ({
                       <td className="sticky-2 total-cell" style={{ fontWeight: 700, color: "var(--prob-orange)" }}>
                         Total — incl. Orange
                       </td>
+                      <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.amount || 0))}</td>

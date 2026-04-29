@@ -7,7 +7,7 @@ import {
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
   ensureSubInvoiceRow, monthFolder, addProjectSub,
   linkInvoiceToProject, findOrCreateProjectForInvoice,
-  setSubInvoicePaid,
+  setSubInvoicePaid, setProjectPrimeCompany,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -1262,8 +1262,10 @@ export const AddSubModal = ({
   companies,
   invoiceId,
   invoiceRow,
+  kind = "sub",                 // 'sub' (default) | 'prime'
   onClose, onAdded,
 }) => {
+  const isPrime = kind === "prime";
   const [companyId, setCompanyId] = useState("");
   const [discipline, setDiscipline] = useState("");
   const [amount, setAmount] = useState("");
@@ -1307,8 +1309,15 @@ export const AddSubModal = ({
         discipline: discipline.trim() || null,
         amount: amount === "" ? null : Number(amount),
         ord: existingSubsCount + 1,
+        kind,
       });
-      onAdded?.({ inserted, linkedProjectId, invoiceId, autoLinkedProject });
+      // For a prime entry, mirror the company onto projects.prime_company_id
+      // so the role/consistency check stays satisfied and the rest of the
+      // app sees the upstream firm without inferring it from project_subs.
+      if (isPrime) {
+        await setProjectPrimeCompany(effectiveProjectId, companyId);
+      }
+      onAdded?.({ inserted, linkedProjectId, invoiceId, autoLinkedProject, kind });
     } catch (e) {
       setError(e?.message || "Add sub failed");
     } finally {
@@ -1323,13 +1332,16 @@ export const AddSubModal = ({
         <div className="modal-head">
           <div className="icon-badge"><Icon name="plus" size={16}/></div>
           <div style={{ flex: 1 }}>
-            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Add sub</div>
+            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>
+              {isPrime ? "Add prime" : "Add sub"}
+            </div>
             <h3 className="drawer-title" style={{ fontSize: 16 }}>
               {projectName || invoiceRow?.name || "Project"}
             </h3>
             <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
-              Subs are firms hired on this project. Enter their total contract
-              amount; monthly invoices live on the row that appears beneath.
+              {isPrime
+                ? "The Prime is the upstream firm hiring MSMM on this project. Enter the contract amount; monthly billing tracks beneath."
+                : "Subs are firms hired on this project. Enter their total contract amount; monthly invoices live on the row that appears beneath."}
             </div>
           </div>
           <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
@@ -1354,12 +1366,12 @@ export const AddSubModal = ({
             </div>
           )}
           <div className="field">
-            <div className="field-label">Company *</div>
+            <div className="field-label">{isPrime ? "Prime firm *" : "Company *"}</div>
             <div className="field-value">
               <SearchableSelect
                 value={companyId}
                 options={subOptions}
-                placeholder="Search firms…"
+                placeholder={isPrime ? "Search prime firms…" : "Search firms…"}
                 onChange={(v) => setCompanyId(v || "")}
               />
             </div>
@@ -1401,7 +1413,7 @@ export const AddSubModal = ({
             <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
             <button className="btn primary sm" onClick={handleSubmit} disabled={!canSubmit}>
               <Icon name="check" size={13}/>
-              {busy ? "Saving…" : "Add sub"}
+              {busy ? "Saving…" : (isPrime ? "Add prime" : "Add sub")}
             </button>
           </div>
         </div>
