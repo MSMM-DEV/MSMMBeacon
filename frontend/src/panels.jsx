@@ -184,7 +184,7 @@ export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
 }
 
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -608,7 +608,15 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           )}
         </div>
         <div className="drawer-foot">
-          <button className="btn ghost sm" style={{ color: "var(--rose)" }}><Icon name="trash" size={13}/>Delete</button>
+          {onDelete && (
+            <button
+              className="btn ghost sm"
+              style={{ color: "var(--rose)" }}
+              onClick={onDelete}
+            >
+              <Icon name="trash" size={13}/>Delete
+            </button>
+          )}
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, color: "var(--text-soft)", fontSize: 12 }}>
             <Icon name="check" size={12}/>Local-only (wire writes to Supabase next)
           </div>

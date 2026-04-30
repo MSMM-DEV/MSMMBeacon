@@ -1019,6 +1019,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       });
   };
 
+  // Delete an anticipated_invoice row. The BEFORE DELETE trigger from the
+  // alerts wiring migration deactivates any related alerts; the
+  // anticipated_invoice_pms join cascades. Optimistic local removal first,
+  // restore on DB error.
+  const deleteInvoice = async (id) => {
+    const prev = invoice;
+    setInvoice(rows => rows.filter(r => r.id !== id));
+    const { error } = await supabase.from("anticipated_invoice").delete().eq("id", id);
+    if (error) {
+      setInvoice(prev);
+      showToast(`Delete failed: ${error.message}`, "x");
+      return;
+    }
+    showToast("Invoice row deleted", "check");
+  };
+
   // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
   // The invoice rows + sub matrix get re-fetched together so primeFiles/files
   // stay in sync with whatever the user just saved.
@@ -2036,6 +2052,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             null
           }
           onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          onDelete={
+            drawer.table === "invoice"
+              ? () => {
+                  if (!window.confirm(`Delete invoice row "${liveRow.name || ""}"? This cannot be undone.`)) return;
+                  deleteInvoice(liveRow.id);
+                  setDrawer(null);
+                }
+              : null
+          }
           linkedSubs={linkedSubs}
           onAddSub={drawer.table === "invoice"
             ? () => { setAddSubModal({ projectRow: liveRow }); }
