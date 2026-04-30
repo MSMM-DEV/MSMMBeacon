@@ -2019,30 +2019,37 @@ html, body { overflow-x: clip; }
 .bar-chart .bar-grp.hover { filter: drop-shadow(0 4px 8px rgba(0,0,0,.18)); }
 .bar-chart .bar-grp.hover .bar-track { opacity: .8; }
 
-/* Benchmark line + chip. */
+/* Benchmark line + chip. The chip lives OUTSIDE the plot area (in the
+   right gutter) so it never overlaps bars or month labels. The caret +
+   short connector visually tie it back to the line when the chip's
+   vertical position has been clamped to stay inside the SVG. */
 .bar-chart .benchmark-line {
   stroke: var(--text);
   stroke-width: 1.5;
   stroke-dasharray: 6 4;
   opacity: .55;
 }
+.bar-chart .benchmark-chip-pointer {
+  fill: var(--accent);
+}
 .bar-chart .benchmark-chip-bg {
   fill: var(--bg-elev);
-  stroke: var(--border-strong);
-  stroke-width: 1;
+  stroke: var(--accent);
+  stroke-width: 1.25;
 }
 .bar-chart .benchmark-chip-label {
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: .14em;
+  font-size: 9px;
+  letter-spacing: .16em;
   fill: var(--text-soft);
   font-weight: 600;
 }
 .bar-chart .benchmark-chip-val {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
-  fill: var(--text);
+  fill: var(--accent-ink);
+  letter-spacing: -.01em;
 }
 
 /* Tooltip variants matched to the verdict color. The diff line keeps a

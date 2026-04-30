@@ -255,7 +255,17 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
     return () => ro.disconnect();
   }, []);
   const W = box.w, H = box.h;
-  const padL = 56, padR = 24, padT = 24, padB = 40;
+  // padR widens when the benchmark chip is rendered so the chip can sit in
+  // the right gutter — fully OUTSIDE the plot area — instead of floating
+  // over December bars or month labels. CHIP_W tracks the chip's width so
+  // the gutter sizing and chip positioning stay in lockstep.
+  const hasBenchmark = Number(monthlyBenchmark) > 0;
+  const CHIP_W = 96;
+  const CHIP_H = 26;
+  const padL = 56;
+  const padR = hasBenchmark ? CHIP_W + 18 : 24;
+  const padT = 24;
+  const padB = 40;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
 
@@ -278,9 +288,14 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
   const allBarX  = (i) => slotCx(i) + PAIR_GAP / 2;
   const yFor = (v) => padT + plotH - (v / yMax) * plotH;
 
-  // Benchmark band — only rendered when set + > 0.
-  const hasBenchmark = Number(monthlyBenchmark) > 0;
+  // Benchmark Y position (or null when not set — flag itself was hoisted to
+  // padR computation above so the gutter widens to fit the chip).
   const benchmarkY = hasBenchmark ? yFor(Number(monthlyBenchmark)) : null;
+  // Clamp the chip vertically so it stays inside the SVG even when the
+  // benchmark sits at the very top or bottom of the plot.
+  const chipCy = hasBenchmark
+    ? Math.max(padT + CHIP_H / 2, Math.min(H - padB + CHIP_H / 2, benchmarkY))
+    : null;
 
   // Y-axis ticks (5 bands, 0..yMax).
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => ({
@@ -416,6 +431,19 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
           y1={padT} y2={padT + plotH}
           className="chart-today"/>
 
+        {/* Benchmark line — drawn BEFORE the bars so each bar visually
+            "sticks out above the line" or sits "below it" naturally; the
+            line is only visible in slot gaps and above bar tops. The chip
+            itself is rendered AFTER bars (further down) since it lives in
+            the right gutter where no bars exist. */}
+        {hasBenchmark && (
+          <line
+            x1={padL} x2={W - padR}
+            y1={benchmarkY} y2={benchmarkY}
+            className="benchmark-line"
+          />
+        )}
+
         {/* Bars — side-by-side pair per month. Left bar = Without-Orange
             (secured baseline). Right bar = With-Orange (total). Each bar's
             verdict color is computed against the same monthly benchmark
@@ -492,17 +520,34 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
           );
         })}
 
-        {/* Benchmark line — drawn last so it sits on top of every bar.
-            A small chip at the right edge labels the threshold. */}
+        {/* Benchmark chip — sits in the right gutter (outside the plot
+            area), with a short connector + caret tying it back to the
+            dashed line. When chipCy is clamped (benchmark near top/bottom
+            of plot), the connector slants. */}
         {hasBenchmark && (
           <g className="benchmark">
-            <line x1={padL} x2={W - padR} y1={benchmarkY} y2={benchmarkY}
-                  className="benchmark-line"/>
-            <g transform={`translate(${W - padR},${benchmarkY})`}>
-              <rect x={-86} y={-12} width="86" height="22" rx="6"
-                    className="benchmark-chip-bg"/>
-              <text x={-78} y={3} className="benchmark-chip-label">TARGET</text>
-              <text x={-8}  y={3} textAnchor="end" className="benchmark-chip-val">
+            <line
+              x1={W - padR} y1={benchmarkY}
+              x2={W - padR + 8} y2={chipCy}
+              className="benchmark-line"
+            />
+            <g transform={`translate(${W - padR + 8},${chipCy})`}>
+              <polygon
+                points="0,-5 5,0 0,5"
+                className="benchmark-chip-pointer"
+              />
+              <rect
+                x={5} y={-CHIP_H / 2}
+                width={CHIP_W - 8} height={CHIP_H}
+                rx={7}
+                className="benchmark-chip-bg"
+              />
+              <text x={13} y={-2} className="benchmark-chip-label">TARGET</text>
+              <text
+                x={CHIP_W - 6} y={10}
+                textAnchor="end"
+                className="benchmark-chip-val"
+              >
                 {fmtMoney(monthlyBenchmark, false)}
               </text>
             </g>
