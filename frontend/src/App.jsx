@@ -1321,7 +1321,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       showToast("Invoice row created from Awarded project");
       setTab("invoice");
     } else if (from === "potential" && to === "invoice") {
-      // COPY: Potential stays as a pipeline tracker; Invoice row spawned.
+      // MOVE: Potential row leaves; Invoice row lands. The invoice row
+      // persists to anticipated_invoice with source_project_id pointing back
+      // at the potential row, then the potential row is deleted from
+      // beacon_v2.projects (project_pms cascades). Optimistic local state
+      // first; rolled back on error.
       const { _invoiceType, ...rest } = newRow;
       const invRow = {
         id: rest.id, sourceId: row.id,
@@ -1330,11 +1334,153 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         type: _invoiceType || "ENG",
         remainingStart: rest.msmm || 0,
         values: Array(12).fill(0),
+        year: rest.year,
+        ytdActualOverride: null,
+        rollforwardOverride: null,
       };
+      const prevPotential = potential;
+      const prevInvoice = invoice;
       setInvoice(rs => [invRow, ...rs]);
+      setPotential(rs => rs.filter(r => r.id !== row.id));
       setFlashId(invRow.id);
-      showToast("Invoice row created from Potential");
       setTab("invoice");
+      (async () => {
+        try {
+          const { data: invData, error: invErr } = await supabase
+            .from("anticipated_invoice").insert({
+              source_project_id: row.id,
+              project_name: rest.name,
+              project_number: rest.projectNumber || null,
+              year: rest.year,
+              contract_amount: rest.amount ?? null,
+              type: _invoiceType || "ENG",
+              msmm_remaining_to_bill_year_start: rest.msmm ?? null,
+            }).select().single();
+          if (invErr) throw invErr;
+          // Sync PMs onto the new anticipated_invoice row.
+          if ((rest.pmIds || []).length > 0) {
+            const { error: pmErr } = await supabase
+              .from("anticipated_invoice_pms")
+              .insert(rest.pmIds.map(uid => ({
+                anticipated_invoice_id: invData.id, user_id: uid,
+              })));
+            if (pmErr) throw pmErr;
+          }
+          // Replace the temp local id with the DB id so future edits hit it.
+          setInvoice(rs => rs.map(r => r.id === invRow.id
+            ? { ...r, id: invData.id }
+            : r));
+          // Delete the potential row from the projects table.
+          const { error: delErr } = await supabase
+            .from("projects").delete().eq("id", row.id);
+          if (delErr) throw delErr;
+          showToast("Invoice row created · Potential moved");
+        } catch (e) {
+          setPotential(prevPotential);
+          setInvoice(prevInvoice);
+          showToast(`Move failed: ${e.message || e}`, "x");
+        }
+      })();
+    } else if (from === "invoice" && to === "closed") {
+      // The invoice row is removed from anticipated_invoice. The upstream
+      // project (if any) flips status='closed_out' with date_closed and
+      // reason_for_closure set; stage-specific fields disallowed on
+      // closed_out are nulled to satisfy the projects_*_only_on_* check
+      // constraints. If the invoice has no upstream project, a fresh
+      // closed_out row is minted. Local state mirrors the DB.
+      const sourceId = row.sourceId;
+      const sourceRow = sourceId
+        ? (awarded.find(r => r.id === sourceId)
+           || potential.find(r => r.id === sourceId)
+           || awaiting.find(r => r.id === sourceId)
+           || closed.find(r => r.id === sourceId))
+        : null;
+      const prevInvoice = invoice;
+      const prevPotential = potential;
+      const prevAwaiting = awaiting;
+      const prevAwarded = awarded;
+      const prevClosed = closed;
+      // Optimistic: remove the invoice + drop the source from any upstream
+      // slice; landed-closed entry is added below once we know its id.
+      setInvoice(rs => rs.filter(r => r.id !== row.id));
+      if (sourceId) {
+        setPotential(rs => rs.filter(r => r.id !== sourceId));
+        setAwaiting(rs => rs.filter(r => r.id !== sourceId));
+        setAwarded(rs => rs.filter(r => r.id !== sourceId));
+      }
+      setTab("closed");
+      (async () => {
+        try {
+          let closedId = sourceId;
+          if (sourceId) {
+            const { error } = await supabase.from("projects").update({
+              status: "closed_out",
+              date_closed: newData.dateClosed || null,
+              reason_for_closure: newData.reason || null,
+              role: null, total_contract_amount: null, msmm_amount: null,
+              probability: null, next_action_date: null, next_action_note: null,
+              anticipated_invoice_start_month: null,
+              anticipated_result_date: null,
+              stage_id: null, details: null, pool: null, contract_expiry_date: null,
+            }).eq("id", sourceId);
+            if (error) throw error;
+          } else {
+            const { data, error } = await supabase.from("projects").insert({
+              status: "closed_out",
+              year: row.year,
+              project_name: row.name,
+              project_number: row.projectNumber || null,
+              date_closed: newData.dateClosed || null,
+              reason_for_closure: newData.reason || null,
+            }).select().single();
+            if (error) throw error;
+            closedId = data.id;
+            if ((row.pmIds || []).length > 0) {
+              const { error: pmErr } = await supabase.from("project_pms")
+                .insert(row.pmIds.map(uid => ({
+                  project_id: closedId, user_id: uid,
+                })));
+              if (pmErr) throw pmErr;
+            }
+          }
+          const { error: invErr } = await supabase
+            .from("anticipated_invoice").delete().eq("id", row.id);
+          if (invErr) throw invErr;
+          const closedRow = {
+            id: closedId,
+            year: sourceRow?.year ?? row.year,
+            name: sourceRow?.name ?? row.name,
+            role: sourceRow?.role ?? "Prime",
+            clientId: sourceRow?.clientId ?? null,
+            amount: null,
+            msmm: 0,
+            subs: sourceRow?.subs ?? [],
+            pmIds: [...(sourceRow?.pmIds || row.pmIds || [])],
+            notes: sourceRow?.notes ?? "",
+            dates: "",
+            projectNumber: sourceRow?.projectNumber ?? row.projectNumber ?? "",
+            status: "Closed Out",
+            dateSubmitted: sourceRow?.dateSubmitted ?? "",
+            clientContract: sourceRow?.clientContract ?? "",
+            msmmContract: sourceRow?.msmmContract ?? "",
+            dateClosed: newData.dateClosed || "",
+            reason: newData.reason || "",
+          };
+          setClosed(rs => {
+            const filtered = rs.filter(r => r.id !== closedId);
+            return [closedRow, ...filtered];
+          });
+          setFlashId(closedId);
+          showToast("Closed out · moved from Invoice");
+        } catch (e) {
+          setInvoice(prevInvoice);
+          setPotential(prevPotential);
+          setAwaiting(prevAwaiting);
+          setAwarded(prevAwarded);
+          setClosed(prevClosed);
+          showToast(`Close out failed: ${e.message || e}`, "x");
+        }
+      })();
     }
     setMoving(null);
     setTimeout(() => setFlashId(null), 1500);
@@ -2052,6 +2198,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             null
           }
           onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          onCloseOut={
+            drawer.table === "invoice"
+              ? () => { triggerForward(liveRow, "invoice", "closed"); setDrawer(null); }
+              : null
+          }
           onDelete={
             drawer.table === "invoice"
               ? () => {

@@ -184,7 +184,7 @@ export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
 }
 
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, onCloseOut, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -533,6 +533,15 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             {onForward && <button className="btn sm primary" onClick={onForward}><Icon name="forward" size={13}/>Move forward</button>}
+            {onCloseOut && (
+              <button
+                className="btn sm"
+                onClick={onCloseOut}
+                style={{ color: "var(--rose)" }}
+              >
+                <Icon name="x" size={13}/>Close out
+              </button>
+            )}
             <button className="btn sm" onClick={onAlert}><Icon name="bell" size={13}/>Alert</button>
             <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
           </div>
@@ -683,6 +692,20 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
       newFields: [
         { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
           hint: "Determines how billing is categorized in Anticipated Invoice." },
+      ]
+    },
+    // Invoice → Closed Out: the invoice row is removed and the upstream
+    // project flips to status='closed_out'. If no upstream project exists, a
+    // new closed_out project is minted from the invoice fields. See the
+    // confirmMove handler in App.jsx for persistence details.
+    "invoice→closed": {
+      title: "Close out project",
+      subtitle: "Invoice row is removed · project moves to Closed Out",
+      carried: ["year","name","projectNumber","pmIds"],
+      newFields: [
+        { k: "status", label: "Status", type: "pill", value: "Closed Out" },
+        { k: "dateClosed", label: "Date Closed", type: "date", value: new Date().toISOString().substr(0,10) },
+        { k: "reason", label: "Reason for Closure", type: "textarea", placeholder: "e.g. Project complete, contract ended, client descope…" },
       ]
     },
   };
