@@ -1207,6 +1207,20 @@ html, body { overflow-x: clip; }
 .menu-item.danger { color: var(--rose); }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
 
+/* Multi-select rows inside a Popover (e.g. Invoice → Type filter). The
+   <input type="checkbox"> sits where the leading icon would go in a
+   normal menu-item; accent-color tints the box on selection. */
+.menu-item.invoice-type-check {
+  user-select: none;
+  cursor: pointer;
+}
+.menu-item.invoice-type-check input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px; height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
 /* ========== Searchable combobox ==========
    Single-select picker with typeahead. Used for every clientId field and
    every sub-company picker. Keyboard-navigable via the underlying input +
@@ -1568,7 +1582,10 @@ html, body { overflow-x: clip; }
 .quad {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 560px 600px;
+  /* Q1 row taller than Q2/Q3/Q4 because Q1 now stacks two charts (ENG +
+     PM split). Each chart needs ~340px to be readable; combined with the
+     card chrome + KPIs that comes out to ~880px total. */
+  grid-template-rows: 880px 600px;
   gap: 18px;
   padding: 4px 2px 24px;
 }
@@ -1580,13 +1597,17 @@ html, body { overflow-x: clip; }
 
 @media (max-width: 1080px) {
   /* On tablet/phone, stack vertically — keep the fixed-height-per-card
-     contract so stacking doesn't produce a short card above a tall one. */
+     contract so stacking doesn't produce a short card above a tall one.
+     Q1 keeps its dual-chart taller geometry; the rest sit at 600px. */
   .quad {
     grid-template-columns: 1fr;
     grid-template-rows: auto;
     grid-auto-rows: 600px;
   }
-  .quad-q1 { grid-column: 1; }
+  .quad-q1 {
+    grid-column: 1;
+    height: 880px;
+  }
 }
 
 .quad-card {
@@ -1863,6 +1884,67 @@ html, body { overflow-x: clip; }
   margin-right: 6px;
 }
 
+/* ----------------------------------------------------------------------------
+ * Q1 splits revenue by invoice type (ENG vs PM) — two charts stacked
+ * inside the Cash Flow card. The container grows to fill the card; each
+ * inner chart-wrap takes ~equal vertical share via flex. The divider is
+ * a hairline with a touch of the accent color to feel intentional rather
+ * than incidental.
+ * ---------------------------------------------------------------------------- */
+.invoice-chart-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.invoice-chart-stack > .chart-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.invoice-chart-divider {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--border) 14%,
+    var(--border) 86%,
+    transparent
+  );
+  position: relative;
+}
+.invoice-chart-divider::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 999px;
+  opacity: .55;
+}
+
+/* Per-chart eyebrow — letterpressed serif/mono caps + colored mark so the
+   user can tell ENG and PM apart at a glance. The mark uses --accent so
+   it inherits the workspace tweak. */
+.chart-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: -4px;
+}
+.chart-eyebrow-mark {
+  width: 14px; height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
 /* ============================================================================
  * Bar chart — Quad Sheet's Cash Flow tile.
  *
@@ -1997,6 +2079,31 @@ html, body { overflow-x: clip; }
     );
   opacity: .55;
 }
+
+/* Pair legend — shows the side-by-side bar pair (without-Orange, with-
+   Orange) using two adjacent swatches and labels. The `pair-base` swatch
+   is the lighter neutral tone (matches the bar-base fill in the chart),
+   `pair-all` is the saturated tone. The two-swatch label group keeps both
+   tied together so the line wraps as a unit. */
+.chart-legend .legend-pair {
+  display: inline-flex; align-items: center; gap: 4px;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+  margin-left: -6px;
+}
+.chart-legend .swatch.pair-base { background: var(--bar-neutral-soft); height: 9px; width: 5px; border-radius: 1px; }
+.chart-legend .swatch.pair-all  { background: var(--bar-neutral);       height: 9px; width: 5px; border-radius: 1px; margin-right: 4px; margin-left: 0; }
+
+/* Bar-pair fills — left bar (Without-Orange) gets the soft tone of its
+   verdict; right bar (With-Orange) gets the saturated tone. This keeps
+   the visual "more saturation = more revenue" rule consistent with what
+   stacked rendering used to convey, but as side-by-side comparison. */
+.bar-chart .bar.bar-pair-base.verdict-above   { fill: var(--bar-good-soft); }
+.bar-chart .bar.bar-pair-base.verdict-below   { fill: var(--bar-bad-soft); }
+.bar-chart .bar.bar-pair-base.verdict-neutral { fill: var(--bar-neutral-soft); }
+.bar-chart .bar.bar-pair-all.verdict-above    { fill: var(--bar-good); }
+.bar-chart .bar.bar-pair-all.verdict-below    { fill: var(--bar-bad); }
+.bar-chart .bar.bar-pair-all.verdict-neutral  { fill: var(--bar-neutral); }
 
 /* ---- Q2 · Event ledger ---- */
 .event-ledger {

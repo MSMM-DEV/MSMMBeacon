@@ -75,11 +75,31 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
           sub={`${THIS_YEAR} · monthly actual vs. projection`}
           accent="flow"
           className="quad-q1">
-          <InvoiceChart
-            invoice={invoice}
-            orangeSourceIds={orangeSourceIds}
-            monthlyBenchmark={monthlyBenchmark}
-          />
+          {(() => {
+            // Hard split by invoice_type_enum so the executive view shows
+            // Engineering and PM revenue as independent stories. Rows with a
+            // missing/unknown type adapter-default to ENG (see adaptInvoice
+            // in data.js), so the union is exhaustive.
+            const invoiceEng = invoice.filter(r => (r.type || "ENG") === "ENG");
+            const invoicePm  = invoice.filter(r => r.type === "PM");
+            return (
+              <div className="invoice-chart-stack">
+                <InvoiceChart
+                  eyebrow="Engineering · ENG"
+                  invoice={invoiceEng}
+                  orangeSourceIds={orangeSourceIds}
+                  monthlyBenchmark={monthlyBenchmark}
+                />
+                <div className="invoice-chart-divider" aria-hidden="true"/>
+                <InvoiceChart
+                  eyebrow="Project Management · PM"
+                  invoice={invoicePm}
+                  orangeSourceIds={orangeSourceIds}
+                  monthlyBenchmark={monthlyBenchmark}
+                />
+              </div>
+            );
+          })()}
         </QuadCard>
 
         <QuadCard
@@ -188,7 +208,7 @@ const QuadCard = ({ eyebrow, title, sub, accent, className, onExpand, children }
 // A horizontal benchmark line is overlaid across the plot when set, with
 // a small numeric chip so the threshold is readable at a glance.
 // ----------------------------------------------------------------------------
-const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
+const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) => {
   // Two parallel 12-month totals:
   //   totalsBase — sum of invoices NOT sourced from an Orange potential row
   //                (formally awarded work — the "secured" baseline)
@@ -239,11 +259,23 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
 
-  // Bar geometry: 12 evenly-spaced slots across plotW. Each slot owns
-  // (slot - gap) px of horizontal real estate; bar takes the inner third.
+  // Bar geometry: 12 evenly-spaced slots across plotW. Each month renders a
+  // pair of side-by-side bars (Without-Orange on the left, With-Orange on
+  // the right) so the user can read "secured" and "secured + Orange"
+  // independently — instead of stacking which can hide whether a bar is
+  // dominated by Orange. When the subset has no Orange rows at all, fall
+  // back to a single wider bar per month so empty-half slots don't waste
+  // visual real estate.
   const slot = plotW / 12;
-  const barW = Math.max(8, Math.min(54, slot * 0.62));
-  const barX = (i) => padL + slot * i + (slot - barW) / 2;
+  const hasOrange = invoice.some(r => r.sourceId && orangeSourceIds?.has(r.sourceId));
+  const PAIR_GAP = 3;
+  const barW = hasOrange
+    ? Math.max(6, Math.min(26, slot * 0.30))
+    : Math.max(8, Math.min(54, slot * 0.62));
+  const slotCx = (i) => padL + slot * i + slot / 2;
+  const baseBarX = (i) =>
+    hasOrange ? slotCx(i) - barW - PAIR_GAP / 2 : slotCx(i) - barW / 2;
+  const allBarX  = (i) => slotCx(i) + PAIR_GAP / 2;
   const yFor = (v) => padT + plotH - (v / yMax) * plotH;
 
   // Benchmark band — only rendered when set + > 0.
@@ -288,17 +320,27 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
 
   return (
     <div className="chart-wrap">
+      {eyebrow && (
+        <div className="chart-eyebrow">
+          <span className="chart-eyebrow-mark"/>
+          <span>{eyebrow}</span>
+        </div>
+      )}
       <div className="chart-kpis">
         <div className="kpi">
           <div className="kpi-label">YTD Actual</div>
           <div className="kpi-val">{fmtMoney(ytdActualAll, false)}</div>
-          <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase, false)}</div>
+          {hasOrange && (
+            <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase, false)}</div>
+          )}
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
           <div className="kpi-label">Projection remaining</div>
           <div className="kpi-val ink-soft">{fmtMoney(projRemAll, false)}</div>
-          <div className="kpi-sub">w/o Orange · {fmtMoney(projRemBase, false)}</div>
+          {hasOrange && (
+            <div className="kpi-sub">w/o Orange · {fmtMoney(projRemBase, false)}</div>
+          )}
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
@@ -359,7 +401,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
         {/* Month labels */}
         {MONTHS.map((m, i) => (
           <text key={i}
-                x={barX(i) + barW / 2} y={H - 14}
+                x={slotCx(i)} y={H - 14}
                 textAnchor="middle"
                 className={"chart-month" + (i === TODAY_MONTH ? " is-today" : "")}>
             {m}
@@ -374,49 +416,77 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
           y1={padT} y2={padT + plotH}
           className="chart-today"/>
 
-        {/* Bars — one slot per month. Each slot stacks two segments:
-              base segment (without-Orange amount, bottom)
-              top  segment (Orange-attributable delta, on top of base)
-            When orange = 0 the top segment has 0 height and only the base
-            renders. The verdict class drives both segments' fill via CSS. */}
+        {/* Bars — side-by-side pair per month. Left bar = Without-Orange
+            (secured baseline). Right bar = With-Orange (total). Each bar's
+            verdict color is computed against the same monthly benchmark
+            independently, so a month can read "base on target / total
+            on target" or "base below / total above" — useful when Orange
+            pre-awarded billing is what's pushing the month over the line. */}
         {totalsAll.map((vAll, i) => {
           const vBase = totalsBase[i];
-          const vOrange = Math.max(0, vAll - vBase);
           const isProj = i > TODAY_MONTH;
-          const verdict = verdictFor(i);
-          const x = barX(i);
-          const yTop = yFor(vAll);
-          const yBaseTop = yFor(vBase);
+          const verdictAll  = verdictFor(i);
+          const verdictBase = !hasBenchmark
+            ? "neutral"
+            : (vBase >= Number(monthlyBenchmark) ? "above" : "below");
+
           const yBottom = padT + plotH;
-          const baseH   = Math.max(0, yBottom - yBaseTop);
-          const orangeH = Math.max(0, yBaseTop - yTop);
-          const cls = `bar verdict-${verdict}` + (isProj ? " proj" : " actual");
-          const fillBase  = isProj ? `url(#hatch-${verdict})` : undefined;
-          const fillTop   = isProj ? `url(#hatch-${verdict})` : undefined;
+          const yTopAll  = yFor(vAll);
+          const yTopBase = yFor(vBase);
+          const heightAll  = Math.max(0, yBottom - yTopAll);
+          const heightBase = Math.max(0, yBottom - yTopBase);
+
+          const projCls = isProj ? " proj" : " actual";
+          const fillForVerdict = (v) => isProj ? `url(#hatch-${v})` : undefined;
 
           return (
             <g key={i} className={hoverIdx === i ? "bar-grp hover" : "bar-grp"}>
-              {/* Track outline — full slot height, just barely visible.
-                  Gives the eye a slot to land on for empty months. */}
-              <rect x={x} y={padT} width={barW} height={plotH}
-                    rx="3" className="bar-track"/>
-              {baseH > 0.5 && (
-                <rect x={x} y={yBaseTop} width={barW} height={baseH}
-                      rx="3"
-                      className={`${cls} bar-base`}
-                      fill={fillBase}/>
+              {/* Slot guide — barely-visible track behind the pair so the
+                  eye can find empty months. Spans the full pair width. */}
+              <rect
+                x={slotCx(i) - (hasOrange ? barW + PAIR_GAP/2 : barW / 2)}
+                y={padT}
+                width={hasOrange ? barW * 2 + PAIR_GAP : barW}
+                height={plotH}
+                rx="4"
+                className="bar-track"
+              />
+
+              {/* Without-Orange bar (always rendered). When hasOrange is
+                  false this is the only bar and fills the wider slot. */}
+              {heightBase > 0.5 && (
+                <rect
+                  x={baseBarX(i)} y={yTopBase}
+                  width={barW} height={heightBase}
+                  rx="3"
+                  className={`bar bar-pair-base verdict-${verdictBase}${projCls}`}
+                  fill={fillForVerdict(verdictBase)}
+                />
               )}
-              {orangeH > 0.5 && (
-                <rect x={x} y={yTop} width={barW} height={orangeH}
-                      rx="3"
-                      className={`${cls} bar-top`}
-                      fill={fillTop}/>
+              {vBase > 0 && (
+                <line
+                  x1={baseBarX(i)} x2={baseBarX(i) + barW}
+                  y1={yTopBase} y2={yTopBase}
+                  className={`bar-cap verdict-${verdictBase}`}
+                />
               )}
-              {/* Cap line at the top of the bar — gives the bar a clean
-                  edge that reads at small sizes. */}
-              {vAll > 0 && (
-                <line x1={x} x2={x + barW} y1={yTop} y2={yTop}
-                      className={`bar-cap verdict-${verdict}`}/>
+
+              {/* With-Orange bar (only when subset has any Orange rows). */}
+              {hasOrange && heightAll > 0.5 && (
+                <rect
+                  x={allBarX(i)} y={yTopAll}
+                  width={barW} height={heightAll}
+                  rx="3"
+                  className={`bar bar-pair-all verdict-${verdictAll}${projCls}`}
+                  fill={fillForVerdict(verdictAll)}
+                />
+              )}
+              {hasOrange && vAll > 0 && (
+                <line
+                  x1={allBarX(i)} x2={allBarX(i) + barW}
+                  y1={yTopAll} y2={yTopAll}
+                  className={`bar-cap verdict-${verdictAll}`}
+                />
               )}
             </g>
           );
@@ -445,38 +515,53 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
           const vBase = totalsBase[hoverIdx];
           const verdict = verdictFor(hoverIdx);
           const isProj = hoverIdx > TODAY_MONTH;
-          const x = barX(hoverIdx) + barW / 2;
+          const x = slotCx(hoverIdx);
           const yTop = yFor(v);
-          const boxW = 200, boxH = hasBenchmark ? 84 : 64;
+          const lines = [];
+          lines.push({ y: 18, cls: "chart-tip-label", text: `${MONTHS[hoverIdx]} ${THIS_YEAR} · ${isProj ? "Projection" : "Actual"}` });
+          lines.push({ y: 38, cls: `chart-tip-val verdict-${verdict}`, text: fmtMoney(v, false) });
+          if (hasOrange) {
+            lines.push({ y: 56, cls: "chart-tip-sub", text: `w/o Orange · ${fmtMoney(vBase, false)}` });
+          }
+          if (hasBenchmark) {
+            const diff = v - Number(monthlyBenchmark);
+            lines.push({
+              y: hasOrange ? 74 : 56,
+              cls: `chart-tip-diff verdict-${verdict}`,
+              text: `${diff >= 0 ? "▲ " : "▼ "}${fmtMoney(Math.abs(diff), false)} vs target`,
+            });
+          }
+          const lastY = lines[lines.length - 1].y;
+          const boxW = 200;
+          const boxH = lastY + 14;
           const left = Math.min(W - padR - boxW, Math.max(padL, x - boxW / 2));
           const top  = Math.max(padT + 4, yTop - boxH - 14);
-          const diff = hasBenchmark ? v - Number(monthlyBenchmark) : null;
           return (
             <g transform={`translate(${left},${top})`}>
               <rect width={boxW} height={boxH} rx={8} className="chart-tip-bg"/>
-              <text x={12} y={18} className="chart-tip-label">
-                {MONTHS[hoverIdx]} {THIS_YEAR} · {isProj ? "Projection" : "Actual"}
-              </text>
-              <text x={12} y={38} className={`chart-tip-val verdict-${verdict}`}>
-                {fmtMoney(v, false)}
-              </text>
-              <text x={12} y={56} className="chart-tip-sub">
-                w/o Orange · {fmtMoney(vBase, false)}
-              </text>
-              {hasBenchmark && (
-                <text x={12} y={74} className={`chart-tip-diff verdict-${verdict}`}>
-                  {diff >= 0 ? "▲ " : "▼ "}{fmtMoney(Math.abs(diff), false)} vs target
-                </text>
-              )}
+              {lines.map((line, idx) => (
+                <text key={idx} x={12} y={line.y} className={line.cls}>{line.text}</text>
+              ))}
             </g>
           );
         })()}
       </svg>
 
       <div className="chart-legend">
-        <span><span className="swatch verdict-above"/>Above target</span>
-        <span><span className="swatch verdict-below"/>Below target</span>
-        <span><span className="swatch verdict-orange-cap"/>Orange · pre-awarded</span>
+        {hasBenchmark ? (
+          <>
+            <span><span className="swatch verdict-above"/>Above target</span>
+            <span><span className="swatch verdict-below"/>Below target</span>
+          </>
+        ) : (
+          <span><span className="swatch verdict-orange-cap"/>Monthly total</span>
+        )}
+        {hasOrange && (
+          <span className="legend-pair">
+            <span className="swatch pair-base"/>w/o Orange
+            <span className="swatch pair-all"/>with Orange
+          </span>
+        )}
         <span><span className="swatch hatched"/>Projection</span>
         <span><span className="swatch today"/>Today</span>
       </div>

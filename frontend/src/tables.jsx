@@ -1834,8 +1834,33 @@ export const InvoiceTable = ({
     ].filter(Boolean).join(" ").toLowerCase();
     return haystack.includes(q);
   };
-  const searchedNonOrange = nonOrangeRows.filter(matchesSearch);
-  const searchedOrange    = orangeRows.filter(matchesSearch);
+
+  // Type filter — multi-select over the invoice_type_enum (ENG / PM). Local
+  // state since this is a view-only filter that doesn't affect what's
+  // fetched. Default = all types selected (chip reads "Type: All"). Empty
+  // selection is treated as "All" too so a stray double-uncheck doesn't
+  // suddenly hide every row.
+  const [typeFilter, setTypeFilter] = useState(() => new Set(invoiceTypeOptions));
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+  const typeBtnRef = useRef(null);
+  const typeFilterActive =
+    typeFilter.size > 0 && typeFilter.size < invoiceTypeOptions.length;
+  const matchesType = (r) => {
+    if (!typeFilterActive) return true;
+    return typeFilter.has(r.type);
+  };
+  const toggleType = (t) => setTypeFilter(prev => {
+    const next = new Set(prev);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    return next;
+  });
+  const typeChipLabel = typeFilterActive
+    ? `Type: ${invoiceTypeOptions.filter(t => typeFilter.has(t)).join(" · ")}`
+    : "Type: All";
+
+  const passes = (r) => matchesSearch(r) && matchesType(r);
+  const searchedNonOrange = nonOrangeRows.filter(passes);
+  const searchedOrange    = orangeRows.filter(passes);
   const searchedRows      = [...searchedNonOrange, ...searchedOrange];
 
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
@@ -1888,7 +1913,14 @@ export const InvoiceTable = ({
         ) : (
           <button className="tool-chip on"><Icon name="calendar" size={13}/>{yearChipLabel}</button>
         )}
-        <button className="tool-chip"><Icon name="filter" size={13}/>Type: All</button>
+        <button
+          ref={typeBtnRef}
+          className={"tool-chip" + (typeFilterActive ? " on" : "")}
+          onClick={() => setTypeMenuOpen(v => !v)}
+        >
+          <Icon name="filter" size={13}/>
+          {typeChipLabel}
+        </button>
         <button className="tool-chip"><Icon name="user" size={13}/>PM: All</button>
         <div className="tool-sep"/>
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
@@ -1899,6 +1931,41 @@ export const InvoiceTable = ({
           <button className="btn primary sm"><Icon name="plus" size={13}/>New invoice row</button>
         </div>
 
+        {typeMenuOpen && (
+          <Popover anchorRef={typeBtnRef} onClose={() => setTypeMenuOpen(false)} align="left">
+            <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
+              Filter by type
+            </div>
+            <button
+              className="menu-item"
+              onClick={() => setTypeFilter(new Set(invoiceTypeOptions))}
+              style={!typeFilterActive ? { color: "var(--accent-ink)" } : undefined}
+            >
+              <Icon name="filter" size={13}/>
+              <span style={{ flex: 1 }}>All types</span>
+              {!typeFilterActive && (<span style={{ fontSize: 11, color: "var(--accent)" }}>✓</span>)}
+            </button>
+            <div className="menu-sep"/>
+            {invoiceTypeOptions.map((t) => {
+              const checked = typeFilter.has(t);
+              return (
+                <label
+                  key={t}
+                  className="menu-item invoice-type-check"
+                  onClick={(e) => { e.preventDefault(); toggleType(t); }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleType(t)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span style={{ flex: 1 }}>{t}</span>
+                </label>
+              );
+            })}
+          </Popover>
+        )}
         {yearMenuOpen && hasYear && (
           <Popover anchorRef={yearBtnRef} onClose={() => setYearMenuOpen(false)} align="left">
             <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
