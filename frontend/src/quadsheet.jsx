@@ -30,6 +30,18 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
   // Invoice chart has intrinsic sizing and doesn't benefit from expand).
   const [expanded, setExpanded] = useState(null);
 
+  // PM chart visibility — persisted across sessions. ENG is always
+  // visible; PM is the optional one because most exec views focus on
+  // engineering revenue, with PM treated as a supplementary cut.
+  const [pmCollapsed, setPmCollapsed] = useState(() => {
+    try { return localStorage.getItem("beacon.quadPmCollapsed") === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("beacon.quadPmCollapsed", pmCollapsed ? "1" : "0"); }
+    catch { /* storage disabled — fine */ }
+  }, [pmCollapsed]);
+
   // Close modal on ESC.
   useEffect(() => {
     if (!expanded) return;
@@ -83,20 +95,63 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
             const invoiceEng = invoice.filter(r => (r.type || "ENG") === "ENG");
             const invoicePm  = invoice.filter(r => r.type === "PM");
             return (
-              <div className="invoice-chart-stack">
+              <div className={"invoice-chart-stack" + (pmCollapsed ? " pm-collapsed" : "")}>
                 <InvoiceChart
                   eyebrow="Engineering · ENG"
                   invoice={invoiceEng}
                   orangeSourceIds={orangeSourceIds}
                   monthlyBenchmark={monthlyBenchmark}
                 />
-                <div className="invoice-chart-divider" aria-hidden="true"/>
-                <InvoiceChart
-                  eyebrow="Project Management · PM"
-                  invoice={invoicePm}
-                  orangeSourceIds={orangeSourceIds}
-                  monthlyBenchmark={monthlyBenchmark}
-                />
+
+                {pmCollapsed ? (
+                  // Collapsed PM section — a single thin bar acting as the
+                  // disclosure header. Clicking anywhere expands. Mirrors
+                  // the eyebrow vocabulary so the user recognizes what
+                  // they're un-hiding.
+                  <button
+                    type="button"
+                    className="invoice-chart-toggle collapsed"
+                    onClick={() => setPmCollapsed(false)}
+                    aria-expanded="false"
+                    aria-label="Show PM chart"
+                  >
+                    <span className="chart-eyebrow-mark"/>
+                    <span className="invoice-chart-toggle-label">
+                      Project Management · PM
+                    </span>
+                    <span className="invoice-chart-toggle-count">
+                      {invoicePm.length} {invoicePm.length === 1 ? "row" : "rows"}
+                    </span>
+                    <span className="invoice-chart-toggle-action">
+                      <Icon name="chevronDown" size={12}/>Show
+                    </span>
+                  </button>
+                ) : (
+                  <>
+                    <div className="invoice-chart-divider" aria-hidden="true"/>
+                    <div className="invoice-chart-pm-wrap">
+                      {/* Floating Hide button — top-right of the PM chart so
+                          it doesn't compete with the chart-eyebrow's
+                          letterpressed accent strip on the left. */}
+                      <button
+                        type="button"
+                        className="invoice-chart-hide-btn"
+                        onClick={() => setPmCollapsed(true)}
+                        aria-expanded="true"
+                        aria-label="Hide PM chart"
+                        title="Hide PM chart"
+                      >
+                        <Icon name="eyeOff" size={11}/>Hide
+                      </button>
+                      <InvoiceChart
+                        eyebrow="Project Management · PM"
+                        invoice={invoicePm}
+                        orangeSourceIds={orangeSourceIds}
+                        monthlyBenchmark={monthlyBenchmark}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             );
           })()}

@@ -1937,6 +1937,100 @@ html, body { overflow-x: clip; }
   flex: 1 1 0;
   min-height: 0;
 }
+/* When PM is hidden, ENG should claim the full card height — the
+   collapsed PM toggle is fixed-height (~40px) so ENG inherits the rest
+   without any extra layout work; the wrap below it sits at the bottom. */
+.invoice-chart-stack.pm-collapsed > .chart-wrap { flex: 1 1 auto; }
+.invoice-chart-stack.pm-collapsed > .invoice-chart-toggle.collapsed {
+  flex: 0 0 auto;
+}
+
+/* Wrap around the PM chart — relative for the floating Hide button. */
+.invoice-chart-pm-wrap {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.invoice-chart-pm-wrap > .chart-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Hide button — sits in the top-right corner of the PM chart, anchored
+   above the eyebrow so the user always has a visible affordance to
+   collapse the section even when the chart's plot area is busy. */
+.invoice-chart-hide-btn {
+  position: absolute;
+  top: -2px; right: 0;
+  z-index: 2;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.invoice-chart-hide-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+/* Collapsed PM disclosure — a thin pill-row that doubles as the show
+   button. The accent mark on the left mirrors the chart-eyebrow style so
+   the collapsed bar reads as "the PM chart's eyebrow, sitting alone." */
+.invoice-chart-toggle.collapsed {
+  display: flex; align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-elev);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: border-color .12s ease, background .12s ease;
+}
+.invoice-chart-toggle.collapsed:hover {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+.invoice-chart-toggle.collapsed .chart-eyebrow-mark {
+  flex-shrink: 0;
+}
+.invoice-chart-toggle-label {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.invoice-chart-toggle-count {
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  color: var(--text-soft);
+}
+.invoice-chart-toggle-action {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.invoice-chart-toggle.collapsed:hover .invoice-chart-toggle-action {
+  color: var(--accent);
+}
 .invoice-chart-divider {
   height: 1px;
   background: linear-gradient(
