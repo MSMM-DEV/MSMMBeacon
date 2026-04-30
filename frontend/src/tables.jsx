@@ -1860,9 +1860,87 @@ export const InvoiceTable = ({
     : "Type: All";
 
   const passes = (r) => matchesSearch(r) && matchesType(r);
-  const searchedNonOrange = nonOrangeRows.filter(passes);
-  const searchedOrange    = orangeRows.filter(passes);
+
+  // Column sort — limited to the columns the user asked to sort on:
+  //   Proj # · Project Name · Role · PM · Contract
+  // Click a header to cycle: unsorted → asc → desc → unsorted (so the
+  // user can always get back to the unsorted-with-Orange-pinned-bottom
+  // default). Sort applies INSIDE each group (non-Orange / Orange) so
+  // the Orange-grouping convention from the line-chart era is preserved
+  // — Orange rows always sit below the rest, regardless of sort.
+  const [sortBy, setSortBy] = useState({ key: null, dir: "asc" });
+  const toggleSort = (key) => {
+    setSortBy(prev => {
+      if (prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return { key: null, dir: "asc" };
+    });
+  };
+  // Sort key extractors return either a string (compared by localeCompare,
+  // case-insensitive) or a number. Empty / null values are normalized so
+  // they always sort to the END regardless of direction — leading blanks
+  // would otherwise dominate the top of an asc sort.
+  const sortValue = (r, key) => {
+    switch (key) {
+      case "projectNumber": return (r.projectNumber || "").trim();
+      case "name":          return (r.name || "").trim();
+      case "role":          return (r.role || "").trim();
+      case "amount":        return Number(r.amount) || 0;
+      case "pm": {
+        // Sort by joined PM short-names so multi-PM rows have a stable key.
+        // First-PM-name alone would be unstable when teams differ only in
+        // the trailing PMs.
+        const names = (r.pmIds || [])
+          .map(id => userById(id)?.shortName || userById(id)?.name || "")
+          .filter(Boolean)
+          .sort();
+        return names.join(" · ");
+      }
+      default: return null;
+    }
+  };
+  const compareRows = (a, b) => {
+    const va = sortValue(a, sortBy.key);
+    const vb = sortValue(b, sortBy.key);
+    const aEmpty = va == null || va === "" || (typeof va === "number" && !Number.isFinite(va));
+    const bEmpty = vb == null || vb === "" || (typeof vb === "number" && !Number.isFinite(vb));
+    if (aEmpty && bEmpty) return 0;
+    if (aEmpty) return 1;
+    if (bEmpty) return -1;
+    let cmp;
+    if (typeof va === "number" && typeof vb === "number") {
+      cmp = va - vb;
+    } else {
+      cmp = String(va).localeCompare(String(vb), undefined, { sensitivity: "base", numeric: true });
+    }
+    return sortBy.dir === "asc" ? cmp : -cmp;
+  };
+  const sortGroup = (arr) => sortBy.key ? [...arr].sort(compareRows) : arr;
+
+  const searchedNonOrange = sortGroup(nonOrangeRows.filter(passes));
+  const searchedOrange    = sortGroup(orangeRows.filter(passes));
   const searchedRows      = [...searchedNonOrange, ...searchedOrange];
+
+  // Tiny header helper — wraps a sortable <th>'s content with the column's
+  // active sort state. Used for the 5 sortable columns; non-sortable
+  // columns (Type, Remaining Jan 1, months, totals) keep their plain
+  // <th> markup. The caret sits on the right at constant width so click
+  // target sizing doesn't shift between sorted/unsorted states.
+  const sortableTh = (key, children, extra = {}) => {
+    const active = sortBy.key === key;
+    const dirGlyph = !active ? "" : sortBy.dir === "asc" ? "▲" : "▼";
+    return (
+      <th
+        {...extra}
+        className={(extra.className || "") + " invoice-th-sortable" + (active ? " active" : "")}
+        onClick={() => toggleSort(key)}
+        title={`Sort by ${typeof children === "string" ? children : key}`}
+      >
+        <span className="invoice-th-label">{children}</span>
+        <span className="invoice-th-caret" aria-hidden="true">{dirGlyph}</span>
+      </th>
+    );
+  };
 
   const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const yearBtnRef = useRef(null);
@@ -2028,12 +2106,12 @@ export const InvoiceTable = ({
               <thead>
                 <tr>
                   <th className="invoice-expand-col"/>
-                  <th className="sticky-1">Proj #</th>
-                  <th className="sticky-2" style={{ minWidth: 260 }}>Project Name</th>
-                  <th style={{ minWidth: 90 }}>Role</th>
+                  {sortableTh("projectNumber", "Proj #", { className: "sticky-1" })}
+                  {sortableTh("name", "Project Name", { className: "sticky-2", style: { minWidth: 260 } })}
+                  {sortableTh("role", "Role", { style: { minWidth: 90 } })}
                   <th style={{ minWidth: 70 }}>Type</th>
-                  <th style={{ minWidth: 80 }}>PM</th>
-                  <th>Contract</th>
+                  {sortableTh("pm", "PM", { style: { minWidth: 80 } })}
+                  {sortableTh("amount", "Contract")}
                   <th>Remaining<br/>Jan 1</th>
                   {MONTHS.map((m, i) => (
                     <th key={i} className={i <= TODAY_MONTH ? "month-actual" : "month-proj"}>

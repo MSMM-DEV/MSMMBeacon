@@ -1368,6 +1368,41 @@ html, body { overflow-x: clip; }
 }
 .invoice-table th.sticky-1, .invoice-table td.sticky-1 { left: 0; min-width: 110px; max-width: 110px; }
 .invoice-table th.sticky-2, .invoice-table td.sticky-2 { left: 110px; }
+
+/* Sortable headers — pointer cursor + a fixed-width caret slot so clicking
+   doesn't shift the column width between sorted/unsorted states. The
+   caret only inks when the column is the active sort. Light hover tint
+   so the user gets visual feedback that the header is interactive. */
+.invoice-table th.invoice-th-sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+.invoice-table th.invoice-th-sortable:hover {
+  background: var(--surface-hover);
+}
+.invoice-table th.invoice-th-sortable .invoice-th-label {
+  display: inline-block;
+}
+.invoice-table th.invoice-th-sortable .invoice-th-caret {
+  display: inline-block;
+  width: 12px;
+  margin-left: 6px;
+  font-size: 9px;
+  color: var(--accent);
+  text-align: right;
+  letter-spacing: 0;
+}
+.invoice-table th.invoice-th-sortable.active {
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent-softer) 65%, transparent);
+}
+.invoice-table th.invoice-th-sortable.sticky-1.active,
+.invoice-table th.invoice-th-sortable.sticky-2.active {
+  /* Sticky headers can't transparency-blend over scrolled bars beneath
+     them — fully opaque accent-tint instead. */
+  background: var(--accent-softer);
+}
 /* CSS max-width is ignored on <td> in auto table-layout (per CSS spec), so
    we cap the inner content with a block wrapper instead. The td inherits the
    wrapper's width, keeping long underscored project names from escaping the
