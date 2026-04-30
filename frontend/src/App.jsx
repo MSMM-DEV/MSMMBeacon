@@ -416,6 +416,26 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       notes: dbRow.notes || "",
     };
   }
+  if (table === "invoice") {
+    return {
+      id: dbRow.id,
+      sourceId: dbRow.source_project_id || null,
+      projectNumber: dbRow.project_number || "",
+      name: dbRow.project_name,
+      pmIds: extras.pmIds || [],
+      amount: dbRow.contract_amount || 0,
+      type: dbRow.type || "ENG",
+      remainingStart: dbRow.msmm_remaining_to_bill_year_start || 0,
+      values: Array(12).fill(0),
+      year: dbRow.year,
+      ytdActualOverride: null,
+      rollforwardOverride: null,
+      // Default role + empty file lists so the table render path doesn't
+      // need to special-case freshly-inserted rows.
+      role: "Prime",
+      primeFiles: Array.from({ length: 12 }, () => []),
+    };
+  }
   return dbRow;
 }
 
@@ -1383,6 +1403,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (table === "hotleads")   setHotLeads(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
     if (table === "companies")  setCompanies(rs => [uiRow, ...rs]);
+    if (table === "invoice")    setInvoice(rs => [uiRow, ...rs]);
     // Orange potential auto-creates an Anticipated Invoice row tagged with
     // source_potential_id so the Invoice tab picks up the stripe.
     if (table === "potential" && extras.invoiceRow) {
@@ -1840,6 +1861,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onOpenFiles={(payload) => setFilesModal(payload)}
             onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
             onChangeRole={setInvoiceRoleHandler}
+            onNew={() => setCreateTable("invoice")}
             yearOptions={availableYears.invoice}
             yearValue={yearFilter.invoice}
             onYearChange={(y) => setYear("invoice", y)}/>

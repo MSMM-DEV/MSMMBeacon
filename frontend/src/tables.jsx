@@ -1788,6 +1788,7 @@ export const InvoiceTable = ({
   onAddSub,          // (projectRow, kind) => void  — opens the AddSubModal
   onTogglePaid,      // ({projectId, companyId, monthIdx, paid, kind}) => void
   onChangeRole,      // (projectRow, role) => void  — toggles Prime/Sub on the project
+  onNew,             // () => void  — opens the New Invoice CreateModal
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -1928,7 +1929,13 @@ export const InvoiceTable = ({
         </span>
         <div className="ml-auto" style={{ display: "flex", gap: 8 }}>
           <button className="btn sm"><Icon name="export" size={13}/>Export</button>
-          <button className="btn primary sm"><Icon name="plus" size={13}/>New invoice row</button>
+          <button
+            type="button"
+            className="btn primary sm"
+            onClick={() => onNew?.()}
+          >
+            <Icon name="plus" size={13}/>New invoice row
+          </button>
         </div>
 
         {typeMenuOpen && (

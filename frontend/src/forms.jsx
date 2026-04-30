@@ -26,6 +26,7 @@ const DB_TABLES = {
   hotleads:  "leads",
   clients:   "clients",
   companies: "companies",
+  invoice:   "anticipated_invoice",
 };
 
 const TITLES = {
@@ -35,6 +36,7 @@ const TITLES = {
   hotleads:  { title: "New hot lead",            icon: "trend"     },
   clients:   { title: "New client",              icon: "users"     },
   companies: { title: "New company",             icon: "briefcase" },
+  invoice:   { title: "New invoice row",         icon: "trend"     },
 };
 
 // Columns that the DB accepts directly. Anything NOT in this list is
@@ -71,11 +73,20 @@ const DB_COLUMNS = {
   companies: [
     "name", "contact_person", "email", "phone", "address", "notes",
   ],
+  // anticipated_invoice — manual entry. source_project_id stays null on
+  // this path; Move Forward handles linked-invoice creation. Standalone
+  // rows just track project_name + year + amounts; PMs go through the
+  // anticipated_invoice_pms join in the second insert step.
+  invoice: [
+    "project_name", "year", "project_number", "type",
+    "contract_amount", "msmm_remaining_to_bill_year_start",
+  ],
 };
 
 const NUMERIC_COLS = new Set([
   "year", "total_contract_amount", "msmm_amount", "anticipated_invoice_start_month",
   "msmm_used", "msmm_remaining",
+  "contract_amount", "msmm_remaining_to_bill_year_start",
 ]);
 
 const INITIAL = {
@@ -144,6 +155,15 @@ const INITIAL = {
     address: "",
     notes: "",
   },
+  invoice: {
+    project_name: "",
+    year: THIS_YEAR,
+    project_number: "",
+    type: "ENG",
+    contract_amount: "",
+    msmm_remaining_to_bill_year_start: "",
+    pm_user_ids: [],
+  },
 };
 
 const REQUIRED = {
@@ -153,6 +173,7 @@ const REQUIRED = {
   hotleads:  ["title"],
   clients:   ["name"],
   companies: ["name"],
+  invoice:   ["project_name", "year"],
 };
 
 // --------------------- shared sub-editor ---------------------
@@ -424,6 +445,17 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             .insert(att.map(uid => ({ lead_id: row.id, user_id: uid })));
           if (eH) throw eH;
           extras.attendees = att;
+        }
+      } else if (table === "invoice") {
+        // PMs land in anticipated_invoice_pms (composite PK on
+        // (anticipated_invoice_id, user_id) — same shape as v1).
+        const pmIds = (form.pm_user_ids || []).filter(Boolean);
+        if (pmIds.length > 0) {
+          const { error: eIP } = await supabase
+            .from("anticipated_invoice_pms")
+            .insert(pmIds.map(uid => ({ anticipated_invoice_id: row.id, user_id: uid })));
+          if (eIP) throw eIP;
+          extras.pmIds = pmIds;
         }
       }
     } catch (e) {
@@ -762,6 +794,62 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           <Field label="Notes" multiline>
             <textarea className="textarea" value={form.notes}
                       onChange={e => set("notes", e.target.value)}/>
+          </Field>
+        </>
+      );
+    }
+
+    if (table === "invoice") {
+      return (
+        <>
+          <Field label="Project Name *">
+            <input className="input" autoFocus value={form.project_name}
+                   onChange={e => set("project_name", e.target.value)}/>
+          </Field>
+          <Field label="Year *">
+            <input className="input" type="number" value={form.year}
+                   onChange={e => set("year", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Project #">
+            <input className="input" value={form.project_number}
+                   onChange={e => set("project_number", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}
+                   placeholder="e.g. 24-101"/>
+          </Field>
+          <Field label="Type">
+            <div className="seg" style={{ maxWidth: 220 }}>
+              <button type="button"
+                      className={"seg-btn" + (form.type === "ENG" ? " active" : "")}
+                      onClick={() => set("type", "ENG")}>
+                ENG
+              </button>
+              <button type="button"
+                      className={"seg-btn" + (form.type === "PM" ? " active" : "")}
+                      onClick={() => set("type", "PM")}>
+                PM
+              </button>
+            </div>
+          </Field>
+          <Field label="Contract Amount">
+            <input className="input" type="number" value={form.contract_amount}
+                   onChange={e => set("contract_amount", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}
+                   placeholder="0"/>
+          </Field>
+          <Field label="MSMM Remaining (year start)">
+            <input className="input" type="number"
+                   value={form.msmm_remaining_to_bill_year_start}
+                   onChange={e => set("msmm_remaining_to_bill_year_start", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}
+                   placeholder="0"/>
+          </Field>
+          <Field label="PMs">
+            <UserMultiPicker
+              value={form.pm_user_ids}
+              users={users}
+              onChange={(ids) => set("pm_user_ids", ids)}
+              placeholder="Pick PMs…"/>
           </Field>
         </>
       );
