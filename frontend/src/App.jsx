@@ -556,6 +556,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
   const [clients,   setClients]   = useState(() => getClientsOnly());
   const [companies, setCompanies] = useState(() => getCompaniesOnly());
+  // Workspace-wide settings (singleton). Today: monthlyInvoiceBenchmark drives
+  // the Quad Sheet's bar coloring (green when month total ≥ benchmark, red
+  // when below). Updated locally + persisted by AdminPanel → Targets tab.
+  const [appSettings, setAppSettings] = useState(
+    initial.appSettings || { monthlyInvoiceBenchmark: null, updatedAt: null }
+  );
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
@@ -1937,6 +1943,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             awaiting={awaiting}
             hotLeads={hotLeads}
             orangeSourceIds={orangeSourceIds}
+            monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
             onOpen={(t, r) => openDrawer(r, t)}
           />
         )}
@@ -2143,6 +2150,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           setTweak={setTweak}
           currentUser={currentUser}
           onClose={() => setAdminOpen(false)}
+          appSettings={appSettings}
+          onAppSettingsChange={setAppSettings}
           onRosterChange={async () => {
             setRosterTick(t => t + 1);
             // If the admin edited themselves (role change, ban) we want the

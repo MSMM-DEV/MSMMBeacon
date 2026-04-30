@@ -1863,6 +1863,141 @@ html, body { overflow-x: clip; }
   margin-right: 6px;
 }
 
+/* ============================================================================
+ * Bar chart — Quad Sheet's Cash Flow tile.
+ *
+ * Verdict-driven palette: each bar's fill comes from one of three CSS
+ * variables — --bar-good (green), --bar-bad (red), or --bar-neutral
+ * (cadmium fallback when no benchmark is set). The base segment (without-
+ * Orange amount) takes the saturated tone; the upper segment (Orange
+ * delta) sits on top in a slightly more saturated tone so the stack is
+ * legible at small heights without inventing new hues. Projection bars
+ * use a 45° hatch pattern in the same hue so the actual/projection split
+ * stays obvious without a color rule fighting the verdict palette.
+ * ============================================================================ */
+:root {
+  --bar-good:        #4F8C5C;   /* meadow green — reads "on target" */
+  --bar-good-soft:   #79B086;
+  --bar-bad:         #C25048;   /* alarm clay   — reads "below target" */
+  --bar-bad-soft:    #DD8C86;
+  --bar-neutral:     var(--prob-orange);
+  --bar-neutral-soft:#F0AB6D;
+  --bar-track:       color-mix(in srgb, var(--text-soft) 8%, transparent);
+}
+[data-theme="dark"] {
+  --bar-good:        #6CB47A;
+  --bar-good-soft:   #4D8C5E;
+  --bar-bad:         #E58680;
+  --bar-bad-soft:    #B95B53;
+  --bar-neutral:     var(--prob-orange);
+  --bar-neutral-soft:#C77C42;
+  --bar-track:       color-mix(in srgb, var(--text-soft) 14%, transparent);
+}
+
+/* Empty-slot track — barely visible; gives months with $0 a place to land. */
+.bar-chart .bar-track {
+  fill: var(--bar-track);
+  opacity: .45;
+}
+
+/* Base segment (without-Orange) sits at the bottom in the soft variant,
+   so the stacked Orange-delta on top reads as "extra" rather than
+   re-coloring the whole bar. */
+.bar-chart .bar.bar-base.verdict-above   { fill: var(--bar-good-soft); }
+.bar-chart .bar.bar-base.verdict-below   { fill: var(--bar-bad-soft); }
+.bar-chart .bar.bar-base.verdict-neutral { fill: var(--bar-neutral-soft); }
+
+/* Top segment (Orange delta) takes the saturated variant. */
+.bar-chart .bar.bar-top.verdict-above   { fill: var(--bar-good); }
+.bar-chart .bar.bar-top.verdict-below   { fill: var(--bar-bad); }
+.bar-chart .bar.bar-top.verdict-neutral { fill: var(--bar-neutral); }
+
+/* Cap line — single pixel-thin stroke at the top of every bar. Anchors
+   the eye to the bar's value, especially at small heights. */
+.bar-chart .bar-cap.verdict-above   { stroke: var(--bar-good); }
+.bar-chart .bar-cap.verdict-below   { stroke: var(--bar-bad); }
+.bar-chart .bar-cap.verdict-neutral { stroke: var(--bar-neutral); }
+.bar-chart .bar-cap { stroke-width: 1.4; opacity: .85; }
+
+/* Projection bars — same verdict hue, but lower alpha + diagonal hatch
+   pattern. The hatch is rendered via SVG <pattern> defs (see quadsheet.jsx);
+   the .hatch-bg / .hatch-line classes color those pattern fragments. */
+.bar-chart .bar.proj { opacity: .58; }
+
+.bar-chart .hatch-bg.verdict-above   { fill: color-mix(in srgb, var(--bar-good-soft) 40%, transparent); }
+.bar-chart .hatch-bg.verdict-below   { fill: color-mix(in srgb, var(--bar-bad-soft)  40%, transparent); }
+.bar-chart .hatch-bg.verdict-neutral { fill: color-mix(in srgb, var(--bar-neutral-soft) 40%, transparent); }
+
+.bar-chart .hatch-line.verdict-above   { stroke: var(--bar-good);    stroke-width: 1.4; opacity: .65; }
+.bar-chart .hatch-line.verdict-below   { stroke: var(--bar-bad);     stroke-width: 1.4; opacity: .65; }
+.bar-chart .hatch-line.verdict-neutral { stroke: var(--bar-neutral); stroke-width: 1.4; opacity: .65; }
+
+/* Hover lift — subtle inflate on the hovered slot. */
+.bar-chart .bar-grp { transition: transform .15s ease, filter .15s ease; }
+.bar-chart .bar-grp.hover { filter: drop-shadow(0 4px 8px rgba(0,0,0,.18)); }
+.bar-chart .bar-grp.hover .bar-track { opacity: .8; }
+
+/* Benchmark line + chip. */
+.bar-chart .benchmark-line {
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: .55;
+}
+.bar-chart .benchmark-chip-bg {
+  fill: var(--bg-elev);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+.bar-chart .benchmark-chip-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: .14em;
+  fill: var(--text-soft);
+  font-weight: 600;
+}
+.bar-chart .benchmark-chip-val {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  fill: var(--text);
+}
+
+/* Tooltip variants matched to the verdict color. The diff line keeps a
+   tighter type scale so the box doesn't grow tall on hover. */
+.chart-tip-val.verdict-above   { fill: var(--bar-good); }
+.chart-tip-val.verdict-below   { fill: var(--bar-bad); }
+.chart-tip-val.verdict-neutral { fill: var(--text); }
+.chart-tip-diff {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .03em;
+}
+.chart-tip-diff.verdict-above   { fill: var(--bar-good); }
+.chart-tip-diff.verdict-below   { fill: var(--bar-bad); }
+
+/* KPI fraction (e.g. "3/4 months on target") — softer color for the
+   denominator so the numerator pops. */
+.kpi-frac { color: var(--text-soft); font-size: 14px; font-weight: 500; margin-left: 2px; }
+
+/* Bar-chart legend swatches — flat color blocks (not lines like the line-
+   chart legend variants above). The hatched swatch reproduces the
+   projection texture in the legend. */
+.chart-legend .swatch.verdict-above       { background: var(--bar-good); }
+.chart-legend .swatch.verdict-below       { background: var(--bar-bad); }
+.chart-legend .swatch.verdict-orange-cap  { background: var(--bar-neutral); }
+.chart-legend .swatch.hatched {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      var(--text-soft),
+      var(--text-soft) 1.5px,
+      transparent 1.5px,
+      transparent 4px
+    );
+  opacity: .55;
+}
+
 /* ---- Q2 · Event ledger ---- */
 .event-ledger {
   list-style: none; padding: 0; margin: 0;
@@ -4814,4 +4949,186 @@ html, body { overflow-x: clip; }
 .invoice-paid-toggle-hint {
   font-size: 11.5px;
   color: var(--text-soft);
+}
+
+/* ============================================================================
+ * Targets panel — admin drawer's "Targets" tab. Houses workspace-wide
+ * numeric thresholds (today: monthly invoice benchmark). Built as a card
+ * grid so future targets can stack into the same surface without redesign.
+ * The aesthetic borrows from the editorial Quad Sheet vocabulary: serif
+ * eyebrow, generous whitespace, mono numerics in the readout, accent edge.
+ * ============================================================================ */
+.targets-panel {
+  display: flex; flex-direction: column;
+  gap: 16px;
+  padding: 4px 2px 20px;
+}
+
+.target-card {
+  position: relative;
+  display: flex; flex-direction: column;
+  gap: 18px;
+  padding: 22px 22px 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+/* Accent sliver along the left edge — same vocabulary as quad-card's
+   data-accent stripe so the panel feels like a sibling of the dashboard. */
+.target-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 18px; bottom: 18px;
+  width: 3px;
+  background: linear-gradient(to bottom, var(--accent), color-mix(in srgb, var(--accent) 40%, transparent));
+  border-radius: 0 3px 3px 0;
+}
+
+.target-card-head {
+  display: flex; flex-direction: column;
+  gap: 6px;
+}
+.target-card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.target-card-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+.target-card-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 56ch;
+}
+
+/* Currency input — large, monospaced, with $ prefix and "/ month" suffix
+   so the field reads like a sentence. Wrapper handles focus ring. */
+.target-input-row {
+  display: flex; gap: 12px; align-items: center;
+  flex-wrap: wrap;
+}
+.target-input-wrap {
+  position: relative;
+  display: flex; align-items: center;
+  flex: 1 1 320px;
+  min-width: 240px;
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 10px 14px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.target-input-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-softer);
+}
+.target-currency {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-soft);
+  margin-right: 4px;
+}
+.target-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -.01em;
+  min-width: 0;
+}
+.target-input::placeholder {
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.target-suffix {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-soft);
+  letter-spacing: .04em;
+  padding-left: 10px;
+  margin-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.target-actions {
+  display: flex; gap: 8px;
+  flex-shrink: 0;
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* Readout strip — current saved value on the left, annual equivalent on
+   the right. Mirrors the kpi-row vocabulary so saved state feels
+   consistent with the chart it powers. */
+.target-readout {
+  display: flex; align-items: stretch;
+  gap: 0;
+  padding: 14px 0 2px;
+  border-top: 1px solid var(--border);
+}
+.target-readout-cell {
+  flex: 1;
+  display: flex; flex-direction: column;
+  gap: 4px;
+  padding-right: 18px;
+}
+.target-readout-cell + .target-readout-cell { padding-left: 18px; padding-right: 0; }
+.target-readout-divider {
+  width: 1px;
+  background: var(--border);
+}
+.target-readout-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.target-readout-val {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  letter-spacing: -.01em;
+}
+
+.target-error {
+  font-size: 12px;
+  color: var(--rose);
+  background: var(--rose-soft);
+  border: 1px solid color-mix(in srgb, var(--rose) 35%, transparent);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+/* Phone — input row stacks. */
+@media (max-width: 640px) {
+  .target-card { padding: 18px 16px; }
+  .target-input-row { gap: 10px; }
+  .target-actions { width: 100%; justify-content: flex-end; }
+  .target-readout-cell { padding-right: 12px; }
+  .target-readout-cell + .target-readout-cell { padding-left: 12px; }
 }

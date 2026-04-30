@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { TweaksPanel } from "./tweaks.jsx";
 import { AlertsAdmin } from "./admin-alerts.jsx";
-import { listAllUsersFull, adminAction, getUsers } from "./data.js";
+import { listAllUsersFull, adminAction, getUsers, updateMonthlyBenchmark, fmtMoney } from "./data.js";
 
 // ============================================================================
 // AdminPanel — gear-icon entry point for Admin users only.
@@ -22,6 +22,8 @@ export const AdminPanel = ({
   currentUser,
   onClose,
   onRosterChange,
+  appSettings,
+  onAppSettingsChange,
   alertSubjectLookup = {},
 }) => {
   const [tab, setTab] = useState("users");
@@ -102,6 +104,10 @@ export const AdminPanel = ({
                   onClick={() => setTab("alerts")}>
             <Icon name="bell" size={13}/>Alerts
           </button>
+          <button className={"admin-tab" + (tab === "targets" ? " active" : "")}
+                  onClick={() => setTab("targets")}>
+            <Icon name="flag" size={13}/>Targets
+          </button>
           <button className={"admin-tab" + (tab === "tweaks" ? " active" : "")}
                   onClick={() => setTab("tweaks")}>
             <Icon name="settings" size={13}/>Appearance
@@ -169,6 +175,17 @@ export const AdminPanel = ({
             <AlertsAdmin
               subjectLookup={alertSubjectLookup}
               users={getUsers()}
+            />
+          )}
+
+          {tab === "targets" && (
+            <TargetsPanel
+              appSettings={appSettings}
+              onSaved={(next) => {
+                onAppSettingsChange?.(next);
+                flash("Benchmark updated");
+              }}
+              onError={(msg) => flash(msg, "x")}
             />
           )}
 
@@ -547,6 +564,146 @@ const DeleteUserModal = ({ row, onClose, onConfirm }) => {
         </div>
       </form>
     </>
+  );
+};
+
+// ----------------------------------------------------------------------------
+// Targets — workspace-wide numeric thresholds that steer derived UI for
+// every signed-in user. Today this panel only manages the monthly invoice
+// benchmark used by the Quad Sheet's bar chart, but the layout is built so
+// new targets can stack into the same card grid without redesign.
+// ----------------------------------------------------------------------------
+const TargetsPanel = ({ appSettings, onSaved, onError }) => {
+  // Local draft (string) so the input is fully controllable while typing.
+  // null/empty in the saved state surfaces as "" in the input — saving a
+  // blank value clears the benchmark and reverts the chart to neutral.
+  const saved = appSettings?.monthlyInvoiceBenchmark;
+  const initial = saved == null || saved === "" ? "" : String(saved);
+  const [draft, setDraft]   = useState(initial);
+  const [pending, setPending] = useState(false);
+
+  // Re-sync draft if the parent's appSettings prop changes from elsewhere
+  // (e.g. another admin saved while this drawer is open and the parent
+  // pushed in a refreshed value).
+  useEffect(() => { setDraft(initial); /* eslint-disable-next-line */ }, [saved]);
+
+  const draftNum = draft.trim() === "" ? null : Number(draft);
+  const draftValid = draft.trim() === "" || (Number.isFinite(draftNum) && draftNum >= 0);
+  const dirty = (draft.trim() === "" ? null : draftNum) !== (saved ?? null);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    if (!draftValid || !dirty || pending) return;
+    setPending(true);
+    try {
+      const next = await updateMonthlyBenchmark(draftNum);
+      onSaved?.(next);
+    } catch (err) {
+      onError?.(String(err.message || err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const onClear = async () => {
+    if (pending) return;
+    setPending(true);
+    try {
+      const next = await updateMonthlyBenchmark(null);
+      setDraft("");
+      onSaved?.(next);
+    } catch (err) {
+      onError?.(String(err.message || err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const annualEquivalent = Number.isFinite(draftNum) && draftNum > 0
+    ? draftNum * 12
+    : null;
+
+  return (
+    <div className="targets-panel">
+      <form className="target-card" onSubmit={onSubmit}>
+        <div className="target-card-head">
+          <div className="target-card-eyebrow">Quad Sheet · Cash Flow</div>
+          <h4 className="target-card-title">Monthly invoice benchmark</h4>
+          <p className="target-card-desc">
+            Bars on the executive dashboard turn green when the month's
+            total invoicing meets or beats this number, red when it falls
+            short. Leave blank to disable color verdicts and render every
+            bar in neutral cadmium.
+          </p>
+        </div>
+
+        <div className="target-input-row">
+          <div className="target-input-wrap">
+            <span className="target-currency">$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="target-input"
+              value={draft}
+              autoFocus
+              onChange={e => {
+                // Allow digits, commas (we strip them on parse), and a
+                // single dot. Reject anything else so users can paste
+                // "$185,000" and get a clean number.
+                const cleaned = e.target.value
+                  .replace(/[$\s]/g, "")
+                  .replace(/,/g, "");
+                setDraft(cleaned);
+              }}
+              placeholder="e.g. 185000"
+            />
+            <span className="target-suffix">/ month</span>
+          </div>
+          <div className="target-actions">
+            {saved != null && (
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={onClear}
+                disabled={pending}
+              >
+                Clear
+              </button>
+            )}
+            <button
+              type="submit"
+              className="btn primary sm"
+              disabled={!draftValid || !dirty || pending}
+            >
+              <Icon name="check" size={13}/>
+              {pending ? "Saving…" : "Save target"}
+            </button>
+          </div>
+        </div>
+
+        <div className="target-readout">
+          <div className="target-readout-cell">
+            <div className="target-readout-label">Current target</div>
+            <div className="target-readout-val">
+              {saved != null ? fmtMoney(saved, false) + "/mo" : "—"}
+            </div>
+          </div>
+          <div className="target-readout-divider"/>
+          <div className="target-readout-cell">
+            <div className="target-readout-label">Annual equivalent</div>
+            <div className="target-readout-val">
+              {annualEquivalent != null ? fmtMoney(annualEquivalent, false) : "—"}
+            </div>
+          </div>
+        </div>
+
+        {!draftValid && (
+          <div className="target-error">
+            Enter a positive number (or leave blank to clear).
+          </div>
+        )}
+      </form>
+    </div>
   );
 };
 

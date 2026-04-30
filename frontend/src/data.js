@@ -138,8 +138,14 @@ export async function fetchCurrentBeaconUser() {
 // ----------------------------------------------------------------------
 let _users = [];
 let _companies = [];
+// Workspace-wide settings (singleton row from beacon_v2.app_settings). Refreshed
+// on every loadBeacon and on every successful updateMonthlyBenchmark write so
+// the in-memory copy never drifts from the DB. Defaults shape used when the
+// table is empty / migration not yet applied:
+let _appSettings = { monthlyInvoiceBenchmark: null, updatedAt: null };
 
 export const getUsers     = () => _users;
+export const getAppSettings = () => _appSettings;
 export const getCompanies = () => _companies;                                         // merged (clients + companies) for generic lookups
 export const getClientsOnly   = () => _companies.filter(c => c.type === "Client");     // beacon.clients rows
 export const getCompaniesOnly = () => _companies.filter(c => c.type !== "Client");     // beacon.companies rows
@@ -539,6 +545,42 @@ function adaptHotLead(r) {
   };
 }
 
+// app_settings is a singleton row. Null benchmark = "no target set" (chart
+// renders bars in a neutral color and hides the benchmark line).
+function adaptAppSettings(row) {
+  if (!row) return { monthlyInvoiceBenchmark: null, updatedAt: null };
+  const v = row.monthly_invoice_benchmark;
+  return {
+    monthlyInvoiceBenchmark: v == null || v === "" ? null : Number(v),
+    updatedAt: row.updated_at || null,
+  };
+}
+
+// Admin-only writer for the monthly invoice benchmark. Pass null to clear.
+// Updates the singleton row keyed on singleton=true; refreshes the in-memory
+// _appSettings cache on success so subsequent getAppSettings() calls see the
+// new value without a full loadBeacon().
+export async function updateMonthlyBenchmark(value) {
+  const numeric = value == null || value === "" ? null : Number(value);
+  if (numeric != null && !Number.isFinite(numeric)) {
+    throw new Error("Benchmark must be a number");
+  }
+  const me = getCurrentBeaconUser();
+  const { data, error } = await supabase
+    .from("app_settings")
+    .update({
+      monthly_invoice_benchmark: numeric,
+      updated_at: new Date().toISOString(),
+      updated_by: me?.id || null,
+    })
+    .eq("singleton", true)
+    .select()
+    .single();
+  if (error) throw error;
+  _appSettings = adaptAppSettings(data);
+  return _appSettings;
+}
+
 // ----------------------------------------------------------------------
 // Linked-projects resolver — used by both the Directory drawer (panels.jsx)
 // and the inline expand row in DirectoryTable (tables.jsx). Walks every
@@ -604,7 +646,7 @@ export async function loadBeacon() {
   // join tables.
   const [
     users, clients, companies, projects, invoice, events, hotLeads,
-    subInvRows, subInvFileRows, primeInvFileRows,
+    subInvRows, subInvFileRows, primeInvFileRows, appSettingsRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -659,7 +701,17 @@ export async function loadBeacon() {
         if (error) { console.warn("[beacon_v2] prime_invoice_files fetch skipped:", error.message); return []; }
         return data || [];
       }),
+    // Workspace-wide settings singleton. If the migration hasn't been applied
+    // yet (frontend deployed ahead of SQL), swallow the error so the rest of
+    // the app boots — the chart just falls back to no-benchmark mode.
+    supabase.from("app_settings").select("*").limit(1)
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] app_settings fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
   ]);
+
+  _appSettings = adaptAppSettings(appSettingsRows?.[0] || null);
 
   // Split the consolidated projects array into status-keyed slices so the
   // rest of the app sees the same shape it always has.
@@ -826,6 +878,7 @@ export async function loadBeacon() {
     clients:   _companies,
     users:     _users,
     subInvoices: subInvoicesMatrix,
+    appSettings: _appSettings,
   };
 }
 
