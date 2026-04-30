@@ -99,9 +99,9 @@ export const SubsCell = ({ subs }) => {
         const co = companyById(s.cId);
         const label = co?.name?.split(" ")[0] || s.desc || "Sub";
         return (
-          <span key={i} className="chip" title={`${co?.name || s.desc} — ${s.desc || ""}: ${fmtMoney(s.amt)}`}>
+          <span key={i} className="chip" title={`${co?.name || s.desc} — ${s.desc || ""}: ${fmtMoney(s.amt, false)}`}>
             <span className="chip-dot" style={{ background: "var(--text-soft)" }}/>
-            {label}{s.amt ? ` · ${fmtMoney(s.amt)}` : ""}
+            {label}{s.amt ? ` · ${fmtMoney(s.amt, false)}` : ""}
           </span>
         );
       })}

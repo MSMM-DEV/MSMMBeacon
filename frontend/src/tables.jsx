@@ -987,17 +987,17 @@ export const PotentialTable = ({
             "Client": <div className="td"/>,
             "Contract": (
               <div className="td mono" style={{ fontWeight: 600 }}>
-                {fmtMoney(r.amount)}
+                {fmtMoney(r.amount, false)}
               </div>
             ),
             "MSMM": (
               <div className="td mono" style={{ fontWeight: 600, color: "var(--accent-ink)" }}>
-                {fmtMoney(r.msmm)}
+                {fmtMoney(r.msmm, false)}
               </div>
             ),
             "Subs": (
               <div className="td mono" style={{ fontWeight: 600 }}>
-                {fmtMoney(r.subsTotal)}
+                {fmtMoney(r.subsTotal, false)}
               </div>
             ),
             "PM": <div className="td"/>,
@@ -1052,14 +1052,14 @@ export const PotentialTable = ({
             <div className="td mono">
               <EditableCell value={r.amount} type="number"
                 onChange={v => updateRow(r.id, { amount: v })}
-                format={v => fmtMoney(v)}/>
+                format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "MSMM": (
             <div className="td mono" style={{ color: "var(--accent-ink)" }}>
               <EditableCell value={r.msmm} type="number"
                 onChange={v => updateRow(r.id, { msmm: v })}
-                format={v => fmtMoney(v)}/>
+                format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
@@ -1324,7 +1324,7 @@ export const AwaitingTable = ({
             <div className="td mono" style={{ color: "var(--accent-ink)" }}>
               <EditableCell value={r.msmmRemaining} type="number"
                 onChange={v => updateRow(r.id, { msmmRemaining: v })}
-                format={v => fmtMoney(v)}/>
+                format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "PM": (
@@ -1346,7 +1346,7 @@ export const AwaitingTable = ({
             <div className="td mono subtle">
               <EditableCell value={r.msmmUsed} type="number"
                 onChange={v => updateRow(r.id, { msmmUsed: v })}
-                format={v => fmtMoney(v)}/>
+                format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Notes": (
@@ -1502,12 +1502,12 @@ export const AwardedTable = ({
                 onChange={v => updateRow(r.id, { pools: v })}/>
             </div>
           ),
-          "Contract": <div className="td mono">{fmtMoney(total || null)}</div>,
+          "Contract": <div className="td mono">{fmtMoney(total || null, false)}</div>,
           "MSMM Used": (
             <div className="td mono subtle">
               <EditableCell value={r.msmmUsed} type="number"
                 onChange={v => updateRow(r.id, { msmmUsed: v })}
-                format={v => fmtMoney(v)}/>
+                format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Remaining": (
@@ -1515,7 +1515,7 @@ export const AwardedTable = ({
               <span style={{ color: "var(--accent-ink)", width: "100%" }}>
                 <EditableCell value={r.msmmRemaining} type="number"
                   onChange={v => updateRow(r.id, { msmmRemaining: v })}
-                  format={v => fmtMoney(v)}/>
+                  format={v => fmtMoney(v, false)}/>
               </span>
               <div style={{ width: "100%", height: 3, background: "var(--surface-2)", borderRadius: 2 }}>
                 <div style={{ width: pct + "%", height: "100%", background: "var(--accent)", borderRadius: 2 }}/>
@@ -1696,7 +1696,7 @@ export const ClosedTable = ({
             <div className="td mono subtle">
               <EditableCell value={r.amount} type="number"
                 onChange={v => updateRow(r.id, { amount: v })}
-                format={v => fmtMoney(v)}/>
+                format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Reason": (
