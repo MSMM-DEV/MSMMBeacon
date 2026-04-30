@@ -790,9 +790,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         "project_pms", "project_id");
     }
 
-    // Orange invariant: if probability transitions into Orange and no Invoice
-    // row is linked yet, spawn one. Unique index on (source_potential_id,
-    // year) guards against concurrent duplicates.
+    // Orange invariant: tagging Orange spawns a linked Invoice row; clearing
+    // Orange (transitioning to any other probability) tears that row back
+    // down. Orange Potentials are also hidden from the Potential view (see
+    // `filtered.potential`), so the row only "lives" in Invoice while Orange.
+    // Unique index on (source_potential_id, year) guards against duplicates
+    // on the spawn path.
     if ("probability" in patch && patch.probability !== existing.probability) {
       const wasOrange = existing.probability === "Orange";
       const isNowOrange = patch.probability === "Orange";
@@ -829,6 +832,27 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             } catch (e) {
               showToast(`Orange Invoice creation failed: ${e.message || e}`, "x");
             }
+          })();
+        }
+      } else if (wasOrange && !isNowOrange) {
+        // Demote from Orange. The linked invoice row was auto-spawned and
+        // has no independent meaning once the project is no longer Orange,
+        // so tear it down. The Potential row reappears in the Potential
+        // view automatically (it's hidden by `filtered.potential` only
+        // while probability='Orange').
+        const linked = invoice.find(r => r.sourceId === id);
+        if (linked) {
+          (async () => {
+            const prev = invoice;
+            setInvoice(rs => rs.filter(r => r.id !== linked.id));
+            const { error } = await supabase
+              .from("anticipated_invoice").delete().eq("id", linked.id);
+            if (error) {
+              setInvoice(prev);
+              showToast(`Demote failed: ${error.message}`, "x");
+              return;
+            }
+            showToast("Demoted from Orange · Invoice row removed", "check");
           })();
         }
       }
@@ -1736,8 +1760,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // Directory merges clients + companies into one feed; the type
     // discriminator ("Client" vs "Prime"/"Sub"/"Multiple") drives section
     // headers + filter chips inside DirectoryTable.
+    // Orange Potentials live in the Invoice tab (auto-spawned) and are
+    // intentionally hidden from the Potential view — they're effectively
+    // "moved to Invoice" while tagged Orange. Demoting from Orange deletes
+    // the invoice row and the Potential row reappears here.
+    const potentialVisible = potential.filter(r => r.probability !== "Orange");
     return {
-      potential: apply("potential", potential),
+      potential: apply("potential", potentialVisible),
       awaiting:  apply("awaiting",  awaiting),
       awarded:   apply("awarded",   awarded),
       closed:    apply("closed",    closed),
@@ -2201,6 +2230,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           onCloseOut={
             drawer.table === "invoice"
               ? () => { triggerForward(liveRow, "invoice", "closed"); setDrawer(null); }
+              : null
+          }
+          onDemoteFromOrange={
+            drawer.table === "invoice"
+            && liveRow.sourceId
+            && orangeSourceIds.has(liveRow.sourceId)
+              ? () => {
+                  if (!window.confirm(
+                    `Demote "${liveRow.name || ""}" from Orange?\n\n`
+                    + `The Invoice row will be removed and the project will `
+                    + `reappear in Potential as "High" probability. You can `
+                    + `change the probability afterward in the Potential drawer.`
+                  )) return;
+                  updatePotential(liveRow.sourceId, { probability: "High" });
+                  setDrawer(null);
+                  setTab("potential");
+                }
               : null
           }
           onDelete={

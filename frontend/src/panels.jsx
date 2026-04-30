@@ -184,7 +184,7 @@ export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
 }
 
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, onCloseOut, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, onCloseOut, onDemoteFromOrange, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -533,6 +533,16 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             {onForward && <button className="btn sm primary" onClick={onForward}><Icon name="forward" size={13}/>Move forward</button>}
+            {onDemoteFromOrange && (
+              <button
+                className="btn sm"
+                onClick={onDemoteFromOrange}
+                style={{ color: "var(--prob-orange)" }}
+                title="Demote from Orange — the Invoice row is removed and the project reappears in Potential."
+              >
+                <Icon name="forward" size={13}/>Move to Potential
+              </button>
+            )}
             {onCloseOut && (
               <button
                 className="btn sm"
