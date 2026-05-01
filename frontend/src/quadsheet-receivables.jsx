@@ -298,6 +298,38 @@ const ProjectDetail = ({ project, isMsmm, onOpen }) => {
           isOpen={pendingOpen}
           onToggle={() => setPendingOpen(v => !v)}
         />
+        <div className="recv-kpi-rule" aria-hidden="true"/>
+
+        {/* Remaining = Contract − Billed To Date (per user spec). Pending
+            is intentionally NOT subtracted — it's still in flight, not yet
+            realized as paid revenue. Negative values surface in rose to
+            flag over-billing (paid amount has exceeded the contract). */}
+        {(() => {
+          const remaining = project.contractAmount - project.billedToDate;
+          const overrun = remaining < 0;
+          const noContract = project.contractAmount === 0;
+          return (
+            <div className="recv-kpi">
+              <div className="recv-kpi-label">Remaining</div>
+              <div className={"recv-kpi-val mono"
+                  + (noContract ? " is-zero" : "")
+                  + (overrun ? " is-overrun" : "")}>
+                {noContract
+                  ? <span className="recv-kpi-empty">— set contract —</span>
+                  : fmtMoney(remaining, false)}
+              </div>
+              {!noContract && (
+                <div className="recv-kpi-sub">
+                  {overrun
+                    ? "over contract"
+                    : project.contractAmount > 0
+                      ? `${Math.round((project.billedToDate / project.contractAmount) * 100)}% billed`
+                      : ""}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
       {onOpen && (
         <div className="recv-detail-actions">
