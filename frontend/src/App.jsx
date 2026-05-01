@@ -27,6 +27,7 @@ import {
   upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub,
   ensureSubInvoiceRow, setSubInvoicePaid,
   setProjectRole, setProjectPrimeCompany,
+  findOrCreateProjectForInvoice, linkInvoiceToProject,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -1138,12 +1139,57 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // step). After the DB write, we patch the project's role + the linked
   // invoice row's role flag locally so the UI updates without a reload.
   const setInvoiceRoleHandler = async (invoiceRow, newRole) => {
-    const projectId = invoiceRow?.sourceId;
-    if (!projectId) {
-      showToast("Link this invoice to a project first.", "x");
-      return;
-    }
+    let projectId = invoiceRow?.sourceId;
+    let autoLinked = null;
     try {
+      // Invisible auto-link: same pattern as AddSubModal. If the invoice
+      // has no upstream project, match by (project_number, year) or mint a
+      // stub. The user never sees a project-picker — they just toggled the
+      // role chip. Without this, role changes on standalone invoices threw
+      // "Link this invoice to a project first" with no path forward.
+      if (!projectId) {
+        autoLinked = await findOrCreateProjectForInvoice({
+          name: invoiceRow.name,
+          projectNumber: invoiceRow.projectNumber,
+          year: invoiceRow.year,
+        });
+        projectId = autoLinked.projectId;
+        await linkInvoiceToProject(invoiceRow.id, projectId);
+        setInvoice(rows => rows.map(inv =>
+          inv.id === invoiceRow.id ? { ...inv, sourceId: projectId } : inv
+        ));
+        // Mirror a brand-new stub project into the awarded slice so the
+        // rest of the UI sees it (matches applyInsertedSub's pattern).
+        if (autoLinked.matchType === "created" && autoLinked.projectStub) {
+          const stub = autoLinked.projectStub;
+          const stubUiRow = {
+            id: stub.id,
+            year: stub.year,
+            name: stub.project_name,
+            role: null,
+            clientId: null,
+            amount: null,
+            msmm: 0,
+            subs: [],
+            pmIds: [],
+            notes: "",
+            dates: "",
+            projectNumber: stub.project_number || "",
+            status: "Awarded",
+            dateSubmitted: "",
+            clientContract: "",
+            msmmContract: "",
+            msmmUsed: 0,
+            msmmRemaining: 0,
+            stage: "",
+            details: "",
+            pools: "",
+            contractExpiry: "",
+          };
+          setAwarded(rows => [stubUiRow, ...rows]);
+        }
+      }
+
       await setProjectRole(projectId, newRole);
       // Patch invoice slice — every invoice on this project gets the new role.
       setInvoice(rows => rows.map(inv =>
@@ -1162,6 +1208,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       else if (awaiting.some(p => p.id === projectId)) setAwaiting(patch);
       else if (awarded.some(p => p.id === projectId)) setAwarded(patch);
       else if (closed.some(p => p.id === projectId))   setClosed(patch);
+
+      if (autoLinked?.matchType === "matched") {
+        showToast(`Linked to ${autoLinked.projectName} · role: ${newRole}`);
+      } else if (autoLinked?.matchType === "created") {
+        showToast(`Stub project created · role: ${newRole}`);
+      }
     } catch (e) {
       showToast(`Role change failed: ${e?.message || e}`, "x");
     }
