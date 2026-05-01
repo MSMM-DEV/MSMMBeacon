@@ -5637,6 +5637,53 @@ html, body { overflow-x: clip; }
   flex-shrink: 0;
 }
 
+/* MSMM-as-sub badge — flags the bucket where pending = money owed TO MSMM
+   instead of money MSMM owes out. Tonally aligned with the receivables
+   accent so it reads as part of the section's vocabulary. */
+.recv-msmm-badge {
+  display: inline-flex;
+  padding: 2px 9px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  background: var(--recv-accent);
+  color: #FFF;
+  border-radius: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--recv-accent) 70%, black 30%);
+}
+[data-theme="dark"] .recv-msmm-badge { color: var(--bg); box-shadow: none; }
+.recv-sub.is-msmm .recv-name-text {
+  letter-spacing: .04em;
+}
+.recv-sub.is-msmm::before {
+  /* Distinct stripe color so MSMM's bucket is recognizable even when
+     collapsed and not currently sorted to the top. */
+  background: var(--recv-accent) !important;
+  width: 3px;
+}
+
+/* Per-project "Prime · <firm>" chip — visible only on rows where MSMM is
+   the sub. Tells viewers who owes MSMM the money on this project. */
+.recv-prime-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  letter-spacing: .02em;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--recv-accent) 12%, var(--surface));
+  color: var(--recv-accent);
+  border: 1px solid color-mix(in srgb, var(--recv-accent) 35%, transparent);
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .recv-num {
   font-family: var(--font-mono);
   font-size: 13px;

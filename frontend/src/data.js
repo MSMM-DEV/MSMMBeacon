@@ -369,6 +369,7 @@ function adaptCompany(c, typeMap) {
   return {
     id: c.id,
     name: c.name,
+    isMsmm: !!c.is_msmm,
     type: c.is_msmm ? "Multiple" : (typeMap.get(c.id) || "Prime"),
     contact: c.contact_person || "",
     email: c.email || "",

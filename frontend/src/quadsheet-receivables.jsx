@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Icon } from "./icons.jsx";
-import { fmtMoney, fmtDate, MONTHS, companyById, getInvoiceFileSignedUrl } from "./data.js";
+import { fmtMoney, fmtDate, MONTHS, companyById, getCompanies, getInvoiceFileSignedUrl } from "./data.js";
 
 // ============================================================================
 // Subs Receivables — sub-centric inversion of the project-centric Invoice tab.
@@ -150,7 +150,8 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
                 : sub.totalPending > sub.totalBilled ? "high"
                 : "active";
               return (
-                <li key={sub.companyId} className={"recv-sub" + (isOpen ? " open" : "") + ` tone-${tone}`}>
+                <li key={sub.companyId}
+                    className={"recv-sub" + (isOpen ? " open" : "") + ` tone-${tone}` + (sub.isMsmm ? " is-msmm" : "")}>
                   <button
                     type="button"
                     className="recv-sub-row"
@@ -161,6 +162,11 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
                         <Icon name="chevronRight" size={11}/>
                       </span>
                       <span className="recv-name-text">{sub.companyName}</span>
+                      {sub.isMsmm && (
+                        <span className="recv-msmm-badge" title="MSMM acts as sub on these projects — pending = money owed TO us">
+                          As Sub
+                        </span>
+                      )}
                       <span className="recv-projects-pill">
                         {sub.projects.length} {sub.projects.length === 1 ? "project" : "projects"}
                       </span>
@@ -220,6 +226,12 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
                                     <span className="recv-project-meta">
                                       {p.projectNumber && <span className="mono recv-project-pn">#{p.projectNumber}</span>}
                                       {p.year && <span className="recv-project-year">· {p.year}</span>}
+                                      {p.primeFirmName && (
+                                        <span className="recv-prime-chip"
+                                              title={`MSMM is a sub on this project under ${p.primeFirmName}`}>
+                                          Prime · {p.primeFirmName}
+                                        </span>
+                                      )}
                                       {p.statusKey && (
                                         <span className={`recv-status-chip status-${p.statusKey}`}>
                                           {labelForStatus(p.statusKey)}
@@ -351,18 +363,44 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
 // ----------------------------------------------------------------------------
 // Pivot — flatten subInvoicesMatrix into a sub-centric structure.
 // ----------------------------------------------------------------------------
+// Two flavors of entry exist in subInvoicesMatrix:
+//
+//   kind='sub'   — MSMM is Prime on the project; the entry's company is a
+//                  downstream sub MSMM hires. The amounts are invoices the
+//                  sub bills MSMM (money MSMM owes them). Bucket per sub.
+//
+//   kind='prime' — MSMM is Sub on the project; the entry's company is the
+//                  upstream prime firm that hired MSMM. The amounts are
+//                  invoices MSMM bills the prime (money owed TO MSMM).
+//                  All such entries roll up under MSMM as the "sub" entity,
+//                  with the upstream prime carried through as project context.
+//
+// Both flavors land in the same list — execs want a unified view of every
+// invoicing relationship. The MSMM bucket gets an `isMsmm` flag the UI uses
+// to render an "AS SUB" badge so viewers know that bucket represents
+// receivables (money in) instead of payables (money out).
+// ----------------------------------------------------------------------------
 function pivotSubsReceivables(subInvoices, projectsById) {
   if (!subInvoices) return [];
   const byCompany = new Map();
+
+  // Resolve MSMM once. The DB seeds exactly one company with is_msmm=true;
+  // adaptCompany surfaces that as `isMsmm` on the cached company list.
+  const msmm = (getCompanies() || []).find(c => c.isMsmm) || null;
+  const msmmId = msmm?.id || "__msmm__"; // fallback synthetic id keeps the bucket distinct
 
   for (const [projectId, entries] of subInvoices) {
     const project = projectsById?.get(projectId);
     if (!project) continue; // skip orphan projects (e.g. only-in-invoice rows)
     for (const e of entries) {
-      // Skip prime entries — they represent the upstream prime firm on a Sub-
-      // role project (i.e. the firm we sub-contract TO), not a downstream
-      // sub we engage. Receivables is about the latter.
-      if (e.kind === "prime") continue;
+      const isPrimeKind = e.kind === "prime";
+
+      // Bucket key: kind='prime' rolls up under MSMM (since MSMM is the sub
+      // on those projects); kind='sub' uses the sub firm's id directly.
+      const bucketId = isPrimeKind ? msmmId : e.companyId;
+      const bucketName = isPrimeKind
+        ? (msmm?.name || "MSMM")
+        : (e.companyName || companyById(e.companyId)?.name || "Unknown sub");
 
       const billingEntries = [];
       let billed = 0, pending = 0;
@@ -383,21 +421,22 @@ function pivotSubsReceivables(subInvoices, projectsById) {
 
       const contract = e.contractAmount || 0;
       // Allow negative remaining — surfaces overruns visibly. Clamping would
-      // hide the bad signal that "we've billed more than the sub's contract."
+      // hide the bad signal that the sub's been billed past their contract.
       const remaining = contract - billed - pending;
 
-      let bucket = byCompany.get(e.companyId);
+      let bucket = byCompany.get(bucketId);
       if (!bucket) {
         bucket = {
-          companyId: e.companyId,
-          companyName: e.companyName || companyById(e.companyId)?.name || "Unknown sub",
+          companyId: bucketId,
+          companyName: bucketName,
+          isMsmm: isPrimeKind,
           projects: [],
           totalContract: 0,
           totalBilled: 0,
           totalPending: 0,
           totalRemaining: 0,
         };
-        byCompany.set(e.companyId, bucket);
+        byCompany.set(bucketId, bucket);
       }
       bucket.projects.push({
         projectId,
@@ -405,6 +444,11 @@ function pivotSubsReceivables(subInvoices, projectsById) {
         projectNumber: project.projectNumber,
         year: project.year,
         statusKey: project.statusKey,
+        // For MSMM-as-sub rows, the entry's companyName is the upstream
+        // prime firm (e.g. "Donald Bond"). The UI renders this as a
+        // "Prime: <name>" chip on the project row so viewers know who
+        // owes MSMM the money.
+        primeFirmName: isPrimeKind ? (e.companyName || companyById(e.companyId)?.name || "") : null,
         contractAmount: contract,
         billedToDate: billed,
         pending,
