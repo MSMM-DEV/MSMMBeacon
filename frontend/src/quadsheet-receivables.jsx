@@ -395,12 +395,23 @@ function pivotSubsReceivables(subInvoices, projectsById) {
     for (const e of entries) {
       const isPrimeKind = e.kind === "prime";
 
+      // For kind='sub' entries, drop anything whose company doesn't resolve
+      // in the companies cache — that's an orphaned project_subs row
+      // pointing at a deleted/missing company. The matrix builder
+      // upstream stamps these as "Unknown company"; surfacing them in
+      // the exec view is noise. (Data-quality issue worth fixing at the
+      // source, but we don't want to leak it here.)
+      if (!isPrimeKind) {
+        const resolved = companyById(e.companyId);
+        if (!resolved || !resolved.name) continue;
+      }
+
       // Bucket key: kind='prime' rolls up under MSMM (since MSMM is the sub
       // on those projects); kind='sub' uses the sub firm's id directly.
       const bucketId = isPrimeKind ? msmmId : e.companyId;
       const bucketName = isPrimeKind
         ? (msmm?.name || "MSMM")
-        : (e.companyName || companyById(e.companyId)?.name || "Unknown sub");
+        : (e.companyName || companyById(e.companyId)?.name);
 
       const billingEntries = [];
       let billed = 0, pending = 0;
