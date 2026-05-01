@@ -6149,93 +6149,364 @@ html, body { overflow-x: clip; }
 .recv-open-link:hover svg { transform: translateX(2px); }
 
 /* ============================================================================
-   Responsive
+   Responsive — aligned with the app's standard ladder (1280 / 1024 / 840 /
+   640 / 440). Mobile reflow leans on CSS Grid: every level becomes a 2-row
+   card so names get prominence and numbers anchor right. The L4 ledger
+   compacts file actions to icon-only at 440 so it fits a 320px viewport.
    ============================================================================ */
-@media (max-width: 1080px) {
-  .recv-name-text { font-size: 15.5px; }
+
+@media (max-width: 1280px) {
+  .recv-search { width: 200px; }
+}
+
+@media (max-width: 1024px) {
+  .recv-name-text { font-size: 16px; }
   .recv-search { width: 180px; }
-  /* 4-up grid; rules drop, replaced by border-right per cell */
+  /* 4-up grid; rules drop, replaced by per-cell right border */
   .recv-detail-strip {
     grid-template-columns: 1fr 1fr 1fr 1fr;
-    gap: 0;
   }
   .recv-kpi-rule { display: none; }
   .recv-kpi {
     border-right: 1px solid var(--border);
-    padding: 4px 14px;
+    padding: 4px 16px;
   }
   .recv-kpi:last-child { border-right: 0; }
-  .recv-kpi-val { font-size: 19px; }
-  .recv-kpi-x.is-clickable .recv-kpi-trigger { padding: 6px; margin: -6px; }
+  .recv-kpi-val { font-size: 21px; }
+  .recv-kpi-x.is-clickable .recv-kpi-trigger { padding: 6px 8px; margin: -6px -8px; }
 }
 
 @media (max-width: 840px) {
-  .recv-name-text { font-size: 14.5px; }
+  .recv-name-text { font-size: 15px; }
   .recv-projects { padding-left: 36px; }
   .recv-project::before { left: -22px; width: 14px; }
   .recv-project::after  { left: -22px; }
-  /* Wrap to a 2x2 grid so the four KPIs each get adequate width.
-     The four .recv-kpi elements are at child positions 1, 3, 5, 7
-     (interleaved with hidden .recv-kpi-rule dividers at 2, 4, 6). */
+  /* 2x2 KPI grid. Children are at child positions 1, 3, 5, 7
+     (rules at 2, 4, 6 are display:none). */
   .recv-detail-strip {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: auto auto;
   }
-  /* Top-row kpis (1st and 2nd) get a bottom border */
   .recv-kpi:nth-child(1),
   .recv-kpi:nth-child(3) { border-bottom: 1px solid var(--border); padding-bottom: 14px; }
-  /* Left-column kpis (1st and 3rd) get a right border */
   .recv-kpi:nth-child(1),
   .recv-kpi:nth-child(5) { border-right: 1px solid var(--border); }
   .recv-kpi:nth-child(3),
   .recv-kpi:nth-child(7) { border-right: 0; }
-  .recv-kpi-val { font-size: 18px; }
-}
-
-@media (max-width: 640px) {
-  .recv-head {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 14px;
-  }
-  .recv-head-r { justify-content: space-between; flex-wrap: wrap; }
-  .recv-search { flex: 1; width: auto; min-width: 140px; }
-
-  /* L1 — wrap the row so the metric drops below the name on narrow screens */
-  .recv-sub-row {
-    flex-wrap: wrap;
-    gap: 10px;
-    padding: 14px 6px;
-  }
-  .recv-rank { width: 18px; font-size: 9.5px; }
-  .recv-name-text { font-size: 14px; }
-  .recv-spacer { display: none; }
-  .recv-metric { margin-left: auto; }
-  .recv-metric-num { font-size: 13px; }
-
-  /* L2 — let the meta wrap; project title gets full row above */
-  .recv-projects { padding-left: 28px; padding-right: 4px; }
-  .recv-project::before { left: -16px; width: 10px; }
-  .recv-project::after  { left: -16px; }
-  .recv-project-row { flex-wrap: wrap; gap: 8px 10px; }
-  .recv-project-title { flex-basis: 100%; font-size: 13px; }
-  .recv-project-meta { flex-wrap: wrap; }
-
-  /* L3 — stack the three KPIs vertically on phone */
-  .recv-detail { padding: 14px 16px; margin: 0 4px 14px; }
-  .recv-detail-strip {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-  .recv-kpi {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    padding: 4px 0 12px;
-  }
-  .recv-kpi:last-child { border-bottom: 0; padding-bottom: 4px; }
   .recv-kpi-val { font-size: 20px; }
 }
 
+/* ============================================================================
+   PHONE — 640px and below. Heavy reflow: header stacks; L1/L2/L3/L4 all
+   drop their flex-row layouts in favor of grid cards with names on top,
+   numbers anchored right. Touch targets bumped to ≥36px.
+   ============================================================================ */
+@media (max-width: 640px) {
+  /* Card chrome — tighten outer padding; quad-card has 22px 24px by default */
+  .recv-card { padding: 20px 18px 18px; }
+
+  /* HEADER — title block above; search + sort below side-by-side */
+  .recv-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding-bottom: 14px;
+  }
+  .recv-head-l { gap: 3px; }
+  .recv-card .quad-title { font-size: 19px; line-height: 1.15; }
+  .quad-sub { font-size: 12px; line-height: 1.45; }
+  .recv-head-r {
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .recv-search {
+    flex: 1 1 100%;
+    width: auto;
+    min-width: 0;
+    padding: 9px 14px;
+    font-size: 13px;
+  }
+  .recv-toggle { flex: 0 0 auto; }
+  .recv-toggle button {
+    padding: 8px 18px;     /* ≥36px tappable */
+    font-size: 12.5px;
+  }
+
+  /* L1 — sub bar reflows to a 2-row grid card. Names get the top row,
+     pill + sort metric anchor the bottom row. Rank prefix hides — sort
+     order is implicit in scroll order at this width. */
+  .recv-sub-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "chev name badge"
+      "pill pill metric";
+    column-gap: 10px;
+    row-gap: 8px;
+    padding: 14px 8px;
+    align-items: center;
+  }
+  /* When MSMM has no badge, the right column collapses to 0; name fills. */
+  .recv-sub:not(.is-msmm) .recv-sub-row { grid-template-areas:
+      "chev name name"
+      "pill pill metric"; }
+  .recv-rank { display: none; }
+  .recv-chev { grid-area: chev; }
+  .recv-name-text {
+    grid-area: name;
+    font-size: 15px;
+    min-width: 0;
+  }
+  .recv-msmm-badge { grid-area: badge; align-self: center; }
+  .recv-projects-pill {
+    grid-area: pill;
+    justify-self: start;
+    margin-left: 32px;        /* align under name (chevron offset 22px + gap 10px) */
+    font-size: 9.5px;
+  }
+  .recv-spacer { display: none; }
+  .recv-metric {
+    grid-area: metric;
+    align-items: flex-end;
+    text-align: right;
+  }
+  .recv-metric-num { font-size: 14px; }
+  .recv-metric-label { font-size: 9px; }
+
+  /* L2 — project row mirrors the same 2-row pattern. Title truncates;
+     pulse dots anchor the right of the top row; meta wraps below. */
+  .recv-projects { padding-left: 32px; padding-right: 4px; padding-bottom: 14px; }
+  .recv-project::before { left: -18px; width: 12px; top: 22px; }
+  .recv-project::after  { left: -18px; }
+  .recv-project-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "chev title pulse"
+      "meta meta meta";
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 14px 6px 14px 0;
+  }
+  .recv-project-row .recv-chev { grid-area: chev; }
+  .recv-project-title {
+    grid-area: title;
+    font-size: 13.5px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-basis: auto;          /* unset desktop's 100% basis */
+  }
+  .recv-project-pulse { grid-area: pulse; }
+  .recv-project-meta {
+    grid-area: meta;
+    flex-wrap: wrap;
+    margin-left: 28px;         /* align under title */
+    gap: 6px;
+    font-size: 11px;
+  }
+  .recv-prime-chip { max-width: 100%; min-width: 0; }
+
+  /* L3 — KPI strip stacks vertically. Each KPI gets its own row with
+     a hairline divider beneath. Click triggers expand cleanly inline. */
+  .recv-detail {
+    padding: 14px 14px 12px;
+    margin: 0 4px 14px;
+    border-radius: 10px;
+  }
+  .recv-detail::before { left: 24px; }
+  .recv-detail-strip {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    gap: 0;
+  }
+  .recv-kpi {
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0;
+    gap: 6px;
+  }
+  .recv-kpi:nth-child(1),
+  .recv-kpi:nth-child(3) { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  .recv-kpi:last-child { border-bottom: 0; padding-bottom: 4px; }
+  .recv-kpi:first-child { padding-top: 4px; }
+  .recv-kpi-val { font-size: 22px; }
+  .recv-kpi-x.is-clickable .recv-kpi-trigger {
+    padding: 10px 8px;
+    margin: -10px -8px;
+    border-radius: 8px;
+  }
+
+  /* L4 — per-month invoice ledger compacts. Three columns: month, amount,
+     file-action. Paid date drops to its own line below. File pill keeps
+     a "View" label until 440. */
+  .recv-kpi-entries {
+    margin-top: 10px;
+    padding: 10px 4px 4px;
+  }
+  .recv-entry {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    column-gap: 10px;
+    padding: 9px 4px;
+  }
+  .recv-entry-month { font-size: 12.5px; }
+  .recv-entry-amt { font-size: 12.5px; }
+  .recv-entry-file-btn,
+  .recv-entry-no-file {
+    padding: 6px 12px;
+    font-size: 10.5px;
+  }
+  .recv-entry-meta {
+    grid-column: 1 / -1;
+    padding-left: 54px;
+    margin-top: -2px;
+    font-size: 9px;
+  }
+
+  /* Detail action — Open project link gets a touch-sized pill */
+  .recv-detail-actions { padding-top: 12px; }
+  .recv-open-link {
+    padding: 8px 14px;
+    font-size: 12.5px;
+  }
+
+  /* Empty state — give it more vertical room since it dominates the section
+     when no data exists */
+  .recv-empty { padding: 50px 16px; font-size: 13px; }
+}
+
+/* ============================================================================
+   TIGHT PHONE — 440px and below (iPhone SE, small Androids ~360px).
+   Toggle becomes a full-width 2-button bar. L4 file action collapses to an
+   icon-only circular button. Numbers shrink to keep the strip readable.
+   ============================================================================ */
+@media (max-width: 440px) {
+  .recv-card { padding: 16px 12px; }
+  .recv-card .quad-title { font-size: 17px; letter-spacing: -0.015em; }
+  .recv-headline-num { font-size: 12px; }
+
+  /* Header — search above, toggle full-width below */
+  .recv-head { gap: 10px; }
+  .recv-head-r {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .recv-toggle {
+    width: 100%;
+    display: flex;
+  }
+  .recv-toggle button {
+    flex: 1;
+    text-align: center;
+    padding: 9px 12px;       /* ≥40px tappable */
+  }
+
+  /* L1 — even tighter; if MSMM badge present, it gets its own row so it
+     never collides with a long sub name */
+  .recv-sub-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "chev name"
+      "badge badge"
+      "pill metric";
+    column-gap: 8px;
+    row-gap: 6px;
+    padding: 12px 4px;
+  }
+  .recv-sub:not(.is-msmm) .recv-sub-row {
+    grid-template-areas:
+      "chev name"
+      "pill metric";
+  }
+  .recv-msmm-badge {
+    grid-area: badge;
+    justify-self: start;
+    margin-left: 30px;
+  }
+  .recv-projects-pill {
+    margin-left: 30px;
+    font-size: 9px;
+    letter-spacing: .03em;
+    padding: 2px 8px;
+  }
+  .recv-name-text { font-size: 14.5px; }
+  .recv-metric-num { font-size: 13px; }
+  .recv-metric-label { font-size: 8.5px; letter-spacing: .1em; }
+
+  /* L2 — drop pulse dots (the project detail surfaces the same info), tighten chips */
+  .recv-projects { padding-left: 26px; padding-bottom: 12px; }
+  .recv-project::before { left: -16px; width: 10px; }
+  .recv-project::after  { left: -16px; }
+  .recv-project-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "chev title"
+      "meta meta";
+    padding: 12px 4px 12px 0;
+  }
+  .recv-project-pulse { display: none; }
+  .recv-project-title { font-size: 13px; }
+  .recv-project-meta {
+    margin-left: 26px;
+    gap: 5px;
+    font-size: 10.5px;
+  }
+  .recv-status-chip { font-size: 9px; padding: 2px 5px; letter-spacing: .08em; }
+  .recv-prime-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .recv-project-pn { font-size: 10px; }
+  .recv-project-year { font-size: 10px; }
+
+  /* L3 — tighter padding, slightly smaller numbers */
+  .recv-detail { padding: 12px 12px 10px; margin: 0 2px 12px; }
+  .recv-detail::before { left: 20px; }
+  .recv-kpi { padding: 10px 0; }
+  .recv-kpi-val { font-size: 20px; }
+  .recv-kpi-empty { font-size: 11px; }
+  .recv-kpi-sub { font-size: 10.5px; }
+
+  /* L4 — month col shrinks, file action becomes circular icon button */
+  .recv-entry {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    column-gap: 8px;
+    padding: 9px 2px;
+  }
+  .recv-entry-month { font-size: 12px; }
+  .recv-entry-amt { font-size: 12.5px; font-weight: 600; }
+  .recv-entry-file-btn,
+  .recv-entry-no-file {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    gap: 0;
+  }
+  .recv-entry-file-label,
+  .recv-entry-no-file > span:not(.empty-cell) { display: none; }
+  .recv-entry-meta {
+    padding-left: 48px;
+    font-size: 8.5px;
+  }
+
+  /* Detail action — full-width pill, easier thumb target */
+  .recv-open-link {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .recv-chev, .recv-open-link svg { transition: none; }
+  .recv-chev, .recv-open-link svg, .recv-kpi-chev,
+  .recv-meter-fill, .recv-billed-chev { transition: none; }
 }
