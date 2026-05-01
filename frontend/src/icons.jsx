@@ -7,6 +7,8 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     filter:   <><path d="M3 5h18M6 12h12M10 19h4" /></>,
     sort:     <><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" /></>,
     forward:  <><path d="M13 5l7 7-7 7M5 12h14" /></>,
+    back:     <><path d="M11 5l-7 7 7 7M19 12H5" /></>,
+    undo:     <><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 1 3 6.7"/></>,
     bell:     <><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10 21a2 2 0 0 0 4 0" /></>,
     close:    <><path d="M6 6l12 12M18 6l6 12" transform="scale(1)"/></>,
     x:        <><path d="M6 6l12 12M18 6L6 18"/></>,

@@ -184,7 +184,7 @@ export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
 }
 
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, onCloseOut, onDemoteFromOrange, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
+export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, onCloseOut, onDemoteFromOrange, onMoveBack, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -531,8 +531,22 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
             </div>
             <h3 className="drawer-title">{row.name || row.title}</h3>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             {onForward && <button className="btn sm primary" onClick={onForward}><Icon name="forward" size={13}/>Move forward</button>}
+            {onMoveBack && (
+              <span className="move-back-group" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                <span style={{ fontSize: 11.5, color: "var(--text-soft)" }}>Move back:</span>
+                <button className="btn sm" onClick={() => onMoveBack("awaiting")} title="Reopen as Awaiting Verdict">
+                  <Icon name="back" size={12}/>Awaiting
+                </button>
+                <button className="btn sm" onClick={() => onMoveBack("awarded")} title="Reopen as Awarded">
+                  <Icon name="back" size={12}/>Awarded
+                </button>
+                <button className="btn sm" onClick={() => onMoveBack("invoice")} title="Reopen as Active (Invoice)">
+                  <Icon name="back" size={12}/>Invoice
+                </button>
+              </span>
+            )}
             {onDemoteFromOrange && (
               <button
                 className="btn sm"
@@ -716,6 +730,45 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "status", label: "Status", type: "pill", value: "Closed Out" },
         { k: "dateClosed", label: "Date Closed", type: "date", value: new Date().toISOString().substr(0,10) },
         { k: "reason", label: "Reason for Closure", type: "textarea", placeholder: "e.g. Project complete, contract ended, client descope…" },
+      ]
+    },
+    // Move-back paths: reopen a Closed Out project. The project row stays
+    // (same DB id) — only its `status` flips and stage-specific fields are
+    // re-applied. Most close-out fields (role, contract amounts, stage_id,
+    // probability, etc.) were nulled at close time, so the user re-enters
+    // what's needed for the destination. closed→invoice also spawns a fresh
+    // anticipated_invoice row.
+    "closed→awaiting": {
+      title: "Reopen as Awaiting Verdict",
+      subtitle: "Removes from Closed Out · returns to Awaiting Verdict",
+      carried: ["year","name","projectNumber","pmIds","dateSubmitted"],
+      newFields: [
+        { k: "status", label: "Status", type: "pill", value: "Awaiting Verdict" },
+        { k: "anticipatedResultDate", label: "Anticipated Result Date", type: "date" },
+        { k: "notes", label: "Notes", type: "textarea", placeholder: "Reopen reason / next steps…" },
+      ]
+    },
+    "closed→awarded": {
+      title: "Reopen as Awarded",
+      subtitle: "Removes from Closed Out · returns to Awarded",
+      carried: ["year","name","projectNumber","pmIds","dateSubmitted"],
+      newFields: [
+        { k: "status", label: "Status", type: "pill", value: "Awarded" },
+        { k: "stage", label: "Stage", type: "select", options: ["Multi-Use Contract","Single Use Contract (Project)","AE Selected List"], value: "Multi-Use Contract" },
+        { k: "details", label: "Details", type: "textarea", placeholder: "Key notes, scope, team…" },
+        { k: "pools", label: "Pools", placeholder: "e.g. IDIQ Pool C" },
+        { k: "contractExpiry", label: "Contract Expiry", type: "date" },
+      ]
+    },
+    "closed→invoice": {
+      title: "Reopen as Active Project (Invoice)",
+      subtitle: "Removes from Closed Out · status flips to Awarded · spawns Invoice row",
+      carried: ["year","name","projectNumber","pmIds"],
+      newFields: [
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+          hint: "Determines how billing is categorized in Anticipated Invoice." },
+        { k: "_amount",    label: "Contract Amount (optional)", type: "money", value: 0 },
+        { k: "_remaining", label: "MSMM Remaining (optional)", type: "money", value: 0 },
       ]
     },
   };

@@ -632,9 +632,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
   const setTweak = (k, v) => setTweaks(t => ({ ...t, [k]: v }));
 
-  const showToast = (msg, icon = "check") => {
-    setToast({ msg, icon });
-    setTimeout(() => setToast(null), 3200);
+  // Toast supports an optional inline action button (e.g. an Undo link after a
+  // move-forward). When opts.action is provided the toast lingers ~10s instead
+  // of the default 3.2s so the user has time to click; calling the action also
+  // dismisses the toast immediately. Each call cancels the prior auto-clear so
+  // back-to-back showToast() calls don't cross streams.
+  const toastTimerRef = useRef(null);
+  const showToast = (msg, icon = "check", opts = {}) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    const action = opts.action || null;
+    setToast({ msg, icon, action });
+    const ttl = action ? 10000 : 3200;
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, ttl);
+  };
+  const dismissToast = () => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
   };
 
   // =====================================================================
@@ -1446,6 +1468,47 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   }, [pendingFocusRowId, tab, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
 
+  // Snapshot all pipeline slices so an Undo toast can restore them in one
+  // shot if the user clicks Undo within ~10s of a move. Doesn't capture
+  // DB-side state — branches that persist also pass an async DB reverser to
+  // undoLastMove below.
+  const buildPipelineSnapshot = () => ({
+    potential, awaiting, awarded, closed, invoice,
+  });
+  const restorePipelineSnapshot = (snap) => {
+    setPotential(snap.potential);
+    setAwaiting(snap.awaiting);
+    setAwarded(snap.awarded);
+    setClosed(snap.closed);
+    setInvoice(snap.invoice);
+  };
+
+  // Wraps a "show toast with Undo" call. `dbReverse` is optional; when
+  // present, clicking Undo runs it after restoring local state. Errors
+  // surface as a follow-up toast — the local restore already happened so
+  // the user sees the previous view immediately.
+  const offerUndo = (msg, snapshot, dbReverse) => {
+    showToast(msg, "check", {
+      action: {
+        label: "Undo",
+        icon: "undo",
+        onClick: async () => {
+          restorePipelineSnapshot(snapshot);
+          if (dbReverse) {
+            try {
+              await dbReverse();
+              showToast("Move undone");
+            } catch (e) {
+              showToast(`Undo failed: ${e?.message || e}`, "x");
+            }
+          } else {
+            showToast("Move undone");
+          }
+        },
+      },
+    });
+  };
+
   // Pipeline transitions. New flow (2026-04):
   //   Awaiting Verdict → Awarded (MOVE: row leaves Awaiting, appears in Awarded)
   //   Awaiting Verdict → Closed Out (MOVE)
@@ -1454,11 +1517,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   //   Awarded → Invoice  (COPY: Awarded stays; new Invoice row spawned)
   //   Potential → Invoice (COPY: Potential stays as a pipeline tracker;
   //                        new Invoice row spawned)
+  //   Invoice → Closed (PERSIST: project status flips to closed_out, invoice deleted)
+  //   Closed → Awaiting / Awarded / Invoice (PERSIST: reopens a closed-out
+  //                        project; flips status back, optionally re-spawns
+  //                        an anticipated_invoice row)
   // Orange-probability Potentials still auto-spawn an Invoice row at create
   // time (special-case shortcut — see handleCreated() below).
   const confirmMove = (newData) => {
     const { row, from, to } = moving;
     const newRow = { ...row, ...newData, id: mkId(), sourceId: row.id };
+
+    const snap = buildPipelineSnapshot();
 
     if (from === "awaiting" && to === "awarded") {
       // MOVE: Awaiting row leaves; Awarded row lands. No auto-Invoice — user
@@ -1466,19 +1535,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setAwarded(rs => [newRow, ...rs]);
       setAwaiting(rs => rs.filter(r => r.id !== row.id));
       setFlashId(newRow.id);
-      showToast("Awarded · carried to Awarded Projects");
+      offerUndo("Awarded · carried to Awarded Projects", snap, null);
       setTab("awarded");
     } else if (from === "awaiting" && to === "closed") {
       setClosed(rs => [newRow, ...rs]);
       setAwaiting(rs => rs.filter(r => r.id !== row.id));
       setFlashId(newRow.id);
-      showToast("Closed out · carried to Closed Out Projects");
+      offerUndo("Closed out · carried to Closed Out Projects", snap, null);
       setTab("closed");
     } else if (from === "awarded" && to === "potential") {
       // COPY: Potential row gets its own id; sourceId points back to Awarded.
       setPotential(rs => [newRow, ...rs]);
       setFlashId(newRow.id);
-      showToast("Tracked as Potential billing candidate");
+      offerUndo("Tracked as Potential billing candidate", snap, null);
       setTab("potential");
     } else if (from === "awarded" && to === "invoice") {
       // COPY: Awarded stays; mint an Invoice row with Awarded-carried fields.
@@ -1493,7 +1562,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       };
       setInvoice(rs => [invRow, ...rs]);
       setFlashId(invRow.id);
-      showToast("Invoice row created from Awarded project");
+      offerUndo("Invoice row created from Awarded project", snap, null);
       setTab("invoice");
     } else if (from === "potential" && to === "invoice") {
       // MOVE: Potential row leaves; Invoice row lands. The invoice row
@@ -1549,7 +1618,42 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           const { error: delErr } = await supabase
             .from("projects").delete().eq("id", row.id);
           if (delErr) throw delErr;
-          showToast("Invoice row created · Potential moved");
+          // Undo for this branch needs to: re-insert the potential project +
+          // its PMs, and delete the freshly-created anticipated_invoice + PMs.
+          offerUndo(
+            "Invoice row created · Potential moved",
+            snap,
+            async () => {
+              // 1. Reinsert the potential project (using its original id so
+              //    sourceId references stay intact).
+              const dbPatch = {
+                id: row.id,
+                status: "potential",
+                year: row.year ?? null,
+                project_name: row.name,
+                project_number: row.projectNumber || null,
+                role: row.role || null,
+                total_contract_amount: row.amount ?? null,
+                msmm_amount: row.msmm ?? null,
+                probability: row.probability || null,
+                next_action_date: row.nextActionDate || null,
+                next_action_note: row.dates || null,
+                client_id: row.clientId || null,
+                notes: row.notes || null,
+              };
+              const { error: rErr } = await supabase.from("projects").insert(dbPatch);
+              if (rErr) throw rErr;
+              if ((row.pmIds || []).length > 0) {
+                const { error: pmErr } = await supabase.from("project_pms")
+                  .insert(row.pmIds.map(uid => ({ project_id: row.id, user_id: uid })));
+                if (pmErr) throw pmErr;
+              }
+              // 2. Delete the anticipated_invoice row (and PMs cascade).
+              const { error: delInvErr } = await supabase
+                .from("anticipated_invoice").delete().eq("id", invData.id);
+              if (delInvErr) throw delInvErr;
+            }
+          );
         } catch (e) {
           setPotential(prevPotential);
           setInvoice(prevInvoice);
@@ -1646,7 +1750,76 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             return [closedRow, ...filtered];
           });
           setFlashId(closedId);
-          showToast("Closed out · moved from Invoice");
+          // Undo: restore the previous project status + re-insert the
+          // anticipated_invoice row. We capture the source row's status
+          // (was 'awarded'/'potential'/'awaiting') so we can flip back to
+          // exactly what it was. If the invoice had no upstream project
+          // (closedId was minted), undoing deletes the freshly-created
+          // closed_out project entirely.
+          const wasMintedClosed = !sourceId;
+          const restoreStatus =
+            sourceRow ? (
+              prevAwarded.find(r => r.id === sourceId)   ? "awarded"   :
+              prevPotential.find(r => r.id === sourceId) ? "potential" :
+              prevAwaiting.find(r => r.id === sourceId)  ? "awaiting"  :
+              "awarded"
+            ) : null;
+          offerUndo(
+            "Closed out · moved from Invoice",
+            snap,
+            async () => {
+              if (wasMintedClosed) {
+                // Drop the brand-new closed_out project + its PMs.
+                const { error } = await supabase
+                  .from("projects").delete().eq("id", closedId);
+                if (error) throw error;
+              } else {
+                // Flip the project's status back; restore stage-specific
+                // fields from the snapshot row.
+                const sr = sourceRow;
+                const { error } = await supabase.from("projects").update({
+                  status: restoreStatus,
+                  date_closed: null,
+                  reason_for_closure: null,
+                  role: sr?.role || null,
+                  total_contract_amount: sr?.amount ?? null,
+                  msmm_amount: sr?.msmm ?? null,
+                  probability: sr?.probability || null,
+                  next_action_date: sr?.nextActionDate || null,
+                  next_action_note: sr?.dates || null,
+                  anticipated_result_date: sr?.anticipatedResultDate || null,
+                  details: sr?.details || null,
+                  pool: sr?.pools || null,
+                  contract_expiry_date: sr?.contractExpiry || null,
+                }).eq("id", sourceId);
+                if (error) throw error;
+              }
+              // Recreate the anticipated_invoice row with its original id so
+              // the snapshot's invoice list lines up after the restore.
+              const { error: invErr2 } = await supabase
+                .from("anticipated_invoice").insert({
+                  id: row.id,
+                  source_project_id: sourceId || null,
+                  project_name: row.name,
+                  project_number: row.projectNumber || null,
+                  year: row.year ?? null,
+                  contract_amount: row.amount ?? null,
+                  type: row.type || "ENG",
+                  msmm_remaining_to_bill_year_start: row.remainingStart ?? null,
+                  ytd_actual_override: row.ytdActualOverride ?? null,
+                  rollforward_override: row.rollforwardOverride ?? null,
+                });
+              if (invErr2) throw invErr2;
+              if ((row.pmIds || []).length > 0) {
+                const { error: pmErr } = await supabase
+                  .from("anticipated_invoice_pms")
+                  .insert(row.pmIds.map(uid => ({
+                    anticipated_invoice_id: row.id, user_id: uid,
+                  })));
+                if (pmErr) throw pmErr;
+              }
+            }
+          );
         } catch (e) {
           setInvoice(prevInvoice);
           setPotential(prevPotential);
@@ -1654,6 +1827,163 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           setAwarded(prevAwarded);
           setClosed(prevClosed);
           showToast(`Close out failed: ${e.message || e}`, "x");
+        }
+      })();
+    } else if (from === "closed" && (to === "awaiting" || to === "awarded")) {
+      // Reopen a Closed Out project. Same DB row — only `status` flips and
+      // stage-specific fields get re-applied. The locally-known carried
+      // fields (clientId, role, msmm, etc.) carry forward in local state for
+      // the user; on the DB side those fields are still NULL from close-out
+      // and the user can edit them in the destination tab as needed.
+      const dbStatus = to === "awaiting" ? "awaiting" : "awarded";
+      const reopenedRow = {
+        ...row,
+        ...newData,
+        id: row.id,                              // same DB id
+        status: to === "awaiting" ? "Awaiting Verdict" : "Awarded",
+        dateClosed: "",
+        reason: "",
+      };
+      setClosed(rs => rs.filter(r => r.id !== row.id));
+      if (to === "awaiting") setAwaiting(rs => [reopenedRow, ...rs]);
+      else                   setAwarded (rs => [reopenedRow, ...rs]);
+      setFlashId(row.id);
+      setTab(to);
+      (async () => {
+        try {
+          const dbPatch = {
+            status: dbStatus,
+            date_closed: null,
+            reason_for_closure: null,
+          };
+          if (to === "awaiting") {
+            dbPatch.anticipated_result_date = newData.anticipatedResultDate || null;
+            dbPatch.notes = newData.notes || null;
+          } else {
+            dbPatch.details = newData.details || null;
+            dbPatch.pool = newData.pools || null;
+            dbPatch.contract_expiry_date = newData.contractExpiry || null;
+            // stage_id requires a name→id lookup against beacon.awarded_stages.
+            // Skipped for now — local state shows the picked stage label;
+            // user can edit via the Awarded drawer afterwards.
+          }
+          const { error } = await supabase
+            .from("projects").update(dbPatch).eq("id", row.id);
+          if (error) throw error;
+          offerUndo(
+            to === "awaiting"
+              ? "Reopened to Awaiting Verdict"
+              : "Reopened to Awarded",
+            snap,
+            async () => {
+              // Reverse: flip status back to closed_out and restore
+              // close-out fields from the original closed row.
+              const { error: revErr } = await supabase.from("projects").update({
+                status: "closed_out",
+                date_closed: row.dateClosed || null,
+                reason_for_closure: row.reason || null,
+                anticipated_result_date: null,
+                details: null, pool: null, contract_expiry_date: null,
+                notes: row.notes || null,
+              }).eq("id", row.id);
+              if (revErr) throw revErr;
+            }
+          );
+        } catch (e) {
+          restorePipelineSnapshot(snap);
+          showToast(`Reopen failed: ${e.message || e}`, "x");
+        }
+      })();
+    } else if (from === "closed" && to === "invoice") {
+      // Reopen as Active: project status flips back to 'awarded' AND a fresh
+      // anticipated_invoice row is spawned with the carried fields. The
+      // project re-appears in the Awarded tab too (consistent with how
+      // awarded → invoice keeps the source visible).
+      const invType  = newData._invoiceType || "ENG";
+      const invAmt   = Number(newData._amount) || null;
+      const invRem   = Number(newData._remaining) || null;
+      // Local invoice row uses a temp id; replaced once we have the DB id.
+      const tempInvId = mkId();
+      const invRow = {
+        id: tempInvId,
+        sourceId: row.id,
+        projectNumber: row.projectNumber || "",
+        name: row.name,
+        pmIds: [...(row.pmIds || [])],
+        amount: invAmt || 0,
+        type: invType,
+        remainingStart: invRem || 0,
+        values: Array(12).fill(0),
+        year: row.year,
+        ytdActualOverride: null,
+        rollforwardOverride: null,
+      };
+      const reopenedAwarded = {
+        ...row,
+        id: row.id,
+        status: "Awarded",
+        dateClosed: "",
+        reason: "",
+        stage: "Multi-Use Contract",
+      };
+      setClosed(rs => rs.filter(r => r.id !== row.id));
+      setAwarded(rs => [reopenedAwarded, ...rs]);
+      setInvoice(rs => [invRow, ...rs]);
+      setFlashId(tempInvId);
+      setTab("invoice");
+      (async () => {
+        try {
+          // 1. Flip the project status back to 'awarded' and clear close-out fields.
+          const { error: upErr } = await supabase.from("projects").update({
+            status: "awarded",
+            date_closed: null,
+            reason_for_closure: null,
+          }).eq("id", row.id);
+          if (upErr) throw upErr;
+          // 2. Spawn the anticipated_invoice row.
+          const { data: invData, error: invErr } = await supabase
+            .from("anticipated_invoice").insert({
+              source_project_id: row.id,
+              project_name: row.name,
+              project_number: row.projectNumber || null,
+              year: row.year ?? null,
+              contract_amount: invAmt,
+              type: invType,
+              msmm_remaining_to_bill_year_start: invRem,
+            }).select().single();
+          if (invErr) throw invErr;
+          // 3. Re-tag PMs onto the new invoice row.
+          if ((row.pmIds || []).length > 0) {
+            const { error: pmErr } = await supabase
+              .from("anticipated_invoice_pms")
+              .insert(row.pmIds.map(uid => ({
+                anticipated_invoice_id: invData.id, user_id: uid,
+              })));
+            if (pmErr) throw pmErr;
+          }
+          // Replace the temp local id with the real one.
+          setInvoice(rs => rs.map(r => r.id === tempInvId
+            ? { ...r, id: invData.id }
+            : r));
+          offerUndo(
+            "Reopened as Active · Invoice row spawned",
+            snap,
+            async () => {
+              // Reverse: drop the invoice row + flip status back to closed_out.
+              const { error: delErr } = await supabase
+                .from("anticipated_invoice").delete().eq("id", invData.id);
+              if (delErr) throw delErr;
+              const { error: revErr } = await supabase.from("projects").update({
+                status: "closed_out",
+                date_closed: row.dateClosed || null,
+                reason_for_closure: row.reason || null,
+              }).eq("id", row.id);
+              if (revErr) throw revErr;
+            }
+          );
+        } catch (e) {
+          restorePipelineSnapshot(snap);
+          showToast(`Reopen failed: ${e.message || e}`, "x");
         }
       })();
     }
@@ -2410,6 +2740,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               ? () => { triggerForward(liveRow, "invoice", "closed"); setDrawer(null); }
               : null
           }
+          onMoveBack={
+            drawer.table === "closed"
+              ? (destination) => { triggerForward(liveRow, "closed", destination); setDrawer(null); }
+              : null
+          }
           onDemoteFromOrange={
             drawer.table === "invoice"
             && liveRow.sourceId
@@ -2562,7 +2897,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {toast && (
         <div className="toast">
           <span className="toast-icon"><Icon name={toast.icon} size={11} stroke={2.2}/></span>
-          {toast.msg}
+          <span className="toast-msg">{toast.msg}</span>
+          {toast.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                const fn = toast.action.onClick;
+                dismissToast();
+                fn?.();
+              }}
+            >
+              <Icon name={toast.action.icon || "undo"} size={11} stroke={2.2}/>
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
 
