@@ -43,6 +43,22 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
     catch { /* storage disabled — fine */ }
   }, [pmCollapsed]);
 
+  // Chart view — "pair" (two side-by-side bars per month, default) or
+  // "average" (single bar per month at the midpoint of with/without Orange).
+  // Only the ENG chart exposes the toggle UI; PM consumes the same state
+  // but has no Orange data so renders identically either way. Persisted
+  // workspace-wide so a user's choice survives reloads + tab switches.
+  const [chartView, setChartView] = useState(() => {
+    try {
+      const v = localStorage.getItem("beacon.chartView");
+      return v === "average" ? "average" : "pair";
+    } catch { return "pair"; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("beacon.chartView", chartView); }
+    catch { /* storage disabled — fine */ }
+  }, [chartView]);
+
   // Close modal on ESC.
   useEffect(() => {
     if (!expanded) return;
@@ -102,6 +118,8 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
                   invoice={invoiceEng}
                   orangeSourceIds={orangeSourceIds}
                   monthlyBenchmark={monthlyBenchmark}
+                  view={chartView}
+                  onViewChange={setChartView}
                 />
 
                 {pmCollapsed ? (
@@ -148,6 +166,11 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
                         eyebrow="Project Management · PM"
                         invoice={invoicePm}
                         orangeSourceIds={orangeSourceIds}
+                        view={chartView}
+                        /* No onViewChange — PM doesn't render the toggle
+                           UI. PM rows have no Orange anyway (Orange is an
+                           ENG-side billing concept), so view choice is a
+                           no-op for PM visually. */
                         /* Benchmark is engineering-revenue only — PM chart
                            intentionally renders without a benchmark line
                            (InvoiceChart treats missing/0 as "no benchmark
@@ -277,13 +300,16 @@ const QuadCard = ({ eyebrow, title, sub, accent, className, onExpand, children }
 // A horizontal benchmark line is overlaid across the plot when set, with
 // a small numeric chip so the threshold is readable at a glance.
 // ----------------------------------------------------------------------------
-const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) => {
+const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange }) => {
   // Two parallel 12-month totals:
   //   totalsBase — sum of invoices NOT sourced from an Orange potential row
   //                (formally awarded work — the "secured" baseline)
   //   totalsAll  — sum of ALL invoices (base + Orange pre-awarded)
-  // The delta between them is the Orange pipeline's billing for the month.
-  const { totalsBase, totalsAll, yMax } = useMemo(() => {
+  //   totalsAvg  — arithmetic mean of base + all (the "midpoint" view, used
+  //                by the Average toggle to render a single consolidated bar
+  //                per month — exec read of "expected case").
+  // The delta between base and all is the Orange pipeline's billing for the month.
+  const { totalsBase, totalsAll, totalsAvg, yMax } = useMemo(() => {
     const totalsBase = Array(12).fill(0);
     const totalsAll  = Array(12).fill(0);
     for (const r of invoice) {
@@ -294,6 +320,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
         if (!isOrange) totalsBase[i] += v;
       }
     }
+    const totalsAvg = totalsAll.map((v, i) => (v + totalsBase[i]) / 2);
     // Pin yMax to the larger of (peak month, benchmark) so the benchmark
     // line stays inside the plot even when every month sits well under it.
     // Round up to a clean magnitude tick (e.g. peak=84k → 100k; peak=4.6M
@@ -302,7 +329,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
     const peak = Math.max(...totalsAll, benchFloor, 1);
     const mag = Math.pow(10, Math.floor(Math.log10(peak)));
     const yMax = Math.ceil(peak / mag) * mag;
-    return { totalsBase, totalsAll, yMax };
+    return { totalsBase, totalsAll, totalsAvg, yMax };
   }, [invoice, orangeSourceIds, monthlyBenchmark]);
 
   // Track SVG pixel box via ResizeObserver so internal geometry reflows
@@ -347,13 +374,17 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
   // visual real estate.
   const slot = plotW / 12;
   const hasOrange = invoice.some(r => r.sourceId && orangeSourceIds?.has(r.sourceId));
+  // Average mode collapses paired bars into one wider bar at the midpoint.
+  // Only meaningful when hasOrange — otherwise base and all are identical
+  // and the "average" is just the single bar that already renders.
+  const isAvgView = view === "average" && hasOrange;
   const PAIR_GAP = 3;
-  const barW = hasOrange
+  const barW = (hasOrange && !isAvgView)
     ? Math.max(6, Math.min(26, slot * 0.30))
     : Math.max(8, Math.min(54, slot * 0.62));
   const slotCx = (i) => padL + slot * i + slot / 2;
   const baseBarX = (i) =>
-    hasOrange ? slotCx(i) - barW - PAIR_GAP / 2 : slotCx(i) - barW / 2;
+    (hasOrange && !isAvgView) ? slotCx(i) - barW - PAIR_GAP / 2 : slotCx(i) - barW / 2;
   const allBarX  = (i) => slotCx(i) + PAIR_GAP / 2;
   const yFor = (v) => padT + plotH - (v / yMax) * plotH;
 
@@ -388,10 +419,13 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
 
   // Verdict per month: above/below benchmark drives the bar color class.
   // When no benchmark is set, every bar is "neutral" so the chart still
-  // communicates magnitude without misleading green/red noise.
+  // communicates magnitude without misleading green/red noise. In average
+  // mode the verdict tracks the avg value (the only bar shown) instead of
+  // the with-Orange total.
   const verdictFor = (i) => {
     if (!hasBenchmark) return "neutral";
-    return totalsAll[i] >= Number(monthlyBenchmark) ? "above" : "below";
+    const v = isAvgView ? totalsAvg[i] : totalsAll[i];
+    return v >= Number(monthlyBenchmark) ? "above" : "below";
   };
 
   const ytdActualAll  = totalsAll.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
@@ -402,12 +436,44 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
     ? totalsAll.slice(0, TODAY_MONTH + 1).filter(v => v >= Number(monthlyBenchmark)).length
     : 0;
 
+  // Toggle UI is only rendered when:
+  //   1. A handler was provided (ENG only — PM's setter was not wired)
+  //   2. There's actually Orange data — without it, "average" and "pair"
+  //      collapse to the same single bar and the toggle is meaningless.
+  const showViewToggle = !!onViewChange && hasOrange;
+
   return (
     <div className="chart-wrap">
-      {eyebrow && (
-        <div className="chart-eyebrow">
-          <span className="chart-eyebrow-mark"/>
-          <span>{eyebrow}</span>
+      {(eyebrow || showViewToggle) && (
+        <div className="chart-eyebrow-row">
+          {eyebrow && (
+            <div className="chart-eyebrow">
+              <span className="chart-eyebrow-mark"/>
+              <span>{eyebrow}</span>
+            </div>
+          )}
+          {showViewToggle && (
+            <div className="events-view-toggle chart-view-toggle"
+                 role="tablist"
+                 aria-label="Chart view">
+              <button
+                type="button" role="tab"
+                aria-selected={view === "pair"}
+                className={view === "pair" ? "active" : ""}
+                onClick={() => onViewChange("pair")}
+                title="Show with-Orange and without-Orange as side-by-side bars">
+                Pair
+              </button>
+              <button
+                type="button" role="tab"
+                aria-selected={view === "average"}
+                className={view === "average" ? "active" : ""}
+                onClick={() => onViewChange("average")}
+                title="Show a single bar at the midpoint of with/without Orange">
+                Average
+              </button>
+            </div>
+          )}
         </div>
       )}
       <div className="chart-kpis">
@@ -445,6 +511,10 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
         </div>
       </div>
 
+      {/* Scroll wrapper — at phone widths the SVG gets a min-width so bars
+          and month labels have legible space; the wrapper provides a
+          horizontal scroll affordance. KPIs above stay pinned. */}
+      <div className="chart-svg-wrap">
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -513,29 +583,95 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
           />
         )}
 
-        {/* Bars — side-by-side pair per month. Left bar = Without-Orange
-            (secured baseline). Right bar = With-Orange (total). Each bar's
-            verdict color is computed against the same monthly benchmark
-            independently, so a month can read "base on target / total
-            on target" or "base below / total above" — useful when Orange
-            pre-awarded billing is what's pushing the month over the line. */}
+        {/* Bars — branches on view mode.
+            Pair view (default) renders side-by-side bars per month:
+              Left = Without-Orange (secured baseline)
+              Right = With-Orange (total)
+            Each bar's verdict color is computed independently so a month
+            can read "base below / total above" — surfacing when Orange
+            pre-awarded billing is what's pushing the month over the line.
+
+            Average view renders ONE bar per month at the midpoint of the
+            two values — the "expected case" exec read. Verdict tracks
+            the avg vs benchmark. On desktop, a small diff chip floats
+            above each bar showing how far the avg is from target. */}
         {totalsAll.map((vAll, i) => {
           const vBase = totalsBase[i];
+          const vAvg  = totalsAvg[i];
           const isProj = i > TODAY_MONTH;
           const verdictAll  = verdictFor(i);
           const verdictBase = !hasBenchmark
             ? "neutral"
             : (vBase >= Number(monthlyBenchmark) ? "above" : "below");
+          const verdictAvg  = !hasBenchmark
+            ? "neutral"
+            : (vAvg >= Number(monthlyBenchmark) ? "above" : "below");
 
           const yBottom = padT + plotH;
           const yTopAll  = yFor(vAll);
           const yTopBase = yFor(vBase);
+          const yTopAvg  = yFor(vAvg);
           const heightAll  = Math.max(0, yBottom - yTopAll);
           const heightBase = Math.max(0, yBottom - yTopBase);
+          const heightAvg  = Math.max(0, yBottom - yTopAvg);
 
           const projCls = isProj ? " proj" : " actual";
           const fillForVerdict = (v) => isProj ? `url(#hatch-${v})` : undefined;
 
+          // Diff vs benchmark for the average bar — drives the floating
+          // delta label above the bar. Skip near-zero diffs (< $100) so
+          // we don't render "+$0" noise.
+          const diff = vAvg - Number(monthlyBenchmark || 0);
+          const showDiff = isAvgView && hasBenchmark && Math.abs(diff) >= 100 && vAvg > 0;
+          const diffSign = diff >= 0 ? "+" : "−";
+          const diffText = `${diffSign}${fmtMoney(Math.abs(diff), false)}`;
+          // Cap label Y so it never escapes the plot top — keep it inside
+          // the chart even when the avg bar is near yMax.
+          const diffY = Math.max(padT + 12, yTopAvg - 8);
+
+          if (isAvgView) {
+            // Single average bar
+            return (
+              <g key={i} className={hoverIdx === i ? "bar-grp hover" : "bar-grp"}>
+                <rect
+                  x={slotCx(i) - barW / 2}
+                  y={padT}
+                  width={barW}
+                  height={plotH}
+                  rx="4"
+                  className="bar-track"
+                />
+                {heightAvg > 0.5 && (
+                  <rect
+                    x={baseBarX(i)} y={yTopAvg}
+                    width={barW} height={heightAvg}
+                    rx="3"
+                    className={`bar bar-avg verdict-${verdictAvg}${projCls}`}
+                    fill={fillForVerdict(verdictAvg)}
+                  />
+                )}
+                {vAvg > 0 && (
+                  <line
+                    x1={baseBarX(i)} x2={baseBarX(i) + barW}
+                    y1={yTopAvg} y2={yTopAvg}
+                    className={`bar-cap verdict-${verdictAvg}`}
+                  />
+                )}
+                {/* Delta-vs-benchmark label — desktop-only via CSS. */}
+                {showDiff && (
+                  <text
+                    x={slotCx(i)} y={diffY}
+                    textAnchor="middle"
+                    className={`chart-bar-diff verdict-${verdictAvg}`}
+                  >
+                    {diffText}
+                  </text>
+                )}
+              </g>
+            );
+          }
+
+          // Pair view — original two-bar rendering
           return (
             <g key={i} className={hoverIdx === i ? "bar-grp hover" : "bar-grp"}>
               {/* Slot guide — barely-visible track behind the pair so the
@@ -625,28 +761,35 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
 
         {/* Hover readout */}
         {hoverIdx != null && (() => {
-          const v = totalsAll[hoverIdx];
+          const vAll  = totalsAll[hoverIdx];
           const vBase = totalsBase[hoverIdx];
+          const vAvg  = totalsAvg[hoverIdx];
+          // Primary value depends on view mode — in Average mode the
+          // tooltip leads with the avg; in Pair mode it leads with the
+          // with-Orange total like before.
+          const v = isAvgView ? vAvg : vAll;
           const verdict = verdictFor(hoverIdx);
           const isProj = hoverIdx > TODAY_MONTH;
           const x = slotCx(hoverIdx);
           const yTop = yFor(v);
           const lines = [];
           lines.push({ y: 18, cls: "chart-tip-label", text: `${MONTHS[hoverIdx]} ${THIS_YEAR} · ${isProj ? "Projection" : "Actual"}` });
-          lines.push({ y: 38, cls: `chart-tip-val verdict-${verdict}`, text: fmtMoney(v, false) });
-          if (hasOrange) {
+          lines.push({ y: 38, cls: `chart-tip-val verdict-${verdict}`, text: fmtMoney(v, false) + (isAvgView ? " avg" : "") });
+          if (isAvgView) {
+            lines.push({ y: 56, cls: "chart-tip-sub", text: `range · ${fmtMoney(vBase, false)} – ${fmtMoney(vAll, false)}` });
+          } else if (hasOrange) {
             lines.push({ y: 56, cls: "chart-tip-sub", text: `w/o Orange · ${fmtMoney(vBase, false)}` });
           }
           if (hasBenchmark) {
             const diff = v - Number(monthlyBenchmark);
             lines.push({
-              y: hasOrange ? 74 : 56,
+              y: (isAvgView || hasOrange) ? 74 : 56,
               cls: `chart-tip-diff verdict-${verdict}`,
               text: `${diff >= 0 ? "▲ " : "▼ "}${fmtMoney(Math.abs(diff), false)} vs target`,
             });
           }
           const lastY = lines[lines.length - 1].y;
-          const boxW = 200;
+          const boxW = 220;
           const boxH = lastY + 14;
           const left = Math.min(W - padR - boxW, Math.max(padL, x - boxW / 2));
           const top  = Math.max(padT + 4, yTop - boxH - 14);
@@ -660,6 +803,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
           );
         })()}
       </svg>
+      </div>
 
       <div className="chart-legend">
         {hasBenchmark ? (
@@ -671,10 +815,16 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow }) =
           <span><span className="swatch verdict-orange-cap"/>Monthly total</span>
         )}
         {hasOrange && (
-          <span className="legend-pair">
-            <span className="swatch pair-base"/>w/o Orange
-            <span className="swatch pair-all"/>with Orange
-          </span>
+          isAvgView ? (
+            <span className="legend-pair">
+              <span className="swatch pair-avg"/>Average · w/o + with Orange
+            </span>
+          ) : (
+            <span className="legend-pair">
+              <span className="swatch pair-base"/>w/o Orange
+              <span className="swatch pair-all"/>with Orange
+            </span>
+          )
         )}
         <span><span className="swatch hatched"/>Projection</span>
         <span><span className="swatch today"/>Today</span>

@@ -1881,6 +1881,17 @@ html, body { overflow-x: clip; }
 .kpi-val.mono-xl { color: var(--text); }
 .kpi-sub { font-size: 11.5px; color: var(--text-soft); }
 
+/* Scroll wrapper around the SVG — invisible at desktop (just flexes
+   identically to the old SVG-as-flex-item behavior). On phone (≤640px)
+   it gains overflow-x: auto and the SVG inside gets a min-width so bars
+   and month labels have legible space; user swipes horizontally to
+   navigate the year. KPIs above stay pinned. */
+.chart-svg-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  width: 100%;
+}
 .flow-chart {
   width: 100%;
   flex: 1 1 auto;
@@ -2127,6 +2138,52 @@ html, body { overflow-x: clip; }
   background: var(--accent);
   border-radius: 2px;
 }
+/* Eyebrow row — holds the eyebrow on the left and the optional view toggle
+   on the right (only ENG renders the toggle today). Maintains the existing
+   eyebrow's negative bottom margin so it nests cleanly above the KPIs. */
+.chart-eyebrow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: -4px;
+}
+.chart-eyebrow-row .chart-eyebrow { margin-bottom: 0; }
+
+/* Compact variant of .events-view-toggle, sized down to fit alongside the
+   chart eyebrow without dominating the row. */
+.chart-view-toggle {
+  flex-shrink: 0;
+}
+.chart-view-toggle button {
+  padding: 3px 11px;
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+
+/* Delta-vs-benchmark label that floats above each average bar. Mono micro-
+   typography so it reads as a chart annotation, not a primary number.
+   Verdict colors mirror the bar's own color — green when above target,
+   rose when below — so the eye picks up over/under at a glance.
+   Hidden on phone (chart already scrolls horizontally; labels would
+   crowd the bars at narrow widths). */
+.chart-bar-diff {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  paint-order: stroke;
+  stroke: var(--bg-elev);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.chart-bar-diff.verdict-above   { fill: var(--bar-good); }
+.chart-bar-diff.verdict-below   { fill: var(--bar-bad); }
+.chart-bar-diff.verdict-neutral { fill: var(--text-muted); }
+@media (max-width: 640px) {
+  .chart-bar-diff { display: none; }
+}
 
 /* ============================================================================
  * Bar chart — Quad Sheet's Cash Flow tile.
@@ -2283,6 +2340,14 @@ html, body { overflow-x: clip; }
 }
 .chart-legend .swatch.pair-base { background: var(--bar-neutral-soft); height: 9px; width: 5px; border-radius: 1px; }
 .chart-legend .swatch.pair-all  { background: var(--bar-neutral);       height: 9px; width: 5px; border-radius: 1px; margin-right: 4px; margin-left: 0; }
+/* Average swatch — a single wider chip in the saturated bar tone, set
+   apart from pair-base/pair-all so the legend reads "one bar, midpoint". */
+.chart-legend .swatch.pair-avg {
+  background: var(--bar-neutral);
+  height: 9px; width: 12px;
+  border-radius: 1px;
+  margin-right: 4px;
+}
 
 /* Bar-pair fills — left bar (Without-Orange) gets the soft tone of its
    verdict; right bar (With-Orange) gets the saturated tone. This keeps
@@ -2294,6 +2359,13 @@ html, body { overflow-x: clip; }
 .bar-chart .bar.bar-pair-all.verdict-above    { fill: var(--bar-good); }
 .bar-chart .bar.bar-pair-all.verdict-below    { fill: var(--bar-bad); }
 .bar-chart .bar.bar-pair-all.verdict-neutral  { fill: var(--bar-neutral); }
+
+/* Average bar — single bar in the saturated verdict tone (matches
+   bar-pair-all so the visual weight is "decisive single read", not
+   "soft baseline"). */
+.bar-chart .bar.bar-avg.verdict-above    { fill: var(--bar-good); }
+.bar-chart .bar.bar-avg.verdict-below    { fill: var(--bar-bad); }
+.bar-chart .bar.bar-avg.verdict-neutral  { fill: var(--bar-neutral); }
 
 /* ---- Q2 · Event ledger ---- */
 .event-ledger {
@@ -6218,6 +6290,72 @@ html, body { overflow-x: clip; }
   }
   /* ENG chart claims full card height when PM section is hidden */
   .invoice-chart-stack > .chart-wrap:first-of-type { flex: 1 1 auto; min-height: 360px; }
+
+  /* ---- CHART — horizontal scroll on phone ----
+     The 12-month SVG needs ~580px to render bars and month labels
+     legibly; at phone widths we wrap it in a scroll container so users
+     can swipe through the year while KPIs above stay anchored. */
+  .chart-svg-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    /* Subtle scroll-shadow hint at the right edge so users know more
+       content lives beyond the viewport. Drops once user scrolls past 90%. */
+    background:
+      linear-gradient(to right, var(--surface) 30%, transparent),
+      linear-gradient(to right, transparent, var(--surface) 70%) 100% 0,
+      radial-gradient(farthest-side at 0 50%, rgba(60,46,18,.10), transparent),
+      radial-gradient(farthest-side at 100% 50%, rgba(60,46,18,.10), transparent) 100% 0;
+    background-repeat: no-repeat;
+    background-size: 30px 100%, 30px 100%, 14px 100%, 14px 100%;
+    background-attachment: local, local, scroll, scroll;
+    /* Thin scrollbar matching the rest of the app's mobile pattern */
+    scrollbar-width: thin;
+  }
+  .chart-svg-wrap::-webkit-scrollbar { height: 5px; }
+  .chart-svg-wrap::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 3px;
+  }
+  .chart-svg-wrap > .flow-chart {
+    min-width: 600px;
+    width: 600px;
+    height: 280px;
+    max-height: none;
+    flex: 0 0 auto;          /* don't shrink — let it overflow horizontally */
+    cursor: default;          /* crosshair is meaningless without hover */
+  }
+
+  /* Compact the chart-kpis on phone — single row, smaller numbers,
+     scrollable horizontally if they don't fit. KPIs are derived totals
+     (YTD, projection, target months) so vertical space is precious. */
+  .quad-q1 .chart-kpis {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0;
+    padding: 4px 0;
+    scrollbar-width: none;
+  }
+  .quad-q1 .chart-kpis::-webkit-scrollbar { display: none; }
+  .quad-q1 .chart-kpis .kpi {
+    padding: 0 14px;
+    min-width: max-content;     /* override 40% min-width — let content size */
+    flex-shrink: 0;
+  }
+  .quad-q1 .chart-kpis .kpi:first-child { padding-left: 4px; }
+  .quad-q1 .chart-kpis .kpi-val { font-size: 18px; }
+  .quad-q1 .chart-kpis .kpi-sub { font-size: 10.5px; }
+  .quad-q1 .kpi-sep { display: block; }    /* keep separators visible inline */
+
+  /* Month labels — shorten to 1 letter would lose info; instead bump
+     font down slightly so 3-letter mono fits the 50px slot at min-width
+     600 cleanly. */
+  .quad-q1 .chart-month { font-size: 10px; letter-spacing: 0; }
+  .quad-q1 .chart-tick  { font-size: 9.5px; }
+
+  /* Legend wraps under the chart; keep at viewport width (not scrolled) */
+  .quad-q1 .chart-legend { flex-wrap: wrap; gap: 8px 14px; font-size: 10.5px; }
 
   /* Card chrome — tighten outer padding; quad-card has 22px 24px by default */
   .recv-card { padding: 20px 18px 18px; }
