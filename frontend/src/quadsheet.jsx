@@ -53,7 +53,7 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
   const cfgs = {
     events: {
       eyebrow: "02 · Calendar",
-      title: "Events",
+      title: "Upcoming Events",
       sub: `${events.length} tracked · sorted by date`,
       accent: "cal",
     },
@@ -147,7 +147,10 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
                         eyebrow="Project Management · PM"
                         invoice={invoicePm}
                         orangeSourceIds={orangeSourceIds}
-                        monthlyBenchmark={monthlyBenchmark}
+                        /* Benchmark is engineering-revenue only — PM chart
+                           intentionally renders without a benchmark line
+                           (InvoiceChart treats missing/0 as "no benchmark
+                           set" and keeps bars neutral cadmium). */
                       />
                     </div>
                   </>

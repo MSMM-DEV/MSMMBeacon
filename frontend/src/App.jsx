@@ -1979,7 +1979,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             {stats.map((s, i) => (
               <div key={i} className="stat">
                 <div className="stat-label">{s.label}</div>
-                <div className="stat-val">{fmtMoney(s.val)}</div>
+                <div className="stat-val">{fmtMoney(s.val, false)}</div>
                 <div className="stat-delta" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{s.sub}</div>
                 <Sparkline values={s.spark}/>
               </div>

@@ -330,11 +330,19 @@ function initialsFromName(name) {
 function adaptUser(u, i) {
   const display = u.display_name || [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || u.login_name || u.email;
   const short = u.short_name || display;
+  // Always two letters: first letter of first_name + first letter of last_name.
+  // Falls through to initialsFromName(display) when both are missing so we
+  // still produce something readable for legacy rows without a split name.
+  const fl = (u.first_name || "").trim()[0] || "";
+  const ll = (u.last_name  || "").trim()[0] || "";
+  const initials = (fl || ll)
+    ? (fl + ll).toUpperCase()
+    : initialsFromName(display);
   return {
     id: u.id,
     name: display,
     shortName: short,
-    initials: initialsFromName(short),
+    initials,
     color: PM_COLORS[i % PM_COLORS.length],
   };
 }

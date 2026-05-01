@@ -2108,11 +2108,11 @@ export const InvoiceTable = ({
                   <th className="invoice-expand-col"/>
                   {sortableTh("projectNumber", "Proj #", { className: "sticky-1" })}
                   {sortableTh("name", "Project Name", { className: "sticky-2", style: { minWidth: 260 } })}
-                  {sortableTh("role", "Role", { style: { minWidth: 90 } })}
-                  <th style={{ minWidth: 70 }}>Type</th>
-                  {sortableTh("pm", "PM", { style: { minWidth: 80 } })}
-                  {sortableTh("amount", "Contract")}
-                  <th>Remaining<br/>Jan 1</th>
+                  {sortableTh("role", "Role", { style: { minWidth: 76 } })}
+                  <th style={{ minWidth: 76 }}>Type</th>
+                  {sortableTh("pm", "PM", { style: { minWidth: 70 } })}
+                  {sortableTh("amount", "Contract", { style: { minWidth: 110 } })}
+                  <th style={{ minWidth: 96 }}>Remaining<br/>Jan&nbsp;1</th>
                   {MONTHS.map((m, i) => (
                     <th key={i} className={i <= TODAY_MONTH ? "month-actual" : "month-proj"}>
                       {m}
@@ -2121,8 +2121,8 @@ export const InvoiceTable = ({
                       </div>
                     </th>
                   ))}
-                  <th className="total-cell">YTD Actual</th>
-                  <th className="total-cell">Rollforward</th>
+                  <th className="total-cell" style={{ minWidth: 96 }}>YTD Actual</th>
+                  <th className="total-cell" style={{ minWidth: 104 }}>Rollforward</th>
                   <th style={{ minWidth: 60 }}></th>
                 </tr>
               </thead>

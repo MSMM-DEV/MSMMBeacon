@@ -36,27 +36,27 @@ export const UserTag = ({ userId, size = "xs", nameOnly = false }) => {
   );
 };
 
+// Renders a row of users as `[avatar][initials]` chips. The initials text
+// next to each avatar makes the column directly scannable instead of
+// requiring a hover-tooltip read on the small in-circle text. Wraps to
+// extra lines when the cell is narrow; overflowing users collapse to "+N".
 export const UserStack = ({ ids, max = 3 }) => {
-  const shown = ids.slice(0, max);
-  const extra = ids.length - shown.length;
+  const shown = (ids || []).slice(0, max);
+  const extra = (ids || []).length - shown.length;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center" }}>
-      {shown.map((id, i) => {
+    <span className="user-chip-stack">
+      {shown.map((id) => {
         const u = userById(id);
         if (!u) return null;
         return (
-          <span key={id} className={`avatar sm ${u.color}`}
-                title={u.name}
-                style={{ marginLeft: i === 0 ? 0 : -7, border: "2px solid var(--surface)" }}>
-            {u.initials}
+          <span key={id} className="user-chip" title={u.name}>
+            <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+            <span className="user-chip-label">{u.initials}</span>
           </span>
         );
       })}
       {extra > 0 && (
-        <span className="avatar sm" style={{
-          marginLeft: -7, background: "var(--surface-2)", color: "var(--text-muted)",
-          border: "2px solid var(--surface)"
-        }}>+{extra}</span>
+        <span className="user-chip-more" title={`${extra} more`}>+{extra}</span>
       )}
     </span>
   );
