@@ -5945,6 +5945,181 @@ html, body { overflow-x: clip; }
   letter-spacing: 0;
 }
 
+/* ===== Click-to-expand KPI (Billed / Pending) ===== */
+/* The KPI block gains a button trigger when expandable. The trigger wraps
+   the label/val/sub stack so clicking anywhere on the KPI toggles its
+   inline ledger. Contract is a plain div (no expand).
+   The chevron in the label rotates 90° when open — same vocabulary as
+   the L1/L2 chevrons. */
+.recv-kpi-trigger {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: default;
+  border-radius: 8px;
+  width: 100%;
+}
+.recv-kpi-x.is-clickable .recv-kpi-trigger {
+  cursor: pointer;
+  /* Negative margin + padding lets the hover background extend slightly
+     past the column edges without enlarging the layout. */
+  padding: 6px 8px;
+  margin: -6px -8px;
+  transition: background .15s;
+}
+.recv-kpi-x.is-clickable .recv-kpi-trigger:hover {
+  background: var(--recv-accent-softer);
+}
+.recv-kpi-x.is-clickable.open .recv-kpi-trigger {
+  background: var(--recv-accent-softer);
+}
+.recv-kpi-x.is-clickable .recv-kpi-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.recv-kpi-x.is-clickable .recv-kpi-trigger:hover .recv-kpi-label {
+  color: var(--recv-accent-strong);
+}
+.recv-kpi-x.is-clickable.open .recv-kpi-label {
+  color: var(--recv-accent-strong);
+}
+.recv-kpi-chev {
+  display: inline-flex;
+  width: 14px; height: 14px;
+  align-items: center; justify-content: center;
+  border-radius: 4px;
+  color: var(--text-soft);
+  transition: transform .2s ease, color .15s, background .15s;
+}
+.recv-kpi-x.is-clickable .recv-kpi-trigger:hover .recv-kpi-chev,
+.recv-kpi-x.is-clickable.open .recv-kpi-chev {
+  color: var(--recv-accent);
+  background: var(--surface);
+}
+.recv-kpi-chev.open { transform: rotate(90deg); }
+
+/* ===== L4 · Per-month invoice ledger ===== */
+.recv-kpi-entries {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 12px 4px 4px;
+  border-top: 1px dashed color-mix(in srgb, var(--recv-accent) 30%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.recv-entry {
+  display: grid;
+  grid-template-columns: 50px 1fr auto auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  font-size: 12.5px;
+  border-radius: 4px;
+  transition: background .12s;
+}
+.recv-entry:last-child { border-bottom: 0; }
+.recv-entry:hover { background: var(--surface); }
+
+.recv-entry-month {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.recv-entry.tone-paid .recv-entry-month {
+  color: var(--recv-paid);
+}
+.recv-entry.tone-pending .recv-entry-month {
+  color: var(--recv-pending);
+}
+.recv-entry-amt {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.recv-entry.tone-paid    .recv-entry-amt { color: var(--text); }
+.recv-entry.tone-pending .recv-entry-amt { color: var(--recv-pending); }
+
+.recv-entry-file {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+}
+.recv-entry-file-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .02em;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--recv-accent) 30%, var(--border));
+  border-radius: 999px;
+  color: var(--recv-accent);
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s, transform .12s;
+}
+.recv-entry-file-btn:hover {
+  background: var(--recv-accent);
+  color: #FFF;
+  border-color: var(--recv-accent);
+  transform: translateY(-1px);
+}
+[data-theme="dark"] .recv-entry-file-btn:hover { color: var(--bg); }
+.recv-entry-file-btn svg { transition: transform .15s; }
+.recv-entry-no-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .02em;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-style: italic;
+}
+
+.recv-entry-meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  white-space: nowrap;
+  grid-column: 1 / -1;
+  margin-top: -4px;
+  padding-left: 62px;
+}
+
+/* ===== L1 · "contract only" metric (no invoices yet) ===== */
+.recv-metric.is-empty .recv-metric-num {
+  color: var(--text);
+  font-weight: 500;
+}
+.recv-metric.is-empty .recv-metric-label {
+  color: var(--recv-accent);
+  letter-spacing: .12em;
+}
+
 .recv-detail-actions {
   display: flex;
   justify-content: flex-end;
