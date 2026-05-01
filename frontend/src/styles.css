@@ -6202,10 +6202,30 @@ html, body { overflow-x: clip; }
    numbers anchored right. Touch targets bumped to ≥36px.
    ============================================================================ */
 @media (max-width: 640px) {
+  /* ---- Q1 CHART — height conflict fix ----
+     The ≤1080px @media pins .quad-q1 to height: 880px, but at ≤840px the
+     .quad grid uses grid-auto-rows: 540px. The fixed height collides with
+     the track and the chart's flex math collapses, leaving the card blank.
+     Release both: let rows AND Q1 grow with content. PM chart hides on
+     phone (only ENG renders) so the card doesn't dominate the viewport
+     with two cramped sub-charts. */
+  .quad { grid-auto-rows: auto !important; }
+  .quad-q1 { height: auto !important; min-height: 600px; }
+  .invoice-chart-stack > .invoice-chart-divider,
+  .invoice-chart-stack > .invoice-chart-pm-wrap,
+  .invoice-chart-stack > .invoice-chart-toggle.collapsed {
+    display: none !important;
+  }
+  /* ENG chart claims full card height when PM section is hidden */
+  .invoice-chart-stack > .chart-wrap:first-of-type { flex: 1 1 auto; min-height: 360px; }
+
   /* Card chrome — tighten outer padding; quad-card has 22px 24px by default */
   .recv-card { padding: 20px 18px 18px; }
 
-  /* HEADER — title block above; search + sort below side-by-side */
+  /* HEADER — title block above; search + sort stack vertically below.
+     Stacking is critical: previous flex-wrap behavior caused the toggle to
+     overflow the right edge while the search rendered as an oversized
+     pill due to flex-shrink resolution. Stack with explicit heights. */
   .recv-head {
     flex-direction: column;
     align-items: stretch;
@@ -6216,22 +6236,32 @@ html, body { overflow-x: clip; }
   .recv-card .quad-title { font-size: 19px; line-height: 1.15; }
   .quad-sub { font-size: 12px; line-height: 1.45; }
   .recv-head-r {
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: 10px;
+    width: 100%;
   }
   .recv-search {
-    flex: 1 1 100%;
-    width: auto;
+    width: 100%;
     min-width: 0;
-    padding: 9px 14px;
+    height: 40px;            /* explicit prevents flex-stretch surprises */
+    padding: 0 14px;
     font-size: 13px;
+    box-sizing: border-box;
   }
-  .recv-toggle { flex: 0 0 auto; }
+  .recv-toggle {
+    width: 100%;
+    display: flex;
+    box-sizing: border-box;
+    height: 40px;
+  }
   .recv-toggle button {
-    padding: 8px 18px;     /* ≥36px tappable */
+    flex: 1;
+    text-align: center;
+    padding: 0 16px;
     font-size: 12.5px;
+    line-height: 1;
   }
 
   /* L1 — sub bar reflows to a 2-row grid card. Names get the top row,
