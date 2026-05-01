@@ -5429,3 +5429,679 @@ html, body { overflow-x: clip; }
   .target-readout-cell { padding-right: 12px; }
   .target-readout-cell + .target-readout-cell { padding-left: 12px; }
 }
+
+/* ============================================================================
+   Q5 — Subs Receivables · executive ledger
+   ----------------------------------------------------------------------------
+   Sub-centric inversion of the Invoice tab. Lives full-width below the four
+   atomic quadrants. Visual idiom: editorial balance-sheet ledger — vertical
+   stack of subs, mono numerics in vertical columns, hairline rules instead of
+   nested cards. Three-level expansion (sub → project → monthly history).
+   Distinct teal accent stripe ("recv") so it reads as its own section while
+   inheriting the .quad-card chrome.
+   ============================================================================ */
+
+:root {
+  --recv-accent: #3D7A78;          /* deep teal — distinct from flow/cal/await/soq */
+  --recv-accent-soft: #D9E8E6;     /* tonally adjacent backgrounds */
+  --recv-tone-active: #C8823B;     /* same as accent — pending in the air */
+  --recv-tone-high:   #B86B66;     /* rose — heavily-pending sub */
+  --recv-tone-settled: #7E8F6F;    /* sage — fully paid */
+  --recv-grid: 2.6fr 1.05fr 1.05fr 1.05fr 1.05fr 1.4fr;
+}
+[data-theme="dark"] {
+  --recv-accent: #6FB1AE;
+  --recv-accent-soft: #2A3938;
+  --recv-tone-active: #E3A15E;
+  --recv-tone-high:   #D68984;
+  --recv-tone-settled: #A2B692;
+}
+
+/* The receivables card lives in its own auto-height grid row appended to the
+   .quad grid. Spans full width like Q1 does. */
+.quad > .recv-card {
+  grid-column: 1 / -1;
+}
+@media (max-width: 1080px) {
+  .quad > .recv-card { grid-column: 1; }
+}
+
+.recv-card {
+  /* Override the fixed .quad row-height so this card breathes vertically as
+     subs expand. The .quad grid still defines its own row, but a hard height
+     on the card would clip content during expansion. */
+  min-height: 280px;
+  height: auto;
+}
+.quad-card[data-accent="recv"]::before { background: var(--recv-accent); }
+
+.recv-head {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+.recv-head-l {
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.recv-head-l .quad-eyebrow { color: var(--recv-accent); }
+.recv-head-r {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.recv-head-sub-num {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.recv-search {
+  appearance: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text);
+  width: 220px;
+  transition: border-color .15s, background .15s;
+}
+.recv-search:focus {
+  outline: none;
+  border-color: var(--recv-accent);
+  background: var(--surface);
+}
+.recv-search::placeholder { color: var(--text-soft); }
+
+.recv-toggle button.active {
+  color: var(--recv-accent);
+}
+
+/* ----- column legend (vertical alignment guide) ----- */
+.recv-col-legend {
+  display: grid;
+  grid-template-columns: var(--recv-grid);
+  gap: 14px;
+  align-items: end;
+  padding: 18px 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  border-bottom: 1px dashed var(--border);
+}
+.recv-legend-num   { text-align: right; }
+.recv-legend-meter { text-align: center; }
+
+/* ----- body ----- */
+.recv-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+.recv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ===== L1 · Sub bar ===== */
+.recv-sub {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  transition: background .12s;
+}
+.recv-sub:last-child { border-bottom: none; }
+.recv-sub::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background .15s;
+}
+.recv-sub.tone-active::before  { background: var(--recv-tone-active); }
+.recv-sub.tone-high::before    { background: var(--recv-tone-high); }
+.recv-sub.tone-settled::before { background: var(--recv-tone-settled); }
+.recv-sub.open  { background: linear-gradient(to right, var(--recv-accent-soft) 0, var(--recv-accent-soft) 2px, var(--surface) 2px); }
+[data-theme="dark"] .recv-sub.open { background: linear-gradient(to right, var(--recv-accent-soft) 0, var(--recv-accent-soft) 2px, var(--surface) 2px); }
+.recv-sub:not(.open):hover { background: var(--surface-2); }
+
+.recv-sub-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: var(--recv-grid);
+  gap: 14px;
+  align-items: center;
+  padding: 16px 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: padding .15s;
+  border: 0;
+}
+.recv-sub.open .recv-sub-row { padding-bottom: 12px; }
+
+.recv-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.recv-chev {
+  display: inline-flex;
+  width: 18px; height: 18px;
+  align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: var(--surface);
+  transition: transform .18s, border-color .15s, background .15s;
+  flex-shrink: 0;
+}
+.recv-chev.open {
+  transform: rotate(90deg);
+  border-color: var(--recv-accent);
+  color: var(--recv-accent);
+  background: var(--recv-accent-soft);
+}
+.recv-name-text {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.recv-projects-pill {
+  display: inline-flex;
+  padding: 2px 9px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .04em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.recv-num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.recv-num-billed { color: var(--text); }
+.recv-num-pending.is-pending { color: var(--accent-ink); font-weight: 600; }
+.recv-num-remaining { color: var(--text-muted); }
+.recv-num-remaining.is-overrun {
+  color: var(--rose);
+  font-weight: 600;
+}
+[data-theme="dark"] .recv-num-pending.is-pending { color: var(--accent); }
+
+/* ----- burn-down meter ----- */
+.recv-meter {
+  position: relative;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.recv-meter-fill {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  transition: width .25s ease;
+}
+.recv-meter-fill.paid {
+  background: linear-gradient(90deg, var(--sage), color-mix(in srgb, var(--sage) 80%, var(--text) 20%));
+}
+.recv-meter-fill.pending {
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--accent) 70%, transparent 30%),
+    color-mix(in srgb, var(--accent) 70%, transparent 30%) 4px,
+    color-mix(in srgb, var(--accent) 30%, transparent 70%) 4px,
+    color-mix(in srgb, var(--accent) 30%, transparent 70%) 8px
+  );
+  opacity: .85;
+}
+.recv-meter-pct {
+  position: relative;
+  z-index: 1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  text-shadow: 0 1px 0 rgba(255,255,255,.6);
+  letter-spacing: -0.02em;
+}
+[data-theme="dark"] .recv-meter-pct { text-shadow: 0 1px 0 rgba(0,0,0,.5); }
+
+.recv-meter-sm {
+  height: 6px;
+  border-radius: 999px;
+}
+.recv-meter-sm .recv-meter-pct { display: none; }
+
+/* ===== L2 · Project list ===== */
+.recv-sub-body {
+  padding: 0 6px 16px 32px;
+  border-top: 1px dashed var(--border);
+}
+.recv-sub-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.recv-link-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: .02em;
+  text-transform: none;
+  color: var(--recv-accent);
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background .15s, border-color .15s;
+}
+.recv-link-btn:hover {
+  background: var(--recv-accent-soft);
+  border-color: color-mix(in srgb, var(--recv-accent) 30%, transparent);
+}
+.recv-link-btn.is-on {
+  background: var(--recv-accent-soft);
+  border-color: color-mix(in srgb, var(--recv-accent) 40%, transparent);
+}
+.recv-empty-inline {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 0 4px;
+}
+
+.recv-projects {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.recv-project {
+  position: relative;
+  border-top: 1px solid var(--border);
+}
+.recv-project:first-child { border-top: 1px dashed var(--border); }
+.recv-project::before {
+  content: "";
+  position: absolute;
+  left: -14px; top: 16px;
+  width: 8px; height: 1px;
+  background: var(--border-strong);
+}
+.recv-project.tone-active  .recv-project-row { box-shadow: inset 2px 0 0 transparent; }
+.recv-project.tone-high    .recv-project-row { box-shadow: inset 2px 0 0 transparent; }
+.recv-project.tone-settled .recv-project-row { opacity: .7; }
+
+.recv-project-row {
+  display: grid;
+  grid-template-columns: var(--recv-grid);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 6px;
+}
+.recv-project-name {
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 0;
+}
+.recv-project-title {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recv-project-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+.recv-project-pn {
+  font-size: 10.5px;
+  letter-spacing: .02em;
+}
+.recv-project-year { color: var(--text-soft); }
+
+.recv-status-chip {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.recv-status-chip.status-potential { background: var(--accent-softer); border-color: var(--accent-soft); color: var(--accent-ink); }
+.recv-status-chip.status-awaiting  { background: var(--blue-soft); border-color: color-mix(in srgb, var(--blue) 40%, transparent); color: #334B66; }
+.recv-status-chip.status-awarded   { background: var(--sage-soft); border-color: color-mix(in srgb, var(--sage) 35%, transparent); color: #3F4D30; }
+.recv-status-chip.status-closed    { background: var(--surface-2); border-color: var(--border); color: var(--text-muted); }
+[data-theme="dark"] .recv-status-chip.status-awaiting { color: #BFD2E4; }
+[data-theme="dark"] .recv-status-chip.status-awarded  { color: #C8D6B7; }
+
+.recv-open-btn {
+  display: inline-flex;
+  width: 18px; height: 18px;
+  align-items: center; justify-content: center;
+  border-radius: 4px;
+  color: var(--text-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.recv-open-btn:hover {
+  color: var(--recv-accent);
+  background: var(--recv-accent-soft);
+  border-color: color-mix(in srgb, var(--recv-accent) 25%, transparent);
+}
+
+/* ----- Billed-to-Date as expand affordance (the user-called-out interaction) ----- */
+.recv-billed-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  transition: color .12s, border-color .12s;
+  text-align: right;
+}
+.recv-billed-btn:not(:disabled):hover {
+  color: var(--recv-accent);
+  border-bottom-color: color-mix(in srgb, var(--recv-accent) 50%, transparent);
+}
+.recv-billed-btn:disabled {
+  cursor: default;
+  color: var(--text-soft);
+}
+.recv-billed-chev {
+  display: inline-flex;
+  width: 12px; height: 12px;
+  align-items: center; justify-content: center;
+  color: var(--text-soft);
+  transition: transform .18s, color .15s;
+  margin-right: 1px;
+}
+.recv-billed-btn:not(:disabled):hover .recv-billed-chev { color: var(--recv-accent); }
+.recv-billed-btn.open .recv-billed-chev {
+  transform: rotate(90deg);
+  color: var(--recv-accent);
+}
+
+/* ===== L3 · Monthly billing ledger ===== */
+.recv-history {
+  margin: 4px 0 12px 14px;
+  padding: 10px 14px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  position: relative;
+}
+.recv-history::before {
+  content: "";
+  position: absolute;
+  left: -14px; top: 22px;
+  width: 14px; height: 1px;
+  background: var(--border-strong);
+}
+.recv-history-head {
+  display: grid;
+  grid-template-columns: 0.7fr 1fr 1.4fr 0.9fr;
+  gap: 14px;
+  padding: 4px 0 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  border-bottom: 1px dashed var(--border);
+}
+.recv-history-head > :nth-child(2) { text-align: right; }
+.recv-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.recv-history-row {
+  display: grid;
+  grid-template-columns: 0.7fr 1fr 1.4fr 0.9fr;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.recv-history-row:last-child { border-bottom: none; }
+.recv-history-mo {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.recv-history-amt { font-size: 12.5px; }
+.recv-history-status .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.recv-history-status .chip svg { stroke-width: 2.5; }
+.recv-history-row.paid .recv-history-amt { color: var(--text); }
+.recv-history-row.pending .recv-history-amt { color: var(--accent-ink); font-weight: 600; }
+[data-theme="dark"] .recv-history-row.pending .recv-history-amt { color: var(--accent); }
+.recv-paid-at {
+  margin-left: 4px;
+  opacity: .7;
+  font-weight: 400;
+  font-size: 9.5px;
+  letter-spacing: .02em;
+}
+
+.chip.recv-pending-chip {
+  background: var(--accent-softer);
+  border-color: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.recv-files-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.recv-files-pill:hover {
+  background: var(--recv-accent-soft);
+  color: var(--recv-accent);
+  border-color: color-mix(in srgb, var(--recv-accent) 35%, transparent);
+}
+.recv-files-pill:hover svg { color: var(--recv-accent); }
+.recv-files-pill svg { color: var(--text-soft); transition: color .15s; }
+
+/* ----- footer totals strip ----- */
+.recv-foot {
+  margin-top: 0;
+  padding: 14px 6px 4px;
+  display: grid;
+  grid-template-columns: var(--recv-grid);
+  gap: 14px;
+  align-items: center;
+  border-top: 2px solid var(--text);
+}
+[data-theme="dark"] .recv-foot { border-top-color: var(--text-muted); }
+.recv-foot-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 600;
+}
+.recv-foot .recv-num {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.recv-foot-pct {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--recv-accent);
+  font-weight: 600;
+}
+
+/* ============================================================================
+   Responsive — tablet down to phone
+   ============================================================================ */
+@media (max-width: 1080px) {
+  /* Tablet — drop the meter column to give the numbers more room. */
+  :root { --recv-grid: 2.4fr 1fr 1fr 1fr 1fr 0; }
+  .recv-meter, .recv-legend-meter { display: none; }
+}
+
+@media (max-width: 840px) {
+  /* Tablet portrait — collapse name+pill to two lines, shrink num font. */
+  :root { --recv-grid: 1.8fr 1fr 1fr 1fr 1fr 0; }
+  .recv-name { flex-wrap: wrap; gap: 6px; }
+  .recv-name-text { font-size: 14px; }
+  .recv-num { font-size: 12px; }
+  .recv-search { width: 160px; }
+}
+
+@media (max-width: 640px) {
+  /* Phone — fully reflow. Sub bar becomes a 2-row card: name on top,
+     numbers as 4 small KPI tiles below. Project rows do the same. */
+  .recv-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .recv-head-r { justify-content: space-between; flex-wrap: wrap; }
+  .recv-search { flex: 1; width: auto; min-width: 140px; }
+  .recv-col-legend { display: none; }
+  /* Recompose: name on top row, four KPIs in a 4-col strip below.
+     Meter column already hidden at 1080px. */
+  .recv-sub-row,
+  .recv-project-row {
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-areas:
+      "name    name    name    name"
+      "n1      n2      n3      n4";
+    gap: 10px;
+    padding: 14px 6px;
+  }
+  .recv-name { grid-area: name; }
+  .recv-sub-row > .recv-num,
+  .recv-project-row > .recv-num,
+  .recv-project-row > .recv-billed-btn { text-align: left; }
+  .recv-sub-row > :nth-child(2),
+  .recv-project-row > :nth-child(2) { grid-area: n1; }
+  .recv-sub-row > :nth-child(3),
+  .recv-project-row > :nth-child(3) { grid-area: n2; }
+  .recv-sub-row > :nth-child(4),
+  .recv-project-row > :nth-child(4) { grid-area: n3; }
+  .recv-sub-row > :nth-child(5),
+  .recv-project-row > :nth-child(5) { grid-area: n4; }
+  .recv-sub-row > :nth-child(6),
+  .recv-project-row > :nth-child(6) { display: none; }
+  .recv-num { font-size: 11.5px; }
+  .recv-num::before {
+    /* Compact label above each phone-mode number so the tiny grid is
+       still readable without the dropped column legend. */
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    margin-bottom: 1px;
+    font-weight: 500;
+  }
+  .recv-sub-row > :nth-child(2)::before,
+  .recv-project-row > :nth-child(2)::before { content: "Contract"; }
+  .recv-sub-row > :nth-child(3)::before,
+  .recv-project-row > :nth-child(3)::before { content: "Billed"; }
+  .recv-sub-row > :nth-child(4)::before,
+  .recv-project-row > :nth-child(4)::before { content: "Pending"; }
+  .recv-sub-row > :nth-child(5)::before,
+  .recv-project-row > :nth-child(5)::before { content: "Remaining"; }
+  .recv-foot {
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-areas:
+      "lbl lbl lbl pct"
+      "n1  n2  n3  n4";
+  }
+  .recv-foot > :nth-child(1) { grid-area: lbl; }
+  .recv-foot > :nth-child(2) { grid-area: n1; }
+  .recv-foot > :nth-child(3) { grid-area: n2; }
+  .recv-foot > :nth-child(4) { grid-area: n3; }
+  .recv-foot > :nth-child(5) { grid-area: n4; }
+  .recv-foot > :nth-child(6) { grid-area: pct; }
+  .recv-history-head,
+  .recv-history-row {
+    grid-template-columns: 0.6fr 1fr 1.2fr 0.6fr;
+    gap: 8px;
+  }
+  .recv-history-status .chip { padding: 1px 5px; }
+  .recv-paid-at { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recv-chev, .recv-billed-chev, .recv-meter-fill { transition: none; }
+}

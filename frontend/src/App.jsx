@@ -2149,17 +2149,42 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             filters={chipsFor("directory")}
             tab="directory"/>
         )}
-        {tab === "quad" && (
-          <QuadSheet
-            invoice={invoice}
-            events={events}
-            awaiting={awaiting}
-            hotLeads={hotLeads}
-            orangeSourceIds={orangeSourceIds}
-            monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
-            onOpen={(t, r) => openDrawer(r, t)}
-          />
-        )}
+        {tab === "quad" && (() => {
+          // Build a project lookup so the receivables panel can resolve
+          // project names + numbers + status from the projectId keys it
+          // sees in subInvoices. Built inline (not memoized) — these
+          // arrays only re-create when their slices change, and the panel
+          // memoizes its pivot internally.
+          const projectsById = new Map();
+          for (const p of potential) projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "potential" });
+          for (const p of awaiting)  projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "awaiting"  });
+          for (const p of awarded)   projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "awarded"   });
+          for (const p of closed)    projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "closed"    });
+          return (
+            <QuadSheet
+              invoice={invoice}
+              events={events}
+              awaiting={awaiting}
+              hotLeads={hotLeads}
+              orangeSourceIds={orangeSourceIds}
+              monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
+              subInvoices={subInvoices}
+              projectsById={projectsById}
+              onOpen={(t, r) => openDrawer(r, t)}
+              onOpenProject={(statusKey, projectId) => {
+                // Mirror the directory-drawer routing: locate the row in
+                // the right slice, switch to that tab, and open its drawer.
+                const slice =
+                  statusKey === "potential" ? potential :
+                  statusKey === "awaiting"  ? awaiting  :
+                  statusKey === "awarded"   ? awarded   :
+                  statusKey === "closed"    ? closed    : [];
+                const target = slice.find(p => p.id === projectId);
+                if (target) openDrawer(target, statusKey);
+              }}
+            />
+          );
+        })()}
       </div>
 
       {drawer && (() => {

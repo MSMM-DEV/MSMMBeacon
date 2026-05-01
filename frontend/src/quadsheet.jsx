@@ -4,6 +4,7 @@ import {
   fmtDate, fmtMoney, MONTHS, TODAY_MONTH, THIS_YEAR,
   companyById, userById,
 } from "./data.js";
+import { SubsReceivablesPanel } from "./quadsheet-receivables.jsx";
 
 // ============================================================================
 // Quad Sheet — executive snapshot for board members / decision-makers.
@@ -24,7 +25,7 @@ import {
 // the Expand button uncaps this for the overlay modal.
 const CARD_LIMIT = 6;
 
-export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds, monthlyBenchmark, onOpen }) => {
+export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds, monthlyBenchmark, subInvoices, projectsById, onOpen, onOpenProject }) => {
   // `expanded` names which card is currently zoomed into the modal.
   // null = no modal open. Only list-type cards can be expanded (the
   // Invoice chart has intrinsic sizing and doesn't benefit from expand).
@@ -180,6 +181,16 @@ export const QuadSheet = ({ invoice, events, awaiting, hotLeads, orangeSourceIds
           onExpand={() => setExpanded("hotleads")}>
           {renderList("hotleads", { limit: CARD_LIMIT })}
         </QuadCard>
+
+        {/* Q5 — Subs Receivables (full-width, inverted lens of the Invoice
+            tab). Sits on its own auto-height grid row beneath the four
+            atomic quadrants because it's a deep-drill ledger that reads
+            top-down, not a snapshot tile. */}
+        <SubsReceivablesPanel
+          subInvoices={subInvoices}
+          projectsById={projectsById}
+          onOpenProject={onOpenProject}
+        />
       </div>
 
       {expanded && (
