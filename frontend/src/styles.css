@@ -4962,6 +4962,52 @@ html, body { overflow-x: clip; }
   font-size: 11px;
   color: var(--text-muted);
   letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.invoice-sub-discipline-empty {
+  color: var(--text-soft);
+  font-style: italic;
+  opacity: 0;
+  transition: opacity .15s, color .15s;
+  font-size: 10.5px;
+}
+.invoice-table tr.invoice-sub-row:hover .invoice-sub-discipline-empty {
+  opacity: 0.7;
+}
+.invoice-sub-discipline:hover .invoice-sub-discipline-empty {
+  opacity: 1;
+  color: var(--accent-ink);
+}
+
+/* Remove button — sits in the leading expand-col gutter, only visible on
+   row hover. Confirms via window.confirm before firing. Preserves billing
+   history (handled in App.jsx; just removes the project_subs row). */
+.invoice-sub-remove {
+  display: inline-flex;
+  width: 18px; height: 18px;
+  align-items: center; justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-soft);
+  background: transparent;
+  opacity: 0;
+  transition: opacity .15s, background .12s, color .12s, border-color .12s;
+  cursor: pointer;
+}
+.invoice-table tr.invoice-sub-row:hover .invoice-sub-remove {
+  opacity: 1;
+}
+.invoice-sub-remove:hover {
+  background: var(--rose-soft);
+  color: var(--rose);
+  border-color: color-mix(in srgb, var(--rose) 30%, transparent);
+}
+.invoice-sub-remove:focus-visible {
+  opacity: 1;
+  outline: none;
+  border-color: var(--rose);
 }
 /* Sub-row month cells use a slightly muted variant of the prime tints */
 .invoice-table tr.invoice-sub-row td.month-actual {
@@ -5431,30 +5477,30 @@ html, body { overflow-x: clip; }
 }
 
 /* ============================================================================
-   Q5 — Subs Receivables · executive ledger
+   Q5 — Subs Receivables · drill-down ledger (v2)
    ----------------------------------------------------------------------------
-   Sub-centric inversion of the Invoice tab. Lives full-width below the four
-   atomic quadrants. Visual idiom: editorial balance-sheet ledger — vertical
-   stack of subs, mono numerics in vertical columns, hairline rules instead of
-   nested cards. Three-level expansion (sub → project → monthly history).
-   Distinct teal accent stripe ("recv") so it reads as its own section while
-   inheriting the .quad-card chrome.
+   Three-level expansion. Names dominate. Numbers reveal only at the deepest
+   level. Visual idiom: an editorial table-of-contents — large display type
+   for sub names, mono numerics, hairline rules, generous whitespace.
+   Distinct teal "recv" accent stripe so the section reads as its own
+   territory while inheriting the .quad-card chrome.
    ============================================================================ */
 
 :root {
-  --recv-accent: #3D7A78;          /* deep teal — distinct from flow/cal/await/soq */
-  --recv-accent-soft: #D9E8E6;     /* tonally adjacent backgrounds */
-  --recv-tone-active: #C8823B;     /* same as accent — pending in the air */
-  --recv-tone-high:   #B86B66;     /* rose — heavily-pending sub */
-  --recv-tone-settled: #7E8F6F;    /* sage — fully paid */
-  --recv-grid: 2.6fr 1.05fr 1.05fr 1.05fr 1.05fr 1.4fr;
+  --recv-accent:       #3D7A78;
+  --recv-accent-strong: #2C5C5A;
+  --recv-accent-soft:  #D9E8E6;
+  --recv-accent-softer: #ECF3F2;
+  --recv-pending:      #C8823B;     /* same hue as primary --accent */
+  --recv-paid:         #7E8F6F;     /* sage */
 }
 [data-theme="dark"] {
-  --recv-accent: #6FB1AE;
-  --recv-accent-soft: #2A3938;
-  --recv-tone-active: #E3A15E;
-  --recv-tone-high:   #D68984;
-  --recv-tone-settled: #A2B692;
+  --recv-accent:        #6FB1AE;
+  --recv-accent-strong: #8DC9C6;
+  --recv-accent-soft:   #2A3938;
+  --recv-accent-softer: #1F2A29;
+  --recv-pending:       #E3A15E;
+  --recv-paid:          #A2B692;
 }
 
 /* The receivables card lives in its own auto-height grid row appended to the
@@ -5465,24 +5511,21 @@ html, body { overflow-x: clip; }
 @media (max-width: 1080px) {
   .quad > .recv-card { grid-column: 1; }
 }
-
 .recv-card {
-  /* Override the fixed .quad row-height so this card breathes vertically as
-     subs expand. The .quad grid still defines its own row, but a hard height
-     on the card would clip content during expansion. */
-  min-height: 280px;
+  min-height: 240px;
   height: auto;
 }
 .quad-card[data-accent="recv"]::before { background: var(--recv-accent); }
 
+/* ===== Header ===== */
 .recv-head {
   flex-direction: row;
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  padding-bottom: 14px;
+  padding-bottom: 16px;
+  margin-bottom: 8px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 0;
 }
 .recv-head-l {
   min-width: 0;
@@ -5495,7 +5538,7 @@ html, body { overflow-x: clip; }
   gap: 12px;
   flex-shrink: 0;
 }
-.recv-head-sub-num {
+.recv-headline-num {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--text);
@@ -5507,16 +5550,17 @@ html, body { overflow-x: clip; }
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 6px 14px;
+  padding: 7px 14px;
   font-size: 12.5px;
   color: var(--text);
   width: 220px;
-  transition: border-color .15s, background .15s;
+  transition: border-color .15s, background .15s, box-shadow .15s;
 }
 .recv-search:focus {
   outline: none;
   border-color: var(--recv-accent);
   background: var(--surface);
+  box-shadow: 0 0 0 3px var(--recv-accent-soft);
 }
 .recv-search::placeholder { color: var(--text-soft); }
 
@@ -5524,87 +5568,87 @@ html, body { overflow-x: clip; }
   color: var(--recv-accent);
 }
 
-/* ----- column legend (vertical alignment guide) ----- */
-.recv-col-legend {
-  display: grid;
-  grid-template-columns: var(--recv-grid);
-  gap: 14px;
-  align-items: end;
-  padding: 18px 6px 8px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--text-soft);
-  border-bottom: 1px dashed var(--border);
-}
-.recv-legend-num   { text-align: right; }
-.recv-legend-meter { text-align: center; }
-
-/* ----- body ----- */
+/* ===== Body ===== */
 .recv-body {
   flex: 1;
   min-height: 0;
-  padding: 0;
 }
-.recv-list {
+.recv-empty {
+  padding: 60px 20px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  margin-top: 12px;
+}
+.recv-empty strong { color: var(--text); font-weight: 600; }
+
+.recv-subs {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-/* ===== L1 · Sub bar ===== */
+/* ===== L1 · Sub firm row ===== */
 .recv-sub {
   position: relative;
   border-bottom: 1px solid var(--border);
-  transition: background .12s;
+  transition: background .14s;
 }
 .recv-sub:last-child { border-bottom: none; }
-.recv-sub::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 2px;
-  background: transparent;
-  transition: background .15s;
+.recv-sub.open {
+  background: linear-gradient(to bottom,
+    var(--recv-accent-softer) 0,
+    var(--recv-accent-softer) 100%);
+  background-clip: padding-box;
 }
-.recv-sub.tone-active::before  { background: var(--recv-tone-active); }
-.recv-sub.tone-high::before    { background: var(--recv-tone-high); }
-.recv-sub.tone-settled::before { background: var(--recv-tone-settled); }
-.recv-sub.open  { background: linear-gradient(to right, var(--recv-accent-soft) 0, var(--recv-accent-soft) 2px, var(--surface) 2px); }
-[data-theme="dark"] .recv-sub.open { background: linear-gradient(to right, var(--recv-accent-soft) 0, var(--recv-accent-soft) 2px, var(--surface) 2px); }
-.recv-sub:not(.open):hover { background: var(--surface-2); }
+.recv-sub:not(.open):hover {
+  background: var(--surface-2);
+}
 
 .recv-sub-row {
   width: 100%;
-  display: grid;
-  grid-template-columns: var(--recv-grid);
-  gap: 14px;
+  display: flex;
   align-items: center;
-  padding: 16px 6px;
+  gap: 14px;
+  padding: 18px 8px 18px 6px;
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: padding .15s;
   border: 0;
+  border-radius: 0;
+  font: inherit;
+  color: inherit;
 }
-.recv-sub.open .recv-sub-row { padding-bottom: 12px; }
+.recv-sub.open .recv-sub-row {
+  padding-bottom: 14px;
+}
 
-.recv-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
+/* Rank prefix — small mono number on the left, calls out the sort order. */
+.recv-rank {
+  font-size: 10px;
+  letter-spacing: .12em;
+  color: var(--text-soft);
+  font-feature-settings: "tnum";
+  flex-shrink: 0;
+  width: 22px;
+  text-align: right;
 }
+.recv-sub.open .recv-rank { color: var(--recv-accent); }
+
+/* Chevron — the affordance signal */
 .recv-chev {
   display: inline-flex;
-  width: 18px; height: 18px;
+  width: 22px; height: 22px;
   align-items: center; justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 7px;
   color: var(--text-muted);
   background: var(--surface);
-  transition: transform .18s, border-color .15s, background .15s;
+  transition: transform .2s ease, border-color .15s, background .15s, color .15s;
   flex-shrink: 0;
 }
 .recv-chev.open {
@@ -5613,20 +5657,53 @@ html, body { overflow-x: clip; }
   color: var(--recv-accent);
   background: var(--recv-accent-soft);
 }
+.recv-chev-sm {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+}
+
 .recv-name-text {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 15px;
+  font-size: 17px;
   color: var(--text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
+.recv-sub.is-msmm .recv-name-text {
+  letter-spacing: .02em;
+}
+.recv-sub.is-msmm::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--recv-accent);
+}
+
+/* MSMM-as-sub badge */
+.recv-msmm-badge {
+  display: inline-flex;
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  background: var(--recv-accent);
+  color: #FFF;
+  border-radius: 4px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 0 var(--recv-accent-strong);
+}
+[data-theme="dark"] .recv-msmm-badge { color: var(--bg); box-shadow: none; }
+
 .recv-projects-pill {
   display: inline-flex;
-  padding: 2px 9px;
+  padding: 3px 10px;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: .04em;
@@ -5637,194 +5714,76 @@ html, body { overflow-x: clip; }
   flex-shrink: 0;
 }
 
-/* MSMM-as-sub badge — flags the bucket where pending = money owed TO MSMM
-   instead of money MSMM owes out. Tonally aligned with the receivables
-   accent so it reads as part of the section's vocabulary. */
-.recv-msmm-badge {
+.recv-spacer { flex: 1; }
+
+/* Right-side sort metric — quiet but informative. Reflects whichever sort
+   key is active so the L1 ordering is meaningful at a glance without
+   importing the whole 4-column ledger. */
+.recv-metric {
   display: inline-flex;
-  padding: 2px 9px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  background: var(--recv-accent);
-  color: #FFF;
-  border-radius: 4px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
   flex-shrink: 0;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--recv-accent) 70%, black 30%);
-}
-[data-theme="dark"] .recv-msmm-badge { color: var(--bg); box-shadow: none; }
-.recv-sub.is-msmm .recv-name-text {
-  letter-spacing: .04em;
-}
-.recv-sub.is-msmm::before {
-  /* Distinct stripe color so MSMM's bucket is recognizable even when
-     collapsed and not currently sorted to the top. */
-  background: var(--recv-accent) !important;
-  width: 3px;
-}
-
-/* Per-project "Prime · <firm>" chip — visible only on rows where MSMM is
-   the sub. Tells viewers who owes MSMM the money on this project. */
-.recv-prime-chip {
-  display: inline-flex;
-  align-items: center;
-  font-size: 10.5px;
-  letter-spacing: .02em;
-  padding: 2px 8px;
-  background: color-mix(in srgb, var(--recv-accent) 12%, var(--surface));
-  color: var(--recv-accent);
-  border: 1px solid color-mix(in srgb, var(--recv-accent) 35%, transparent);
-  border-radius: 4px;
-  font-weight: 500;
-  white-space: nowrap;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.recv-num {
-  font-family: var(--font-mono);
-  font-size: 13px;
   text-align: right;
+}
+.recv-metric-num {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
   color: var(--text);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
 }
-.recv-num-billed { color: var(--text); }
-.recv-num-pending.is-pending { color: var(--accent-ink); font-weight: 600; }
-.recv-num-remaining { color: var(--text-muted); }
-.recv-num-remaining.is-overrun {
-  color: var(--rose);
-  font-weight: 600;
-}
-[data-theme="dark"] .recv-num-pending.is-pending { color: var(--accent); }
-
-/* ----- burn-down meter ----- */
-.recv-meter {
-  position: relative;
-  height: 22px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.recv-meter-fill {
-  position: absolute;
-  top: 0; bottom: 0; left: 0;
-  transition: width .25s ease;
-}
-.recv-meter-fill.paid {
-  background: linear-gradient(90deg, var(--sage), color-mix(in srgb, var(--sage) 80%, var(--text) 20%));
-}
-.recv-meter-fill.pending {
-  background: repeating-linear-gradient(
-    -45deg,
-    color-mix(in srgb, var(--accent) 70%, transparent 30%),
-    color-mix(in srgb, var(--accent) 70%, transparent 30%) 4px,
-    color-mix(in srgb, var(--accent) 30%, transparent 70%) 4px,
-    color-mix(in srgb, var(--accent) 30%, transparent 70%) 8px
-  );
-  opacity: .85;
-}
-.recv-meter-pct {
-  position: relative;
-  z-index: 1;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text);
-  text-shadow: 0 1px 0 rgba(255,255,255,.6);
-  letter-spacing: -0.02em;
-}
-[data-theme="dark"] .recv-meter-pct { text-shadow: 0 1px 0 rgba(0,0,0,.5); }
-
-.recv-meter-sm {
-  height: 6px;
-  border-radius: 999px;
-}
-.recv-meter-sm .recv-meter-pct { display: none; }
-
-/* ===== L2 · Project list ===== */
-.recv-sub-body {
-  padding: 0 6px 16px 32px;
-  border-top: 1px dashed var(--border);
-}
-.recv-sub-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
+.recv-metric.is-pending .recv-metric-num { color: var(--recv-pending); }
+.recv-metric.is-paid    .recv-metric-num { color: var(--recv-paid); }
+.recv-metric.is-zero    .recv-metric-num { color: var(--text-soft); font-weight: 500; }
+.recv-metric-label {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: .08em;
+  font-size: 9px;
+  letter-spacing: .14em;
   text-transform: uppercase;
   color: var(--text-soft);
 }
-.recv-link-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; font-weight: 500;
-  letter-spacing: .02em;
-  text-transform: none;
-  color: var(--recv-accent);
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: transparent;
-  border: 1px solid transparent;
-  transition: background .15s, border-color .15s;
-}
-.recv-link-btn:hover {
-  background: var(--recv-accent-soft);
-  border-color: color-mix(in srgb, var(--recv-accent) 30%, transparent);
-}
-.recv-link-btn.is-on {
-  background: var(--recv-accent-soft);
-  border-color: color-mix(in srgb, var(--recv-accent) 40%, transparent);
-}
-.recv-empty-inline {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-style: italic;
-  padding: 6px 0 4px;
-}
 
+/* ===== L2 · Project list ===== */
 .recv-projects {
   list-style: none;
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  padding: 0 0 14px 50px;
 }
 .recv-project {
   position: relative;
-  border-top: 1px solid var(--border);
+  border-top: 1px dashed var(--border);
 }
 .recv-project:first-child { border-top: 1px dashed var(--border); }
 .recv-project::before {
   content: "";
   position: absolute;
-  left: -14px; top: 16px;
-  width: 8px; height: 1px;
+  left: -28px; top: 21px;
+  width: 18px; height: 1px;
   background: var(--border-strong);
 }
-.recv-project.tone-active  .recv-project-row { box-shadow: inset 2px 0 0 transparent; }
-.recv-project.tone-high    .recv-project-row { box-shadow: inset 2px 0 0 transparent; }
-.recv-project.tone-settled .recv-project-row { opacity: .7; }
+.recv-project::after {
+  content: "";
+  position: absolute;
+  left: -28px; top: 0; bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+.recv-project:last-child::after { bottom: 50%; }
 
 .recv-project-row {
-  display: grid;
-  grid-template-columns: var(--recv-grid);
-  gap: 14px;
+  width: 100%;
+  display: flex;
   align-items: center;
-  padding: 12px 6px;
-}
-.recv-project-name {
-  display: flex; flex-direction: column; gap: 4px;
-  min-width: 0;
+  gap: 14px;
+  padding: 12px 6px 12px 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  font: inherit;
+  color: inherit;
 }
 .recv-project-title {
   font-family: var(--font-body);
@@ -5834,11 +5793,16 @@ html, body { overflow-x: clip; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .recv-project-meta {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
   font-size: 11px;
   color: var(--text-soft);
 }
@@ -5846,7 +5810,27 @@ html, body { overflow-x: clip; }
   font-size: 10.5px;
   letter-spacing: .02em;
 }
-.recv-project-year { color: var(--text-soft); }
+.recv-project-year {
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* Project-level pulse dots — tiny indicators of pending/paid activity so
+   you can see at a glance which projects under a sub have what. */
+.recv-project-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.pulse-dot {
+  width: 7px; height: 7px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.pulse-dot.pending { background: var(--recv-pending); }
+.pulse-dot.paid    { background: var(--recv-paid); }
 
 .recv-status-chip {
   font-family: var(--font-mono);
@@ -5866,214 +5850,156 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .recv-status-chip.status-awaiting { color: #BFD2E4; }
 [data-theme="dark"] .recv-status-chip.status-awarded  { color: #C8D6B7; }
 
-.recv-open-btn {
-  display: inline-flex;
-  width: 18px; height: 18px;
-  align-items: center; justify-content: center;
-  border-radius: 4px;
-  color: var(--text-soft);
-  background: transparent;
-  border: 1px solid transparent;
-  transition: background .12s, color .12s, border-color .12s;
-}
-.recv-open-btn:hover {
-  color: var(--recv-accent);
-  background: var(--recv-accent-soft);
-  border-color: color-mix(in srgb, var(--recv-accent) 25%, transparent);
-}
-
-/* ----- Billed-to-Date as expand affordance (the user-called-out interaction) ----- */
-.recv-billed-btn {
+.recv-prime-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-  background: transparent;
-  border: 0;
-  padding: 4px 0;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-  color: var(--text);
-  cursor: pointer;
-  border-bottom: 1px dashed transparent;
-  transition: color .12s, border-color .12s;
-  text-align: right;
-}
-.recv-billed-btn:not(:disabled):hover {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--recv-accent) 12%, var(--surface));
   color: var(--recv-accent);
-  border-bottom-color: color-mix(in srgb, var(--recv-accent) 50%, transparent);
-}
-.recv-billed-btn:disabled {
-  cursor: default;
-  color: var(--text-soft);
-}
-.recv-billed-chev {
-  display: inline-flex;
-  width: 12px; height: 12px;
-  align-items: center; justify-content: center;
-  color: var(--text-soft);
-  transition: transform .18s, color .15s;
-  margin-right: 1px;
-}
-.recv-billed-btn:not(:disabled):hover .recv-billed-chev { color: var(--recv-accent); }
-.recv-billed-btn.open .recv-billed-chev {
-  transform: rotate(90deg);
-  color: var(--recv-accent);
+  border: 1px solid color-mix(in srgb, var(--recv-accent) 35%, transparent);
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ===== L3 · Monthly billing ledger ===== */
-.recv-history {
-  margin: 4px 0 12px 14px;
-  padding: 10px 14px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+/* ===== L3 · Project detail strip ===== */
+.recv-detail {
+  margin: 0 6px 18px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgba(0,0,0,.02), 0 6px 18px -8px rgba(60,46,18,.12);
   position: relative;
 }
-.recv-history::before {
+.recv-detail::before {
+  /* connector arm tying detail strip back to the project row */
   content: "";
   position: absolute;
-  left: -14px; top: 22px;
-  width: 14px; height: 1px;
-  background: var(--border-strong);
+  left: 28px; top: -8px;
+  width: 12px; height: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-bottom: 0; border-right: 0;
+  transform: rotate(45deg);
+  border-top-left-radius: 3px;
 }
-.recv-history-head {
-  display: grid;
-  grid-template-columns: 0.7fr 1fr 1.4fr 0.9fr;
-  gap: 14px;
-  padding: 4px 0 8px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--text-soft);
-  border-bottom: 1px dashed var(--border);
-}
-.recv-history-head > :nth-child(2) { text-align: right; }
-.recv-history-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.recv-history-row {
-  display: grid;
-  grid-template-columns: 0.7fr 1fr 1.4fr 0.9fr;
-  gap: 14px;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-}
-.recv-history-row:last-child { border-bottom: none; }
-.recv-history-mo {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-.recv-history-amt { font-size: 12.5px; }
-.recv-history-status .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
-  font-weight: 500;
-}
-.recv-history-status .chip svg { stroke-width: 2.5; }
-.recv-history-row.paid .recv-history-amt { color: var(--text); }
-.recv-history-row.pending .recv-history-amt { color: var(--accent-ink); font-weight: 600; }
-[data-theme="dark"] .recv-history-row.pending .recv-history-amt { color: var(--accent); }
-.recv-paid-at {
-  margin-left: 4px;
-  opacity: .7;
-  font-weight: 400;
-  font-size: 9.5px;
-  letter-spacing: .02em;
+[data-theme="dark"] .recv-detail {
+  box-shadow: 0 1px 0 rgba(0,0,0,.5), 0 8px 22px -10px rgba(0,0,0,.6);
 }
 
-.chip.recv-pending-chip {
-  background: var(--accent-softer);
-  border-color: var(--accent-soft);
-  color: var(--accent-ink);
+.recv-detail-strip {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr 1px 1fr;
+  gap: 0;
+  align-items: stretch;
 }
-
-.recv-files-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+.recv-kpi {
+  padding: 4px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.recv-kpi:first-child  { padding-left: 4px; }
+.recv-kpi:last-child   { padding-right: 4px; }
+.recv-kpi-rule {
+  background: var(--border);
+  width: 1px;
+}
+.recv-kpi-label {
   font-family: var(--font-mono);
   font-size: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background .15s, color .15s, border-color .15s;
-}
-.recv-files-pill:hover {
-  background: var(--recv-accent-soft);
-  color: var(--recv-accent);
-  border-color: color-mix(in srgb, var(--recv-accent) 35%, transparent);
-}
-.recv-files-pill:hover svg { color: var(--recv-accent); }
-.recv-files-pill svg { color: var(--text-soft); transition: color .15s; }
-
-/* ----- footer totals strip ----- */
-.recv-foot {
-  margin-top: 0;
-  padding: 14px 6px 4px;
-  display: grid;
-  grid-template-columns: var(--recv-grid);
-  gap: 14px;
-  align-items: center;
-  border-top: 2px solid var(--text);
-}
-[data-theme="dark"] .recv-foot { border-top-color: var(--text-muted); }
-.recv-foot-label {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
   letter-spacing: .14em;
   text-transform: uppercase;
+  color: var(--text-soft);
+}
+.recv-kpi-val {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: -0.02em;
   color: var(--text);
-  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
 }
-.recv-foot .recv-num {
-  font-weight: 600;
-  font-size: 13.5px;
+.recv-kpi-val.is-zero { color: var(--text-soft); font-weight: 500; }
+.recv-kpi-val.is-paid    { color: var(--recv-paid); }
+.recv-kpi-val.is-pending { color: var(--recv-pending); }
+.recv-kpi-empty {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0;
+  color: var(--text-soft);
 }
-.recv-foot-pct {
-  text-align: center;
+.recv-kpi-sub {
   font-size: 11px;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--recv-accent);
-  font-weight: 600;
+  color: var(--text-soft);
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
+.recv-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.recv-open-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--recv-accent);
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.recv-open-link:hover {
+  background: var(--recv-accent-soft);
+  border-color: color-mix(in srgb, var(--recv-accent) 35%, transparent);
+}
+.recv-open-link svg { transition: transform .15s; }
+.recv-open-link:hover svg { transform: translateX(2px); }
+
 /* ============================================================================
-   Responsive — tablet down to phone
+   Responsive
    ============================================================================ */
 @media (max-width: 1080px) {
-  /* Tablet — drop the meter column to give the numbers more room. */
-  :root { --recv-grid: 2.4fr 1fr 1fr 1fr 1fr 0; }
-  .recv-meter, .recv-legend-meter { display: none; }
+  .recv-name-text { font-size: 15.5px; }
+  .recv-search { width: 180px; }
+  .recv-detail-strip {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+  }
+  .recv-kpi-rule { display: none; }
+  .recv-kpi {
+    border-right: 1px solid var(--border);
+    padding: 4px 16px;
+  }
+  .recv-kpi:last-child { border-right: 0; }
+  .recv-kpi-val { font-size: 21px; }
 }
 
 @media (max-width: 840px) {
-  /* Tablet portrait — collapse name+pill to two lines, shrink num font. */
-  :root { --recv-grid: 1.8fr 1fr 1fr 1fr 1fr 0; }
-  .recv-name { flex-wrap: wrap; gap: 6px; }
-  .recv-name-text { font-size: 14px; }
-  .recv-num { font-size: 12px; }
-  .recv-search { width: 160px; }
+  .recv-name-text { font-size: 14.5px; }
+  .recv-projects { padding-left: 36px; }
+  .recv-project::before { left: -22px; width: 14px; }
+  .recv-project::after  { left: -22px; }
+  .recv-kpi-val { font-size: 19px; }
 }
 
 @media (max-width: 640px) {
-  /* Phone — fully reflow. Sub bar becomes a 2-row card: name on top,
-     numbers as 4 small KPI tiles below. Project rows do the same. */
   .recv-head {
     flex-direction: column;
     align-items: stretch;
@@ -6081,74 +6007,42 @@ html, body { overflow-x: clip; }
   }
   .recv-head-r { justify-content: space-between; flex-wrap: wrap; }
   .recv-search { flex: 1; width: auto; min-width: 140px; }
-  .recv-col-legend { display: none; }
-  /* Recompose: name on top row, four KPIs in a 4-col strip below.
-     Meter column already hidden at 1080px. */
-  .recv-sub-row,
-  .recv-project-row {
-    grid-template-columns: repeat(4, 1fr);
-    grid-template-areas:
-      "name    name    name    name"
-      "n1      n2      n3      n4";
+
+  /* L1 — wrap the row so the metric drops below the name on narrow screens */
+  .recv-sub-row {
+    flex-wrap: wrap;
     gap: 10px;
     padding: 14px 6px;
   }
-  .recv-name { grid-area: name; }
-  .recv-sub-row > .recv-num,
-  .recv-project-row > .recv-num,
-  .recv-project-row > .recv-billed-btn { text-align: left; }
-  .recv-sub-row > :nth-child(2),
-  .recv-project-row > :nth-child(2) { grid-area: n1; }
-  .recv-sub-row > :nth-child(3),
-  .recv-project-row > :nth-child(3) { grid-area: n2; }
-  .recv-sub-row > :nth-child(4),
-  .recv-project-row > :nth-child(4) { grid-area: n3; }
-  .recv-sub-row > :nth-child(5),
-  .recv-project-row > :nth-child(5) { grid-area: n4; }
-  .recv-sub-row > :nth-child(6),
-  .recv-project-row > :nth-child(6) { display: none; }
-  .recv-num { font-size: 11.5px; }
-  .recv-num::before {
-    /* Compact label above each phone-mode number so the tiny grid is
-       still readable without the dropped column legend. */
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    color: var(--text-soft);
-    margin-bottom: 1px;
-    font-weight: 500;
+  .recv-rank { width: 18px; font-size: 9.5px; }
+  .recv-name-text { font-size: 14px; }
+  .recv-spacer { display: none; }
+  .recv-metric { margin-left: auto; }
+  .recv-metric-num { font-size: 13px; }
+
+  /* L2 — let the meta wrap; project title gets full row above */
+  .recv-projects { padding-left: 28px; padding-right: 4px; }
+  .recv-project::before { left: -16px; width: 10px; }
+  .recv-project::after  { left: -16px; }
+  .recv-project-row { flex-wrap: wrap; gap: 8px 10px; }
+  .recv-project-title { flex-basis: 100%; font-size: 13px; }
+  .recv-project-meta { flex-wrap: wrap; }
+
+  /* L3 — stack the three KPIs vertically on phone */
+  .recv-detail { padding: 14px 16px; margin: 0 4px 14px; }
+  .recv-detail-strip {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
-  .recv-sub-row > :nth-child(2)::before,
-  .recv-project-row > :nth-child(2)::before { content: "Contract"; }
-  .recv-sub-row > :nth-child(3)::before,
-  .recv-project-row > :nth-child(3)::before { content: "Billed"; }
-  .recv-sub-row > :nth-child(4)::before,
-  .recv-project-row > :nth-child(4)::before { content: "Pending"; }
-  .recv-sub-row > :nth-child(5)::before,
-  .recv-project-row > :nth-child(5)::before { content: "Remaining"; }
-  .recv-foot {
-    grid-template-columns: repeat(4, 1fr);
-    grid-template-areas:
-      "lbl lbl lbl pct"
-      "n1  n2  n3  n4";
+  .recv-kpi {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 4px 0 12px;
   }
-  .recv-foot > :nth-child(1) { grid-area: lbl; }
-  .recv-foot > :nth-child(2) { grid-area: n1; }
-  .recv-foot > :nth-child(3) { grid-area: n2; }
-  .recv-foot > :nth-child(4) { grid-area: n3; }
-  .recv-foot > :nth-child(5) { grid-area: n4; }
-  .recv-foot > :nth-child(6) { grid-area: pct; }
-  .recv-history-head,
-  .recv-history-row {
-    grid-template-columns: 0.6fr 1fr 1.2fr 0.6fr;
-    gap: 8px;
-  }
-  .recv-history-status .chip { padding: 1px 5px; }
-  .recv-paid-at { display: none; }
+  .recv-kpi:last-child { border-bottom: 0; padding-bottom: 4px; }
+  .recv-kpi-val { font-size: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .recv-chev, .recv-billed-chev, .recv-meter-fill { transition: none; }
+  .recv-chev, .recv-open-link svg { transition: none; }
 }

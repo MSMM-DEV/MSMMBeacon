@@ -839,41 +839,84 @@ export async function loadBeacon() {
     arr.push(f);
     subFilesBySubInvoice.set(f.sub_invoice_id, arr);
   }
+  // Helper — pulls per-month amounts/paid/files for a (project, kind, company)
+  // tuple from the sub_invoices map. Used by both the project_subs-driven
+  // path AND the synthetic prime-fallback path below.
+  const buildMonthlyArrays = (projectId, kind, companyId) => {
+    const amounts = Array(12).fill(null);
+    const files   = Array(12).fill(null).map(() => []);
+    const subInvoiceIds = Array(12).fill(null);
+    const paid    = Array(12).fill(false);
+    const paidAt  = Array(12).fill(null);
+    let touched = false;
+    for (let m = 1; m <= 12; m++) {
+      const row = subInvoicesByProjectCompany.get(`${projectId}:${kind}:${companyId}:${m}`);
+      if (row) {
+        touched = true;
+        amounts[m - 1] = row.amount != null ? Number(row.amount) : null;
+        subInvoiceIds[m - 1] = row.id;
+        files[m - 1] = subFilesBySubInvoice.get(row.id) || [];
+        paid[m - 1] = !!row.paid;
+        paidAt[m - 1] = row.paid_at || null;
+      }
+    }
+    return { amounts, files, subInvoiceIds, paid, paidAt, touched };
+  };
+
   const subInvoicesMatrix = new Map();   // project_id → [{ companyId, companyName, contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12] }]
   for (const p of projects) {
     const subs = (p.subs || [])
       .slice()
       .sort((a, b) => (a.ord || 0) - (b.ord || 0));
-    if (subs.length === 0) continue;
     const entries = subs.map(s => {
       const company = companies.find(c => c.id === s.company_id);
       const kind = s.kind || "sub";
-      const amounts = Array(12).fill(null);
-      const files   = Array(12).fill(null).map(() => []);
-      const subInvoiceIds = Array(12).fill(null);
-      const paid    = Array(12).fill(false);
-      const paidAt  = Array(12).fill(null);
-      for (let m = 1; m <= 12; m++) {
-        const key = `${p.id}:${kind}:${s.company_id}:${m}`;
-        const row = subInvoicesByProjectCompany.get(key);
-        if (row) {
-          amounts[m - 1] = row.amount != null ? Number(row.amount) : null;
-          subInvoiceIds[m - 1] = row.id;
-          files[m - 1] = subFilesBySubInvoice.get(row.id) || [];
-          paid[m - 1] = !!row.paid;
-          paidAt[m - 1] = row.paid_at || null;
-        }
-      }
+      const arrays = buildMonthlyArrays(p.id, kind, s.company_id);
       return {
         kind,
         companyId: s.company_id,
         companyName: company?.name || "Unknown company",
         contractAmount: s.amount || 0,
         discipline: s.discipline || "",
-        amounts, files, subInvoiceIds, paid, paidAt,
+        amounts: arrays.amounts,
+        files: arrays.files,
+        subInvoiceIds: arrays.subInvoiceIds,
+        paid: arrays.paid,
+        paidAt: arrays.paidAt,
       };
     });
-    subInvoicesMatrix.set(p.id, entries);
+
+    // Synthetic prime fallback — when MSMM is sub on a project (the project
+    // row has prime_company_id set), but no project_subs(kind='prime') row
+    // exists, we still need to surface this relationship for the
+    // receivables view and for the InvoiceTable's prime row. The synthetic
+    // entry pulls any sub_invoices(kind='prime') data that may have been
+    // entered without a corresponding project_subs row, so manually-added
+    // billing data isn't lost.
+    const hasPrimeEntry = entries.some(e => e.kind === "prime");
+    if (!hasPrimeEntry && p.prime_company_id) {
+      const primeCompany = companies.find(c => c.id === p.prime_company_id);
+      const arrays = buildMonthlyArrays(p.id, "prime", p.prime_company_id);
+      // Only synthesize when there's actually billing data — otherwise we'd
+      // emit empty entries for every Sub-role project regardless of activity.
+      if (arrays.touched) {
+        entries.push({
+          kind: "prime",
+          companyId: p.prime_company_id,
+          companyName: primeCompany?.name || "Unknown prime",
+          contractAmount: 0, // unknown — no project_subs row to read amount from
+          discipline: "",
+          amounts: arrays.amounts,
+          files: arrays.files,
+          subInvoiceIds: arrays.subInvoiceIds,
+          paid: arrays.paid,
+          paidAt: arrays.paidAt,
+          synthetic: true,
+        });
+      }
+    }
+
+    if (entries.length > 0) subInvoicesMatrix.set(p.id, entries);
   }
 
   return {
@@ -1141,6 +1184,52 @@ export async function addProjectSub({ projectId, companyId, discipline, amount, 
     .single();
   if (error) throw new Error(`add ${kind}: ${error.message}`);
   return data;
+}
+
+// Update an existing project_subs row. Identifies the row by the natural
+// composite key (project_id, company_id, kind). Patch is whitelisted to the
+// metadata fields users can edit inline — amount and discipline. Other
+// columns (project_id / company_id / kind / ord) are immutable; to swap the
+// linked company on a row, remove + re-add.
+export async function updateProjectSub({ projectId, companyId, kind = "sub", amount, discipline }) {
+  const patch = {};
+  if (amount !== undefined) {
+    patch.amount = (amount === "" || amount == null) ? null : Number(amount);
+  }
+  if (discipline !== undefined) {
+    patch.discipline = (discipline === "" || discipline == null) ? null : String(discipline);
+  }
+  if (Object.keys(patch).length === 0) return null;
+  const { error } = await supabase
+    .from("project_subs")
+    .update(patch)
+    .eq("project_id", projectId)
+    .eq("company_id", companyId)
+    .eq("kind", kind);
+  if (error) throw new Error(`update ${kind}: ${error.message}`);
+  return patch;
+}
+
+// Remove a project_subs row. For kind='prime' rows we also clear
+// projects.prime_company_id so the role/consistency invariant holds.
+// Note: this does NOT delete linked sub_invoices rows — those are kept as
+// history. If you re-add the same company afterwards, the existing billing
+// data resurfaces automatically (the matrix builder keys on company_id).
+export async function removeProjectSub({ projectId, companyId, kind = "sub" }) {
+  const { error } = await supabase
+    .from("project_subs")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("company_id", companyId)
+    .eq("kind", kind);
+  if (error) throw new Error(`remove ${kind}: ${error.message}`);
+  if (kind === "prime") {
+    const { error: e2 } = await supabase
+      .from("projects")
+      .update({ prime_company_id: null })
+      .eq("id", projectId);
+    if (e2) throw new Error(`clear prime_company_id: ${e2.message}`);
+  }
 }
 
 // Update a project's role explicitly. Switching to Prime also clears

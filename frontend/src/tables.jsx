@@ -1788,6 +1788,8 @@ export const InvoiceTable = ({
   onAddSub,          // (projectRow, kind) => void  — opens the AddSubModal
   onTogglePaid,      // ({projectId, companyId, monthIdx, paid, kind}) => void
   onChangeRole,      // (projectRow, role) => void  — toggles Prime/Sub on the project
+  onUpdateSubMeta,   // ({projectId, companyId, kind, patch}) => void  — inline edit (amount/discipline)
+  onRemoveSub,       // ({projectId, companyId, kind, companyName}) => void  — × button on sub row
   onNew,             // () => void  — opens the New Invoice CreateModal
 }) => {
   const USERS = getUsers();
@@ -2263,7 +2265,33 @@ export const InvoiceTable = ({
                     return (
                     <tr key={`${r.id}:${entryKind}:${s.companyId}`}
                         className={"invoice-sub-row" + (isPrimeEntry ? " invoice-prime-row" : "")}>
-                      <td className="invoice-expand-col"/>
+                      <td className="invoice-expand-col">
+                        {onRemoveSub && (
+                          <button
+                            type="button"
+                            className="invoice-sub-remove"
+                            title={isPrimeEntry
+                              ? `Remove ${s.companyName} as the prime`
+                              : `Remove ${s.companyName} from this project`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const ok = window.confirm(
+                                isPrimeEntry
+                                  ? `Remove ${s.companyName} as the prime on this project?\n\nMonthly billing data is preserved and will resurface if you re-add the same prime.`
+                                  : `Remove ${s.companyName} as a sub on this project?\n\nMonthly billing data is preserved and will resurface if you re-add the same sub.`
+                              );
+                              if (!ok) return;
+                              onRemoveSub({
+                                projectId: r.sourceId,
+                                companyId: s.companyId,
+                                kind: entryKind,
+                                companyName: s.companyName,
+                              });
+                            }}>
+                            <Icon name="x" size={11}/>
+                          </button>
+                        )}
+                      </td>
                       <td className="sticky-1 mono subtle" style={{ fontSize: 11 }}/>
                       <td className="sticky-2">
                         <span className="invoice-sub-name">
@@ -2272,16 +2300,33 @@ export const InvoiceTable = ({
                             <span className="invoice-prime-tag mono">PRIME</span>
                           )}
                         </span>
-                        {s.discipline && (
-                          <span className="invoice-sub-discipline mono">· {s.discipline}</span>
-                        )}
+                        <span className="invoice-sub-discipline mono">
+                          {s.discipline ? "· " : null}
+                          <EditableCell value={s.discipline || ""}
+                            onChange={v => onUpdateSubMeta?.({
+                              projectId: r.sourceId,
+                              companyId: s.companyId,
+                              kind: entryKind,
+                              patch: { discipline: v },
+                            })}
+                            format={v => v
+                              ? <span>{v}</span>
+                              : <span className="invoice-sub-discipline-empty">+ discipline</span>}/>
+                        </span>
                       </td>
                       {/* Role column — empty on sub-rows */}
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="mono">
-                        {s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>}
+                        <EditableCell value={s.contractAmount} type="number"
+                          onChange={v => onUpdateSubMeta?.({
+                            projectId: r.sourceId,
+                            companyId: s.companyId,
+                            kind: entryKind,
+                            patch: { amount: v },
+                          })}
+                          format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       {s.amounts.map((amt, i) => {

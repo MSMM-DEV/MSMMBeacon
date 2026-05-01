@@ -24,7 +24,7 @@ import {
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
-  upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub,
+  upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub, updateProjectSub, removeProjectSub,
   ensureSubInvoiceRow, setSubInvoicePaid,
   setProjectRole, setProjectPrimeCompany,
   findOrCreateProjectForInvoice, linkInvoiceToProject,
@@ -1133,6 +1133,105 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // Edit metadata on an existing project_subs row (contract amount or
+  // discipline). Identifies the row by the natural composite key
+  // (project_id, company_id, kind). Optimistic — patches both the
+  // subInvoices matrix AND the per-project subs array on whichever pipeline
+  // slice owns the project, so every consumer sees the change immediately.
+  const updateSubMeta = async ({ projectId, companyId, kind = "sub", patch }) => {
+    if (!patch || Object.keys(patch).length === 0) return;
+    try {
+      await updateProjectSub({ projectId, companyId, kind, ...patch });
+
+      // 1) Patch the matrix entry (Invoice tab + Receivables read this).
+      setSubInvoices(prev => {
+        const next = new Map(prev);
+        const list = next.get(projectId);
+        if (!list) return prev;
+        next.set(projectId, list.map(s => {
+          if (s.companyId !== companyId || (s.kind || "sub") !== kind) return s;
+          const out = { ...s };
+          if (patch.amount !== undefined) {
+            out.contractAmount = (patch.amount === "" || patch.amount == null) ? 0 : Number(patch.amount);
+          }
+          if (patch.discipline !== undefined) {
+            out.discipline = patch.discipline || "";
+          }
+          return out;
+        }));
+        return next;
+      });
+
+      // 2) Patch the project's subs array on whichever slice holds it. The
+      //    adapted shape uses {cId, desc, amt, kind}, distinct from the
+      //    matrix entry shape — both need to stay in sync.
+      const patchSlice = (setter) => setter(prev => prev.map(p => {
+        if (p.id !== projectId) return p;
+        return {
+          ...p,
+          subs: (p.subs || []).map(s => {
+            if (s.cId !== companyId || (s.kind || "sub") !== kind) return s;
+            const out = { ...s };
+            if (patch.amount !== undefined) {
+              out.amt = (patch.amount === "" || patch.amount == null) ? 0 : Number(patch.amount);
+            }
+            if (patch.discipline !== undefined) {
+              out.desc = patch.discipline || "";
+            }
+            return out;
+          }),
+        };
+      }));
+      patchSlice(setPotential);
+      patchSlice(setAwaiting);
+      patchSlice(setAwarded);
+      patchSlice(setClosed);
+    } catch (e) {
+      showToast(`Update failed: ${e?.message || e}`, "x");
+    }
+  };
+
+  // Remove a project_subs row entirely. For kind='prime' rows the DB call
+  // also clears projects.prime_company_id (see data.js). Local state mirrors
+  // both removals — the matrix entry is dropped, the project's subs list
+  // is filtered, and for prime removals the project's clientId is recomputed
+  // (it's conflated with prime_company_id by the adapter, so leaving it
+  // alone leaves a dangling reference to the removed firm).
+  const removeSub = async ({ projectId, companyId, kind = "sub", companyName }) => {
+    try {
+      await removeProjectSub({ projectId, companyId, kind });
+
+      setSubInvoices(prev => {
+        const next = new Map(prev);
+        const list = next.get(projectId);
+        if (!list) return prev;
+        const filtered = list.filter(s => !(s.companyId === companyId && (s.kind || "sub") === kind));
+        if (filtered.length === 0) next.delete(projectId);
+        else next.set(projectId, filtered);
+        return next;
+      });
+
+      const patchSlice = (setter) => setter(prev => prev.map(p => {
+        if (p.id !== projectId) return p;
+        const nextSubs = (p.subs || []).filter(s => !(s.cId === companyId && (s.kind || "sub") === kind));
+        const out = { ...p, subs: nextSubs };
+        // For prime removal, also drop the conflated clientId reference if it
+        // was pointing at the prime we just removed (the adapter folds
+        // prime_company_id into clientId when client_id is null).
+        if (kind === "prime" && p.clientId === companyId) out.clientId = null;
+        return out;
+      }));
+      patchSlice(setPotential);
+      patchSlice(setAwaiting);
+      patchSlice(setAwarded);
+      patchSlice(setClosed);
+
+      showToast(`Removed ${companyName || (kind === "prime" ? "prime" : "sub")}`, "check");
+    } catch (e) {
+      showToast(`Remove failed: ${e?.message || e}`, "x");
+    }
+  };
+
   // Toggle a project's Prime/Sub role from the Invoice tab. Switching to
   // Prime also clears prime_company_id in the DB; switching to Sub leaves
   // prime_company_id alone (the user picks one in the next "+ Add prime"
@@ -2103,6 +2202,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onTogglePaid={setSubInvoicePaidStatus}
             onOpenFiles={(payload) => setFilesModal(payload)}
             onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
+            onUpdateSubMeta={updateSubMeta}
+            onRemoveSub={removeSub}
             onChangeRole={setInvoiceRoleHandler}
             onNew={() => setCreateTable("invoice")}
             yearOptions={availableYears.invoice}

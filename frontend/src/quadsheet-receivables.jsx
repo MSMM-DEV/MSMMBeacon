@@ -1,26 +1,30 @@
 import React, { useMemo, useState } from "react";
 import { Icon } from "./icons.jsx";
-import { fmtMoney, fmtDate, MONTHS, companyById, getCompanies, getInvoiceFileSignedUrl } from "./data.js";
+import { fmtMoney, MONTHS, companyById, getCompanies } from "./data.js";
 
 // ============================================================================
 // Subs Receivables — sub-centric inversion of the project-centric Invoice tab.
 // ----------------------------------------------------------------------------
-// The Invoice table reads "for this project, who are the subs and what have
-// we billed them?". Executives want the reverse lens: "for each sub firm we
-// engage, where's our money?". This panel pivots subInvoicesMatrix by sub
-// company and exposes three levels of drill-down:
+// Three-level drill-down — names first, numbers on demand:
 //
-//   L1  Sub firm — Contract · Billed · Pending · Remaining (across all projects)
-//   L2  Per-project breakdown — same four numbers, scoped to one project
-//   L3  Monthly billing ledger — derived from the 12 month columns + per-month
-//       paid flag + per-month uploaded files (the user's mental model of
-//       "billing history" is implemented here as that derived ledger; there
-//       is no separate billings table)
+//   L1  Sub firm name  (+ sort-metric chip on the right)
+//   L2  Project names this sub is on
+//   L3  Three numbers — Contract · Billed To Date · Pending
 //
-// "Pending" = sum of monthly amounts where paid=false. "Billed" = sum where
-// paid=true. "Remaining" = contract − billed − pending. Remaining can go
-// negative when a sub overruns their contract; we display that in red rather
-// than clamping to zero so the variance is visible to execs.
+// Inclusion criterion: a sub appears only when at least one billing entry
+// (any month, any project) is attached to it. Sub firms with a contract
+// amount but no billing activity are hidden — execs care about active
+// receivables, not idle relationships.
+//
+// Two flavors of entry land in the same list:
+//
+//   kind='sub'   — MSMM is Prime; the sub firm bills MSMM (money MSMM owes
+//                  out). Bucket per sub firm.
+//   kind='prime' — MSMM is Sub; MSMM bills the upstream prime firm (money
+//                  owed TO MSMM). All such entries roll up under MSMM with
+//                  the upstream prime carried as project context. The MSMM
+//                  bucket gets an "AS SUB" badge so viewers know the
+//                  pending-money direction is reversed.
 // ============================================================================
 
 export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject }) => {
@@ -30,9 +34,8 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
   );
 
   const [sortKey, setSortKey] = useState("pending");
-  const [showFullyPaid, setShowFullyPaid] = useState(false);
   const [expandedSubs, setExpandedSubs] = useState(() => new Set());
-  const [expandedHistory, setExpandedHistory] = useState(() => new Set());
+  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [query, setQuery] = useState("");
 
   const toggleSub = (id) => setExpandedSubs(prev => {
@@ -40,7 +43,7 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
-  const toggleHistory = (key) => setExpandedHistory(prev => {
+  const toggleProject = (key) => setExpandedProjects(prev => {
     const next = new Set(prev);
     next.has(key) ? next.delete(key) : next.add(key);
     return next;
@@ -48,16 +51,13 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let arr = subs;
-    if (q) arr = arr.filter(s => s.companyName.toLowerCase().includes(q));
-    return arr;
+    if (!q) return subs;
+    return subs.filter(s => s.companyName.toLowerCase().includes(q));
   }, [subs, query]);
 
   const sorted = useMemo(() => {
     const arr = filtered.slice();
     arr.sort((a, b) => {
-      // Primary: chosen metric (desc). Tie-break: name asc, so the order
-      // is stable when two subs are at $0 on the chosen axis.
       const ka = sortKey === "pending" ? a.totalPending : a.totalBilled;
       const kb = sortKey === "pending" ? b.totalPending : b.totalBilled;
       if (kb !== ka) return kb - ka;
@@ -66,29 +66,26 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
     return arr;
   }, [filtered, sortKey]);
 
-  // Sticky workspace totals — at-a-glance for the exec scanning the section.
-  const totals = useMemo(() => {
-    const t = { contract: 0, billed: 0, pending: 0, remaining: 0 };
-    for (const s of sorted) {
-      t.contract  += s.totalContract;
-      t.billed    += s.totalBilled;
-      t.pending   += s.totalPending;
-      t.remaining += s.totalRemaining;
-    }
-    return t;
-  }, [sorted]);
+  const headlineNumber = sorted.reduce(
+    (acc, s) => acc + (sortKey === "pending" ? s.totalPending : s.totalBilled),
+    0
+  );
 
   return (
-    <section className="quad-card recv-card" data-accent="recv">
+    <section className="quad-card recv-card recv-v2" data-accent="recv">
       <header className="quad-head recv-head">
         <div className="recv-head-l">
           <div className="quad-eyebrow">05 · Receivables</div>
-          <h2 className="quad-title">Subs · Outstanding Invoices</h2>
+          <h2 className="quad-title">Outstanding Invoices</h2>
           <div className="quad-sub">
-            {sorted.length} {sorted.length === 1 ? "sub firm" : "sub firms"}
-            {" · "}
-            <span className="recv-head-sub-num">{fmtMoney(totals.pending, false)}</span>
-            {" pending across the book"}
+            {sorted.length === 0
+              ? "No active sub receivables yet"
+              : <>
+                  {sorted.length} {sorted.length === 1 ? "sub" : "subs"}
+                  {" · "}
+                  <span className="recv-headline-num">{fmtMoney(headlineNumber, false)}</span>
+                  {" "}{sortKey === "pending" ? "pending" : "billed"} across the book
+                </>}
           </div>
         </div>
         <div className="recv-head-r">
@@ -119,217 +116,108 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
         </div>
       </header>
 
-      <div className="recv-col-legend" aria-hidden="true">
-        <div className="recv-legend-name"></div>
-        <div className="recv-legend-num">Contract</div>
-        <div className="recv-legend-num">Billed</div>
-        <div className="recv-legend-num">Pending</div>
-        <div className="recv-legend-num">Remaining</div>
-        <div className="recv-legend-meter">% Paid</div>
-      </div>
-
       <div className="recv-body">
         {sorted.length === 0 ? (
-          <div className="quad-empty recv-empty">
+          <div className="recv-empty">
             {query
-              ? `No subs match "${query}".`
-              : "No sub receivables yet — tag subs on projects and bill them to populate this view."}
+              ? <>No subs match "<strong>{query}</strong>".</>
+              : "Once subs have invoice amounts entered against them, they'll appear here."}
           </div>
         ) : (
-          <ul className="recv-list">
-            {sorted.map(sub => {
+          <ul className="recv-subs">
+            {sorted.map((sub, idx) => {
               const isOpen = expandedSubs.has(sub.companyId);
-              const visibleProjects = showFullyPaid
-                ? sub.projects
-                : sub.projects.filter(p => p.pending > 0);
-              const projectCount = visibleProjects.length;
-              const denom = sub.totalContract || 1;
-              const paidPct = Math.max(0, Math.min(100, (sub.totalBilled / denom) * 100));
-              const pendingPct = Math.max(0, Math.min(100 - paidPct, (sub.totalPending / denom) * 100));
-              const tone = sub.totalPending === 0 && sub.totalBilled > 0 ? "settled"
-                : sub.totalPending > sub.totalBilled ? "high"
-                : "active";
+              const sortVal = sortKey === "pending" ? sub.totalPending : sub.totalBilled;
               return (
                 <li key={sub.companyId}
-                    className={"recv-sub" + (isOpen ? " open" : "") + ` tone-${tone}` + (sub.isMsmm ? " is-msmm" : "")}>
+                    className={"recv-sub" + (isOpen ? " open" : "") + (sub.isMsmm ? " is-msmm" : "")}
+                    style={{ "--rank": idx + 1 }}>
                   <button
                     type="button"
                     className="recv-sub-row"
                     onClick={() => toggleSub(sub.companyId)}
                     aria-expanded={isOpen}>
-                    <span className="recv-name">
-                      <span className={"recv-chev" + (isOpen ? " open" : "")} aria-hidden="true">
-                        <Icon name="chevronRight" size={11}/>
+                    <span className="recv-rank mono">{String(idx + 1).padStart(2, "0")}</span>
+                    <span className={"recv-chev" + (isOpen ? " open" : "")} aria-hidden="true">
+                      <Icon name="chevronRight" size={11}/>
+                    </span>
+                    <span className="recv-name-text">{sub.companyName}</span>
+                    {sub.isMsmm && (
+                      <span className="recv-msmm-badge"
+                            title="MSMM is the sub on these projects — pending = money owed TO us">
+                        As Sub
                       </span>
-                      <span className="recv-name-text">{sub.companyName}</span>
-                      {sub.isMsmm && (
-                        <span className="recv-msmm-badge" title="MSMM acts as sub on these projects — pending = money owed TO us">
-                          As Sub
-                        </span>
-                      )}
-                      <span className="recv-projects-pill">
-                        {sub.projects.length} {sub.projects.length === 1 ? "project" : "projects"}
-                      </span>
+                    )}
+                    <span className="recv-projects-pill">
+                      {sub.projects.length} {sub.projects.length === 1 ? "project" : "projects"}
                     </span>
-                    <span className="recv-num mono">{fmtMoney(sub.totalContract, false)}</span>
-                    <span className="recv-num mono recv-num-billed">{fmtMoney(sub.totalBilled, false)}</span>
-                    <span className={"recv-num mono recv-num-pending" + (sub.totalPending > 0 ? " is-pending" : "")}>
-                      {fmtMoney(sub.totalPending, false)}
-                    </span>
-                    <span className={"recv-num mono recv-num-remaining" + (sub.totalRemaining < 0 ? " is-overrun" : "")}>
-                      {fmtMoney(sub.totalRemaining, false)}
-                    </span>
-                    <span className="recv-meter" aria-label={`${Math.round(paidPct)}% paid`}>
-                      <span className="recv-meter-fill paid"  style={{ width: `${paidPct}%` }}/>
-                      <span className="recv-meter-fill pending" style={{ width: `${pendingPct}%`, left: `${paidPct}%` }}/>
-                      <span className="recv-meter-pct mono">{Math.round(paidPct)}%</span>
+                    <span className="recv-spacer"/>
+                    <span className={"recv-metric" + (sortVal > 0 ? ` is-${sortKey}` : " is-zero")}>
+                      <span className="recv-metric-num mono">{fmtMoney(sortVal, false)}</span>
+                      <span className="recv-metric-label">{sortKey}</span>
                     </span>
                   </button>
 
                   {isOpen && (
-                    <div className="recv-sub-body">
-                      <div className="recv-sub-toolbar">
-                        <span className="recv-sub-toolbar-l">
-                          {projectCount} of {sub.projects.length}
-                          {showFullyPaid ? " · all projects" : " · with pending"}
-                        </span>
-                        {sub.projects.length > visibleProjects.length || showFullyPaid ? (
-                          <button
-                            type="button"
-                            className={"recv-link-btn" + (showFullyPaid ? " is-on" : "")}
-                            onClick={() => setShowFullyPaid(v => !v)}>
-                            {showFullyPaid
-                              ? <>Hide fully-paid <Icon name="chevronDown" size={9}/></>
-                              : <>Show fully-paid ({sub.projects.length - visibleProjects.length}) <Icon name="chevronDown" size={9}/></>}
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {projectCount === 0 ? (
-                        <div className="recv-empty-inline">
-                          All projects with this sub are fully paid.
-                        </div>
-                      ) : (
-                        <ul className="recv-projects">
-                          {visibleProjects.map(p => {
-                            const histKey = `${sub.companyId}:${p.projectId}`;
-                            const histOpen = expandedHistory.has(histKey);
-                            const projectTone =
-                              p.pending === 0 ? "settled" :
-                              p.pending > p.billedToDate ? "high" : "active";
-                            return (
-                              <li key={p.projectId}
-                                  className={"recv-project tone-" + projectTone + (histOpen ? " open" : "")}>
-                                <div className="recv-project-row">
-                                  <div className="recv-project-name">
-                                    <span className="recv-project-title">{p.projectName || "Untitled project"}</span>
-                                    <span className="recv-project-meta">
-                                      {p.projectNumber && <span className="mono recv-project-pn">#{p.projectNumber}</span>}
-                                      {p.year && <span className="recv-project-year">· {p.year}</span>}
-                                      {p.primeFirmName && (
-                                        <span className="recv-prime-chip"
-                                              title={`MSMM is a sub on this project under ${p.primeFirmName}`}>
-                                          Prime · {p.primeFirmName}
-                                        </span>
-                                      )}
-                                      {p.statusKey && (
-                                        <span className={`recv-status-chip status-${p.statusKey}`}>
-                                          {labelForStatus(p.statusKey)}
-                                        </span>
-                                      )}
-                                      {onOpenProject && (
-                                        <button
-                                          type="button"
-                                          className="recv-open-btn"
-                                          title="Open project"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            onOpenProject(p.statusKey, p.projectId);
-                                          }}>
-                                          <Icon name="forward" size={10}/>
-                                        </button>
-                                      )}
-                                    </span>
-                                  </div>
-                                  <span className="recv-num mono">{fmtMoney(p.contractAmount, false)}</span>
-                                  <button
-                                    type="button"
-                                    className={"recv-num mono recv-billed-btn" + (histOpen ? " open" : "")}
-                                    title={histOpen
-                                      ? "Hide monthly billing"
-                                      : `${p.billingEntries.length} billing entries`}
-                                    aria-expanded={histOpen}
-                                    onClick={() => toggleHistory(histKey)}
-                                    disabled={p.billingEntries.length === 0}>
-                                    <span className="recv-billed-chev"><Icon name="chevronRight" size={9}/></span>
-                                    {fmtMoney(p.billedToDate, false)}
-                                  </button>
-                                  <span className={"recv-num mono recv-num-pending" + (p.pending > 0 ? " is-pending" : "")}>
-                                    {fmtMoney(p.pending, false)}
-                                  </span>
-                                  <span className={"recv-num mono recv-num-remaining" + (p.remaining < 0 ? " is-overrun" : "")}>
-                                    {fmtMoney(p.remaining, false)}
-                                  </span>
-                                  <span className="recv-meter recv-meter-sm">
-                                    <span className="recv-meter-fill paid"
-                                          style={{ width: `${Math.max(0, Math.min(100, (p.billedToDate / (p.contractAmount || 1)) * 100))}%` }}/>
-                                  </span>
-                                </div>
-
-                                {histOpen && p.billingEntries.length > 0 && (
-                                  <div className="recv-history">
-                                    <div className="recv-history-head">
-                                      <span>Month</span>
-                                      <span className="recv-history-amt">Amount</span>
-                                      <span>Status</span>
-                                      <span>Files</span>
-                                    </div>
-                                    <ul className="recv-history-list">
-                                      {p.billingEntries.map((b, idx) => (
-                                        <li key={idx} className={"recv-history-row" + (b.paid ? " paid" : " pending")}>
-                                          <span className="recv-history-month">
-                                            <span className="recv-history-mo">{b.monthLabel}</span>
-                                          </span>
-                                          <span className="recv-num mono recv-history-amt">{fmtMoney(b.amount, false)}</span>
-                                          <span className="recv-history-status">
-                                            {b.paid
-                                              ? <span className="chip sage" title={b.paidAt ? `Paid · ${fmtDate(b.paidAt)}` : "Paid"}>
-                                                  <Icon name="check" size={9}/>
-                                                  Paid{b.paidAt ? <span className="recv-paid-at">· {fmtDate(b.paidAt)}</span> : null}
-                                                </span>
-                                              : <span className="chip recv-pending-chip">Pending</span>}
-                                          </span>
-                                          <span className="recv-history-files">
-                                            {b.files.length === 0
-                                              ? <span className="empty-cell">—</span>
-                                              : (
-                                                <button
-                                                  type="button"
-                                                  className="recv-files-pill"
-                                                  title={`Open ${b.files[0].file_name || "invoice"}${b.files.length > 1 ? ` (+${b.files.length - 1} more — drill into project for all)` : ""}`}
-                                                  onClick={async (e) => {
-                                                    e.stopPropagation();
-                                                    try {
-                                                      const url = await getInvoiceFileSignedUrl(b.files[0].file_path, 60);
-                                                      if (url) window.open(url, "_blank", "noopener,noreferrer");
-                                                    } catch { /* signed URL flake — silent fail; user can retry */ }
-                                                  }}>
-                                                  <Icon name="link" size={10}/>
-                                                  {b.files.length} {b.files.length === 1 ? "file" : "files"}
-                                                </button>
-                                              )}
-                                          </span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
+                    <ul className="recv-projects">
+                      {sub.projects.map(p => {
+                        const pkey = `${sub.companyId}:${p.projectId}`;
+                        const pOpen = expandedProjects.has(pkey);
+                        return (
+                          <li key={pkey} className={"recv-project" + (pOpen ? " open" : "")}>
+                            <button
+                              type="button"
+                              className="recv-project-row"
+                              onClick={() => toggleProject(pkey)}
+                              aria-expanded={pOpen}>
+                              <span className={"recv-chev recv-chev-sm" + (pOpen ? " open" : "")} aria-hidden="true">
+                                <Icon name="chevronRight" size={10}/>
+                              </span>
+                              <span className="recv-project-title">
+                                {p.projectName || "Untitled project"}
+                              </span>
+                              <span className="recv-project-meta">
+                                {p.projectNumber && (
+                                  <span className="recv-project-pn mono">#{p.projectNumber}</span>
                                 )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </div>
+                                {p.year && (
+                                  <span className="recv-project-year">{p.year}</span>
+                                )}
+                                {p.statusKey && (
+                                  <span className={`recv-status-chip status-${p.statusKey}`}>
+                                    {labelForStatus(p.statusKey)}
+                                  </span>
+                                )}
+                                {p.primeFirmName && (
+                                  <span className="recv-prime-chip"
+                                        title={`MSMM is sub under ${p.primeFirmName}`}>
+                                    Prime · {p.primeFirmName}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="recv-project-pulse" aria-hidden="true">
+                                {p.pending > 0 && (
+                                  <span className="pulse-dot pending"
+                                        title={`${fmtMoney(p.pending, false)} pending`}/>
+                                )}
+                                {p.billedToDate > 0 && (
+                                  <span className="pulse-dot paid"
+                                        title={`${fmtMoney(p.billedToDate, false)} billed`}/>
+                                )}
+                              </span>
+                            </button>
+
+                            {pOpen && (
+                              <ProjectDetail
+                                project={p}
+                                isMsmm={sub.isMsmm}
+                                onOpen={() => onOpenProject?.(p.statusKey, p.projectId)}
+                              />
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
                 </li>
               );
@@ -337,48 +225,80 @@ export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject 
           </ul>
         )}
       </div>
-
-      {sorted.length > 0 && (
-        <footer className="recv-foot">
-          <span className="recv-foot-label">Totals</span>
-          <span className="recv-num mono">{fmtMoney(totals.contract, false)}</span>
-          <span className="recv-num mono">{fmtMoney(totals.billed, false)}</span>
-          <span className={"recv-num mono recv-num-pending" + (totals.pending > 0 ? " is-pending" : "")}>
-            {fmtMoney(totals.pending, false)}
-          </span>
-          <span className={"recv-num mono recv-num-remaining" + (totals.remaining < 0 ? " is-overrun" : "")}>
-            {fmtMoney(totals.remaining, false)}
-          </span>
-          <span className="recv-foot-pct mono">
-            {totals.contract > 0
-              ? `${Math.round((totals.billed / totals.contract) * 100)}% paid`
-              : "—"}
-          </span>
-        </footer>
-      )}
     </section>
   );
 };
 
 // ----------------------------------------------------------------------------
-// Pivot — flatten subInvoicesMatrix into a sub-centric structure.
+// L3 — Project detail strip (Contract · Billed · Pending)
 // ----------------------------------------------------------------------------
-// Two flavors of entry exist in subInvoicesMatrix:
-//
-//   kind='sub'   — MSMM is Prime on the project; the entry's company is a
-//                  downstream sub MSMM hires. The amounts are invoices the
-//                  sub bills MSMM (money MSMM owes them). Bucket per sub.
-//
-//   kind='prime' — MSMM is Sub on the project; the entry's company is the
-//                  upstream prime firm that hired MSMM. The amounts are
-//                  invoices MSMM bills the prime (money owed TO MSMM).
-//                  All such entries roll up under MSMM as the "sub" entity,
-//                  with the upstream prime carried through as project context.
-//
-// Both flavors land in the same list — execs want a unified view of every
-// invoicing relationship. The MSMM bucket gets an `isMsmm` flag the UI uses
-// to render an "AS SUB" badge so viewers know that bucket represents
-// receivables (money in) instead of payables (money out).
+// The drill-down payoff. Three numbers, generously spaced, in mono-display
+// type. For MSMM-as-sub the verbal labels shift slightly to reflect that
+// the money flows the other way (Pending here = money the prime owes MSMM).
+// ----------------------------------------------------------------------------
+const ProjectDetail = ({ project, isMsmm, onOpen }) => {
+  const pendingLabel = isMsmm ? "Pending Receipt" : "Pending";
+  const billedLabel  = isMsmm ? "Received To Date" : "Billed To Date";
+  return (
+    <div className="recv-detail">
+      <div className="recv-detail-strip">
+        <div className="recv-kpi">
+          <div className="recv-kpi-label">Contract</div>
+          <div className={"recv-kpi-val mono" + (project.contractAmount === 0 ? " is-zero" : "")}>
+            {project.contractAmount === 0
+              ? <span className="recv-kpi-empty">— not set —</span>
+              : fmtMoney(project.contractAmount, false)}
+          </div>
+        </div>
+        <div className="recv-kpi-rule" aria-hidden="true"/>
+        <div className="recv-kpi">
+          <div className="recv-kpi-label">{billedLabel}</div>
+          <div className={"recv-kpi-val mono" + (project.billedToDate > 0 ? " is-paid" : "")}>
+            {fmtMoney(project.billedToDate, false)}
+          </div>
+          {project.billingEntries.filter(b => b.paid).length > 0 && (
+            <div className="recv-kpi-sub">
+              {project.billingEntries.filter(b => b.paid).length} paid invoice
+              {project.billingEntries.filter(b => b.paid).length === 1 ? "" : "s"}
+            </div>
+          )}
+        </div>
+        <div className="recv-kpi-rule" aria-hidden="true"/>
+        <div className="recv-kpi">
+          <div className="recv-kpi-label">{pendingLabel}</div>
+          <div className={"recv-kpi-val mono" + (project.pending > 0 ? " is-pending" : "")}>
+            {fmtMoney(project.pending, false)}
+          </div>
+          {project.billingEntries.filter(b => !b.paid).length > 0 && (
+            <div className="recv-kpi-sub">
+              {project.billingEntries.filter(b => !b.paid).length} unpaid invoice
+              {project.billingEntries.filter(b => !b.paid).length === 1 ? "" : "s"}
+              {" · "}
+              {monthsListFromEntries(project.billingEntries.filter(b => !b.paid))}
+            </div>
+          )}
+        </div>
+      </div>
+      {onOpen && (
+        <div className="recv-detail-actions">
+          <button type="button" className="recv-open-link" onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+            Open project<Icon name="forward" size={10}/>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const monthsListFromEntries = (entries) => {
+  if (entries.length === 0) return "";
+  const months = entries.map(e => e.monthLabel);
+  if (months.length <= 3) return months.join(", ");
+  return `${months.slice(0, 3).join(", ")} +${months.length - 3} more`;
+};
+
+// ----------------------------------------------------------------------------
+// Pivot — flatten subInvoicesMatrix into a sub-centric structure.
 // ----------------------------------------------------------------------------
 function pivotSubsReceivables(subInvoices, projectsById) {
   if (!subInvoices) return [];
@@ -386,33 +306,32 @@ function pivotSubsReceivables(subInvoices, projectsById) {
 
   // Resolve MSMM once. The DB seeds exactly one company with is_msmm=true;
   // adaptCompany surfaces that as `isMsmm` on the cached company list.
+  // Synthetic id fallback keeps the bucket distinct even if the lookup
+  // fails in some edge case.
   const msmm = (getCompanies() || []).find(c => c.isMsmm) || null;
-  const msmmId = msmm?.id || "__msmm__"; // fallback synthetic id keeps the bucket distinct
+  const msmmId = msmm?.id || "__msmm__";
+  const msmmName = msmm?.name || "MSMM";
 
   for (const [projectId, entries] of subInvoices) {
     const project = projectsById?.get(projectId);
     if (!project) continue; // skip orphan projects (e.g. only-in-invoice rows)
+
     for (const e of entries) {
       const isPrimeKind = e.kind === "prime";
 
       // For kind='sub' entries, drop anything whose company doesn't resolve
-      // in the companies cache — that's an orphaned project_subs row
-      // pointing at a deleted/missing company. The matrix builder
-      // upstream stamps these as "Unknown company"; surfacing them in
-      // the exec view is noise. (Data-quality issue worth fixing at the
-      // source, but we don't want to leak it here.)
+      // in the companies cache — those are orphaned project_subs rows
+      // pointing at a deleted/missing company. The matrix builder upstream
+      // stamps these as "Unknown company"; surfacing them in the exec view
+      // is noise.
       if (!isPrimeKind) {
         const resolved = companyById(e.companyId);
         if (!resolved || !resolved.name) continue;
       }
 
-      // Bucket key: kind='prime' rolls up under MSMM (since MSMM is the sub
-      // on those projects); kind='sub' uses the sub firm's id directly.
-      const bucketId = isPrimeKind ? msmmId : e.companyId;
-      const bucketName = isPrimeKind
-        ? (msmm?.name || "MSMM")
-        : (e.companyName || companyById(e.companyId)?.name);
-
+      // Compute billing entries up-front so we can decide whether to keep
+      // this (sub, project) at all. Per the user spec: a sub appears only
+      // when at least one invoice amount is attached.
       const billingEntries = [];
       let billed = 0, pending = 0;
       for (let i = 0; i < 12; i++) {
@@ -430,10 +349,20 @@ function pivotSubsReceivables(subInvoices, projectsById) {
         if (paid) billed += amt; else pending += amt;
       }
 
+      // Skip (sub, project) pairs with zero billing activity. A sub firm
+      // that's contracted but never invoiced doesn't belong in the
+      // outstanding-invoices ledger.
+      if (billingEntries.length === 0) continue;
+
       const contract = e.contractAmount || 0;
-      // Allow negative remaining — surfaces overruns visibly. Clamping would
-      // hide the bad signal that the sub's been billed past their contract.
       const remaining = contract - billed - pending;
+
+      // Bucket key: kind='prime' rolls up under MSMM (since MSMM is the sub
+      // on those projects); kind='sub' uses the sub firm's id directly.
+      const bucketId = isPrimeKind ? msmmId : e.companyId;
+      const bucketName = isPrimeKind
+        ? msmmName
+        : (e.companyName || companyById(e.companyId)?.name);
 
       let bucket = byCompany.get(bucketId);
       if (!bucket) {
@@ -449,16 +378,13 @@ function pivotSubsReceivables(subInvoices, projectsById) {
         };
         byCompany.set(bucketId, bucket);
       }
+
       bucket.projects.push({
         projectId,
         projectName: project.name,
         projectNumber: project.projectNumber,
         year: project.year,
         statusKey: project.statusKey,
-        // For MSMM-as-sub rows, the entry's companyName is the upstream
-        // prime firm (e.g. "Donald Bond"). The UI renders this as a
-        // "Prime: <name>" chip on the project row so viewers know who
-        // owes MSMM the money.
         primeFirmName: isPrimeKind ? (e.companyName || companyById(e.companyId)?.name || "") : null,
         contractAmount: contract,
         billedToDate: billed,
@@ -473,12 +399,10 @@ function pivotSubsReceivables(subInvoices, projectsById) {
     }
   }
 
-  // Hide subs with zero activity entirely — no contract, no billing, no
-  // pending. Otherwise empty rows clutter the executive view.
+  // Order projects within each sub: pending desc, then billed desc, then
+  // name asc. Same rule the user-facing sort uses at L1, applied locally.
   const out = [];
   for (const sub of byCompany.values()) {
-    if (sub.totalContract === 0 && sub.totalBilled === 0 && sub.totalPending === 0) continue;
-    // Sort projects: pending desc primary, billed desc secondary, name asc tie-break.
     sub.projects.sort((a, b) => {
       if (b.pending !== a.pending) return b.pending - a.pending;
       if (b.billedToDate !== a.billedToDate) return b.billedToDate - a.billedToDate;
