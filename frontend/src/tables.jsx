@@ -2243,9 +2243,16 @@ export const InvoiceTable = ({
                           : <span className="empty-cell">—</span>}/>
                     </td>
                     <td>
-                      {(r.pmIds || []).length > 0
-                        ? <UserStack ids={r.pmIds}/>
-                        : <span className="empty-cell">—</span>}
+                      <EditableCell
+                        value={r.pmIds || []}
+                        type="users"
+                        options={pmOptions}
+                        placeholder="Pick PMs…"
+                        onChange={v => updateRow(r.id, { pmIds: v })}
+                        render={v => (v || []).length > 0
+                          ? <UserStack ids={v}/>
+                          : <span className="empty-cell">—</span>}
+                      />
                     </td>
                     <td>
                       <EditableCell value={r.amount} type="number"
