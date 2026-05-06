@@ -1934,7 +1934,17 @@ export const InvoiceTable = ({
     }
     return sortBy.dir === "asc" ? cmp : -cmp;
   };
-  const sortGroup = (arr) => sortBy.key ? [...arr].sort(compareRows) : arr;
+  // Default order (when no column sort is active): Type ENG before PM, then
+  // by project name as a stable tiebreaker. Rows with neither type land last.
+  // The Orange-at-bottom split is preserved because this runs per-group.
+  const typeRank = (r) => (r.type === "ENG" ? 0 : r.type === "PM" ? 1 : 2);
+  const defaultCompare = (a, b) => {
+    const t = typeRank(a) - typeRank(b);
+    if (t !== 0) return t;
+    return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base", numeric: true });
+  };
+  const sortGroup = (arr) =>
+    sortBy.key ? [...arr].sort(compareRows) : [...arr].sort(defaultCompare);
 
   const searchedNonOrange = sortGroup(nonOrangeRows.filter(passes));
   const searchedOrange    = sortGroup(orangeRows.filter(passes));
