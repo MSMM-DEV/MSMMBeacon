@@ -1224,6 +1224,26 @@ html, body { overflow-x: clip; }
 }
 .tag button { color: var(--accent-ink); opacity: .6; padding: 0 2px; }
 .tag button:hover { opacity: 1; }
+.cell-user-edit {
+  min-height: var(--row-h);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+  border-radius: 2px;
+}
+.cell-user-edit input {
+  min-width: 54px;
+  font-size: 12px;
+}
+.cell-user-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  min-width: 180px;
+  max-height: 230px;
+  overflow-y: auto;
+  margin: 0;
+  z-index: 20;
+}
 
 /* dropdown menu */
 .menu {

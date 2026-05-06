@@ -138,6 +138,8 @@ export const EditableCell = ({
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [userQuery, setUserQuery] = useState("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const ref = useRef();
 
   useEffect(() => {
@@ -149,9 +151,22 @@ export const EditableCell = ({
         try { ref.current.select(); } catch (_) { /* ignore */ }
       }
     }
+    if (editing && type === "users") {
+      setUserQuery("");
+      setUserMenuOpen(true);
+    }
   }, [editing, type]);
 
   useEffect(() => { setDraft(value); }, [value]);
+
+  const sameValue = (a, b) => {
+    if (Array.isArray(a) || Array.isArray(b)) {
+      const aa = Array.isArray(a) ? a : [];
+      const bb = Array.isArray(b) ? b : [];
+      return aa.length === bb.length && aa.every((x, i) => x === bb[i]);
+    }
+    return a === b;
+  };
 
   const closeNoChange = () => {
     setDraft(value);
@@ -169,7 +184,7 @@ export const EditableCell = ({
     } else {
       out = v;
     }
-    if (out !== value) {
+    if (!sameValue(out, value)) {
       if (typeof onChange === "function") onChange(out);
     }
   };
@@ -225,6 +240,101 @@ export const EditableCell = ({
     onMouseDown: (e) => e.stopPropagation(),
     onDoubleClick: (e) => e.stopPropagation(),
   };
+
+  if (type === "users") {
+    const raw = Array.isArray(options) ? options.map(normOption) : [];
+    const ids = Array.isArray(draft) ? draft : [];
+    const selected = ids
+      .map(id => raw.find(o => o.value === id) || { value: id, label: userById(id)?.name || id })
+      .filter(Boolean);
+    const available = raw.filter(o =>
+      !ids.includes(o.value) &&
+      (!userQuery || String(o.label || "").toLowerCase().includes(userQuery.toLowerCase()))
+    );
+    const commitUsers = (nextIds) => {
+      setDraft(nextIds);
+      if (!sameValue(nextIds, value) && typeof onChange === "function") onChange(nextIds);
+    };
+    const closeUsers = () => {
+      window.setTimeout(() => {
+        setUserMenuOpen(false);
+        setEditing(false);
+      }, 140);
+    };
+    const addUser = (uid) => {
+      if (!uid || ids.includes(uid)) return;
+      commitUsers([...ids, uid]);
+      setUserQuery("");
+      setUserMenuOpen(true);
+    };
+
+    return (
+      <div
+        className="tag-input cell-user-edit"
+        style={{ position: "relative", width: "100%" }}
+        {...stopRowEvents}
+      >
+        {selected.map(o => {
+          const u = userById(o.value);
+          return (
+            <span key={o.value} className="tag">
+              {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
+              {u?.shortName || o.label}
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  commitUsers(ids.filter(x => x !== o.value));
+                }}
+              >
+                <Icon name="x" size={10}/>
+              </button>
+            </span>
+          );
+        })}
+        <input
+          ref={ref}
+          value={userQuery}
+          placeholder={ids.length ? "Add…" : (placeholder || "Pick users…")}
+          onChange={(e) => { setUserQuery(e.target.value); setUserMenuOpen(true); }}
+          onFocus={() => setUserMenuOpen(true)}
+          onBlur={closeUsers}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setUserMenuOpen(false);
+              setEditing(false);
+            } else if (e.key === "Enter" && available[0]) {
+              e.preventDefault();
+              addUser(available[0].value);
+            }
+          }}
+        />
+        {userMenuOpen && available.length > 0 && (
+          <div className="menu cell-user-menu">
+            {available.slice(0, 8).map(o => {
+              const u = userById(o.value);
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  className="menu-item"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    addUser(o.value);
+                  }}
+                >
+                  {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
+                  <span>{o.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (type === "combobox") {
     // Searchable single-select. onChange fires on pick (commits + exits
