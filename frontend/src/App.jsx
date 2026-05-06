@@ -20,7 +20,7 @@ import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
-  routeClientPick, linkedProjectsFor,
+  routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
@@ -798,11 +798,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // pmIds, attendees — handled separately). PMs + event attendees are diffed
   // and mirrored to their join tables. Subs edits are still local-only today.
   // =====================================================================
-  // NOTE on `clientId`: deliberately NOT in any *_COLS map. The UI's
-  // clientId field is unified (adapter: client_id || prime_company_id) and
-  // needs routing based on whether the picked UUID is actually a client or
-  // a prime firm. Each updater calls routeClientPick(patch.clientId) and
-  // merges the result into dbPatch after buildDbPatch runs.
+  // NOTE on `clientId` / `primeId`: deliberately NOT in any *_COLS map.
+  // Both are merged-pool UI fields whose picked UUID could belong to either
+  // the clients or companies table. Each updater calls the matching router
+  // (routeClientPick / routePrimePick) and merges the result into dbPatch
+  // after buildDbPatch runs. clientId is unified across every project tab;
+  // primeId is awarded-only.
   const POTENTIAL_COLS = {
     year: "year", name: "project_name", role: "role",
     amount: "total_contract_amount", msmm: "msmm_amount",
@@ -1031,6 +1032,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setAwarded(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, AWARDED_COLS);
     if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
+    if ("primeId"  in patch) Object.assign(dbPatch, routePrimePick (patch.primeId));
     patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,

@@ -198,6 +198,16 @@ export const routeClientPick = (v) => {
   if (clients.some(c => c.id === v)) return { client_id: v };
   return { prime_company_id: v, client_id: null };
 };
+
+// Same idea for the dedicated Prime column on Awarded. The picker uses the
+// merged client+company list, so writes need to land on `prime_client_id`
+// (clients) or `prime_company_id` (companies). Clearing nulls both.
+export const routePrimePick = (v) => {
+  if (v === "" || v == null) return { prime_company_id: null, prime_client_id: null };
+  const clients = getClientsOnly();
+  if (clients.some(c => c.id === v)) return { prime_client_id: v, prime_company_id: null };
+  return { prime_company_id: v, prime_client_id: null };
+};
 export const userById     = (id) => _users.find(u => u.id === id);
 export const companyById  = (id) => _companies.find(c => c.id === id);
 
@@ -468,8 +478,12 @@ function adaptAwarded(r) {
     id: r.id,
     year: r.year,
     name: r.project_name,
-    role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id || r.prime_company_id || null,
+    // Awarded keeps Prime as its own column (Client and Prime no longer share
+    // a slot), so role comes straight from the stored column. Older rows
+    // without a stored role fall back to the prime_company_id heuristic.
+    role: r.role || (r.prime_company_id ? "Sub" : "Prime"),
+    clientId: r.client_id || null,
+    primeId: r.prime_client_id || r.prime_company_id || null,
     amount: null,
     msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),

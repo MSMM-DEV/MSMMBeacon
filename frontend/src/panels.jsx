@@ -246,6 +246,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "year",           label: "Year",                    type: "number" },
       { k: "name",           label: "Project Name" },
       { k: "clientId",       label: "Client",                  type: "company" },
+      { k: "primeId",        label: "Prime",                   type: "clientOrFirm" },
       { k: "role",           label: "Prime or Sub",            type: "select", options: ["Prime","Sub"] },
       { k: "subs",           label: "Subs",                    type: "subs" },
       { k: "status",         label: "Status",                  type: "status" },

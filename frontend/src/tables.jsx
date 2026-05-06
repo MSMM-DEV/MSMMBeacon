@@ -1397,7 +1397,9 @@ export const AwardedTable = ({
     { label: "Project", w: "minmax(220px, 2fr)", sortKey: "name" },
     { label: "Client", w: "minmax(150px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
-    { label: "Org Type", w: "110px", sortKey: "orgType", defaultHidden: true,
+    { label: "Prime", w: "minmax(150px, 1.2fr)", sortKey: "primeName",
+      sortValue: r => companyById(r.primeId)?.name || "" },
+    { label: "Org Type", w: "110px", sortKey: "orgType",
       sortValue: r => orgRank(r.clientId) },
     { label: "Stage", w: "150px", sortKey: "stage" },
     { label: "Pool", w: "130px", sortKey: "pools" },
@@ -1409,13 +1411,13 @@ export const AwardedTable = ({
     { label: "PM", w: "130px", sortKey: "pm",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
-    { label: "Role", w: "100px", sortKey: "role", defaultHidden: true },
-    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
-    { label: "Submitted", w: "120px", sortKey: "dateSubmitted", defaultHidden: true },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract", defaultHidden: true },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract", defaultHidden: true },
-    { label: "Status", w: "120px", sortKey: "status", defaultHidden: true },
-    { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details", defaultHidden: true },
+    { label: "Role", w: "100px", sortKey: "role" },
+    { label: "Subs", w: "minmax(180px, 1.5fr)" },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
+    { label: "Status", w: "120px", sortKey: "status" },
+    { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details" },
     { label: "__actions", w: "90px", locked: true },
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
@@ -1474,8 +1476,15 @@ export const AwardedTable = ({
           ),
           "Client": (
             <div className="td subtle">
-              <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
+                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Prime": (
+            <div className="td subtle">
+              <EditableCell value={r.primeId} type="combobox" options={clientOrFirmOpts}
+                onChange={v => updateRow(r.id, { primeId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
             </div>
           ),

@@ -79,8 +79,12 @@ async function authorizeCaller(req: Request) {
   if (!auth) throw errResp("missing authorization header", 401);
 
   // JWT validation runs against the anon client (caller's JWT in header).
+  // Schema is `beacon_v2` — the live one the frontend reads from. Keeping
+  // this in sync with the frontend is what makes deletes actually disappear
+  // from the UI; the legacy `beacon` schema is a cold backup and is allowed
+  // to drift after cutover.
   const anon = createClient(SUPABASE_URL, ANON_KEY, {
-    db: { schema: "beacon" },
+    db: { schema: "beacon_v2" },
     global: { headers: { Authorization: auth } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -145,7 +149,7 @@ type ServiceClient = ReturnType<typeof createClient>;
 
 function svc(): ServiceClient {
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    db: { schema: "beacon" },
+    db: { schema: "beacon_v2" },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -274,9 +278,11 @@ async function deleteUser(admin: ServiceClient, payload: any, callerBeaconId: st
     if (n <= 1) return bad("refusing to delete the last Admin");
   }
 
-  // Cascade: *_pms join rows are ON DELETE CASCADE from beacon.users.
-  // Delete beacon.users first, then auth.users (the FK from beacon.users →
-  // auth.users is ON DELETE SET NULL, so it's safe in either order).
+  // Cascade: project_pms / anticipated_invoice_pms / event_attendees /
+  // lead_attendees / alert_recipients are ON DELETE CASCADE from
+  // beacon_v2.users. Delete beacon_v2.users first, then auth.users (the FK
+  // from beacon_v2.users.auth_user_id → auth.users is ON DELETE SET NULL,
+  // so order is safe either way).
   const { error: bErr } = await admin.from("users").delete().eq("id", id);
   if (bErr) return bad(`delete beacon.users failed: ${bErr.message}`, 500);
 
