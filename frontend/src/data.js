@@ -59,6 +59,27 @@ export async function getCurrentSession() {
   return data?.session || null;
 }
 
+export async function changeOwnPassword(email, currentPassword, newPassword) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("No email is available for this session.");
+  if (!currentPassword) throw new Error("Enter your current password.");
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("New password must be at least 6 characters.");
+  }
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: currentPassword,
+  });
+  if (signInError) {
+    throw new Error("Current password is incorrect.");
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+  return { ok: true };
+}
+
 // ----------------------------------------------------------------------
 // Admin panel helpers
 // ----------------------------------------------------------------------

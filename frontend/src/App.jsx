@@ -21,7 +21,7 @@ import {
   MONTHS, TODAY_MONTH, THIS_YEAR,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
   routeClientPick, linkedProjectsFor,
-  supabase, signOut, getCurrentSession, fetchCurrentBeaconUser,
+  supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
   upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub, updateProjectSub, removeProjectSub,
@@ -487,6 +487,135 @@ function LoadingScreen({ error }) {
   );
 }
 
+const OwnPasswordModal = ({ user, onClose, onSubmit }) => {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
+  const valid =
+    currentPassword.length > 0 &&
+    newPassword.length >= 6 &&
+    newPassword === confirmPassword &&
+    newPassword !== currentPassword;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pending) return;
+    if (!currentPassword) {
+      setError("Enter your current password.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New passwords do not match.");
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setError("Choose a password that is different from your current one.");
+      return;
+    }
+
+    setPending(true);
+    setError("");
+    try {
+      await onSubmit(currentPassword, newPassword);
+      onClose();
+    } catch (err) {
+      setError(err?.message || "Password change failed.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={pending ? undefined : onClose}/>
+      <form className="modal password-modal" onSubmit={submit}>
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="lock" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <div className="drawer-eyebrow">Account</div>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>Change password</h3>
+            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+              <span className="mono">{user?.email}</span>
+            </div>
+          </div>
+          <button type="button" className="drawer-close" onClick={onClose} disabled={pending}>
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <div className="field-label">Current password *</div>
+            <div className="field-value">
+              <input
+                className="input"
+                type={show ? "text" : "password"}
+                autoComplete="current-password"
+                value={currentPassword}
+                autoFocus
+                onChange={e => setCurrentPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <div className="field-label">New password *</div>
+            <div className="field-value">
+              <input
+                className="input"
+                type={show ? "text" : "password"}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <div className="field-label">Confirm password *</div>
+            <div className="field-value">
+              <input
+                className="input"
+                type={show ? "text" : "password"}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <label className="password-show-toggle">
+            <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)}/>
+            <span>Show passwords</span>
+          </label>
+          {error && (
+            <div className="admin-error" role="alert">
+              <Icon name="x" size={12}/>
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <div style={{ fontSize: 12, color: "var(--text-soft)" }}>
+            You will stay signed in on this device.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn sm" onClick={onClose} disabled={pending}>Cancel</button>
+            <button className="btn primary sm" disabled={!valid || pending}>
+              <Icon name="check" size={13}/>
+              {pending ? "Updating…" : "Update password"}
+            </button>
+          </div>
+        </div>
+      </form>
+    </>
+  );
+};
+
 // ======================================================================
 // Main App
 // ======================================================================
@@ -502,6 +631,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     (currentUser?.last_name?.[0]  || "")
     || userDisplayName.slice(0, 2);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [tweaks, setTweaks] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("beacon-tweaks") || "null");
@@ -2385,6 +2515,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{userDisplayName}</div>
                     <div style={{ fontSize: 11.5, color: "var(--text-soft)" }}>{currentUser?.email}</div>
                   </div>
+                  <button className="menu-item" onClick={() => { setMenuOpen(false); setPasswordModalOpen(true); }}>
+                    <Icon name="lock" size={13}/>
+                    <span>Change password</span>
+                  </button>
+                  <div className="menu-sep"/>
                   <button className="menu-item" onClick={() => { setMenuOpen(false); onSignOut?.(); }}>
                     <Icon name="logout" size={13}/>
                     <span>Sign out</span>
@@ -2919,6 +3054,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             </button>
           )}
         </div>
+      )}
+
+      {passwordModalOpen && (
+        <OwnPasswordModal
+          user={currentUser}
+          onClose={() => setPasswordModalOpen(false)}
+          onSubmit={async (currentPassword, newPassword) => {
+            await changeOwnPassword(currentUser?.email, currentPassword, newPassword);
+            showToast("Password updated", "check");
+          }}
+        />
       )}
 
       {adminOpen && isAdmin && (

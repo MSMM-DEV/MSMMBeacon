@@ -1133,6 +1133,21 @@ html, body { overflow-x: clip; }
   display: flex; gap: 8px; justify-content: space-between;
   align-items: center;
 }
+.password-modal .field {
+  grid-template-columns: 150px minmax(0, 1fr);
+}
+.password-show-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 12px 150px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.password-show-toggle input {
+  accent-color: var(--accent);
+}
 
 /* recurrence chips */
 .radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -4062,6 +4077,8 @@ html, body { overflow-x: clip; }
   }
   .field-label { padding-top: 0; }
   .field-value { min-height: 0; }
+  .password-modal .field { grid-template-columns: 1fr; }
+  .password-show-toggle { margin-left: 0; }
 
   /* Subrow (2 Sub entries on Potential form etc.): stack name/amount. */
   .subrow { grid-template-columns: 1fr 110px 32px; gap: 4px; }
