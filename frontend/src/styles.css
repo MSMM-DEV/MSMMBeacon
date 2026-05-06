@@ -586,10 +586,35 @@ html, body { overflow-x: clip; }
 /* "Project total" row sits at the bottom of an expanded Invoice row,
    below the MSMM line + each sub-row + the Add-sub action. Tinted in
    blue (rather than the accent-orange used elsewhere) so it reads
-   distinctly as the project's reconciliation footer. */
-.invoice-table tr.invoice-total-row td {
-  background: color-mix(in srgb, var(--blue) 12%, var(--bg-elev));
-  border-top: 1px solid color-mix(in srgb, var(--blue) 32%, transparent);
+   distinctly as the project's reconciliation footer.
+   Selectors chain `.invoice-sub-row.invoice-total-row` so they have
+   higher specificity than the default sub-row backgrounds further
+   down in this stylesheet — same trick as `.invoice-prime-row` above. */
+.invoice-table tr.invoice-sub-row.invoice-total-row td {
+  background: color-mix(in srgb, var(--blue) 20%, var(--bg-elev));
+  border-top: 1px solid color-mix(in srgb, var(--blue) 36%, transparent);
+}
+.invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-1,
+.invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-2 {
+  background: color-mix(in srgb, var(--blue) 20%, var(--bg-elev));
+}
+/* Drop the italic + ↳ caret used on per-sub rows; the total row is
+   a footer label, not a sub-detail. */
+.invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-2 {
+  font-style: normal;
+  color: var(--text);
+}
+.invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-2::before {
+  content: none;
+}
+/* Override the per-sub muted month tints so the blue carries across
+   the 12 monthly cells too. Slightly stronger on actual months to
+   match the existing actual/proj rhythm. */
+.invoice-table tr.invoice-sub-row.invoice-total-row td.month-actual {
+  background: color-mix(in srgb, var(--blue) 24%, var(--bg-elev));
+}
+.invoice-table tr.invoice-sub-row.invoice-total-row td.month-proj {
+  background: color-mix(in srgb, var(--blue) 14%, var(--bg-elev));
 }
 .invoice-total-row-hint {
   margin-left: 10px;
