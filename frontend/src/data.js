@@ -542,7 +542,15 @@ function adaptInvoice(r) {
     // renames the cell to "Total Contract Value" — the underlying field is
     // unchanged so the drawer / forms / PDF export stay wired identically.
     amount: r.contract_amount || 0,
+    // MSMM override fields — NULL means "show derived value (= total − Σ subs)";
+    // numeric means "this is a frozen override". Same semantic as
+    // ytd_actual_override / rollforward_override.
     msmmAmount: r.msmm_amount ?? null,
+    msmmValues: [
+      r.msmm_jan_amount, r.msmm_feb_amount, r.msmm_mar_amount, r.msmm_apr_amount,
+      r.msmm_may_amount, r.msmm_jun_amount, r.msmm_jul_amount, r.msmm_aug_amount,
+      r.msmm_sep_amount, r.msmm_oct_amount, r.msmm_nov_amount, r.msmm_dec_amount,
+    ].map(v => v ?? null),
     type: r.type || "ENG",
     remainingStart: r.msmm_remaining_to_bill_year_start || 0,
     values: [

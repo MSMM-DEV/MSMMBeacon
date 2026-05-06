@@ -457,6 +457,11 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       pmIds: extras.pmIds || [],
       amount: dbRow.contract_amount || 0,
       msmmAmount: dbRow.msmm_amount ?? null,
+      msmmValues: [
+        dbRow.msmm_jan_amount, dbRow.msmm_feb_amount, dbRow.msmm_mar_amount, dbRow.msmm_apr_amount,
+        dbRow.msmm_may_amount, dbRow.msmm_jun_amount, dbRow.msmm_jul_amount, dbRow.msmm_aug_amount,
+        dbRow.msmm_sep_amount, dbRow.msmm_oct_amount, dbRow.msmm_nov_amount, dbRow.msmm_dec_amount,
+      ].map(v => v ?? null),
       type: dbRow.type || "ENG",
       remainingStart: dbRow.msmm_remaining_to_bill_year_start || 0,
       values: Array(12).fill(0),
@@ -995,11 +1000,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 project_name: existing.name,
                 year: existing.year,
                 project_number: existing.projectNumber || null,
-                // Default MSMM portion = Total at create time. The user splits
-                // out subs later via the expand row; the soft-mismatch chip
-                // surfaces inconsistencies as they go.
+                // Total Contract Value only. MSMM portion stays NULL so the
+                // UI shows the derived value (= total − Σ subs); the user
+                // can override from the Invoice expand row if needed.
                 contract_amount: existing.amount ?? null,
-                msmm_amount:     existing.amount ?? null,
               };
               const { data: invRow, error } = await supabase
                 .from("anticipated_invoice").insert(invPayload).select().single();
@@ -1012,6 +1016,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 pmIds: [...(existing.pmIds || [])],
                 amount: invRow.contract_amount ?? 0,
                 msmmAmount: invRow.msmm_amount ?? null,
+                msmmValues: Array(12).fill(null),
                 type: invRow.type || "ENG",
                 remainingStart: invRow.msmm_remaining_to_bill_year_start || 0,
                 values: Array(12).fill(0),
@@ -1193,6 +1198,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "may_amount","jun_amount","jul_amount","aug_amount",
     "sep_amount","oct_amount","nov_amount","dec_amount",
   ];
+  // Parallel monthly columns holding MSMM-portion overrides. NULL means
+  // "auto-calc (= total month − Σ sub.amounts[month])"; numeric is a
+  // frozen override. Same semantic as msmm_amount on the contract field.
+  const INVOICE_MSMM_MONTH_COLS = [
+    "msmm_jan_amount","msmm_feb_amount","msmm_mar_amount","msmm_apr_amount",
+    "msmm_may_amount","msmm_jun_amount","msmm_jul_amount","msmm_aug_amount",
+    "msmm_sep_amount","msmm_oct_amount","msmm_nov_amount","msmm_dec_amount",
+  ];
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
     setInvoice(rows => rows.map(r => {
@@ -1202,6 +1215,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return { ...r, values: vals };
     }));
     const col = INVOICE_MONTH_COLS[monthIdx];
+    if (!col) return;
+    supabase.from("anticipated_invoice").update({ [col]: nv }).eq("id", id)
+      .then(({ error }) => {
+        if (error) showToast(`Save failed: ${error.message}`, "x");
+      });
+  };
+  // MSMM monthly override write. Empty input → null → resume auto-calc;
+  // numeric → freeze that month's MSMM value at the override.
+  const updateInvoiceMsmmCell = (id, monthIdx, v) => {
+    const nv = (v == null || v === "") ? null : Number(v);
+    setInvoice(rows => rows.map(r => {
+      if (r.id !== id) return r;
+      const next = [...(r.msmmValues || Array(12).fill(null))];
+      next[monthIdx] = nv;
+      return { ...r, msmmValues: next };
+    }));
+    const col = INVOICE_MSMM_MONTH_COLS[monthIdx];
     if (!col) return;
     supabase.from("anticipated_invoice").update({ [col]: nv }).eq("id", id)
       .then(({ error }) => {
@@ -1733,7 +1763,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         id: rest.id, sourceId: row.id,
         projectNumber: rest.projectNumber, name: rest.name,
         pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
-        msmmAmount: rest.amount || null,
+        msmmAmount: null,                       // auto-calc by default
+        msmmValues: Array(12).fill(null),       // auto-calc per month
         type: _invoiceType || "ENG",
         remainingStart: rest.msmmRemaining || 0,
         values: Array(12).fill(0),
@@ -1775,7 +1806,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               project_number: rest.projectNumber || null,
               year: rest.year,
               contract_amount: rest.amount ?? null,
-              msmm_amount:     rest.amount ?? null,
+              // MSMM portion stays NULL → auto-calc in the expand row.
               type: _invoiceType || "ENG",
               msmm_remaining_to_bill_year_start: rest.msmm ?? null,
             }).select().single();
@@ -1983,7 +2014,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   project_number: row.projectNumber || null,
                   year: row.year ?? null,
                   contract_amount: row.amount ?? null,
-                  msmm_amount:     row.msmmAmount ?? row.amount ?? null,
+                  // Preserve any prior MSMM override (NULL ⟹ auto-calc).
+                  msmm_amount: row.msmmAmount ?? null,
                   type: row.type || "ENG",
                   msmm_remaining_to_bill_year_start: row.remainingStart ?? null,
                   ytd_actual_override: row.ytdActualOverride ?? null,
@@ -2091,7 +2123,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         name: row.name,
         pmIds: [...(row.pmIds || [])],
         amount: invAmt || 0,
-        msmmAmount: invAmt || null,
+        msmmAmount: null,                       // auto-calc by default
+        msmmValues: Array(12).fill(null),       // auto-calc per month
         type: invType,
         remainingStart: invRem || 0,
         values: Array(12).fill(0),
@@ -2129,7 +2162,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               project_number: row.projectNumber || null,
               year: row.year ?? null,
               contract_amount: invAmt,
-              msmm_amount:     invAmt,
+              // MSMM portion stays NULL → auto-calc.
               type: invType,
               msmm_remaining_to_bill_year_start: invRem,
             }).select().single();
@@ -2714,6 +2747,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {tab === "invoice" && (
           <InvoiceTable rows={filtered.invoice}
             updateInvoice={updateInvoiceCell}
+            updateInvoiceMsmm={updateInvoiceMsmmCell}
             updateRow={updateInvoice}
             onOpenDrawer={r => openDrawer(r, "invoice")}
             onAlert={r => setAlertObj({ row: r, tab: "invoice" })}

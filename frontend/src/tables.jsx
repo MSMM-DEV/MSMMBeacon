@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons.jsx";
 import {
   EditableCell, RoleChip, StatusChip, UserTag, UserStack, SubsCell, RowActions,
@@ -197,25 +198,35 @@ const Popover = ({ anchorRef, onClose, children, align = "left" }) => {
     };
   }, [anchorRef, onClose]);
 
-  // Position relative to anchor
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  useEffect(() => {
+  // Position relative to anchor. useLayoutEffect runs before paint so the
+  // menu never flashes at (0,0). `ready` guards the first frame so we don't
+  // render the menu at a stale position before the rect is measured.
+  const [pos, setPos] = useState({ top: 0, left: 0, ready: false });
+  useLayoutEffect(() => {
     if (!anchorRef?.current) return;
     const r = anchorRef.current.getBoundingClientRect();
     setPos({
       top: r.bottom + 4 + window.scrollY,
       left: align === "right" ? r.right + window.scrollX : r.left + window.scrollX,
+      ready: true,
     });
   }, [anchorRef, align]);
 
-  return (
+  // Portal to <body> so the menu is not affected by any ancestor's
+  // overflow/clip/transform/contain — the toolbar lives inside .tablewrap
+  // which sets `overflow: clip`, and earlier non-portaled placement would
+  // get visually clipped on some viewport widths even though the menu is
+  // position:absolute.
+  return createPortal(
     <div ref={ref} className="menu" style={{
       top: pos.top,
       left: align === "right" ? undefined : pos.left,
       right: align === "right" ? (window.innerWidth - pos.left) : undefined,
+      visibility: pos.ready ? "visible" : "hidden",
     }}>
       {children}
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -1793,7 +1804,7 @@ export const ClosedTable = ({
 // snapshot are intentionally skipped here. We still wire the Year chip so
 // users can filter this spreadsheet by year in the same UX pattern.
 export const InvoiceTable = ({
-  tab, rows, updateInvoice, updateRow = _noopUpdate,
+  tab, rows, updateInvoice, updateInvoiceMsmm, updateRow = _noopUpdate,
   onOpenDrawer, onAlert, flashId,
   yearOptions, yearValue, onYearChange,
   orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
@@ -2295,32 +2306,16 @@ export const InvoiceTable = ({
                         onChange={v => updateRow(r.id, { remainingStart: v })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
-                    {r.values.map((v, i) => {
-                      const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
-                      const hasFiles = filesForCell.length > 0;
-                      return (
+                    {/* Parent-row month cells stay blank. The 12 monthly
+                        totals (= MSMM + Σ subs) and their prime invoice file
+                        attachments live in the "Total monthly" row inside
+                        the expand block — same relocation as Total Contract
+                        Value above. YTD Actual and Rollforward stay on the
+                        parent row since they're aggregates, not per-month. */}
+                    {r.values.map((_, i) => (
                       <td key={i}
-                          className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
-                        <EditableCell value={v} type="number"
-                          onChange={nv => updateInvoice(r.id, i, nv)}
-                          format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
-                        />
-                        <button
-                          type="button"
-                          className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
-                          title={hasFiles
-                            ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
-                            : "Attach prime invoice file"}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
-                          }}>
-                          <Icon name="link" size={11}/>
-                          {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
-                        </button>
-                      </td>
-                      );
-                    })}
+                          className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "")}/>
+                    ))}
                     <td className={"total-cell" + (isYtdOverride(r) ? " inv-override" : "")}
                         title={isYtdOverride(r) ? "Manually overridden — clear the cell to reset to auto-calc" : "Auto-calculated — click to override"}>
                       <EditableCell value={ytdActualShown(r)} type="number"
@@ -2340,6 +2335,96 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                   </tr>
+                  {isExpanded && (
+                    // Total monthly row — the 12 per-month TOTALS that used
+                    // to render on the parent row. Editable; persists to
+                    // anticipated_invoice.{jan..dec}_amount via updateInvoice.
+                    // Each cell carries the prime invoice file-attachment
+                    // button (relocated from the parent row).
+                    <tr className="invoice-sub-row invoice-total-row">
+                      <td className="invoice-expand-col"/>
+                      <td className="sticky-1"/>
+                      <td className="sticky-2" colSpan={5} style={{ paddingLeft: 28, fontWeight: 600 }}>
+                        Total monthly
+                        <span className="invoice-total-row-hint">MSMM + subs</span>
+                      </td>
+                      <td/>
+                      {r.values.map((v, i) => {
+                        const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
+                        const hasFiles = filesForCell.length > 0;
+                        return (
+                        <td key={i}
+                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
+                          <EditableCell value={v} type="number"
+                            onChange={nv => updateInvoice(r.id, i, nv)}
+                            format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
+                          />
+                          <button
+                            type="button"
+                            className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
+                            title={hasFiles
+                              ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                              : "Attach prime invoice file"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                            }}>
+                            <Icon name="link" size={11}/>
+                            {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                          </button>
+                        </td>
+                        );
+                      })}
+                      <td className="total-cell"/>
+                      <td className="total-cell"/>
+                      <td/>
+                    </tr>
+                  )}
+                  {isExpanded && (() => {
+                    // MSMM monthly row — auto-calculated per month as
+                    // (total_month − Σ sub.amounts[month]). Editable to
+                    // override; clearing the cell writes NULL and resumes
+                    // auto-calc. Persists to msmm_{jan..dec}_amount via
+                    // updateInvoiceMsmm. Sub monthly amounts come from
+                    // subInvoices Map (sourced from sub_invoices table).
+                    const msmmVals = r.msmmValues || Array(12).fill(null);
+                    return (
+                      <tr className="invoice-sub-row invoice-msmm-row">
+                        <td className="invoice-expand-col"/>
+                        <td className="sticky-1"/>
+                        <td className="sticky-2" colSpan={5} style={{ paddingLeft: 28, fontWeight: 600 }}>
+                          MSMM monthly
+                          <span className="invoice-total-row-hint">total − subs</span>
+                        </td>
+                        <td/>
+                        {Array.from({ length: 12 }).map((_, i) => {
+                          const total      = Number(r.values[i] || 0);
+                          const subSum     = subList.reduce(
+                            (a, s) => a + Number((s.amounts && s.amounts[i]) || 0), 0);
+                          const auto       = total - subSum;
+                          const override   = msmmVals[i];
+                          const isOverride = override != null;
+                          const shown      = isOverride ? Number(override) : auto;
+                          return (
+                          <td key={i}
+                              className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
+                              title={isOverride
+                                ? `Override · auto would be ${fmtMoney(auto, false)}`
+                                : "Auto-calculated. Click to override."}>
+                            <EditableCell value={shown} type="number"
+                              onChange={nv => updateInvoiceMsmm?.(r.id, i,
+                                (nv == null || nv === "") ? null : Number(nv))}
+                              format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
+                            />
+                          </td>
+                          );
+                        })}
+                        <td className="total-cell"/>
+                        <td className="total-cell"/>
+                        <td/>
+                      </tr>
+                    );
+                  })()}
                   {isExpanded && subList.length === 0 && (
                     <tr className="invoice-sub-row invoice-sub-empty">
                       <td className="invoice-expand-col"/>
@@ -2515,18 +2600,20 @@ export const InvoiceTable = ({
                     // Summary strip rendered as the project's footer — it sits
                     // below the subs + Add-sub action so the breakdown reads
                     // naturally bottom-up: per-sub amounts → total reconciliation.
-                    // Total Contract Value (= contract_amount) and MSMM Portion
-                    // (= msmm_amount) are editable here. Subs subtotal is
-                    // derived from the per-sub contractAmount values that
-                    // render inline in the sub-rows above. The mismatch chip
-                    // surfaces inconsistencies softly — there's no DB CHECK,
-                    // since data entry is iterative (Total → MSMM → each sub).
+                    // - Total Contract Value (= contract_amount) is the
+                    //   user-entered total. Editable here.
+                    // - Subs subtotal is read-only, summed from the per-sub
+                    //   contractAmount fields rendered in the rows above.
+                    // - MSMM Portion is AUTO-CALCULATED (= total − subs)
+                    //   when r.msmmAmount is NULL. Users may override by
+                    //   typing a value into the cell; clearing the cell
+                    //   (empty input) resets back to auto.
                     const subsSubtotal = subList.reduce(
                       (a, s) => a + (Number(s.contractAmount) || 0), 0);
-                    const total = Number(r.amount) || 0;
-                    const msmm  = Number(r.msmmAmount) || 0;
-                    const delta = total - (msmm + subsSubtotal);
-                    const showMismatch = (r.amount != null) && Math.abs(delta) > 1;
+                    const total          = Number(r.amount) || 0;
+                    const msmmAuto       = total - subsSubtotal;
+                    const isMsmmOverride = r.msmmAmount != null;
+                    const msmmShown      = isMsmmOverride ? Number(r.msmmAmount) : msmmAuto;
                     return (
                       <tr className="invoice-summary-row invoice-summary-footer">
                         <td className="invoice-expand-col"/>
@@ -2542,11 +2629,21 @@ export const InvoiceTable = ({
                               </span>
                             </span>
                             <span className="invoice-summary-equals">=</span>
-                            <span className="invoice-summary-field">
-                              <span className="invoice-summary-label">MSMM Portion</span>
+                            <span className={"invoice-summary-field" + (isMsmmOverride ? " inv-override" : "")}>
+                              <span className="invoice-summary-label">
+                                MSMM Portion
+                                <span className={"invoice-summary-badge" + (isMsmmOverride ? "" : " muted")}
+                                      title={isMsmmOverride
+                                        ? `Override · auto would be ${fmtMoney(msmmAuto, false)} — clear the cell to resume auto-calc`
+                                        : "Auto-calculated as Total − Subs subtotal. Click to override."}>
+                                  {isMsmmOverride ? "override" : "auto"}
+                                </span>
+                              </span>
                               <span className="invoice-summary-input mono">
-                                <EditableCell value={r.msmmAmount} type="number"
-                                  onChange={v => updateRow(r.id, { msmmAmount: v })}
+                                <EditableCell value={msmmShown} type="number"
+                                  onChange={v => updateRow(r.id, {
+                                    msmmAmount: (v == null || v === "") ? null : Number(v)
+                                  })}
                                   format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                               </span>
                             </span>
@@ -2559,12 +2656,6 @@ export const InvoiceTable = ({
                                 {fmtMoney(subsSubtotal)}
                               </span>
                             </span>
-                            {showMismatch && (
-                              <span className="chip rose invoice-summary-mismatch"
-                                    title={`Total ≠ MSMM + ${isPrimeRow ? "Σ subs" : "prime"}. Adjust any of the three to balance.`}>
-                                off by {fmtMoney(Math.abs(delta), false)}
-                              </span>
-                            )}
                           </div>
                         </td>
                       </tr>

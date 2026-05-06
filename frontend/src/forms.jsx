@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Icon } from "./icons.jsx";
 import { supabase, THIS_YEAR, MONTHS, fmtMoney } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
@@ -341,10 +341,6 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
   const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}), ...(seed || {}) }));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  // Invoice modal: until the user manually edits MSMM Portion, mirror it
-  // from Total Contract Value on every keystroke. Most ENG-only / no-subs
-  // projects have MSMM = Total, so this saves a redundant entry.
-  const msmmTouchedRef = useRef(false);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -464,10 +460,10 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             year: row.year,
             project_number: row.project_number || null,
             // Total Contract Value = potential.total_contract_amount.
-            // MSMM Portion seeds from potential.msmm_amount; the user can
-            // refine the split later via the Invoice expand row.
+            // MSMM Portion stays NULL by default — the Invoice expand row
+            // shows the derived value (= total − Σ subs); users override
+            // via that cell only when MSMM ≠ derived.
             contract_amount: row.total_contract_amount ?? null,
-            msmm_amount:     row.msmm_amount ?? null,
           };
           const { data: invRow, error: e4 } = await supabase
             .from("anticipated_invoice").insert(invPayload).select().single();
@@ -1039,26 +1035,15 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           </Field>
           <Field label="Total Contract Value">
             <input className="input" type="number" value={form.contract_amount}
-                   onChange={e => {
-                     const v = e.target.value;
-                     setForm(f => ({
-                       ...f,
-                       contract_amount: v,
-                       // Mirror Total → MSMM until the user manually overrides.
-                       ...(msmmTouchedRef.current ? {} : { msmm_amount: v }),
-                     }));
-                   }}
+                   onChange={e => set("contract_amount", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)" }}
                    placeholder="0"/>
           </Field>
-          <Field label="MSMM Portion">
+          <Field label="MSMM Portion (optional override)">
             <input className="input" type="number" value={form.msmm_amount}
-                   onChange={e => {
-                     msmmTouchedRef.current = true;
-                     set("msmm_amount", e.target.value);
-                   }}
+                   onChange={e => set("msmm_amount", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)" }}
-                   placeholder="0"/>
+                   placeholder="auto-calc (= total − subs)"/>
           </Field>
           <Field label="MSMM Remaining (year start)">
             <input className="input" type="number"

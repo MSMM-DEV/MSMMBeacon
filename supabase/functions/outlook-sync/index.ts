@@ -211,7 +211,7 @@ Deno.serve(async (req) => {
   const isServiceCall = bearer === SERVICE_ROLE_KEY;
   if (!isServiceCall) {
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      db: { schema: "beacon" },
+      db: { schema: "beacon_v2" },
       global: { headers: { Authorization: `Bearer ${bearer}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -237,7 +237,7 @@ Deno.serve(async (req) => {
   }
 
   const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    db: { schema: "beacon" },
+    db: { schema: "beacon_v2" },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
