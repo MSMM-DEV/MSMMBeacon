@@ -1041,8 +1041,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   };
 
   // UI-field → DB-column whitelist for other editable Invoice cells. Any
-  // key not in this map updates local state only (e.g. pmIds is managed
-  // via the anticipated_invoice_pms join table, not columns on the row).
+  // key not in this map updates local state only. PMs are mirrored below
+  // through anticipated_invoice_pms, not patched onto anticipated_invoice.
   const INVOICE_COL_MAP = {
     ytdActualOverride:   "ytd_actual_override",
     rollforwardOverride: "rollforward_override",
@@ -1054,16 +1054,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     year:                "year",
   };
   const updateInvoice = (id, patch) => {
+    const existing = invoice.find(r => r.id === id);
+    if (!existing) return;
     setInvoice(rows => rows.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = {};
     for (const [uiKey, dbCol] of Object.entries(INVOICE_COL_MAP)) {
       if (uiKey in patch) dbPatch[dbCol] = patch[uiKey];
     }
-    if (Object.keys(dbPatch).length === 0) return;
-    supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
-      .then(({ error }) => {
-        if (error) showToast(`Save failed: ${error.message}`, "x");
-      });
+    if (Object.keys(dbPatch).length > 0) {
+      supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
+        .then(({ error }) => {
+          if (error) showToast(`Save failed: ${error.message}`, "x");
+        });
+    }
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds,
+        "anticipated_invoice_pms", "anticipated_invoice_id");
+    }
   };
 
   // Delete an anticipated_invoice row. The BEFORE DELETE trigger from the

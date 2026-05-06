@@ -1950,6 +1950,51 @@ export const InvoiceTable = ({
   const yearChipLabel = hasYear
     ? `Year: ${yearValue ?? "All"}`
     : `Year: ${THIS_YEAR}`;
+  const invoiceWrapRef = useRef(null);
+  const invoiceTopScrollRef = useRef(null);
+  const invoiceTableRef = useRef(null);
+  const [invoiceScrollWidth, setInvoiceScrollWidth] = useState(1280);
+
+  useEffect(() => {
+    const wrap = invoiceWrapRef.current;
+    const top = invoiceTopScrollRef.current;
+    const table = invoiceTableRef.current;
+    if (!wrap || !top || !table) return;
+
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const width = Math.max(wrap.scrollWidth, table.scrollWidth, wrap.clientWidth);
+        setInvoiceScrollWidth(prev => prev === width ? prev : width);
+        if (top.scrollLeft !== wrap.scrollLeft) top.scrollLeft = wrap.scrollLeft;
+      });
+    };
+
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(wrap);
+    ro?.observe(table);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [searchedRows.length, expandedIds.size]);
+
+  const syncInvoiceScroll = (source) => {
+    const wrap = invoiceWrapRef.current;
+    const top = invoiceTopScrollRef.current;
+    if (!wrap || !top) return;
+    const from = source === "top" ? top : wrap;
+    const to = source === "top" ? wrap : top;
+    if (Math.abs(to.scrollLeft - from.scrollLeft) > 1) {
+      to.scrollLeft = from.scrollLeft;
+    }
+  };
+  const onInvoiceTopScroll = () => syncInvoiceScroll("top");
+  const onInvoiceBodyScroll = () => syncInvoiceScroll("body");
 
   return (
     <div className="tablewrap">
@@ -2103,8 +2148,20 @@ export const InvoiceTable = ({
               }
             </div>
           )}
-          <div className="invoice-wrap">
-            <table className="invoice-table">
+          <div
+            className="invoice-top-scroll"
+            ref={invoiceTopScrollRef}
+            onScroll={onInvoiceTopScroll}
+            aria-hidden="true"
+            tabIndex={-1}
+          >
+            <div
+              className="invoice-top-scroll-spacer"
+              style={{ width: invoiceScrollWidth }}
+            />
+          </div>
+          <div className="invoice-wrap" ref={invoiceWrapRef} onScroll={onInvoiceBodyScroll}>
+            <table className="invoice-table" ref={invoiceTableRef}>
               <thead>
                 <tr>
                   <th className="invoice-expand-col"/>
