@@ -91,10 +91,10 @@ export const Money = ({ value, muted, cents }) => (
   </span>
 );
 
-export const SubsCell = ({ subs }) => {
+export const SubsCell = ({ subs, wrap = false }) => {
   if (!subs || subs.length === 0) return <span className="empty-cell">—</span>;
   return (
-    <span className="chip-stack trunc">
+    <span className={wrap ? "chip-stack" : "chip-stack trunc"}>
       {subs.map((s, i) => {
         const co = companyById(s.cId);
         const label = co?.name?.split(" ")[0] || s.desc || "Sub";

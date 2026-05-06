@@ -1563,7 +1563,11 @@ export const AwardedTable = ({
                 render={v => <RoleChip role={v}/>}/>
             </div>
           ),
-          "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
+          "Subs": (
+            <div className="td" style={{ overflow: "visible", whiteSpace: "normal", flexWrap: "wrap", padding: "6px 12px" }}>
+              <SubsCell subs={r.subs} wrap/>
+            </div>
+          ),
           "Submitted": (
             <div className="td mono subtle">
               <EditableCell value={r.dateSubmitted} type="date"

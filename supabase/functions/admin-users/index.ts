@@ -168,7 +168,7 @@ async function fetchBeaconUser(admin: ServiceClient, id: string) {
     .eq("id", id)
     .maybeSingle();
   if (error) throw bad(error.message, 500);
-  if (!data) throw bad("beacon.users row not found", 404);
+  if (!data) throw bad("beacon_v2.users row not found", 404);
   return data;
 }
 
@@ -217,7 +217,7 @@ async function createUser(admin: ServiceClient, payload: any) {
     })
     .select()
     .single();
-  if (bErr) return bad(`insert beacon.users failed: ${bErr.message}`, 500);
+  if (bErr) return bad(`insert beacon_v2.users failed: ${bErr.message}`, 500);
 
   const { data: aRes, error: aErr } = await admin.auth.admin.createUser({
     email,
@@ -284,14 +284,14 @@ async function deleteUser(admin: ServiceClient, payload: any, callerBeaconId: st
   // from beacon_v2.users.auth_user_id → auth.users is ON DELETE SET NULL,
   // so order is safe either way).
   const { error: bErr } = await admin.from("users").delete().eq("id", id);
-  if (bErr) return bad(`delete beacon.users failed: ${bErr.message}`, 500);
+  if (bErr) return bad(`delete beacon_v2.users failed: ${bErr.message}`, 500);
 
   if (row.auth_user_id) {
     const { error: aErr } = await admin.auth.admin.deleteUser(row.auth_user_id);
     if (aErr) {
-      // beacon.users is already gone; we could recreate it but the safer
+      // beacon_v2.users is already gone; we could recreate it but the safer
       // signal is to surface a partial-failure so the admin can investigate.
-      return bad(`beacon.users deleted but auth.users still present: ${aErr.message}`, 500);
+      return bad(`beacon_v2.users deleted but auth.users still present: ${aErr.message}`, 500);
     }
   }
   return json({ ok: true, message: "user deleted" });
@@ -317,7 +317,7 @@ async function setBan(admin: ServiceClient, payload: any, callerBeaconId: string
     .from("users")
     .update({ is_enabled: !banned })
     .eq("id", id);
-  if (upErr) return bad(`beacon is_enabled failed: ${upErr.message}`, 500);
+  if (upErr) return bad(`beacon_v2 is_enabled failed: ${upErr.message}`, 500);
 
   const fresh = await fetchBeaconUser(admin, id);
   return json({ ok: true, data: fresh, message: banned ? "user banned" : "user unbanned" });
