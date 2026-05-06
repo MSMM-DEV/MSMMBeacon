@@ -300,6 +300,12 @@ const QuadCard = ({ eyebrow, title, sub, accent, className, onExpand, children }
 // A horizontal benchmark line is overlaid across the plot when set, with
 // a small numeric chip so the threshold is readable at a glance.
 // ----------------------------------------------------------------------------
+const niceChartMax = (peak) => {
+  const safePeak = Math.max(Number(peak) || 0, 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(safePeak)));
+  return Math.ceil(safePeak / mag) * mag;
+};
+
 const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange }) => {
   // Two parallel 12-month totals:
   //   totalsBase — sum of invoices NOT sourced from an Orange potential row
@@ -309,7 +315,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
   //                by the Average toggle to render a single consolidated bar
   //                per month — exec read of "expected case").
   // The delta between base and all is the Orange pipeline's billing for the month.
-  const { totalsBase, totalsAll, totalsAvg, yMax } = useMemo(() => {
+  const { totalsBase, totalsAll, totalsAvg } = useMemo(() => {
     const totalsBase = Array(12).fill(0);
     const totalsAll  = Array(12).fill(0);
     for (const r of invoice) {
@@ -321,16 +327,8 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
       }
     }
     const totalsAvg = totalsAll.map((v, i) => (v + totalsBase[i]) / 2);
-    // Pin yMax to the larger of (peak month, benchmark) so the benchmark
-    // line stays inside the plot even when every month sits well under it.
-    // Round up to a clean magnitude tick (e.g. peak=84k → 100k; peak=4.6M
-    // → 5M). Floor of 1 keeps the divisor from blowing up on empty data.
-    const benchFloor = Number(monthlyBenchmark) > 0 ? Number(monthlyBenchmark) : 0;
-    const peak = Math.max(...totalsAll, benchFloor, 1);
-    const mag = Math.pow(10, Math.floor(Math.log10(peak)));
-    const yMax = Math.ceil(peak / mag) * mag;
-    return { totalsBase, totalsAll, totalsAvg, yMax };
-  }, [invoice, orangeSourceIds, monthlyBenchmark]);
+    return { totalsBase, totalsAll, totalsAvg };
+  }, [invoice, orangeSourceIds]);
 
   // Track SVG pixel box via ResizeObserver so internal geometry reflows
   // with the card. Fallback dims apply before the observer fires.
@@ -378,6 +376,13 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
   // Only meaningful when hasOrange — otherwise base and all are identical
   // and the "average" is just the single bar that already renders.
   const isAvgView = view === "average" && hasOrange;
+  // The Y-axis follows the bars that are visible in the current view. Pair
+  // mode considers both side-by-side series; Average mode considers only
+  // the midpoint bars. The benchmark no longer stretches the axis by itself.
+  const visibleBarValues = isAvgView
+    ? totalsAvg
+    : (hasOrange ? totalsBase.concat(totalsAll) : totalsAll);
+  const yMax = niceChartMax(Math.max(...visibleBarValues, 1));
   const PAIR_GAP = 3;
   const barW = (hasOrange && !isAvgView)
     ? Math.max(6, Math.min(26, slot * 0.30))
@@ -390,7 +395,10 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
 
   // Benchmark Y position (or null when not set — flag itself was hoisted to
   // padR computation above so the gutter widens to fit the chip).
-  const benchmarkY = hasBenchmark ? yFor(Number(monthlyBenchmark)) : null;
+  const rawBenchmarkY = hasBenchmark ? yFor(Number(monthlyBenchmark)) : null;
+  const benchmarkY = hasBenchmark
+    ? Math.max(padT, Math.min(padT + plotH, rawBenchmarkY))
+    : null;
   // Clamp the chip vertically so it stays inside the SVG even when the
   // benchmark sits at the very top or bottom of the plot.
   const chipCy = hasBenchmark
