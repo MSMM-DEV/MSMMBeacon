@@ -1387,6 +1387,24 @@ html, body { overflow-x: clip; }
      top/bottom of the invoice — keeps momentum scrolls predictable. */
   overscroll-behavior: contain;
 }
+.invoice-top-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 14px;
+  min-height: 14px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  scrollbar-width: thin;
+}
+.invoice-top-scroll-spacer {
+  height: 1px;
+}
+.invoice-top-scroll::-webkit-scrollbar { height: 8px; }
+.invoice-top-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
 .invoice-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -1480,6 +1498,9 @@ html, body { overflow-x: clip; }
   padding: 10px 10px;
   /* Hairline under the header so it stays visually anchored when scrolling. */
   box-shadow: inset 0 -1px 0 var(--border-strong);
+}
+.invoice-table thead th.invoice-th-sortable {
+  position: sticky;
 }
 .invoice-table thead th .invoice-th-label {
   /* Ensures sortable labels can't overflow under their caret silently. */
@@ -3975,10 +3996,13 @@ html, body { overflow-x: clip; }
   /* Give the horizontal table-scroll an inertial scroll feel on iOS and a
      thin scrollbar so users can tell it scrolls. Applies to both the grid
      (.table-scroll) and the <table>-based invoice (.invoice-wrap). */
-  .table-scroll, .invoice-wrap { -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
-  .table-scroll::-webkit-scrollbar, .invoice-wrap::-webkit-scrollbar { height: 6px; }
+  .table-scroll, .invoice-wrap, .invoice-top-scroll { -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .table-scroll::-webkit-scrollbar,
+  .invoice-wrap::-webkit-scrollbar,
+  .invoice-top-scroll::-webkit-scrollbar { height: 6px; }
   .table-scroll::-webkit-scrollbar-thumb,
-  .invoice-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+  .invoice-wrap::-webkit-scrollbar-thumb,
+  .invoice-top-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
   /* Invoice spreadsheet — on desktop the two leftmost columns (Proj # +
      Project Name) are sticky-pinned so the name stays readable while
