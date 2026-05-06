@@ -1391,6 +1391,11 @@ export const AwardedTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onMoveToPotential, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
 }) => {
+  // Column order mirrors Scott's Proposals workbook header row:
+  // Proposal Year · Title · Client Name · Prime · Sub · Status · Stage · Details ·
+  // Pool · Submitted Date · Client Contract No · MSMM Contract No · Contract Exp Date ·
+  // MSMM Capacity · MSMM Used · MSMM Remaining.
+  // UI-only columns (Org Type, PM, Proj #, Role) trail the spreadsheet block.
   const cols = [
     { label: "__select", w: "42px", locked: true },
     { label: "Year", w: "64px", sortKey: "year" },
@@ -1399,25 +1404,25 @@ export const AwardedTable = ({
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Prime", w: "minmax(150px, 1.2fr)", sortKey: "primeName",
       sortValue: r => companyById(r.primeId)?.name || "" },
-    { label: "Org Type", w: "110px", sortKey: "orgType",
-      sortValue: r => orgRank(r.clientId) },
+    { label: "Subs", w: "minmax(180px, 1.5fr)" },
+    { label: "Status", w: "120px", sortKey: "status" },
     { label: "Stage", w: "150px", sortKey: "stage" },
+    { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details" },
     { label: "Pool", w: "130px", sortKey: "pools" },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
+    { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
     { label: "Contract", w: "120px", sortKey: "contract",
       sortValue: r => (r.msmmUsed || 0) + (r.msmmRemaining || 0) },
     { label: "MSMM Used", w: "120px", sortKey: "msmmUsed" },
     { label: "Remaining", w: "120px", sortKey: "msmmRemaining" },
-    { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
+    { label: "Org Type", w: "110px", sortKey: "orgType",
+      sortValue: r => orgRank(r.clientId) },
     { label: "PM", w: "130px", sortKey: "pm",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
     { label: "Role", w: "100px", sortKey: "role" },
-    { label: "Subs", w: "minmax(180px, 1.5fr)" },
-    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
-    { label: "Status", w: "120px", sortKey: "status" },
-    { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details" },
     { label: "__actions", w: "90px", locked: true },
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
