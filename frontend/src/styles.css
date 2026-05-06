@@ -583,6 +583,53 @@ html, body { overflow-x: clip; }
   border-radius: 3px;
 }
 
+/* Summary strip at the top of an expanded Invoice row.
+   Holds Total Contract Value · MSMM Portion · Subs subtotal + mismatch chip. */
+.invoice-table tr.invoice-summary-row td {
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+  border-bottom: 1px solid var(--border);
+}
+.invoice-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.invoice-summary-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.invoice-summary-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.invoice-summary-input {
+  min-width: 96px;
+  font-weight: 600;
+}
+.invoice-summary-readonly {
+  min-width: 96px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+.invoice-summary-equals,
+.invoice-summary-plus {
+  font-size: 16px;
+  color: var(--text-muted);
+  align-self: center;
+  margin-top: 14px;  /* visually align with the input row, not the label row */
+}
+.invoice-summary-mismatch {
+  align-self: center;
+  margin-top: 14px;
+  font-size: 11px;
+}
+
 .thead, .trow {
   display: grid;
   gap: 0;

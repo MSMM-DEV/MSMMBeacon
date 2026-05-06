@@ -1882,7 +1882,7 @@ export const InvoiceTable = ({
   const passes = (r) => matchesSearch(r) && matchesType(r);
 
   // Column sort — limited to the columns the user asked to sort on:
-  //   Proj # · Project Name · Role · PM · Contract
+  //   Proj # · Project Name · Role · PM
   // Click a header to cycle: unsorted → asc → desc → unsorted (so the
   // user can always get back to the unsorted-with-Orange-pinned-bottom
   // default). Sort applies INSIDE each group (non-Orange / Orange) so
@@ -1905,7 +1905,6 @@ export const InvoiceTable = ({
       case "projectNumber": return (r.projectNumber || "").trim();
       case "name":          return (r.name || "").trim();
       case "role":          return (r.role || "").trim();
-      case "amount":        return Number(r.amount) || 0;
       case "pm": {
         // Sort by joined PM short-names so multi-PM rows have a stable key.
         // First-PM-name alone would be unstable when teams differ only in
@@ -2188,7 +2187,11 @@ export const InvoiceTable = ({
                   {sortableTh("role", "Role", { style: { minWidth: 76 } })}
                   <th style={{ minWidth: 76 }}>Type</th>
                   {sortableTh("pm", "PM", { style: { minWidth: 70 } })}
-                  {sortableTh("amount", "Contract", { style: { minWidth: 110 } })}
+                  {/* Per-sub contract amount slot. Parent rows show "—"; the
+                      project's Total Contract Value + MSMM Portion + mismatch
+                      live in the summary strip inside the expand block.
+                      Sort removed — there's no parent-row value to sort by. */}
+                  <th style={{ minWidth: 110 }}>Contract</th>
                   <th style={{ minWidth: 96 }}>Remaining<br/>Jan&nbsp;1</th>
                   {MONTHS.map((m, i) => (
                     <th key={i} className={i <= TODAY_MONTH ? "month-actual" : "month-proj"}>
@@ -2272,11 +2275,11 @@ export const InvoiceTable = ({
                           : <span className="empty-cell">—</span>}
                       />
                     </td>
-                    <td>
-                      <EditableCell value={r.amount} type="number"
-                        onChange={v => updateRow(r.id, { amount: v })}
-                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                    </td>
+                    {/* Parent rows leave the Contract column blank. The
+                        project's Total Contract Value + MSMM Portion live in
+                        the summary strip inside the expand block; per-sub
+                        contract amounts fill this slot on sub-rows below. */}
+                    <td className="subtle"><span className="empty-cell">—</span></td>
                     <td>
                       <EditableCell value={r.remainingStart} type="number"
                         onChange={v => updateRow(r.id, { remainingStart: v })}
@@ -2327,6 +2330,63 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                   </tr>
+                  {isExpanded && (() => {
+                    // Summary strip at the top of the expand block.
+                    // Total Contract Value (= contract_amount) and MSMM Portion
+                    // (= msmm_amount) are editable here. Subs subtotal is
+                    // derived from the per-sub contractAmount values that
+                    // render inline in the sub-rows below. The mismatch chip
+                    // surfaces inconsistencies softly — there's no DB CHECK,
+                    // since data entry is iterative (Total → MSMM → each sub).
+                    const subsSubtotal = subList.reduce(
+                      (a, s) => a + (Number(s.contractAmount) || 0), 0);
+                    const total = Number(r.amount) || 0;
+                    const msmm  = Number(r.msmmAmount) || 0;
+                    const delta = total - (msmm + subsSubtotal);
+                    const showMismatch = (r.amount != null) && Math.abs(delta) > 1;
+                    return (
+                      <tr className="invoice-summary-row">
+                        <td className="invoice-expand-col"/>
+                        <td className="sticky-1"/>
+                        <td className="sticky-2" colSpan={20} style={{ paddingLeft: 28 }}>
+                          <div className="invoice-summary">
+                            <span className="invoice-summary-field">
+                              <span className="invoice-summary-label">Total Contract Value</span>
+                              <span className="invoice-summary-input mono">
+                                <EditableCell value={r.amount} type="number"
+                                  onChange={v => updateRow(r.id, { amount: v })}
+                                  format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                              </span>
+                            </span>
+                            <span className="invoice-summary-equals">=</span>
+                            <span className="invoice-summary-field">
+                              <span className="invoice-summary-label">MSMM Portion</span>
+                              <span className="invoice-summary-input mono">
+                                <EditableCell value={r.msmmAmount} type="number"
+                                  onChange={v => updateRow(r.id, { msmmAmount: v })}
+                                  format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                              </span>
+                            </span>
+                            <span className="invoice-summary-plus">+</span>
+                            <span className="invoice-summary-field">
+                              <span className="invoice-summary-label">
+                                {isPrimeRow ? "Subs subtotal" : "Prime portion"}
+                              </span>
+                              <span className="invoice-summary-readonly mono">
+                                {fmtMoney(subsSubtotal)}
+                              </span>
+                            </span>
+                            {showMismatch && (
+                              <span className="chip rose invoice-summary-mismatch"
+                                    title={`Total ≠ MSMM + ${isPrimeRow ? "Σ subs" : "prime"}. Adjust any of the three to balance.`}>
+                                off by {fmtMoney(Math.abs(delta), false)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })()}
                   {isExpanded && subList.length === 0 && (
                     <tr className="invoice-sub-row invoice-sub-empty">
                       <td className="invoice-expand-col"/>
@@ -2515,7 +2575,7 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
-                      <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.amount || 0))}</td>
+                      <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.remainingStart || 0))}</td>
                       {MONTHS.map((_, i) => (
                         <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
@@ -2540,7 +2600,7 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
-                      <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.amount || 0))}</td>
+                      <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.remainingStart || 0))}</td>
                       {MONTHS.map((_, i) => (
                         <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>

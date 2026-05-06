@@ -537,7 +537,12 @@ function adaptInvoice(r) {
     projectNumber: r.project_number || "",
     name: r.project_name,
     pmIds: allPms(r.pms),
+    // `amount` continues to map to anticipated_invoice.contract_amount but
+    // now represents the *total* contract value (MSMM + every sub). The UI
+    // renames the cell to "Total Contract Value" — the underlying field is
+    // unchanged so the drawer / forms / PDF export stay wired identically.
     amount: r.contract_amount || 0,
+    msmmAmount: r.msmm_amount ?? null,
     type: r.type || "ENG",
     remainingStart: r.msmm_remaining_to_bill_year_start || 0,
     values: [

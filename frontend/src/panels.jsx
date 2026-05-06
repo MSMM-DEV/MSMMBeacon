@@ -285,7 +285,8 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
       { k: "type",           label: "Type",                    type: "select", options: ["ENG","PM"] },
       { k: "pmIds",          label: "PMs",                     type: "users" },
-      { k: "amount",         label: "Contract Amount",         type: "money" },
+      { k: "amount",         label: "Total Contract Value",    type: "money" },
+      { k: "msmmAmount",     label: "MSMM Portion",            type: "money" },
       { k: "remainingStart", label: "Remaining to Bill (Jan 1)", type: "money" },
     ],
     events: [

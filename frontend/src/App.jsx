@@ -425,6 +425,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       name: dbRow.project_name,
       pmIds: extras.pmIds || [],
       amount: dbRow.contract_amount || 0,
+      msmmAmount: dbRow.msmm_amount ?? null,
       type: dbRow.type || "ENG",
       remainingStart: dbRow.msmm_remaining_to_bill_year_start || 0,
       values: Array(12).fill(0),
@@ -963,7 +964,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 project_name: existing.name,
                 year: existing.year,
                 project_number: existing.projectNumber || null,
+                // Default MSMM portion = Total at create time. The user splits
+                // out subs later via the expand row; the soft-mismatch chip
+                // surfaces inconsistencies as they go.
                 contract_amount: existing.amount ?? null,
+                msmm_amount:     existing.amount ?? null,
               };
               const { data: invRow, error } = await supabase
                 .from("anticipated_invoice").insert(invPayload).select().single();
@@ -975,6 +980,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 name: invRow.project_name,
                 pmIds: [...(existing.pmIds || [])],
                 amount: invRow.contract_amount ?? 0,
+                msmmAmount: invRow.msmm_amount ?? null,
                 type: invRow.type || "ENG",
                 remainingStart: invRow.msmm_remaining_to_bill_year_start || 0,
                 values: Array(12).fill(0),
@@ -1181,6 +1187,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     name:                "project_name",
     projectNumber:       "project_number",
     amount:              "contract_amount",
+    msmmAmount:          "msmm_amount",
     type:                "type",
     remainingStart:      "msmm_remaining_to_bill_year_start",
     year:                "year",
@@ -1695,6 +1702,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         id: rest.id, sourceId: row.id,
         projectNumber: rest.projectNumber, name: rest.name,
         pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
+        msmmAmount: rest.amount || null,
         type: _invoiceType || "ENG",
         remainingStart: rest.msmmRemaining || 0,
         values: Array(12).fill(0),
@@ -1736,6 +1744,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               project_number: rest.projectNumber || null,
               year: rest.year,
               contract_amount: rest.amount ?? null,
+              msmm_amount:     rest.amount ?? null,
               type: _invoiceType || "ENG",
               msmm_remaining_to_bill_year_start: rest.msmm ?? null,
             }).select().single();
@@ -1943,6 +1952,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   project_number: row.projectNumber || null,
                   year: row.year ?? null,
                   contract_amount: row.amount ?? null,
+                  msmm_amount:     row.msmmAmount ?? row.amount ?? null,
                   type: row.type || "ENG",
                   msmm_remaining_to_bill_year_start: row.remainingStart ?? null,
                   ytd_actual_override: row.ytdActualOverride ?? null,
@@ -2050,6 +2060,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         name: row.name,
         pmIds: [...(row.pmIds || [])],
         amount: invAmt || 0,
+        msmmAmount: invAmt || null,
         type: invType,
         remainingStart: invRem || 0,
         values: Array(12).fill(0),
@@ -2087,6 +2098,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               project_number: row.projectNumber || null,
               year: row.year ?? null,
               contract_amount: invAmt,
+              msmm_amount:     invAmt,
               type: invType,
               msmm_remaining_to_bill_year_start: invRem,
             }).select().single();
@@ -2220,9 +2232,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         projectNumber: ir.project_number || uiRow.projectNumber || "",
         name: ir.project_name || uiRow.name,
         pmIds: [...(uiRow.pmIds || [])],
-        amount: ir.total_contract_amount ?? uiRow.amount ?? 0,
+        // Orange invoice INSERT (forms.jsx) writes contract_amount =
+        // potential.total_contract_amount and msmm_amount = potential.msmm_amount.
+        // Read both columns explicitly here so the local stub mirrors the DB row.
+        amount: ir.contract_amount ?? uiRow.amount ?? 0,
+        msmmAmount: ir.msmm_amount ?? uiRow.msmm ?? null,
         type: "ENG",
-        remainingStart: ir.msmm_amount ?? uiRow.msmm ?? 0,
+        remainingStart: ir.msmm_remaining_to_bill_year_start ?? uiRow.msmm ?? 0,
         values: Array(12).fill(0),
       };
       setInvoice(rs => [invUiRow, ...rs]);
