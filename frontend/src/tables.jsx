@@ -2402,62 +2402,6 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                   </tr>
-                  {isExpanded && (
-                    // Project total row — Total Contract Value lands in the
-                    // Contract column; the 12 per-month totals land in the
-                    // Jan..Dec columns. Editable inline; persists to
-                    // anticipated_invoice.contract_amount and
-                    // {jan..dec}_amount. Each month cell carries the prime
-                    // invoice file-attachment button.
-                    <tr className="invoice-sub-row invoice-total-row">
-                      <td className="invoice-expand-col"/>
-                      <td className="sticky-1"/>
-                      <td className="sticky-2" style={{ paddingLeft: 28, fontWeight: 600 }}>
-                        Project total
-                        <span className="invoice-total-row-hint">Total CV + monthly totals</span>
-                      </td>
-                      <td/>
-                      <td/>
-                      <td/>
-                      <td className="mono">
-                        <EditableCell value={r.amount} type="number"
-                          onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
-                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                      </td>
-                      <td/>
-                      {r.values.map((v, i) => {
-                        const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
-                        const hasFiles = filesForCell.length > 0;
-                        return (
-                        <td key={i}
-                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
-                          <EditableCell value={v} type="number"
-                            onChange={nv => updateInvoice(r.id, i, nv)}
-                            format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
-                          />
-                          <button
-                            type="button"
-                            className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
-                            title={hasFiles
-                              ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
-                              : "Attach prime invoice file"}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
-                            }}>
-                            <Icon name="link" size={11}/>
-                            {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
-                          </button>
-                        </td>
-                        );
-                      })}
-                      <td className="total-cell mono">
-                        {fmtMoney(r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b||0), 0)) || <span className="empty-cell">—</span>}
-                      </td>
-                      <td className="total-cell"/>
-                      <td/>
-                    </tr>
-                  )}
                   {isExpanded && subList.length === 0 && (
                     <tr className="invoice-sub-row invoice-sub-empty">
                       <td className="invoice-expand-col"/>
@@ -2629,6 +2573,64 @@ export const InvoiceTable = ({
                     </tr>
                     );
                   })()}
+                  {isExpanded && (
+                    // Project total row — sits at the BOTTOM of the expand
+                    // block (below the MSMM line on the parent row + each
+                    // sub-row + the Add-sub action) so the breakdown reads
+                    // bottom-up: per-sub amounts → MSMM → reconciled total.
+                    // Total Contract Value lands in the Contract column; the
+                    // 12 monthly totals land in the Jan..Dec columns; total
+                    // YTD aggregates the months actuals. Each month cell
+                    // carries the prime invoice file-attachment button.
+                    <tr className="invoice-sub-row invoice-total-row">
+                      <td className="invoice-expand-col"/>
+                      <td className="sticky-1"/>
+                      <td className="sticky-2" style={{ paddingLeft: 28, fontWeight: 600 }}>
+                        Project total
+                        <span className="invoice-total-row-hint">Total CV + monthly totals</span>
+                      </td>
+                      <td/>
+                      <td/>
+                      <td/>
+                      <td className="mono">
+                        <EditableCell value={r.amount} type="number"
+                          onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
+                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                      </td>
+                      <td/>
+                      {r.values.map((v, i) => {
+                        const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
+                        const hasFiles = filesForCell.length > 0;
+                        return (
+                        <td key={i}
+                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
+                          <EditableCell value={v} type="number"
+                            onChange={nv => updateInvoice(r.id, i, nv)}
+                            format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
+                          />
+                          <button
+                            type="button"
+                            className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
+                            title={hasFiles
+                              ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                              : "Attach prime invoice file"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                            }}>
+                            <Icon name="link" size={11}/>
+                            {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                          </button>
+                        </td>
+                        );
+                      })}
+                      <td className="total-cell mono">
+                        {fmtMoney(r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b||0), 0)) || <span className="empty-cell">—</span>}
+                      </td>
+                      <td className="total-cell"/>
+                      <td/>
+                    </tr>
+                  )}
                   </React.Fragment>
                   );
                 })}

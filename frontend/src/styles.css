@@ -583,68 +583,13 @@ html, body { overflow-x: clip; }
   border-radius: 3px;
 }
 
-/* Summary strip — rendered as the project's footer inside an expanded Invoice
-   row. Holds Total Contract Value · MSMM Portion · Subs subtotal + mismatch
-   chip. As a footer it sits below the subs + Add-sub action, so the divider
-   moves to the top edge to fence it off from the rows above. */
-.invoice-table tr.invoice-summary-row td {
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
-}
-.invoice-table tr.invoice-summary-footer td {
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.invoice-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  align-items: center;
-  padding: 6px 0;
-  font-size: 12px;
-}
-.invoice-summary-field {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.invoice-summary-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-.invoice-summary-input {
-  min-width: 96px;
-  font-weight: 600;
-}
-.invoice-summary-readonly {
-  min-width: 96px;
-  font-weight: 600;
-  color: var(--text-soft);
-}
-.invoice-summary-equals,
-.invoice-summary-plus {
-  font-size: 16px;
-  color: var(--text-muted);
-  align-self: center;
-  margin-top: 14px;  /* visually align with the input row, not the label row */
-}
-.invoice-summary-mismatch {
-  align-self: center;
-  margin-top: 14px;
-  font-size: 11px;
-}
-
-/* "Total monthly" + "MSMM monthly" rows inside the expand block.
-   Both render with a subtle accent tint distinguishing them from
-   the per-sub rows. The MSMM row's override cells use the existing
-   `inv-override` styling (orange dotted underline). */
-.invoice-table tr.invoice-total-row td,
-.invoice-table tr.invoice-msmm-row td {
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg-elev));
-}
-.invoice-table tr.invoice-msmm-row td {
-  background: color-mix(in srgb, var(--accent) 2%, var(--bg-elev));
+/* "Project total" row sits at the bottom of an expanded Invoice row,
+   below the MSMM line + each sub-row + the Add-sub action. Tinted in
+   blue (rather than the accent-orange used elsewhere) so it reads
+   distinctly as the project's reconciliation footer. */
+.invoice-table tr.invoice-total-row td {
+  background: color-mix(in srgb, var(--blue) 12%, var(--bg-elev));
+  border-top: 1px solid color-mix(in srgb, var(--blue) 32%, transparent);
 }
 .invoice-total-row-hint {
   margin-left: 10px;
@@ -653,26 +598,6 @@ html, body { overflow-x: clip; }
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-}
-
-/* Override / auto badge in the summary strip's MSMM Portion field. */
-.invoice-summary-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 5px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--accent-ink);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  border-radius: 3px;
-}
-.invoice-summary-badge.muted {
-  color: var(--text-muted);
-  background: transparent;
-  border-color: var(--border);
 }
 
 .thead, .trow {
