@@ -2330,63 +2330,6 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                   </tr>
-                  {isExpanded && (() => {
-                    // Summary strip at the top of the expand block.
-                    // Total Contract Value (= contract_amount) and MSMM Portion
-                    // (= msmm_amount) are editable here. Subs subtotal is
-                    // derived from the per-sub contractAmount values that
-                    // render inline in the sub-rows below. The mismatch chip
-                    // surfaces inconsistencies softly — there's no DB CHECK,
-                    // since data entry is iterative (Total → MSMM → each sub).
-                    const subsSubtotal = subList.reduce(
-                      (a, s) => a + (Number(s.contractAmount) || 0), 0);
-                    const total = Number(r.amount) || 0;
-                    const msmm  = Number(r.msmmAmount) || 0;
-                    const delta = total - (msmm + subsSubtotal);
-                    const showMismatch = (r.amount != null) && Math.abs(delta) > 1;
-                    return (
-                      <tr className="invoice-summary-row">
-                        <td className="invoice-expand-col"/>
-                        <td className="sticky-1"/>
-                        <td className="sticky-2" colSpan={20} style={{ paddingLeft: 28 }}>
-                          <div className="invoice-summary">
-                            <span className="invoice-summary-field">
-                              <span className="invoice-summary-label">Total Contract Value</span>
-                              <span className="invoice-summary-input mono">
-                                <EditableCell value={r.amount} type="number"
-                                  onChange={v => updateRow(r.id, { amount: v })}
-                                  format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                              </span>
-                            </span>
-                            <span className="invoice-summary-equals">=</span>
-                            <span className="invoice-summary-field">
-                              <span className="invoice-summary-label">MSMM Portion</span>
-                              <span className="invoice-summary-input mono">
-                                <EditableCell value={r.msmmAmount} type="number"
-                                  onChange={v => updateRow(r.id, { msmmAmount: v })}
-                                  format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                              </span>
-                            </span>
-                            <span className="invoice-summary-plus">+</span>
-                            <span className="invoice-summary-field">
-                              <span className="invoice-summary-label">
-                                {isPrimeRow ? "Subs subtotal" : "Prime portion"}
-                              </span>
-                              <span className="invoice-summary-readonly mono">
-                                {fmtMoney(subsSubtotal)}
-                              </span>
-                            </span>
-                            {showMismatch && (
-                              <span className="chip rose invoice-summary-mismatch"
-                                    title={`Total ≠ MSMM + ${isPrimeRow ? "Σ subs" : "prime"}. Adjust any of the three to balance.`}>
-                                off by {fmtMoney(Math.abs(delta), false)}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })()}
                   {isExpanded && subList.length === 0 && (
                     <tr className="invoice-sub-row invoice-sub-empty">
                       <td className="invoice-expand-col"/>
@@ -2556,6 +2499,65 @@ export const InvoiceTable = ({
                         </button>
                       </td>
                     </tr>
+                    );
+                  })()}
+                  {isExpanded && (() => {
+                    // Summary strip rendered as the project's footer — it sits
+                    // below the subs + Add-sub action so the breakdown reads
+                    // naturally bottom-up: per-sub amounts → total reconciliation.
+                    // Total Contract Value (= contract_amount) and MSMM Portion
+                    // (= msmm_amount) are editable here. Subs subtotal is
+                    // derived from the per-sub contractAmount values that
+                    // render inline in the sub-rows above. The mismatch chip
+                    // surfaces inconsistencies softly — there's no DB CHECK,
+                    // since data entry is iterative (Total → MSMM → each sub).
+                    const subsSubtotal = subList.reduce(
+                      (a, s) => a + (Number(s.contractAmount) || 0), 0);
+                    const total = Number(r.amount) || 0;
+                    const msmm  = Number(r.msmmAmount) || 0;
+                    const delta = total - (msmm + subsSubtotal);
+                    const showMismatch = (r.amount != null) && Math.abs(delta) > 1;
+                    return (
+                      <tr className="invoice-summary-row invoice-summary-footer">
+                        <td className="invoice-expand-col"/>
+                        <td className="sticky-1"/>
+                        <td className="sticky-2" colSpan={20} style={{ paddingLeft: 28 }}>
+                          <div className="invoice-summary">
+                            <span className="invoice-summary-field">
+                              <span className="invoice-summary-label">Total Contract Value</span>
+                              <span className="invoice-summary-input mono">
+                                <EditableCell value={r.amount} type="number"
+                                  onChange={v => updateRow(r.id, { amount: v })}
+                                  format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                              </span>
+                            </span>
+                            <span className="invoice-summary-equals">=</span>
+                            <span className="invoice-summary-field">
+                              <span className="invoice-summary-label">MSMM Portion</span>
+                              <span className="invoice-summary-input mono">
+                                <EditableCell value={r.msmmAmount} type="number"
+                                  onChange={v => updateRow(r.id, { msmmAmount: v })}
+                                  format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                              </span>
+                            </span>
+                            <span className="invoice-summary-plus">+</span>
+                            <span className="invoice-summary-field">
+                              <span className="invoice-summary-label">
+                                {isPrimeRow ? "Subs subtotal" : "Prime portion"}
+                              </span>
+                              <span className="invoice-summary-readonly mono">
+                                {fmtMoney(subsSubtotal)}
+                              </span>
+                            </span>
+                            {showMismatch && (
+                              <span className="chip rose invoice-summary-mismatch"
+                                    title={`Total ≠ MSMM + ${isPrimeRow ? "Σ subs" : "prime"}. Adjust any of the three to balance.`}>
+                                off by {fmtMoney(Math.abs(delta), false)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })()}
                   </React.Fragment>

@@ -16,12 +16,13 @@ import { SearchableSelect } from "./primitives.jsx";
 //
 // Errors after step 1 are reported inline; the main row stays in the DB.
 
-// In v2, both Potential and Awaiting INSERT into the same `projects` table —
-// they differ only in the `status` column (set in onSubmit). Hot Leads is
-// the renamed `leads` table.
+// In v2, Potential, Awaiting, and Awarded all INSERT into the same
+// `projects` table — they differ only in the `status` column (set in
+// onSubmit). Hot Leads is the renamed `leads` table.
 const DB_TABLES = {
   potential: "projects",
   awaiting:  "projects",
+  awarded:   "projects",
   events:    "events",
   hotleads:  "leads",
   clients:   "clients",
@@ -32,6 +33,7 @@ const DB_TABLES = {
 const TITLES = {
   potential: { title: "New potential project",  icon: "briefcase" },
   awaiting:  { title: "New awaiting verdict",   icon: "clock"     },
+  awarded:   { title: "New awarded project",    icon: "check"     },
   events:    { title: "New event",               icon: "calendar"  },
   hotleads:  { title: "New hot lead",            icon: "trend"     },
   clients:   { title: "New client",              icon: "users"     },
@@ -58,6 +60,16 @@ const DB_COLUMNS = {
     "date_submitted", "anticipated_result_date",
     "client_contract_number", "msmm_contract_number",
     "msmm_used", "msmm_remaining",
+    "notes", "project_number",
+  ],
+  // Direct-create awarded — backfills historical rows or projects that
+  // skipped the proposal stage. stage_id is resolved from `stage` (a name
+  // string in the form) at insert time via a lookup against awarded_stages.
+  awarded: [
+    "project_name", "year", "client_id",
+    "date_submitted", "client_contract_number", "msmm_contract_number",
+    "msmm_used", "msmm_remaining",
+    "details", "pool", "contract_expiry_date",
     "notes", "project_number",
   ],
   events: [
@@ -121,6 +133,26 @@ const INITIAL = {
     pm_user_ids: [],
     subs: [],
   },
+  awarded: {
+    project_name: "",
+    year: THIS_YEAR,
+    role: "Prime",
+    client_id: "",
+    prime_id: "",         // companies/clients merged-pool pick — routed at insert
+    stage: "",            // resolved → stage_id at insert via awarded_stages lookup
+    pool: "",
+    contract_expiry_date: "",
+    details: "",
+    date_submitted: "",
+    client_contract_number: "",
+    msmm_contract_number: "",
+    msmm_used: "",
+    msmm_remaining: "",
+    notes: "",
+    project_number: "",
+    pm_user_ids: [],
+    subs: [],
+  },
   events: {
     title: "",
     status: "Booked",
@@ -170,6 +202,7 @@ const INITIAL = {
 const REQUIRED = {
   potential: ["project_name"],
   awaiting:  ["project_name"],
+  awarded:   ["project_name"],
   events:    ["title"],
   hotleads:  ["title"],
   clients:   ["name"],
@@ -363,6 +396,29 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
     // appropriate status for the UI tab.
     if (table === "potential") payload.status = "potential";
     if (table === "awaiting")  payload.status = "awaiting";
+    if (table === "awarded") {
+      payload.status = "awarded";
+      // Awarded carries a `role` column independent of prime_company_id /
+      // prime_client_id since the v1→v2 migration relaxed that constraint.
+      if (form.role) payload.role = form.role;
+      // Prime field is merged-pool: clients table OR companies table. The
+      // form field `prime_id` carries either UUID; route to the right
+      // column based on which pool it belongs to. (Mirrors routePrimePick
+      // in data.js — duplicated inline because forms.jsx imports the
+      // bare clients/companies arrays already.)
+      if (form.prime_id) {
+        if (clientIdSet.has(form.prime_id)) payload.prime_client_id = form.prime_id;
+        else                                payload.prime_company_id = form.prime_id;
+      }
+      // Stage is a name in the form; the DB stores stage_id. Look it up
+      // against awarded_stages — fail-soft (skip) if no match so the row
+      // still inserts and the user can fix via the drawer.
+      if (form.stage) {
+        const { data: stageRow } = await supabase
+          .from("awarded_stages").select("id").eq("name", form.stage).maybeSingle();
+        if (stageRow?.id) payload.stage_id = stageRow.id;
+      }
+    }
     const { data: row, error: err } = await supabase
       .from(dbTable).insert(payload).select().single();
     if (err) {
@@ -435,6 +491,33 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             .from("project_subs")
             .insert(subs.map(s => ({ project_id: row.id, company_id: s.cId })));
           if (eAS) throw eAS;
+          extras.subs = subs;
+        }
+      } else if (table === "awarded") {
+        // Direct entry into Awarded: same project_pms/project_subs joins as
+        // any other status. Subs carry their `amount` (per-sub contract)
+        // for downstream Invoice expand-row math.
+        if (form.stage) extras.stageName = form.stage;
+        const pmIds = (form.pm_user_ids || []).filter(Boolean);
+        if (pmIds.length > 0) {
+          const { error: eAwP } = await supabase
+            .from("project_pms")
+            .insert(pmIds.map(uid => ({ project_id: row.id, user_id: uid })));
+          if (eAwP) throw eAwP;
+          extras.pmIds = pmIds;
+        }
+        const subs = (form.subs || []).filter(s => s.cId || s.desc || s.amt);
+        if (subs.length > 0) {
+          const subsPayload = subs.map((s, i) => ({
+            project_id: row.id,
+            ord: i + 1,
+            company_id: s.cId || null,
+            discipline: s.desc || null,
+            amount: s.amt != null && s.amt !== "" ? Number(s.amt) : null,
+          }));
+          const { error: eAwS } = await supabase
+            .from("project_subs").insert(subsPayload);
+          if (eAwS) throw eAwS;
           extras.subs = subs;
         }
       } else if (table === "events") {
@@ -630,6 +713,120 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             <input className="input" type="number" value={form.msmm_remaining}
                    onChange={e => set("msmm_remaining", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
+          </Field>
+          <Field label="Notes" multiline>
+            <textarea className="textarea" value={form.notes}
+                      onChange={e => set("notes", e.target.value)}/>
+          </Field>
+          <Field label="Project Number">
+            <input className="input" value={form.project_number}
+                   onChange={e => set("project_number", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
+          </Field>
+        </>
+      );
+    }
+
+    if (table === "awarded") {
+      return (
+        <>
+          <Field label="Project Name *">
+            <input className="input" autoFocus value={form.project_name}
+                   onChange={e => set("project_name", e.target.value)}/>
+          </Field>
+          <Field label="Year">
+            <input className="input" type="number" value={form.year}
+                   onChange={e => set("year", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Role">
+            <div className="seg" style={{ maxWidth: 220 }}>
+              <button type="button"
+                      className={"seg-btn" + (form.role === "Prime" ? " active" : "")}
+                      onClick={() => set("role", "Prime")}>
+                Prime
+              </button>
+              <button type="button"
+                      className={"seg-btn" + (form.role === "Sub" ? " active" : "")}
+                      onClick={() => set("role", "Sub")}>
+                Sub
+              </button>
+            </div>
+          </Field>
+          <Field label="Client">
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOptions}
+              placeholder="Search clients…"
+              onChange={v => set("client_id", v || "")}
+            />
+          </Field>
+          <Field label="Prime">
+            <SearchableSelect
+              value={form.prime_id || ""}
+              options={clientOrFirmOptions}
+              placeholder="Search clients or firms…"
+              onChange={v => set("prime_id", v || "")}
+            />
+          </Field>
+          <Field label="Stage">
+            <select className="select" value={form.stage}
+                    onChange={e => set("stage", e.target.value)}>
+              <option value="">—</option>
+              <option value="Multi-Use Contract">Multi-Use Contract</option>
+              <option value="Single Use Contract (Project)">Single Use Contract (Project)</option>
+              <option value="AE Selected List">AE Selected List</option>
+            </select>
+          </Field>
+          <Field label="Pool">
+            <input className="input" value={form.pool}
+                   onChange={e => set("pool", e.target.value)}
+                   placeholder="e.g. Pool A"/>
+          </Field>
+          <Field label="Contract Expiry Date">
+            <input className="input" type="date" value={form.contract_expiry_date}
+                   onChange={e => set("contract_expiry_date", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Subs" multiline>
+            <SubsEditor value={form.subs} companies={companies}
+                        onChange={next => set("subs", next)}/>
+          </Field>
+          <Field label="PMs" multiline>
+            <UserMultiPicker value={form.pm_user_ids} users={users}
+                             onChange={next => set("pm_user_ids", next)}
+                             placeholder="Pick MSMM users…"/>
+          </Field>
+          <Field label="Date Submitted">
+            <input className="input" type="date" value={form.date_submitted}
+                   onChange={e => set("date_submitted", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Client Contract #">
+            <input className="input" value={form.client_contract_number}
+                   onChange={e => set("client_contract_number", e.target.value)}
+                   placeholder="e.g. POSL-2026-045"
+                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
+          </Field>
+          <Field label="MSMM Contract #">
+            <input className="input" value={form.msmm_contract_number}
+                   onChange={e => set("msmm_contract_number", e.target.value)}
+                   placeholder="e.g. MSMM-2026-045"
+                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
+          </Field>
+          <Field label="MSMM Used">
+            <input className="input" type="number" value={form.msmm_used}
+                   onChange={e => set("msmm_used", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
+          </Field>
+          <Field label="MSMM Remaining">
+            <input className="input" type="number" value={form.msmm_remaining}
+                   onChange={e => set("msmm_remaining", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
+          </Field>
+          <Field label="Details" multiline>
+            <textarea className="textarea" value={form.details}
+                      onChange={e => set("details", e.target.value)}/>
           </Field>
           <Field label="Notes" multiline>
             <textarea className="textarea" value={form.notes}

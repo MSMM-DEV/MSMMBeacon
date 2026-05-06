@@ -583,10 +583,15 @@ html, body { overflow-x: clip; }
   border-radius: 3px;
 }
 
-/* Summary strip at the top of an expanded Invoice row.
-   Holds Total Contract Value · MSMM Portion · Subs subtotal + mismatch chip. */
+/* Summary strip — rendered as the project's footer inside an expanded Invoice
+   row. Holds Total Contract Value · MSMM Portion · Subs subtotal + mismatch
+   chip. As a footer it sits below the subs + Add-sub action, so the divider
+   moves to the top edge to fence it off from the rows above. */
 .invoice-table tr.invoice-summary-row td {
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+}
+.invoice-table tr.invoice-summary-footer td {
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 .invoice-summary {

@@ -367,6 +367,37 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       msmmRemaining: dbRow.msmm_remaining || 0,
     };
   }
+  if (table === "awarded") {
+    // Direct-create awarded row. Stage is captured server-side as stage_id;
+    // the form's `stage` name string isn't returned in dbRow, so fall back
+    // to extras.stageName when available. If neither is set, the cell
+    // renders blank and the user fills it in via the drawer.
+    return {
+      id: dbRow.id,
+      year: dbRow.year,
+      name: dbRow.project_name,
+      role: dbRow.role || (dbRow.prime_company_id || dbRow.prime_client_id ? "Sub" : "Prime"),
+      clientId: dbRow.client_id || null,
+      primeId: dbRow.prime_client_id || dbRow.prime_company_id || null,
+      amount: null,
+      msmm: (dbRow.msmm_used || 0) + (dbRow.msmm_remaining || 0),
+      subs: extras.subs || [],
+      pmIds: extras.pmIds || [],
+      notes: dbRow.notes || "",
+      dates: "",
+      projectNumber: dbRow.project_number || "",
+      status: "Awarded",
+      dateSubmitted: dbRow.date_submitted || "",
+      clientContract: dbRow.client_contract_number || "",
+      msmmContract: dbRow.msmm_contract_number || "",
+      msmmUsed: dbRow.msmm_used || 0,
+      msmmRemaining: dbRow.msmm_remaining || 0,
+      stage: extras.stageName || "",
+      details: dbRow.details || "",
+      pools: dbRow.pool || "",
+      contractExpiry: dbRow.contract_expiry_date || "",
+    };
+  }
   if (table === "events") {
     return {
       id: dbRow.id,
@@ -2217,6 +2248,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const uiRow = adaptInsertedRow(table, dbRow, extras);
     if (table === "potential")  setPotential(rs => [uiRow, ...rs]);
     if (table === "awaiting")   setAwaiting(rs => [uiRow, ...rs]);
+    if (table === "awarded")    setAwarded(rs => [uiRow, ...rs]);
     if (table === "events")     setEvents(rs => [uiRow, ...rs]);
     if (table === "hotleads")   setHotLeads(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
@@ -2479,12 +2511,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Directory's primary "New X" defaults to client (the more common entry).
   // Companies are typically created via the sub-picker on a project rather
   // than from this tab.
-  const newForTab = { awaiting: "awaiting", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients" };
+  const newForTab = { awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
                  : tab === "hotleads" ? "New hot lead"
                  : tab === "directory" ? "New client"
                  : tab === "awaiting" ? "New awaiting verdict"
+                 : tab === "awarded" ? "New awarded project"
                  : "New project";
 
   return (
