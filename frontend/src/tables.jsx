@@ -1830,13 +1830,13 @@ export const InvoiceTable = ({
   // block's "Project total" row carries the totals; per-sub rows carry
   // each sub's portion. Helpers below compute the MSMM auto-calc by
   // walking subInvoices for each project.
-  const subListFor = (r) => {
-    const allEntries = subInvoices?.get(r.sourceId) || [];
-    const isPrime = (r.role || "Prime") === "Prime";
-    return isPrime
-      ? allEntries.filter(s => (s.kind || "sub") === "sub")
-      : allEntries.filter(s => s.kind === "prime");
-  };
+  //
+  // MSMM math only ever subtracts kind='sub' entries — these are firms
+  // MSMM hires (money MSMM pays out). The kind='prime' entry on a Sub-role
+  // project is informational only (it records the upstream firm hiring
+  // MSMM, for cross-reference); it must not be subtracted from Total CV.
+  const subListFor = (r) =>
+    (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
   // MSMM monthly value at month i — override takes precedence; else
   // auto = total[i] − Σ sub.amounts[i].
   const msmmAtMonth = (r, i) => {
@@ -2268,14 +2268,22 @@ export const InvoiceTable = ({
                 {searchedRows.map((r) => {
                   const isExpanded = expandedIds.has(r.id);
                   const allEntries = (subInvoices?.get(r.sourceId) || []);
-                  // Filter the sub matrix by role/kind:
+                  // Render block contents by role:
                   //   Prime project → list of sub firms (kind='sub')
-                  //   Sub project   → at most one prime firm (kind='prime')
+                  //   Sub project   → the upstream prime firm (kind='prime',
+                  //                    at most one — partial unique index)
+                  //                    PLUS any sub firms MSMM further hires
+                  //                    (kind='sub', unlimited).
+                  // Prime entry sorted first so the upstream relationship is
+                  // visually prominent above MSMM's own subs.
                   const role       = r.role || "Prime";
                   const isPrimeRow = role === "Prime";
+                  const primeEntry = allEntries.find(s => s.kind === "prime");
+                  const subEntries = allEntries.filter(s => (s.kind || "sub") === "sub");
                   const subList    = isPrimeRow
-                    ? allEntries.filter(s => (s.kind || "sub") === "sub")
-                    : allEntries.filter(s => s.kind === "prime");
+                    ? subEntries
+                    : [...(primeEntry ? [primeEntry] : []), ...subEntries];
+                  const hasPrimeEntry = !!primeEntry;
                   return (
                   <React.Fragment key={r.id}>
                   <tr className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
@@ -2410,7 +2418,7 @@ export const InvoiceTable = ({
                         <span style={{ fontStyle: "italic", color: "var(--text-soft)" }}>
                           {isPrimeRow
                             ? "No subs tracked on this project yet."
-                            : "No prime firm tracked on this project yet."}
+                            : "No prime or subs tracked on this project yet."}
                         </span>
                       </td>
                       <td colSpan={16}/>
@@ -2548,27 +2556,39 @@ export const InvoiceTable = ({
                     );
                   })}
                   {isExpanded && (() => {
-                    // For Prime projects, allow many subs. For Sub projects,
-                    // only allow adding a prime if one isn't already set.
-                    const canAddPrime = !isPrimeRow && subList.length === 0;
-                    const showButton  = isPrimeRow || canAddPrime;
-                    if (!showButton) return null;
-                    const addKind = isPrimeRow ? "sub" : "prime";
+                    // Prime-role projects: one button — "Add sub" (unlimited).
+                    // Sub-role projects: two buttons —
+                    //   "Add prime" (gated by the partial unique index — at
+                    //                most one prime entry per project)
+                    //   "Add sub"   (always shown; MSMM may further sub-
+                    //                contract pieces of its own work)
                     return (
                     <tr className="invoice-sub-add-row">
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1"/>
                       <td className="sticky-2" colSpan={20}>
-                        <button
-                          type="button"
-                          className="invoice-add-sub-btn"
-                          onClick={() => onAddSub?.(r, addKind)}
-                          title={isPrimeRow
-                            ? "Add a sub to this project"
-                            : "Add the upstream prime firm for this project"}>
-                          <Icon name="plus" size={11}/>
-                          {isPrimeRow ? "Add sub" : "Add prime"}
-                        </button>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {!isPrimeRow && !hasPrimeEntry && (
+                            <button
+                              type="button"
+                              className="invoice-add-sub-btn"
+                              onClick={() => onAddSub?.(r, "prime")}
+                              title="Add the upstream prime firm for this project">
+                              <Icon name="plus" size={11}/>
+                              Add prime
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="invoice-add-sub-btn"
+                            onClick={() => onAddSub?.(r, "sub")}
+                            title={isPrimeRow
+                              ? "Add a sub to this project"
+                              : "Add a firm MSMM further sub-contracts on this project"}>
+                            <Icon name="plus" size={11}/>
+                            Add sub
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     );
