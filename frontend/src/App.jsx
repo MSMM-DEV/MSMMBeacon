@@ -757,13 +757,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     events: "all", hotleads: "all", directory: "all",
   });
 
-  // Year filter state. null = All years; number = filter to that year. Default
-  // is THIS_YEAR for every pipeline table so users see current-year data on
-  // first load — clicking "All" in the Year menu clears to null.
+  // Year filter state. null = All years; number = filter to that year.
   const [yearFilter, setYearFilter] = useState({
-    potential: THIS_YEAR, awaiting: THIS_YEAR, awarded: THIS_YEAR,
-    closed: THIS_YEAR, invoice: THIS_YEAR, events: THIS_YEAR,
-    hotleads: THIS_YEAR,
+    potential: null, awaiting: null, awarded: null,
+    closed: null, invoice: null, events: null,
+    hotleads: null,
   });
   const setYear = (t, y) => setYearFilter(f => ({ ...f, [t]: y }));
 
