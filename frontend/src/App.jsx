@@ -188,6 +188,19 @@ const FILTER_CHIPS = {
 // ======================================================================
 // Labels MUST match the table column labels in tables.jsx so the export can
 // map the user's visible/ordered columns onto these export defs by label.
+// Awarded view-toggle buckets. Each row is placed by its `stage`:
+//   "single" → "Single Use Contract (Project)"
+//   "multi"  → "Multi-Use Contract" | "AE Selected List"
+//   "others" → everything else (design/construction stages, NULL, untagged)
+// Used in both the awarded tab render (partition) and updateAwarded (toast
+// when a stage edit moves the row out of the active view).
+const AWARDED_BUCKETS = { single: "Single-Use", multi: "Multi/List", others: "Others" };
+const awardedBucketOf = (stage) => {
+  if (stage === "Single Use Contract (Project)") return "single";
+  if (stage === "Multi-Use Contract" || stage === "AE Selected List") return "multi";
+  return "others";
+};
+
 const EXPORT_COLUMNS = {
   potential: [
     { label: "Year",              wMm: 14,  get: r => r._total ? "" : r.year },
@@ -1085,6 +1098,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
         "project_pms", "project_id");
+    }
+    if ("stage" in patch && patch.stage !== existing.stage) {
+      const from = awardedBucketOf(existing.stage);
+      const to   = awardedBucketOf(patch.stage);
+      if (from !== to && awardedViewMode === from) {
+        showToast(`Moved to ${AWARDED_BUCKETS[to]}`, "forward", {
+          action: { label: "View", onClick: () => setAwardedViewMode(to) },
+        });
+      }
     }
   };
 
@@ -2726,10 +2748,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onYearChange={(y) => setYear("awaiting", y)}/>
         )}
         {tab === "awarded" && (() => {
-          const SINGLE_USE_STAGE = "Single Use Contract (Project)";
-          const awardedSingle = filtered.awarded.filter(r => r.stage === SINGLE_USE_STAGE);
-          const awardedMulti  = filtered.awarded.filter(r => r.stage !== SINGLE_USE_STAGE);
-          const awardedRows   = awardedViewMode === "single" ? awardedSingle : awardedMulti;
+          const bucketed = { single: [], multi: [], others: [] };
+          for (const r of filtered.awarded) bucketed[awardedBucketOf(r.stage)].push(r);
+          const awardedRows = bucketed[awardedViewMode] || bucketed.single;
           return (
             <>
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -2741,7 +2762,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     aria-selected={awardedViewMode === "single"}
                   >
                     <Icon name="flag" size={12}/> Single-Use
-                    <span className="view-toggle-count">{awardedSingle.length}</span>
+                    <span className="view-toggle-count">{bucketed.single.length}</span>
                   </button>
                   <button
                     className={awardedViewMode === "multi" ? "active" : ""}
@@ -2750,7 +2771,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     aria-selected={awardedViewMode === "multi"}
                   >
                     <Icon name="columns" size={12}/> Multi/List
-                    <span className="view-toggle-count">{awardedMulti.length}</span>
+                    <span className="view-toggle-count">{bucketed.multi.length}</span>
+                  </button>
+                  <button
+                    className={awardedViewMode === "others" ? "active" : ""}
+                    onClick={() => setAwardedViewMode("others")}
+                    role="tab"
+                    aria-selected={awardedViewMode === "others"}
+                  >
+                    <Icon name="more" size={12}/> Others
+                    <span className="view-toggle-count">{bucketed.others.length}</span>
                   </button>
                 </div>
               </div>
