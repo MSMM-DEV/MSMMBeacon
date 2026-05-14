@@ -1464,7 +1464,8 @@ html, body { overflow-x: clip; }
      top/bottom of the invoice — keeps momentum scrolls predictable. */
   overscroll-behavior: contain;
 }
-.invoice-top-scroll {
+.invoice-top-scroll,
+.table-top-scroll {
   overflow-x: auto;
   overflow-y: hidden;
   height: 14px;
@@ -1474,13 +1475,22 @@ html, body { overflow-x: clip; }
   background: var(--bg-elev);
   scrollbar-width: thin;
 }
-.invoice-top-scroll-spacer {
+.invoice-top-scroll-spacer,
+.table-top-scroll-spacer {
   height: 1px;
 }
-.invoice-top-scroll::-webkit-scrollbar { height: 8px; }
-.invoice-top-scroll::-webkit-scrollbar-thumb {
+.invoice-top-scroll::-webkit-scrollbar,
+.table-top-scroll::-webkit-scrollbar { height: 8px; }
+.invoice-top-scroll::-webkit-scrollbar-thumb,
+.table-top-scroll::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 4px;
+}
+/* The TableView top scrollbar sits between the toolbar and the table body.
+   Round the bottom corners so its visual seam matches the surface beneath
+   (the body's first row carries its own top border). */
+.table-top-scroll {
+  border-radius: 6px 6px 0 0;
 }
 .invoice-table {
   border-collapse: separate;
@@ -4073,13 +4083,15 @@ html, body { overflow-x: clip; }
   /* Give the horizontal table-scroll an inertial scroll feel on iOS and a
      thin scrollbar so users can tell it scrolls. Applies to both the grid
      (.table-scroll) and the <table>-based invoice (.invoice-wrap). */
-  .table-scroll, .invoice-wrap, .invoice-top-scroll { -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .table-scroll, .invoice-wrap, .invoice-top-scroll, .table-top-scroll { -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
   .table-scroll::-webkit-scrollbar,
   .invoice-wrap::-webkit-scrollbar,
-  .invoice-top-scroll::-webkit-scrollbar { height: 6px; }
+  .invoice-top-scroll::-webkit-scrollbar,
+  .table-top-scroll::-webkit-scrollbar { height: 6px; }
   .table-scroll::-webkit-scrollbar-thumb,
   .invoice-wrap::-webkit-scrollbar-thumb,
-  .invoice-top-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+  .invoice-top-scroll::-webkit-scrollbar-thumb,
+  .table-top-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
   /* Invoice spreadsheet — on desktop the two leftmost columns (Proj # +
      Project Name) are sticky-pinned so the name stays readable while
@@ -5276,6 +5288,118 @@ html, body { overflow-x: clip; }
   letter-spacing: 0;
 }
 
+/* Firm-name paperclip — sits inline next to the project name (parent row,
+   MSMM line) and next to each sub/prime company name in the expanded view.
+   Distinct from .invoice-cell-clip (which is positioned absolutely inside
+   a month cell) — this one flows with text and stays subtle until hover. */
+.invoice-party-clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease, border-color 120ms ease;
+  vertical-align: middle;
+}
+.invoice-table tr:hover .invoice-party-clip,
+.invoice-table tr.expanded .invoice-party-clip {
+  opacity: 0.85;
+}
+.invoice-party-clip.has-files {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.invoice-party-clip:hover {
+  opacity: 1 !important;
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.invoice-party-clip .invoice-cell-clip-count {
+  font-size: 10px;
+}
+
+/* InvoiceFilesModal · staged files list (multi-file upload).
+   Shows below the dropzone with one row per File picked/dropped, plus a
+   "Clear all" row at the bottom when more than one is staged. */
+.invoice-staged-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.invoice-staged-list li {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.invoice-staged-list li > svg:first-child {
+  color: var(--accent-ink);
+}
+.invoice-staged-name {
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invoice-staged-size {
+  font-size: 11px;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.invoice-staged-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.invoice-staged-remove:hover:not(:disabled) {
+  background: var(--rose-soft);
+  color: var(--rose);
+  border-color: var(--rose);
+}
+.invoice-staged-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.invoice-staged-clear-row {
+  display: flex !important;
+  justify-content: flex-end;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  grid-template-columns: none !important;
+}
+
 /* InvoiceFilesModal · existing-files list */
 .invoice-files-modal-list {
   list-style: none;
@@ -5313,6 +5437,107 @@ html, body { overflow-x: clip; }
     grid-template-columns: 1fr;
     gap: 4px;
   }
+}
+
+/* InvoiceFilesModal · secondary drag-and-drop strip.
+   Sits BELOW the native "Choose File" input — Choose File is still the
+   primary path. This strip is a compact drop-only affordance (no click)
+   that lights up on dragover and shows the picked-file pill once a file
+   has been selected by either method. */
+.invoice-dropzone {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  transition: border-color .15s, background .15s, transform .12s;
+  user-select: none;
+}
+.invoice-dropzone.dragover {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--accent-soft);
+  transform: scale(1.004);
+  box-shadow: var(--shadow-sm);
+}
+.invoice-dropzone.has-file {
+  border-style: solid;
+  border-color: var(--border);
+  background: var(--bg-elev);
+}
+.invoice-dropzone.is-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.invoice-dropzone-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-soft);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+.invoice-dropzone.dragover .invoice-dropzone-prompt {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.invoice-dropzone-picked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.invoice-dropzone-picked > svg:first-child {
+  color: var(--accent-ink);
+  flex-shrink: 0;
+}
+.invoice-dropzone-name {
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.invoice-dropzone-size {
+  font-size: 11px;
+  color: var(--text-soft);
+  flex-shrink: 0;
+}
+.invoice-dropzone-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.invoice-dropzone-clear:hover:not(:disabled) {
+  background: var(--rose-soft);
+  color: var(--rose);
+  border-color: var(--rose);
+}
+.invoice-dropzone-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .invoice-dropzone,
+  .invoice-dropzone.dragover { transition: none; transform: none; }
 }
 
 /* "+ Add sub" trigger row at the bottom of an expanded Invoice project */

@@ -5,6 +5,7 @@ import {
   getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions,
   getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
+  uploadInvoicePartyFile, deleteInvoicePartyFile,
   ensureSubInvoiceRow, monthFolder, addProjectSub,
   linkInvoiceToProject, findOrCreateProjectForInvoice,
   setSubInvoicePaid, setProjectPrimeCompany,
@@ -1103,25 +1104,120 @@ export const InvoiceFilesModal = ({
   amount,
   paid: initialPaid = false,
   paidAt: initialPaidAt = null,
+  // Party-mode props — when partyKind is set, the modal targets
+  // beacon_v2.invoice_party_files and ignores month-level state. Caller
+  // passes partyKind ∈ ("msmm"|"prime"|"sub"), partyCompanyId (NULL for
+  // 'msmm'), and `files` already filtered to that party.
+  partyKind,
+  partyCompanyId,
+  partyInvoiceId,
   onClose, onChanged,
 }) => {
+  const isParty = !!partyKind;
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState("");
   const [notes, setNotes] = useState("");
   const fileRef = useRef(null);
-  const [picked, setPicked] = useState(null);
+  // Staged files awaiting upload. Stored as File[] so the user can pick / drop
+  // multiple times and we accumulate. Each upload submits them sequentially.
+  const [picked, setPicked] = useState([]);
+  const [dragActive, setDragActive] = useState(false);
+  // Counter avoids the dragover/dragleave flicker when the cursor crosses
+  // child element boundaries inside the dropzone — we only deactivate when
+  // the depth returns to 0.
+  const dragDepthRef = useRef(0);
   // Local copy of paid state so the modal feels responsive while the round-trip
   // happens. Synced back to the parent via onChanged after the DB write.
   const [paid, setPaid] = useState(!!initialPaid);
   const [paidAt, setPaidAt] = useState(initialPaidAt);
 
-  const monthLabel = monthFolder(year, monthIdx);
-  const headerTitle = kind === "sub"
-    ? `Sub invoices · ${projectName} · ${monthLabel}`
-    : `Prime invoice · ${projectName} · ${monthLabel}`;
-  const subhead = kind === "sub"
-    ? `Sub: ${companyName || "—"}${amount != null ? ` · ${fmtMoney(amount)}` : ""}`
-    : amount != null ? fmtMoney(amount) : "—";
+  // Append picked files to the staged list, deduping by (name, size,
+  // lastModified) so re-picking the same file is a no-op. FileList → Array
+  // here so callers can pass either.
+  const handlePickFiles = (fl) => {
+    if (!fl || fl.length === 0) return;
+    const incoming = Array.from(fl);
+    setPicked(prev => {
+      const seen = new Set(prev.map(f => `${f.name}::${f.size}::${f.lastModified || 0}`));
+      const next = prev.slice();
+      for (const f of incoming) {
+        const k = `${f.name}::${f.size}::${f.lastModified || 0}`;
+        if (!seen.has(k)) { next.push(f); seen.add(k); }
+      }
+      return next;
+    });
+    setError("");
+  };
+  const removeStaged = (idx) => {
+    setPicked(prev => prev.filter((_, i) => i !== idx));
+    // Clear the native input value so re-picking the same file works after a
+    // removal (browsers suppress onChange when the same file is re-selected).
+    if (fileRef.current) fileRef.current.value = "";
+  };
+  const clearAllStaged = () => {
+    setPicked([]);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+  const onZoneDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    dragDepthRef.current += 1;
+    setDragActive(true);
+  };
+  const onZoneDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragActive(false);
+  };
+  const onZoneDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onZoneDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setDragActive(false);
+    if (busy) return;
+    const fl = e.dataTransfer?.files;
+    if (!fl || fl.length === 0) return;
+    handlePickFiles(fl);
+  };
+  const fmtBytes = (n) => {
+    if (n == null) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const monthLabel = !isParty ? monthFolder(year, monthIdx) : "";
+  // Party-mode headers describe the attach point (firm or MSMM line); month
+  // mode keeps the existing "Project · Month" framing.
+  const partyHeaderTitle = isParty
+    ? (partyKind === "msmm"
+        ? `MSMM files · ${projectName}`
+        : partyKind === "prime"
+          ? `Prime files · ${companyName || "Prime"} · ${projectName}`
+          : `Sub files · ${companyName || "Sub"} · ${projectName}`)
+    : "";
+  const partySubhead = isParty
+    ? (partyKind === "msmm"
+        ? "Project-level attachments for the MSMM line"
+        : partyKind === "prime"
+          ? `Project-level attachments for ${companyName || "this prime"}`
+          : `Project-level attachments for ${companyName || "this sub"}`)
+    : "";
+  const headerTitle = isParty ? partyHeaderTitle
+    : kind === "sub"
+      ? `Sub invoices · ${projectName} · ${monthLabel}`
+      : `Prime invoice · ${projectName} · ${monthLabel}`;
+  const subhead = isParty ? partySubhead
+    : kind === "sub"
+      ? `Sub: ${companyName || "—"}${amount != null ? ` · ${fmtMoney(amount)}` : ""}`
+      : amount != null ? fmtMoney(amount) : "—";
 
   const handleTogglePaid = async (next) => {
     if (busy) return;
@@ -1164,7 +1260,11 @@ export const InvoiceFilesModal = ({
     if (busy) return;
     setBusy(true); setError("");
     try {
-      await deleteInvoiceFile({ kind, fileId: file.id, filePath: file.file_path });
+      if (isParty) {
+        await deleteInvoicePartyFile({ fileId: file.id, filePath: file.file_path });
+      } else {
+        await deleteInvoiceFile({ kind, fileId: file.id, filePath: file.file_path });
+      }
       await onChanged?.();
     } catch (e) {
       setError(e?.message || "Delete failed");
@@ -1175,39 +1275,82 @@ export const InvoiceFilesModal = ({
 
   const handleUpload = async () => {
     if (busy) return;
-    if (!picked) { setError("Choose a file first"); return; }
+    if (picked.length === 0) { setError("Choose at least one file first"); return; }
     setBusy(true); setError("");
-    try {
-      let parentSubInvoiceId = subInvoiceId;
-      if (kind === "sub" && !parentSubInvoiceId) {
+    // Resolve a parent sub_invoice row once (month mode only). Created on
+    // demand so the user doesn't have to type an amount before attaching a PDF.
+    let parentSubInvoiceId = subInvoiceId;
+    if (!isParty && kind === "sub" && !parentSubInvoiceId) {
+      try {
         const row = await ensureSubInvoiceRow({
           projectId, companyId, year, month: monthIdx + 1,
         });
         parentSubInvoiceId = row.id;
+      } catch (e) {
+        setError(e?.message || "Couldn't create sub_invoice row");
+        setBusy(false);
+        return;
       }
-      await uploadInvoiceFile({
-        kind, projectId, year, monthIdx,
-        file: picked,
-        notes,
-        primeInvoiceId,
-        subInvoiceId: parentSubInvoiceId,
-        companyId, companyName,
-      });
-      setPicked(null);
+    }
+    // Upload each staged file in sequence. Partial failures: keep the
+    // unsuccessful files staged so the user can retry; show a single error
+    // line naming the first failure. Successful uploads are pruned from
+    // the staged list as we go.
+    const failures = [];
+    for (let i = 0; i < picked.length; i++) {
+      const file = picked[i];
+      try {
+        if (isParty) {
+          await uploadInvoicePartyFile({
+            invoiceId: partyInvoiceId,
+            projectId,
+            partyKind,
+            partyCompanyId,
+            companyName,
+            file,
+            notes,
+          });
+        } else {
+          await uploadInvoiceFile({
+            kind, projectId, year, monthIdx,
+            file, notes,
+            primeInvoiceId,
+            subInvoiceId: parentSubInvoiceId,
+            companyId, companyName,
+          });
+        }
+      } catch (e) {
+        failures.push({ file, message: e?.message || "Upload failed" });
+      }
+    }
+    // Drop the successes from staged; keep failures so the user can retry.
+    const failedSet = new Set(failures.map(f => `${f.file.name}::${f.file.size}::${f.file.lastModified || 0}`));
+    setPicked(prev => prev.filter(f =>
+      failedSet.has(`${f.name}::${f.size}::${f.lastModified || 0}`)));
+    if (failures.length === 0) {
       setNotes("");
       if (fileRef.current) fileRef.current.value = "";
-      await onChanged?.();
-    } catch (e) {
-      setError(e?.message || "Upload failed");
-    } finally {
-      setBusy(false);
+    } else {
+      setError(`${failures.length} of ${picked.length} failed — ${failures[0].message}`);
     }
+    setBusy(false);
+    await onChanged?.();
   };
 
   return (
     <>
-      <div className="overlay" onClick={onClose}/>
-      <div className="modal" style={{ width: 580, maxHeight: "86vh", display: "flex", flexDirection: "column" }}>
+      <div
+        className="overlay"
+        onClick={onClose}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => e.preventDefault()}
+      />
+      <div
+        className="modal"
+        style={{ width: 580, maxHeight: "86vh", display: "flex", flexDirection: "column" }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => e.preventDefault()}
+      >
         <div className="modal-head">
           <div className="icon-badge"><Icon name="link" size={16}/></div>
           <div style={{ flex: 1 }}>
@@ -1221,7 +1364,7 @@ export const InvoiceFilesModal = ({
         </div>
 
         <div className="modal-body" style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
-          {kind === "sub" && (
+          {!isParty && kind === "sub" && (
             <label className={"invoice-paid-toggle-row" + (paid ? " paid" : "")}>
               <input
                 type="checkbox"
@@ -1291,10 +1434,61 @@ export const InvoiceFilesModal = ({
               ref={fileRef}
               type="file"
               className="input"
-              onChange={(e) => setPicked(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => handlePickFiles(e.target.files)}
               disabled={busy}
               style={{ width: "100%" }}
             />
+            <div
+              className={"invoice-dropzone"
+                + (dragActive ? " dragover" : "")
+                + (busy ? " is-busy" : "")}
+              onDragEnter={onZoneDragEnter}
+              onDragLeave={onZoneDragLeave}
+              onDragOver={onZoneDragOver}
+              onDrop={onZoneDrop}
+              aria-label="Drag and drop files here"
+              aria-busy={busy || undefined}
+            >
+              <div className="invoice-dropzone-prompt">
+                <Icon name="export" size={14}/>
+                <span>{dragActive
+                  ? (picked.length > 0 ? "Drop to add to staged" : "Drop to attach")
+                  : "or drag and drop file(s) here"}</span>
+              </div>
+            </div>
+            {picked.length > 0 && (
+              <ul className="invoice-staged-list" aria-label="Files staged for upload">
+                {picked.map((f, i) => (
+                  <li key={`${f.name}::${f.size}::${i}`}>
+                    <Icon name="check" size={12}/>
+                    <span className="invoice-staged-name mono" title={f.name}>{f.name}</span>
+                    <span className="invoice-staged-size mono subtle">{fmtBytes(f.size)}</span>
+                    <button
+                      type="button"
+                      className="invoice-staged-remove"
+                      onClick={() => removeStaged(i)}
+                      disabled={busy}
+                      aria-label={`Remove ${f.name} from staged files`}
+                    >
+                      <Icon name="x" size={11}/>
+                    </button>
+                  </li>
+                ))}
+                {picked.length > 1 && (
+                  <li className="invoice-staged-clear-row">
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      onClick={clearAllStaged}
+                      disabled={busy}
+                    >
+                      Clear all ({picked.length})
+                    </button>
+                  </li>
+                )}
+              </ul>
+            )}
             <div className="field" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
               <div className="field-label">Notes (optional)</div>
               <div className="field-value">
@@ -1322,9 +1516,11 @@ export const InvoiceFilesModal = ({
             <button className="btn sm" onClick={onClose} disabled={busy}>Close</button>
             <button className="btn primary sm"
                     onClick={handleUpload}
-                    disabled={busy || !picked}>
+                    disabled={busy || picked.length === 0}>
               <Icon name="check" size={13}/>
-              {busy ? "Uploading…" : "Upload"}
+              {busy
+                ? (picked.length > 1 ? `Uploading ${picked.length}…` : "Uploading…")
+                : (picked.length > 1 ? `Upload ${picked.length} files` : "Upload")}
             </button>
           </div>
         </div>

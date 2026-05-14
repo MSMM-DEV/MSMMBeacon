@@ -24,7 +24,7 @@ import {
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
-  upsertSubInvoiceAmount, reloadInvoiceArtifacts, addProjectSub, updateProjectSub, removeProjectSub,
+  upsertSubInvoiceAmount, reloadInvoiceArtifacts, reloadInvoicePartyFiles, addProjectSub, updateProjectSub, removeProjectSub,
   ensureSubInvoiceRow, setSubInvoicePaid,
   setProjectRole, setProjectPrimeCompany,
   findOrCreateProjectForInvoice, linkInvoiceToProject,
@@ -1324,14 +1324,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try {
       const allProjects = [...potential, ...awaiting, ...awarded, ...closed];
       const allCompaniesOrClients = [...clients, ...companies];
-      const { primeFilesByKey, subInvoicesMatrix } =
-        await reloadInvoiceArtifacts(allProjects, allCompaniesOrClients);
-      // Re-annotate primeFiles on existing invoice rows.
+      const [{ primeFilesByKey, subInvoicesMatrix }, partyFilesByInvoice] = await Promise.all([
+        reloadInvoiceArtifacts(allProjects, allCompaniesOrClients),
+        reloadInvoicePartyFiles(),
+      ]);
+      // Re-annotate primeFiles + partyFiles on existing invoice rows.
       setInvoice(rows => rows.map(inv => ({
         ...inv,
         primeFiles: Array.from({ length: 12 }, (_, i) =>
           primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
         ),
+        partyFiles: partyFilesByInvoice.get(inv.id) || { msmm: [], prime: {}, sub: {} },
       })));
       setSubInvoices(subInvoicesMatrix);
     } catch (e) {
@@ -3145,19 +3148,36 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       })()}
 
       {filesModal && (() => {
-        const { kind, projectRow, monthIdx, sub } = filesModal;
-        const isSub = kind === "sub";
-        // Resolve the sub fresh from the live matrix on every render so any
-        // uploads / deletes / paid toggles surface immediately. Falls back
-        // to the captured object if the matrix hasn't been refreshed yet.
+        const { kind, projectRow, monthIdx, sub, companyId, companyName } = filesModal;
+        const isParty = kind === "party-msmm" || kind === "party-prime" || kind === "party-sub";
+        const isSub   = kind === "sub";
+        // Always re-read the invoice row from live state so file counts /
+        // partyFiles annotations reflect the latest refresh.
+        const liveProjectRow = invoice.find(r => r.id === projectRow.id) || projectRow;
+        if (isParty) {
+          // Party mode: resolve the right bucket from partyFiles.
+          const partyKind = kind === "party-msmm" ? "msmm" : kind === "party-prime" ? "prime" : "sub";
+          const partyFilesForBucket = partyKind === "msmm"
+            ? (liveProjectRow?.partyFiles?.msmm || [])
+            : (liveProjectRow?.partyFiles?.[partyKind]?.[companyId] || []);
+          return (
+            <InvoiceFilesModal
+              partyKind={partyKind}
+              partyCompanyId={partyKind === "msmm" ? null : companyId}
+              partyInvoiceId={liveProjectRow.id}
+              projectId={liveProjectRow.sourceId}
+              projectName={liveProjectRow.name}
+              companyName={companyName}
+              files={partyFilesForBucket}
+              onClose={() => setFilesModal(null)}
+              onChanged={refreshInvoiceArtifacts}
+            />
+          );
+        }
+        // Month-cell mode (existing): resolve sub fresh from the live matrix.
         const liveSub = isSub
           ? (subInvoices.get(projectRow.sourceId) || []).find(s => s.companyId === sub.companyId) || sub
           : null;
-        // Likewise for the prime row — re-read from the invoice slice so
-        // primeFiles annotations are current.
-        const liveProjectRow = isSub
-          ? projectRow
-          : (invoice.find(r => r.id === projectRow.id) || projectRow);
         const filesForCell = isSub
           ? (liveSub?.files?.[monthIdx] || [])
           : (liveProjectRow?.primeFiles?.[monthIdx] || []);

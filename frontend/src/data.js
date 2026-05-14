@@ -703,7 +703,7 @@ export async function loadBeacon() {
   // join tables.
   const [
     users, clients, companies, projects, invoice, events, hotLeads,
-    subInvRows, subInvFileRows, primeInvFileRows, appSettingsRows,
+    subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -756,6 +756,13 @@ export async function loadBeacon() {
     supabase.from("prime_invoice_files").select("*")
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] prime_invoice_files fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    // Project-level (party) file attachments. New in 20260514120000; degrade
+    // gracefully if the migration hasn't been applied yet.
+    supabase.from("invoice_party_files").select("*")
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] invoice_party_files fetch skipped:", error.message); return []; }
         return data || [];
       }),
     // Workspace-wide settings singleton. If the migration hasn't been applied
@@ -850,6 +857,26 @@ export async function loadBeacon() {
     arr.push(f);
     primeFilesByKey.set(key, arr);
   }
+  // Project-level (party) file lookup. Three buckets per invoice row:
+  //   partyFiles.msmm: File[]                       — files on the MSMM line
+  //   partyFiles.prime: { [companyId]: File[] }     — files on each prime firm
+  //   partyFiles.sub:   { [companyId]: File[] }     — files on each sub firm
+  // Built once here and attached to every adapted invoice row so the UI can
+  // render counts on the firm-name paperclips without an extra query.
+  const partyFilesByInvoice = new Map();
+  for (const f of (partyInvFileRows || [])) {
+    let bucket = partyFilesByInvoice.get(f.invoice_id);
+    if (!bucket) {
+      bucket = { msmm: [], prime: {}, sub: {} };
+      partyFilesByInvoice.set(f.invoice_id, bucket);
+    }
+    if (f.party_kind === "msmm") {
+      bucket.msmm.push(f);
+    } else if (f.party_company_id) {
+      const sub = bucket[f.party_kind];
+      (sub[f.party_company_id] = sub[f.party_company_id] || []).push(f);
+    }
+  }
   // Resolve role per project so each invoice row knows whether MSMM is
   // Prime or Sub on the linked project. role can be explicit (potential
   // rows have it) or derived from prime_company_id (non-Prime if set).
@@ -865,6 +892,7 @@ export async function loadBeacon() {
     primeFiles: Array.from({ length: 12 }, (_, i) =>
       primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
     ),
+    partyFiles: partyFilesByInvoice.get(inv.id) || { msmm: [], prime: {}, sub: {} },
   }));
 
   // Build the per-project sub matrix. For each project that has subs in
@@ -1413,6 +1441,86 @@ export async function getInvoiceFileSignedUrl(filePath, expiresInSeconds = 60) {
     .createSignedUrl(filePath, expiresInSeconds);
   if (error) throw new Error(`signed url: ${error.message}`);
   return data?.signedUrl;
+}
+
+// Storage path for project-level (party) attachments. Independent of month —
+// these files describe the firm relationship, not a specific billing cycle.
+//   msmm:  ${projectId}/party/msmm/${stamp-name}
+//   prime: ${projectId}/party/prime/${slug}/${stamp-name}
+//   sub:   ${projectId}/party/sub/${slug}/${stamp-name}
+export function buildInvoicePartyStoragePath({ projectId, partyKind, companyName, originalName }) {
+  const fileName = uploadFilename(originalName);
+  if (partyKind === "msmm") return `${projectId}/party/msmm/${fileName}`;
+  const slug = slugCompanyName(companyName || partyKind);
+  return `${projectId}/party/${partyKind}/${slug}/${fileName}`;
+}
+
+// Upload one file to the bucket + write a metadata row in invoice_party_files.
+// Caller may invoke this in a loop for multi-file uploads (the modal stages
+// every picked file and submits them sequentially so we get per-file error
+// surfaces). Falls back to projectId=invoiceId when the invoice has no
+// linked project — keeps the binary discoverable in Storage either way.
+export async function uploadInvoicePartyFile(opts) {
+  const { invoiceId, projectId, partyKind, partyCompanyId, companyName, file, notes } = opts;
+  const path = buildInvoicePartyStoragePath({
+    projectId: projectId || invoiceId,
+    partyKind,
+    companyName,
+    originalName: file?.name || "file",
+  });
+  const up = await supabase.storage.from("invoices").upload(path, file, {
+    upsert: false,
+    cacheControl: "3600",
+  });
+  if (up.error) throw new Error(`storage upload: ${up.error.message}`);
+  const session = await supabase.auth.getSession();
+  const authUid = session.data?.session?.user?.id || null;
+  const beaconUserId = authUid ? (_users.find(x => x.id === authUid)?.id || null) : null;
+  const { data, error } = await supabase.from("invoice_party_files")
+    .insert({
+      invoice_id: invoiceId,
+      party_kind: partyKind,
+      party_company_id: partyKind === "msmm" ? null : (partyCompanyId || null),
+      file_path: path,
+      file_name: file.name,
+      notes: notes || null,
+      uploaded_by: beaconUserId,
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(`invoice_party_files insert: ${error.message}`);
+  return data;
+}
+
+export async function deleteInvoicePartyFile({ fileId, filePath }) {
+  // Same ordering as deleteInvoiceFile — storage binary first, then DB row.
+  const rm = await supabase.storage.from("invoices").remove([filePath]);
+  if (rm.error) throw new Error(`storage remove: ${rm.error.message}`);
+  const { error } = await supabase.from("invoice_party_files").delete().eq("id", fileId);
+  if (error) throw new Error(`invoice_party_files delete: ${error.message}`);
+}
+
+// Refetch only the invoice_party_files table and rebuild the per-invoice
+// bucket. Used by App.jsx onChanged after an upload/delete inside the party
+// modal so the row's count badges update without a full reload.
+export async function reloadInvoicePartyFiles() {
+  const { data, error } = await supabase.from("invoice_party_files").select("*");
+  if (error) { console.warn("[beacon_v2] party files reload skipped:", error.message); return new Map(); }
+  const byInvoice = new Map();
+  for (const f of (data || [])) {
+    let bucket = byInvoice.get(f.invoice_id);
+    if (!bucket) {
+      bucket = { msmm: [], prime: {}, sub: {} };
+      byInvoice.set(f.invoice_id, bucket);
+    }
+    if (f.party_kind === "msmm") {
+      bucket.msmm.push(f);
+    } else if (f.party_company_id) {
+      const slot = bucket[f.party_kind];
+      (slot[f.party_company_id] = slot[f.party_company_id] || []).push(f);
+    }
+  }
+  return byInvoice;
 }
 
 // Refetch sub_invoices + sub_invoice_files + prime_invoice_files after an

@@ -728,6 +728,67 @@ const TableView = ({
 
   const showNoMatches = search.trim() && filteredRows.length === 0 && rows.length > 0;
 
+  // --- Mirrored top scrollbar -------------------------------------------------
+  // Wide tables already get a bottom scrollbar from .table-scroll's overflow-x.
+  // Long lists make it unreachable until the user scrolls to the bottom — so
+  // we mirror it as a thin scrollbar fixed at the TOP of the table. Same
+  // pattern InvoiceTable uses (.invoice-top-scroll), implemented inline here
+  // so all TableView consumers (Potential / Awaiting / Awarded / Closed /
+  // Events / Hot Leads / Directory) get it for free.
+  const tableScrollRef     = useRef(null);
+  const tableScrollBodyRef = useRef(null);
+  const tableTopScrollRef  = useRef(null);
+  const [tableTopWidth, setTableTopWidth] = useState(0);
+  const [tableHasOverflow, setTableHasOverflow] = useState(false);
+
+  useEffect(() => {
+    const scroll = tableScrollRef.current;
+    const body   = tableScrollBodyRef.current;
+    const top    = tableTopScrollRef.current;
+    if (!scroll || !body || !top) return;
+
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        // .table-scroll-body uses min-width: min-content so its scrollWidth
+        // collapses to the sum of grid track minimums — exactly what the
+        // bottom scrollbar lays out. We mirror that.
+        const w = Math.max(body.scrollWidth, body.offsetWidth, scroll.clientWidth);
+        setTableTopWidth(prev => prev === w ? prev : w);
+        setTableHasOverflow(w - scroll.clientWidth > 1);
+        if (top.scrollLeft !== scroll.scrollLeft) top.scrollLeft = scroll.scrollLeft;
+      });
+    };
+
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(scroll);
+    ro?.observe(body);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [processedRows.length, visibleColumns.length, gridCols]);
+
+  // Two-way sync: scrolling either bar drives the other. The `> 1` guard
+  // prevents the feedback loop where each onScroll re-fires the partner
+  // setter and rounds-trips a sub-pixel drift forever.
+  const syncTableScroll = (source) => {
+    const scroll = tableScrollRef.current;
+    const top    = tableTopScrollRef.current;
+    if (!scroll || !top) return;
+    const from = source === "top" ? top : scroll;
+    const to   = source === "top" ? scroll : top;
+    if (Math.abs(to.scrollLeft - from.scrollLeft) > 1) {
+      to.scrollLeft = from.scrollLeft;
+    }
+  };
+  const onTableTopScroll  = () => syncTableScroll("top");
+  const onTableBodyScroll = () => syncTableScroll("body");
+
   // Publish current table state for external consumers (e.g., Export). Export
   // should see the SAME rows the user sees — including any synthetic totals
   // rows injected by postProcess — so we publish processedRows here.
@@ -772,6 +833,21 @@ const TableView = ({
           }
         </div>
       )}
+      {/* Mirrored top scrollbar — render only when content actually overflows,
+          so narrow tables don't grow an empty horizontal bar. aria-hidden +
+          tabIndex={-1} keep the synthetic bar out of keyboard / SR focus
+          (the real .table-scroll below is the authoritative scroll target). */}
+      {tableHasOverflow && (
+        <div
+          className="table-top-scroll"
+          ref={tableTopScrollRef}
+          onScroll={onTableTopScroll}
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          <div className="table-top-scroll-spacer" style={{ width: tableTopWidth }}/>
+        </div>
+      )}
       {/* Table-only horizontal scroll container. Keeps the toolbar fixed-width
           while the header row + data rows scroll together when total column
           width exceeds viewport. The PAGE never gets a horizontal scrollbar.
@@ -779,8 +855,8 @@ const TableView = ({
           (max of all children's intrinsic widths). Without the wrapper, each
           .trow would size to its own content and rows would drift out of
           alignment at narrow viewports. */}
-      <div className="table-scroll">
-        <div className="table-scroll-body">
+      <div className="table-scroll" ref={tableScrollRef} onScroll={onTableBodyScroll}>
+        <div className="table-scroll-body" ref={tableScrollBodyRef}>
           <HeaderRow
             columns={orderedColumns} gridCols={gridCols} sort={sort}
             onSortToggle={onSortToggle} hiddenCols={hiddenCols}
@@ -2313,6 +2389,25 @@ export const InvoiceTable = ({
                       <div className="inv-name-wrap">
                         <EditableCell value={r.name}
                           onChange={v => updateRow(r.id, { name: v })}/>
+                        {(() => {
+                          const msmmFiles = r.partyFiles?.msmm || [];
+                          const hasFiles  = msmmFiles.length > 0;
+                          return (
+                            <button
+                              type="button"
+                              className={"invoice-party-clip" + (hasFiles ? " has-files" : "")}
+                              title={hasFiles
+                                ? `${msmmFiles.length} MSMM file${msmmFiles.length === 1 ? "" : "s"} attached`
+                                : "Attach project-level files for MSMM"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenFiles?.({ kind: "party-msmm", projectRow: r });
+                              }}>
+                              <Icon name="link" size={11}/>
+                              {hasFiles && <span className="invoice-cell-clip-count">{msmmFiles.length}</span>}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </td>
                     <td>
@@ -2464,6 +2559,32 @@ export const InvoiceTable = ({
                           {isPrimeEntry && (
                             <span className="invoice-prime-tag mono">PRIME</span>
                           )}
+                          {(() => {
+                            const partyBucket = isPrimeEntry
+                              ? (r.partyFiles?.prime?.[s.companyId] || [])
+                              : (r.partyFiles?.sub?.[s.companyId] || []);
+                            const hasFiles = partyBucket.length > 0;
+                            return (
+                              <button
+                                type="button"
+                                className={"invoice-party-clip" + (hasFiles ? " has-files" : "")}
+                                title={hasFiles
+                                  ? `${partyBucket.length} file${partyBucket.length === 1 ? "" : "s"} attached to ${s.companyName}`
+                                  : `Attach project-level files for ${s.companyName}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenFiles?.({
+                                    kind: isPrimeEntry ? "party-prime" : "party-sub",
+                                    projectRow: r,
+                                    companyId: s.companyId,
+                                    companyName: s.companyName,
+                                  });
+                                }}>
+                                <Icon name="link" size={11}/>
+                                {hasFiles && <span className="invoice-cell-clip-count">{partyBucket.length}</span>}
+                              </button>
+                            );
+                          })()}
                         </span>
                         <span className="invoice-sub-discipline mono">
                           {s.discipline ? "· " : null}
