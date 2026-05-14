@@ -648,11 +648,10 @@ html, body { overflow-x: clip; }
   min-width: min-content;
 }
 .thead {
-  /* top:0 (not 60) because .table-scroll is a scroll container on both axes
-     once overflow-x:auto is applied (CSS coerces overflow-y:visible/clip
-     pairs to auto/hidden). A 60px offset there would render 60px BELOW the
-     toolbar instead of flush against it. With top:0 the header sticks to
-     .table-scroll's top edge — which is right under the toolbar. */
+  /* top:0 because .table-scroll is a two-axis scroll container (overflow-x:
+     auto, overflow-y: auto with a max-height bound). The header pins flush
+     against .table-scroll's top edge, which sits directly under the toolbar
+     — so it stays visible no matter how far the user scrolls the rows. */
   position: sticky; top: 0;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
@@ -1429,16 +1428,23 @@ html, body { overflow-x: clip; }
 }
 
 /* ========== Invoice table ========== */
-/* Horizontal scroll is contained to the table itself — the page never
-   horizontal-scrolls. `overflow-y: clip` (not `visible`) prevents the
-   browser from promoting the element to a full scroll container on the
-   y-axis; if it did (the spec forces visible→auto when the other axis
-   isn't visible), the sticky .thead would anchor to this container
-   instead of the viewport, and its `top: 60px` offset would push the
-   header down into the row area — bug we hit earlier. */
+/* Two-axis scroll container for the pipeline tables (Awaiting / Awarded /
+   Closed / Potential / Hot Leads / Events / Directory). Same pattern as
+   .invoice-wrap below — bound the vertical scroll inside the wrap so the
+   sticky <thead> anchors to this container's top edge and stays visible
+   while the user scrolls long lists. Without max-height, vertical scroll
+   would happen at the page level and carry the header off-screen behind
+   the sticky topbar.
+   max-height leaves headroom for topbar + tabs + page-head + stats strip
+   + toolbar + the always-rendered top-scroll mirror; min-height keeps
+   short viewports usable. overscroll-behavior contains momentum scrolls
+   so they don't bleed into the page once the user reaches an edge. */
 .table-scroll {
   overflow-x: auto;
-  overflow-y: clip;
+  overflow-y: auto;
+  max-height: calc(100vh - 300px);
+  min-height: 340px;
+  overscroll-behavior: contain;
   min-width: 0;
   max-width: 100%;
 }
