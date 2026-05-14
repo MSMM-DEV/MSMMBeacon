@@ -1492,6 +1492,12 @@ html, body { overflow-x: clip; }
 .table-top-scroll {
   border-radius: 6px 6px 0 0;
 }
+/* Both top scrollbars auto-hide when the table doesn't actually overflow
+   horizontally — keeps narrow tables from carrying a dead 14px strip. */
+.table-top-scroll.is-hidden,
+.invoice-top-scroll.is-hidden {
+  display: none;
+}
 .invoice-table {
   border-collapse: separate;
   border-spacing: 0;

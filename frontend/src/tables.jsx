@@ -744,8 +744,7 @@ const TableView = ({
   useEffect(() => {
     const scroll = tableScrollRef.current;
     const body   = tableScrollBodyRef.current;
-    const top    = tableTopScrollRef.current;
-    if (!scroll || !body || !top) return;
+    if (!scroll || !body) return;
 
     let frame = 0;
     const measure = () => {
@@ -757,7 +756,10 @@ const TableView = ({
         const w = Math.max(body.scrollWidth, body.offsetWidth, scroll.clientWidth);
         setTableTopWidth(prev => prev === w ? prev : w);
         setTableHasOverflow(w - scroll.clientWidth > 1);
-        if (top.scrollLeft !== scroll.scrollLeft) top.scrollLeft = scroll.scrollLeft;
+        // Sync only when the top bar is in the DOM (it always is now, but the
+        // ref might briefly be null mid-mount on edge cases).
+        const top = tableTopScrollRef.current;
+        if (top && top.scrollLeft !== scroll.scrollLeft) top.scrollLeft = scroll.scrollLeft;
       });
     };
 
@@ -772,6 +774,15 @@ const TableView = ({
       window.removeEventListener("resize", measure);
     };
   }, [processedRows.length, visibleColumns.length, gridCols]);
+
+  // When overflow flips from false → true the top bar un-hides; snap its
+  // scrollLeft to match the body so the thumb starts in the right spot.
+  useEffect(() => {
+    if (!tableHasOverflow) return;
+    const top = tableTopScrollRef.current;
+    const scroll = tableScrollRef.current;
+    if (top && scroll) top.scrollLeft = scroll.scrollLeft;
+  }, [tableHasOverflow]);
 
   // Two-way sync: scrolling either bar drives the other. The `> 1` guard
   // prevents the feedback loop where each onScroll re-fires the partner
@@ -833,21 +844,20 @@ const TableView = ({
           }
         </div>
       )}
-      {/* Mirrored top scrollbar — render only when content actually overflows,
-          so narrow tables don't grow an empty horizontal bar. aria-hidden +
-          tabIndex={-1} keep the synthetic bar out of keyboard / SR focus
-          (the real .table-scroll below is the authoritative scroll target). */}
-      {tableHasOverflow && (
-        <div
-          className="table-top-scroll"
-          ref={tableTopScrollRef}
-          onScroll={onTableTopScroll}
-          aria-hidden="true"
-          tabIndex={-1}
-        >
-          <div className="table-top-scroll-spacer" style={{ width: tableTopWidth }}/>
-        </div>
-      )}
+      {/* Mirrored top scrollbar — always rendered so its ref is stable for
+          the measurement effect; hidden via .is-hidden when the table doesn't
+          actually overflow (narrow tables don't grow an empty 14px strip).
+          aria-hidden + tabIndex={-1} keep the synthetic bar out of keyboard /
+          SR focus — the real .table-scroll below is the authoritative target. */}
+      <div
+        className={"table-top-scroll" + (tableHasOverflow ? "" : " is-hidden")}
+        ref={tableTopScrollRef}
+        onScroll={onTableTopScroll}
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        <div className="table-top-scroll-spacer" style={{ width: tableTopWidth }}/>
+      </div>
       {/* Table-only horizontal scroll container. Keeps the toolbar fixed-width
           while the header row + data rows scroll together when total column
           width exceeds viewport. The PAGE never gets a horizontal scrollbar.
