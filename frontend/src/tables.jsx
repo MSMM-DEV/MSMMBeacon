@@ -1416,6 +1416,7 @@ export const AwardedTable = ({
     { label: "Prime", w: "minmax(150px, 1.2fr)", sortKey: "primeName",
       sortValue: r => companyById(r.primeId)?.name || "" },
     { label: "Subs", w: "minmax(180px, 1.5fr)" },
+    { label: "Role", w: "100px", sortKey: "role" },
     { label: "Status", w: "120px", sortKey: "status" },
     { label: "Stage", w: "150px", sortKey: "stage" },
     { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details" },
@@ -1433,7 +1434,6 @@ export const AwardedTable = ({
     { label: "PM", w: "130px", sortKey: "pm",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
     { label: "Proj #", w: "110px", sortKey: "projectNumber" },
-    { label: "Role", w: "100px", sortKey: "role" },
     { label: "__actions", w: "90px", locked: true },
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";

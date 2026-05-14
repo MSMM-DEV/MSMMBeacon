@@ -4731,6 +4731,27 @@ html, body { overflow-x: clip; }
   color: var(--accent-ink);
   box-shadow: var(--shadow-sm);
 }
+.view-toggle-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  transition: background .15s, color .15s;
+}
+.events-view-toggle button.active .view-toggle-count {
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--accent-ink);
+}
 
 /* Mobile */
 @media (max-width: 640px) {

@@ -781,6 +781,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try { return localStorage.getItem("beacon.eventsViewMode") || "list"; }
     catch { return "list"; }
   });
+  const [awardedViewMode, setAwardedViewModeState] = useState(() => {
+    try { return localStorage.getItem("beacon.awardedViewMode") || "single"; }
+    catch { return "single"; }
+  });
   const [calendarViewMode, setCalendarViewModeState] = useState(() => {
     try { return localStorage.getItem("beacon.calendarViewMode") || "month"; }
     catch { return "month"; }
@@ -789,6 +793,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const setEventsViewMode = (v) => {
     setEventsViewModeState(v);
     try { localStorage.setItem("beacon.eventsViewMode", v); } catch {}
+  };
+  const setAwardedViewMode = (v) => {
+    setAwardedViewModeState(v);
+    try { localStorage.setItem("beacon.awardedViewMode", v); } catch {}
   };
   const setCalendarViewMode = (v) => {
     setCalendarViewModeState(v);
@@ -2717,19 +2725,49 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.awaiting}
             onYearChange={(y) => setYear("awaiting", y)}/>
         )}
-        {tab === "awarded" && (
-          <AwardedTable rows={filtered.awarded} updateRow={updateAwarded}
-            onOpenDrawer={r => openDrawer(r, "awarded")}
-            onForward={r => triggerForward(r, "awarded", "invoice")}
-            onMoveToPotential={r => triggerForward(r, "awarded", "potential")}
-            onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
-            flashId={flashId}
-            filters={chipsFor("awarded")}
-            tab="awarded"
-            yearOptions={availableYears.awarded}
-            yearValue={yearFilter.awarded}
-            onYearChange={(y) => setYear("awarded", y)}/>
-        )}
+        {tab === "awarded" && (() => {
+          const SINGLE_USE_STAGE = "Single Use Contract (Project)";
+          const awardedSingle = filtered.awarded.filter(r => r.stage === SINGLE_USE_STAGE);
+          const awardedMulti  = filtered.awarded.filter(r => r.stage !== SINGLE_USE_STAGE);
+          const awardedRows   = awardedViewMode === "single" ? awardedSingle : awardedMulti;
+          return (
+            <>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                <div className="events-view-toggle" role="tablist" aria-label="Awarded view">
+                  <button
+                    className={awardedViewMode === "single" ? "active" : ""}
+                    onClick={() => setAwardedViewMode("single")}
+                    role="tab"
+                    aria-selected={awardedViewMode === "single"}
+                  >
+                    <Icon name="flag" size={12}/> Single-Use
+                    <span className="view-toggle-count">{awardedSingle.length}</span>
+                  </button>
+                  <button
+                    className={awardedViewMode === "multi" ? "active" : ""}
+                    onClick={() => setAwardedViewMode("multi")}
+                    role="tab"
+                    aria-selected={awardedViewMode === "multi"}
+                  >
+                    <Icon name="columns" size={12}/> Multi/List
+                    <span className="view-toggle-count">{awardedMulti.length}</span>
+                  </button>
+                </div>
+              </div>
+              <AwardedTable rows={awardedRows} updateRow={updateAwarded}
+                onOpenDrawer={r => openDrawer(r, "awarded")}
+                onForward={r => triggerForward(r, "awarded", "invoice")}
+                onMoveToPotential={r => triggerForward(r, "awarded", "potential")}
+                onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
+                flashId={flashId}
+                filters={chipsFor("awarded")}
+                tab="awarded"
+                yearOptions={availableYears.awarded}
+                yearValue={yearFilter.awarded}
+                onYearChange={(y) => setYear("awarded", y)}/>
+            </>
+          );
+        })()}
         {tab === "closed" && (
           <ClosedTable rows={filtered.closed}
             updateRow={updateClosed}
