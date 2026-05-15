@@ -311,10 +311,10 @@ const EXPORT_COLUMNS = {
         ? (r._starsHeader === "Unrated" ? `Unrated · ${r._count} ${r._count === 1 ? "event" : "events"}`
                                         : `${"★".repeat(r._starsHeader)} · ${r._count} ${r._count === 1 ? "event" : "events"}`)
         : (r.title || "") },
-    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
     { label: "Date & Time",       wMm: 36,  get: r => r._starsHeader ? "" : fmtDateTime(r.dateTime) },
     { label: "Attendees",                   get: r => r._starsHeader ? "" : ((r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ")) },
     { label: "Notes",                       get: r => r._starsHeader ? "" : (r.notes || "") },
+    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
   ],
   hotleads: [
     { label: "Status",            wMm: 24,  get: r => r._starsHeader ? "" : (r.status || "") },
@@ -323,10 +323,10 @@ const EXPORT_COLUMNS = {
                                         : `${"★".repeat(r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`)
         : (r.title || ""), wrap: true },
     { label: "Client / Firm",               get: r => r._starsHeader ? "" : (companyById(r.clientId)?.name || "") },
-    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
     { label: "Date & Time",       wMm: 36,  get: r => r._starsHeader ? "" : fmtDateTime(r.dateTime) },
     { label: "Attendees",                   get: r => r._starsHeader ? "" : ((r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ")) },
     { label: "Notes",                       get: r => r._starsHeader ? "" : (r.notes || "") },
+    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
   ],
   directory: [
     { label: "Name",                        get: r => r.type === "Client" ? (r.baseName || r.name) : r.name },

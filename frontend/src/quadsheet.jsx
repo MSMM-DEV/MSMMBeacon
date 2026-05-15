@@ -884,6 +884,12 @@ const EventLedger = ({ events, onOpen, limit = 40 }) => {
             <div className="evt-title">{e.title}</div>
             <div className="evt-meta">
               {e.type && <span className={`chip ${typeColor(e.type)}`}>{e.type}</span>}
+              {e.stars > 0 && (
+                <span className={`evt-stars stars-set-${e.stars}`}
+                      title={`${e.stars} of 5 stars`}>
+                  {"★".repeat(e.stars)}
+                </span>
+              )}
               <span className="evt-when">
                 {e.dateTime
                   ? new Date(e.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
@@ -1013,6 +1019,12 @@ const HotLeadsList = ({ hotLeads, onOpen, limit = 40 }) => {
               <div className="evt-title">{h.title}</div>
               <div className="evt-meta">
                 {firm && <span className="chip accent">{firm.name}</span>}
+                {h.stars > 0 && (
+                  <span className={`evt-stars stars-set-${h.stars}`}
+                        title={`${h.stars} of 5 stars`}>
+                    {"★".repeat(h.stars)}
+                  </span>
+                )}
                 <span className="evt-when">
                   {new Date(h._t).toLocaleTimeString("en-US",
                     { hour: "numeric", minute: "2-digit" })}

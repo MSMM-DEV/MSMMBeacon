@@ -2875,11 +2875,11 @@ export const EventsTable = ({
     { label: "Type", w: "140px", sortKey: "type",
       sortValue: r => eventTypeRank(r.type) },
     { label: "Title", w: "minmax(260px, 2.5fr)", sortKey: "title" },
-    { label: "Rating", w: "150px", sortKey: "stars",
-      sortValue: r => starsRank(r.stars) },
     { label: "Date & Time", w: "160px", sortKey: "dateTime" },
     { label: "Attendees", w: "minmax(160px, 1.2fr)" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
+    { label: "Rating", w: "150px", sortKey: "stars",
+      sortValue: r => starsRank(r.stars) },
     { label: "__actions", w: "80px", locked: true },
   ];
   const typeColor = t => ({
@@ -3046,11 +3046,11 @@ export const HotLeadsTable = ({
     { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
     { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
-    { label: "Rating",      w: "150px", sortKey: "stars",
-      sortValue: r => starsRank(r.stars) },
     { label: "Date & Time", w: "170px", sortKey: "dateTime" },
     { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
+    { label: "Rating",      w: "150px", sortKey: "stars",
+      sortValue: r => starsRank(r.stars) },
     { label: "__actions",   w: "80px", locked: true },
   ];
 

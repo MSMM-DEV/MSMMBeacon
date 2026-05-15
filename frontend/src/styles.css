@@ -950,6 +950,19 @@ html, body { overflow-x: clip; }
 .cal-agenda-stars.stars-set-4 { color: var(--stars-4); }
 .cal-agenda-stars.stars-set-5 { color: var(--stars-5); }
 
+/* Quad Sheet event ledger + hot leads list — tier-colored star glyphs
+   inline with the date/type chip. Compact so they don't crowd the meta line. */
+.evt-stars {
+  font-size: 11px;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.evt-stars.stars-set-1 { color: var(--stars-1); }
+.evt-stars.stars-set-2 { color: var(--stars-2); }
+.evt-stars.stars-set-3 { color: var(--stars-3); }
+.evt-stars.stars-set-4 { color: var(--stars-4); }
+.evt-stars.stars-set-5 { color: var(--stars-5); }
+
 /* ---- Column drag-reorder + drag-resize affordances ---- */
 .th { position: relative; }
 .th[draggable="true"] { cursor: grab; }
