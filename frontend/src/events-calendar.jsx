@@ -69,6 +69,7 @@ function EventBlock({ event }) {
   const r = event.resource;
   const externalCount = (r.outlookExternalAttendees || []).length;
   const tone = TYPE_TONE[r.type] || "muted";
+  const stars = r.stars;
   return (
     <div className={`cal-event tone-${tone}${r.outlookIsCancelled ? " cancelled" : ""}`}>
       <span className="cal-event-stripe" aria-hidden />
@@ -79,6 +80,15 @@ function EventBlock({ event }) {
           </span>
         )}
         <span className="cal-event-title">{event.title}</span>
+        {stars > 0 && (
+          <span
+            className={`cal-event-stars stars-set-${stars}`}
+            title={`${stars} of 5 stars`}
+            aria-label={`${stars} of 5 stars`}
+          >
+            ★{stars}
+          </span>
+        )}
         {externalCount > 0 && (
           <span
             className="cal-event-ext"
@@ -95,10 +105,16 @@ function EventBlock({ event }) {
 function AgendaEventRow({ event }) {
   const r = event.resource;
   const tone = TYPE_TONE[r.type] || "muted";
+  const stars = r.stars;
   return (
     <div className={`cal-agenda-row${r.outlookIsCancelled ? " cancelled" : ""}`}>
       <span className={`cal-agenda-dot tone-${tone}`} aria-hidden />
       <span className="cal-agenda-title">{event.title}</span>
+      {stars > 0 && (
+        <span className={`cal-agenda-stars stars-set-${stars}`} title={`${stars} of 5 stars`}>
+          {"★".repeat(stars)}
+        </span>
+      )}
       {r.source === "outlook" && <span className="cal-agenda-source">Outlook</span>}
       {(r.attendees || []).length > 0 && (
         <span className="cal-agenda-attendees">

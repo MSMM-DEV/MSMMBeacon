@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Icon } from "./icons.jsx";
 import { supabase, THIS_YEAR, MONTHS, fmtMoney } from "./data.js";
-import { SearchableSelect } from "./primitives.jsx";
+import { SearchableSelect, StarRating } from "./primitives.jsx";
 
 // ============ CREATE MODAL ============
 // "New X" flow for potential / events / clients / companies.
@@ -73,10 +73,10 @@ const DB_COLUMNS = {
     "notes", "project_number",
   ],
   events: [
-    "title", "status", "type", "event_datetime", "notes",
+    "title", "status", "type", "event_datetime", "notes", "stars",
   ],
   hotleads: [
-    "title", "status", "client_id", "date_time", "notes",
+    "title", "status", "client_id", "date_time", "notes", "stars",
   ],
   clients: [
     "name", "district", "org_type",
@@ -99,6 +99,7 @@ const NUMERIC_COLS = new Set([
   "year", "total_contract_amount", "msmm_amount", "anticipated_invoice_start_month",
   "msmm_used", "msmm_remaining",
   "contract_amount", "msmm_remaining_to_bill_year_start",
+  "stars",
 ]);
 
 const INITIAL = {
@@ -160,6 +161,7 @@ const INITIAL = {
     event_datetime: "",
     attendees: [],
     notes: "",
+    stars: "",
   },
   hotleads: {
     title: "",
@@ -168,6 +170,7 @@ const INITIAL = {
     date_time: "",
     notes: "",
     attendees: [],
+    stars: "",
   },
   clients: {
     name: "",
@@ -868,6 +871,12 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
                    onChange={e => set("event_datetime", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
+          <Field label="Rating">
+            <StarRating
+              value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
+              onChange={v => set("stars", v == null ? "" : v)}
+            />
+          </Field>
           <Field label="Attendees" multiline>
             <UserMultiPicker value={form.attendees} users={users}
                              onChange={next => set("attendees", next)}
@@ -907,6 +916,12 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             <input className="input" type="datetime-local" value={form.date_time}
                    onChange={e => set("date_time", e.target.value)}
                    style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Rating">
+            <StarRating
+              value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
+              onChange={v => set("stars", v == null ? "" : v)}
+            />
           </Field>
           <Field label="Attendees" multiline>
             <UserMultiPicker value={form.attendees} users={users}

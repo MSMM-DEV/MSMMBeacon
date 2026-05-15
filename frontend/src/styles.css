@@ -794,6 +794,162 @@ html, body { overflow-x: clip; }
 .trow[data-prob="low"]    { background-color: var(--prob-low-bg);    box-shadow: inset 4px 0 0 var(--prob-low); }
 .trow[data-prob="orange"] { background-color: var(--prob-orange-bg); box-shadow: inset 4px 0 0 var(--prob-orange); }
 
+/* ---- Stars palette (5-tier rating: 5★ = top, 1★ = bottom, Unrated = neutral)
+   Used by Events & Other and Hot Leads tables — row stripes mirror the
+   Potential `data-prob` pattern. 5★/4★ slot into the green family, 3★ yellow,
+   2★ orange, 1★ red; Unrated leans muted so it doesn't compete for attention. */
+:root {
+  --stars-5:    #1F6B3E;   /* deep forest — strongest signal */
+  --stars-4:    #7AAE53;   /* olive-leaf green */
+  --stars-3:    #A89200;   /* dark dijon — shared hue family as --prob-medium */
+  --stars-2:    #D97418;   /* cadmium orange — shared with --prob-orange */
+  --stars-1:    #A3302E;   /* crimson — shared with --prob-low */
+  --stars-5-bg:   rgba(31, 107, 62, 0.14);
+  --stars-4-bg:   rgba(122, 174, 83, 0.16);
+  --stars-3-bg:   rgba(168, 146, 0, 0.18);
+  --stars-2-bg:   rgba(217, 116, 24, 0.14);
+  --stars-1-bg:   rgba(163, 48, 46, 0.13);
+  --stars-5-bg-hover: rgba(31, 107, 62, 0.24);
+  --stars-4-bg-hover: rgba(122, 174, 83, 0.26);
+  --stars-3-bg-hover: rgba(168, 146, 0, 0.28);
+  --stars-2-bg-hover: rgba(217, 116, 24, 0.24);
+  --stars-1-bg-hover: rgba(163, 48, 46, 0.22);
+}
+[data-theme="dark"] {
+  --stars-5:    #6FB58A;
+  --stars-4:    #B2D188;
+  --stars-3:    #F0D03D;
+  --stars-2:    #F3A064;
+  --stars-1:    #E07A78;
+  --stars-5-bg:   rgba(111, 181, 138, 0.16);
+  --stars-4-bg:   rgba(178, 209, 136, 0.18);
+  --stars-3-bg:   rgba(240, 208, 61, 0.18);
+  --stars-2-bg:   rgba(243, 160, 100, 0.16);
+  --stars-1-bg:   rgba(224, 122, 120, 0.16);
+  --stars-5-bg-hover: rgba(111, 181, 138, 0.26);
+  --stars-4-bg-hover: rgba(178, 209, 136, 0.28);
+  --stars-3-bg-hover: rgba(240, 208, 61, 0.28);
+  --stars-2-bg-hover: rgba(243, 160, 100, 0.26);
+  --stars-1-bg-hover: rgba(224, 122, 120, 0.26);
+}
+
+.trow[data-stars="5"] { background-color: var(--stars-5-bg); box-shadow: inset 4px 0 0 var(--stars-5); }
+.trow[data-stars="4"] { background-color: var(--stars-4-bg); box-shadow: inset 4px 0 0 var(--stars-4); }
+.trow[data-stars="3"] { background-color: var(--stars-3-bg); box-shadow: inset 4px 0 0 var(--stars-3); }
+.trow[data-stars="2"] { background-color: var(--stars-2-bg); box-shadow: inset 4px 0 0 var(--stars-2); }
+.trow[data-stars="1"] { background-color: var(--stars-1-bg); box-shadow: inset 4px 0 0 var(--stars-1); }
+
+.trow[data-stars="5"]:hover { background-color: var(--stars-5-bg-hover); }
+.trow[data-stars="4"]:hover { background-color: var(--stars-4-bg-hover); }
+.trow[data-stars="3"]:hover { background-color: var(--stars-3-bg-hover); }
+.trow[data-stars="2"]:hover { background-color: var(--stars-2-bg-hover); }
+.trow[data-stars="1"]:hover { background-color: var(--stars-1-bg-hover); }
+
+/* Section-header row for the stars-grouped tables. Same chrome as
+   .org-header (org-type sections on Awaiting/Awarded) — re-using the
+   pattern keeps visual rhythm consistent across grouped tables. */
+.trow.stars-header {
+  background: var(--surface-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 4px 0 0 var(--border);
+  cursor: default;
+}
+.trow.stars-header[data-stars="5"] { box-shadow: inset 4px 0 0 var(--stars-5); }
+.trow.stars-header[data-stars="4"] { box-shadow: inset 4px 0 0 var(--stars-4); }
+.trow.stars-header[data-stars="3"] { box-shadow: inset 4px 0 0 var(--stars-3); }
+.trow.stars-header[data-stars="2"] { box-shadow: inset 4px 0 0 var(--stars-2); }
+.trow.stars-header[data-stars="1"] { box-shadow: inset 4px 0 0 var(--stars-1); }
+
+/* ---- StarRating widget (cells, drawer, CreateModal) ----
+   Glyph row with optional inline edit. Editable variant exposes a small
+   "×" clear button to the right of the stars; read-only mode hides it. */
+.stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+}
+.stars .star-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0 1px;
+  margin: 0;
+  cursor: default;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--border);
+  transition: color .12s, transform .08s;
+}
+.stars.stars-editable .star-btn { cursor: pointer; }
+.stars .star-btn.on { color: var(--accent); }
+.stars.stars-set-1 .star-btn.on { color: var(--stars-1); }
+.stars.stars-set-2 .star-btn.on { color: var(--stars-2); }
+.stars.stars-set-3 .star-btn.on { color: var(--stars-3); }
+.stars.stars-set-4 .star-btn.on { color: var(--stars-4); }
+.stars.stars-set-5 .star-btn.on { color: var(--stars-5); }
+.stars.stars-editable .star-btn:hover,
+.stars.stars-editable .star-btn:focus-visible { transform: scale(1.15); outline: none; }
+.stars.stars-editable .star-btn:focus-visible { color: var(--accent); }
+.stars.stars-sm .star-btn { font-size: 12px; }
+.stars.stars-lg .star-btn { font-size: 19px; }
+.stars-clear {
+  appearance: none;
+  margin-left: 4px;
+  width: 16px; height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  opacity: 0;
+}
+.stars.stars-editable:hover .stars-clear,
+.stars.stars-editable:focus-within .stars-clear { opacity: 1; }
+.stars-clear:hover { background: var(--rose-bg, var(--surface-3, var(--surface-2))); color: var(--rose, var(--text)); }
+
+/* Calendar event card star indicator — colored badge by tier */
+.cal-event-stars {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.6);
+}
+[data-theme="dark"] .cal-event-stars { background: rgba(0, 0, 0, 0.35); }
+.cal-event-stars.stars-set-1 { color: var(--stars-1); }
+.cal-event-stars.stars-set-2 { color: var(--stars-2); }
+.cal-event-stars.stars-set-3 { color: var(--stars-3); }
+.cal-event-stars.stars-set-4 { color: var(--stars-4); }
+.cal-event-stars.stars-set-5 { color: var(--stars-5); }
+.cal-agenda-stars {
+  margin-left: 6px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.cal-agenda-stars.stars-set-1 { color: var(--stars-1); }
+.cal-agenda-stars.stars-set-2 { color: var(--stars-2); }
+.cal-agenda-stars.stars-set-3 { color: var(--stars-3); }
+.cal-agenda-stars.stars-set-4 { color: var(--stars-4); }
+.cal-agenda-stars.stars-set-5 { color: var(--stars-5); }
+
 /* ---- Column drag-reorder + drag-resize affordances ---- */
 .th { position: relative; }
 .th[draggable="true"] { cursor: grab; }
@@ -834,6 +990,11 @@ html, body { overflow-x: clip; }
 .trow[data-prob="medium"]:hover { background-color: var(--prob-medium-bg-hover); }
 .trow[data-prob="low"]:hover    { background-color: var(--prob-low-bg-hover); }
 .trow[data-prob="orange"]:hover { background-color: var(--prob-orange-bg-hover); }
+
+/* Stars-grouped tables — section header rows can never enter the data-row
+   hover state. The two color-stripe definitions earlier in this file ride
+   on top of TableView's base .trow hover by selector specificity. */
+.trow.stars-header:hover { background: var(--surface-2); }
 
 /* Invoice spreadsheet rows: orange tint matches Potential row. Sticky cells
    carry the left stripe; month/total cells keep their own bg. */

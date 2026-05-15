@@ -574,6 +574,7 @@ function adaptEvent(r) {
     title: r.title,
     dateTime: r.event_datetime || "",
     notes: r.notes || "",
+    stars: r.stars == null ? null : Number(r.stars),
     attendees: (r.attendees || []).map(a => a.user_id),
     source:                    r.source || "manual",
     outlookEventId:            r.outlook_event_id || "",
@@ -598,6 +599,7 @@ function adaptHotLead(r) {
     // through routeClientPick (see App.jsx) which targets the right column.
     clientId: r.client_id || r.prime_company_id || null,
     notes: r.notes || "",
+    stars: r.stars == null ? null : Number(r.stars),
     attendees: (r.attendees || []).map(a => a.user_id),
   };
 }

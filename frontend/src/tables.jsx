@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Icon } from "./icons.jsx";
 import {
   EditableCell, RoleChip, StatusChip, UserTag, UserStack, SubsCell, RowActions,
+  StarRating,
 } from "./primitives.jsx";
 import {
   getCompanies, getClientsOnly, getCompaniesOnly, getUsers,
@@ -160,6 +161,10 @@ const probChipClass = (p) => {
 };
 const PROB_RANK = { High: 1, Medium: 2, Low: 3, Orange: 4 };
 const probRank = (p) => PROB_RANK[p] ?? 5;
+
+// Stars sort key: 5★ first, 1★ last, NULL/Unrated last of all. Pure-int
+// comparison maps to the desired display order with one expression.
+const starsRank = (s) => (s == null ? 99 : 6 - Number(s));
 
 // Events grouping rank — Board Meetings first (highest-value stakeholder
 // touchpoint), then partner-facing, then internal.
@@ -2870,6 +2875,8 @@ export const EventsTable = ({
     { label: "Type", w: "140px", sortKey: "type",
       sortValue: r => eventTypeRank(r.type) },
     { label: "Title", w: "minmax(260px, 2.5fr)", sortKey: "title" },
+    { label: "Rating", w: "150px", sortKey: "stars",
+      sortValue: r => starsRank(r.stars) },
     { label: "Date & Time", w: "160px", sortKey: "dateTime" },
     { label: "Attendees", w: "minmax(160px, 1.2fr)" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
@@ -2882,28 +2889,28 @@ export const EventsTable = ({
 
   const { eventStatusOptions, eventTypeOptions } = buildOptions();
 
-  // Group-by-type: rows keep their user sort inside each type, and a header
-  // row introduces each type block (same mechanic the Awarded/Awaiting
-  // tables use for org-type). eventTypeRank lives at module scope.
-  const primarySort = [{ key: "type", dir: "asc" }];
-  const injectTypeHeaders = (sortedRows) => {
+  // Group-by-stars: rows are bucketed 5★ → 1★ → Unrated. Mirrors the
+  // probability-grouped pattern on Potential (see PotentialTable above) —
+  // count totals per bucket, user's column sort applies inside each group.
+  const primarySort = [{ key: "stars", dir: "asc" }];
+  const injectStarHeaders = (sortedRows) => {
     if (!sortedRows || sortedRows.length === 0) return sortedRows;
     const counts = {};
     for (const r of sortedRows) {
-      const t = r.type || "—";
-      counts[t] = (counts[t] || 0) + 1;
+      const k = r.stars == null ? "_unrated" : String(r.stars);
+      counts[k] = (counts[k] || 0) + 1;
     }
     const out = [];
-    let lastType;
+    let lastKey;
     for (const r of sortedRows) {
-      const t = r.type || "—";
-      if (t !== lastType) {
+      const k = r.stars == null ? "_unrated" : String(r.stars);
+      if (k !== lastKey) {
         out.push({
-          id: `_typeheader_${t}`,
-          _typeHeader: t,
-          _count: counts[t],
+          id: `_starsheader_${k}`,
+          _starsHeader: k === "_unrated" ? "Unrated" : Number(k),
+          _count: counts[k],
         });
-        lastType = t;
+        lastKey = k;
       }
       out.push(r);
     }
@@ -2916,21 +2923,23 @@ export const EventsTable = ({
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
-      postProcess={injectTypeHeaders}
+      postProcess={injectStarHeaders}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No events logged yet"
       emptyHint="Track partner touchpoints, conferences, and meetings here."
       emptyIcon="calendar"
       renderRow={(r, _i, gridCols, visibleColumns) => {
-        if (r._typeHeader) {
-          const raw = r._typeHeader;
-          const typeKey = raw === "—" ? "unknown" : raw.toLowerCase().replace(/\s+/g, "-");
+        if (r._starsHeader != null) {
+          const isUnrated = r._starsHeader === "Unrated";
+          const label = isUnrated
+            ? `Unrated · ${r._count} ${r._count === 1 ? "event" : "events"}`
+            : `${"★".repeat(r._starsHeader)}${"☆".repeat(5 - r._starsHeader)} · ${r._count} ${r._count === 1 ? "event" : "events"}`;
           return (
-            <div key={r.id} className="trow org-header"
-                 data-org={typeKey}
+            <div key={r.id} className="trow stars-header"
+                 data-stars={isUnrated ? "0" : String(r._starsHeader)}
                  style={{ gridTemplateColumns: gridCols }}>
               <div className="td" style={{ color: "var(--text)" }}>
-                Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._count === 1 ? "event" : "events"}
+                {label}
               </div>
             </div>
           );
@@ -2970,6 +2979,12 @@ export const EventsTable = ({
               )}
             </div>
           ),
+          "Rating": (
+            <div className="td">
+              <StarRating value={r.stars}
+                onChange={v => updateRow(r.id, { stars: v })}/>
+            </div>
+          ),
           "Date & Time": (
             <div className="td mono subtle">
               {r.source === "outlook" ? (
@@ -3003,6 +3018,7 @@ export const EventsTable = ({
         };
         return (
           <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-stars={r.stars != null ? String(r.stars) : undefined}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}
@@ -3030,6 +3046,8 @@ export const HotLeadsTable = ({
     { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
     { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
+    { label: "Rating",      w: "150px", sortKey: "stars",
+      sortValue: r => starsRank(r.stars) },
     { label: "Date & Time", w: "170px", sortKey: "dateTime" },
     { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
@@ -3038,8 +3056,35 @@ export const HotLeadsTable = ({
 
   const { clientOrFirmOpts, hotLeadStatusOptions } = buildOptions();
 
-  // Newest-first is the most intuitive default for a running lead list.
-  const primarySort = [{ key: "dateTime", dir: "desc" }];
+  // Group-by-stars (5★ → 1★ → Unrated). Inside each bucket the user's
+  // column sort applies — defaults to dateTime desc via buildEffectiveSort.
+  const primarySort = [
+    { key: "stars",    dir: "asc"  },
+    { key: "dateTime", dir: "desc" },
+  ];
+  const injectStarHeaders = (sortedRows) => {
+    if (!sortedRows || sortedRows.length === 0) return sortedRows;
+    const counts = {};
+    for (const r of sortedRows) {
+      const k = r.stars == null ? "_unrated" : String(r.stars);
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    const out = [];
+    let lastKey;
+    for (const r of sortedRows) {
+      const k = r.stars == null ? "_unrated" : String(r.stars);
+      if (k !== lastKey) {
+        out.push({
+          id: `_starsheader_${k}`,
+          _starsHeader: k === "_unrated" ? "Unrated" : Number(k),
+          _count: counts[k],
+        });
+        lastKey = k;
+      }
+      out.push(r);
+    }
+    return out;
+  };
 
   return (
     <TableView
@@ -3047,11 +3092,27 @@ export const HotLeadsTable = ({
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
+      postProcess={injectStarHeaders}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No hot leads yet"
       emptyHint="Log early-stage opportunities here — partner intros, conference chats, warm pre-RFPs."
       emptyIcon="trend"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        if (r._starsHeader != null) {
+          const isUnrated = r._starsHeader === "Unrated";
+          const label = isUnrated
+            ? `Unrated · ${r._count} ${r._count === 1 ? "lead" : "leads"}`
+            : `${"★".repeat(r._starsHeader)}${"☆".repeat(5 - r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`;
+          return (
+            <div key={r.id} className="trow stars-header"
+                 data-stars={isUnrated ? "0" : String(r._starsHeader)}
+                 style={{ gridTemplateColumns: gridCols }}>
+              <div className="td" style={{ color: "var(--text)" }}>
+                {label}
+              </div>
+            </div>
+          );
+        }
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
@@ -3076,6 +3137,12 @@ export const HotLeadsTable = ({
               <EditableCell value={r.clientId} type="combobox" options={clientOrFirmOpts}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Rating": (
+            <div className="td">
+              <StarRating value={r.stars}
+                onChange={v => updateRow(r.id, { stars: v })}/>
             </div>
           ),
           "Date & Time": (
@@ -3105,6 +3172,7 @@ export const HotLeadsTable = ({
         };
         return (
           <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-stars={r.stars != null ? String(r.stars) : undefined}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}

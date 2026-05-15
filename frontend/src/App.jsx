@@ -305,20 +305,28 @@ const EXPORT_COLUMNS = {
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
-    { label: "Status",            wMm: 24,  get: r => r.status || "" },
-    { label: "Type",              wMm: 22,  get: r => r.type || "" },
-    { label: "Title",                       get: r => r.title || "" },
-    { label: "Date & Time",       wMm: 36,  get: r => fmtDateTime(r.dateTime) },
-    { label: "Attendees",                   get: r => (r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ") },
-    { label: "Notes",                       get: r => r.notes || "" },
+    { label: "Status",            wMm: 24,  get: r => r._starsHeader ? "" : (r.status || "") },
+    { label: "Type",              wMm: 22,  get: r => r._starsHeader ? "" : (r.type || "") },
+    { label: "Title",                       get: r => r._starsHeader
+        ? (r._starsHeader === "Unrated" ? `Unrated · ${r._count} ${r._count === 1 ? "event" : "events"}`
+                                        : `${"★".repeat(r._starsHeader)} · ${r._count} ${r._count === 1 ? "event" : "events"}`)
+        : (r.title || "") },
+    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
+    { label: "Date & Time",       wMm: 36,  get: r => r._starsHeader ? "" : fmtDateTime(r.dateTime) },
+    { label: "Attendees",                   get: r => r._starsHeader ? "" : ((r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ")) },
+    { label: "Notes",                       get: r => r._starsHeader ? "" : (r.notes || "") },
   ],
   hotleads: [
-    { label: "Status",            wMm: 24,  get: r => r.status || "" },
-    { label: "Title",                       get: r => r.title || "", wrap: true },
-    { label: "Client / Firm",               get: r => companyById(r.clientId)?.name || "" },
-    { label: "Date & Time",       wMm: 36,  get: r => fmtDateTime(r.dateTime) },
-    { label: "Attendees",                   get: r => (r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ") },
-    { label: "Notes",                       get: r => r.notes || "" },
+    { label: "Status",            wMm: 24,  get: r => r._starsHeader ? "" : (r.status || "") },
+    { label: "Title",                       get: r => r._starsHeader
+        ? (r._starsHeader === "Unrated" ? `Unrated · ${r._count} ${r._count === 1 ? "lead" : "leads"}`
+                                        : `${"★".repeat(r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`)
+        : (r.title || ""), wrap: true },
+    { label: "Client / Firm",               get: r => r._starsHeader ? "" : (companyById(r.clientId)?.name || "") },
+    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
+    { label: "Date & Time",       wMm: 36,  get: r => r._starsHeader ? "" : fmtDateTime(r.dateTime) },
+    { label: "Attendees",                   get: r => r._starsHeader ? "" : ((r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ")) },
+    { label: "Notes",                       get: r => r._starsHeader ? "" : (r.notes || "") },
   ],
   directory: [
     { label: "Name",                        get: r => r.type === "Client" ? (r.baseName || r.name) : r.name },
@@ -421,6 +429,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       dateTime: dbRow.event_datetime || "",
       attendees: extras.attendees || [],
       notes: dbRow.notes || "",
+      stars: dbRow.stars == null ? null : Number(dbRow.stars),
     };
   }
   if (table === "hotleads") {
@@ -432,6 +441,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       clientId: dbRow.client_id || dbRow.prime_company_id || null,
       notes: dbRow.notes || "",
       attendees: extras.attendees || [],
+      stars: dbRow.stars == null ? null : Number(dbRow.stars),
     };
   }
   if (table === "clients" || table === "directory-client") {
@@ -894,6 +904,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const EVENTS_COLS = {
     title: "title", status: "status", type: "type",
     date: "event_date", dateTime: "event_datetime", notes: "notes",
+    stars: "stars",
   };
   // Hot Leads — like Events but with a client/company picker. `clientId` is
   // intentionally OMITTED from this map for the same reason as the project
@@ -904,6 +915,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     status: "status",
     dateTime: "date_time",
     notes: "notes",
+    stars: "stars",
   };
   const CLIENTS_COLS = {
     baseName: "name", district: "district", orgType: "org_type",
@@ -928,6 +940,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "anticipated_invoice_start_month", "msmm_used", "msmm_remaining",
     "client_id",
     "role", "probability", "org_type", "status", "type",
+    "stars",
   ]);
 
   const buildDbPatch = (patch, colMap) => {

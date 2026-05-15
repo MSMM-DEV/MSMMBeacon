@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import { Icon } from "./icons.jsx";
-import { StatusChip } from "./primitives.jsx";
+import { StatusChip, StarRating } from "./primitives.jsx";
 import {
   getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions,
   getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
@@ -294,6 +294,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "title",          label: "Title",                                           readOnlyIf: (r) => r.source === "outlook" },
       { k: "status",         label: "Status",                  type: "select", options: ["Booked","Happened"] },
       { k: "type",           label: "Type",                    type: "select", options: ["Partner","AI","Project","Meetings","Board Meetings","Event"] },
+      { k: "stars",          label: "Rating",                  type: "stars" },
       { k: "dateTime",       label: "Date & Time",             type: "datetime",       readOnlyIf: (r) => r.source === "outlook" },
       { k: "attendees",      label: "Attendees from MSMM",     type: "users",          readOnlyIf: (r) => r.source === "outlook" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
@@ -301,6 +302,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
     hotleads: [
       { k: "title",          label: "Title" },
       { k: "status",         label: "Status",                  type: "select", options: ["Scheduled","Happened"] },
+      { k: "stars",          label: "Rating",                  type: "stars" },
       // `company` field type feeds from the Clients list. For Hot Leads we
       // want BOTH clients AND companies available, so this drawer swaps in
       // the merged list via the `hotleadsCompany` custom type below.
@@ -366,6 +368,9 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       return <div className="field-readonly">{val || <span className="muted">—</span>}</div>;
     }
     if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
+    if (f.type === "stars") return (
+      <StarRating value={val == null ? null : Number(val)} onChange={v => set(v)}/>
+    );
     if (f.type === "select") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
         <option value="">—</option>
