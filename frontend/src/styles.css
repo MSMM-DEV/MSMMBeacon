@@ -820,18 +820,24 @@ html, body { overflow-x: clip; }
   --prob-orange-bg-hover: rgba(217, 116, 24, 0.25);
 }
 [data-theme="dark"] {
-  --prob-high:    #7EB889;   /* moss green */
-  --prob-medium:  #F0D03D;   /* bright lemon-gold — lifts off the dark bg cleanly */
-  --prob-low:     #E07A78;   /* soft coral-red */
-  --prob-orange:  #F3A064;   /* warm mandarin — shared with Invoice Orange rows */
-  --prob-high-bg:   rgba(126, 184, 137, 0.16);
-  --prob-medium-bg: rgba(240, 208, 61, 0.19);
-  --prob-low-bg:    rgba(224, 122, 120, 0.16);
-  --prob-orange-bg: rgba(243, 160, 100, 0.18);
-  --prob-high-bg-hover:   rgba(126, 184, 137, 0.26);
-  --prob-medium-bg-hover: rgba(240, 208, 61, 0.30);
-  --prob-low-bg-hover:    rgba(224, 122, 120, 0.26);
-  --prob-orange-bg-hover: rgba(243, 160, 100, 0.28);
+  --prob-high:    #8FD09B;   /* mint — lifts cleanly */
+  --prob-medium:  #F6D34A;   /* warm gold */
+  --prob-low:     #ED8682;   /* coral */
+  --prob-orange:  #F8A766;   /* clear mandarin */
+  /* Alphas tuned up from the original 16–19% range to 32–38%. Dark mode
+     needs the extra saturation: tints below ~25% over #1B1917 read as
+     "almost no color" and the row stripes vanish into the surrounding
+     surface (the issue called out in the second user screenshot — the
+     Orange probability rows at the bottom of Invoice looked muddy
+     brown instead of clearly orange). */
+  --prob-high-bg:   rgba(143, 208, 155, 0.32);
+  --prob-medium-bg: rgba(246, 211, 74, 0.30);
+  --prob-low-bg:    rgba(237, 134, 130, 0.30);
+  --prob-orange-bg: rgba(248, 167, 102, 0.32);
+  --prob-high-bg-hover:   rgba(143, 208, 155, 0.42);
+  --prob-medium-bg-hover: rgba(246, 211, 74, 0.42);
+  --prob-low-bg-hover:    rgba(237, 134, 130, 0.42);
+  --prob-orange-bg-hover: rgba(248, 167, 102, 0.42);
 }
 
 .trow[data-prob="high"]   { background-color: var(--prob-high-bg);   box-shadow: inset 4px 0 0 var(--prob-high); }
@@ -1846,49 +1852,81 @@ html, body { overflow-x: clip; }
   );
   color: var(--text-muted);
 }
-/* Dark-mode month cells — explicit warm tone on actual cells so the
-   "what's billed" vs "what's projected" rhythm survives the dark palette.
-   The base sub/prime/total rules cascade specificities that would otherwise
-   strip the warmth; we re-assert it below for each row variant. The colors
-   are tuned so any hover brightness lift lands inside readable range
-   (no aggressive orange wash). */
+/* ────────────────────────────────────────────────────────────────────
+   Dark-mode Invoice table — bold three-layer hierarchy
+   ────────────────────────────────────────────────────────────────────
+   Editorial financial-dashboard aesthetic. Three clearly-stepped
+   luminance shelves so the eye can read project rows → expand area →
+   project-total at a glance, and an unambiguously warm amber on actual
+   months so the actual/projection rhythm reads at first glance.
+
+       MAIN ROW      base    #221E1A   (matches --bg-elev)
+       EXPAND ROW    shelf   #2E2520   (warm shelf, +4% L over base)
+       SUB MONTH     amber   #4A3520   (clear warm signal)
+       PRIME MONTH   blue    blue 36% on amber base
+       TOTAL ROW     navy    blue 50% with bright top border
+
+   Color stops were picked so a brightness(1.04) hover lift sits inside
+   readable range and doesn't blow saturation. */
+
+/* Header-level month cells (sticky top of the grid) */
+[data-theme="dark"] .invoice-table th.month-actual {
+  background: #3A2A18;
+  color: #F4D7A0;
+}
+[data-theme="dark"] .invoice-table th.month-proj {
+  background: repeating-linear-gradient(135deg, var(--surface) 0 6px, var(--surface-2) 6px 7px);
+  color: var(--text-muted);
+}
+
+/* Base project row cells */
 [data-theme="dark"] .invoice-table td.month-actual {
-  background: #2C2014;
-  color: #E8C896;
+  background: #3A2A18;
+  color: #F4D7A0;
+  font-weight: 500;
 }
 [data-theme="dark"] .invoice-table td.month-proj {
   background: repeating-linear-gradient(135deg, var(--surface) 0 6px, var(--surface-2) 6px 7px);
   color: var(--text);
 }
-/* Sub-row month cells — slightly cooler than the prime baseline so the
-   sub stripe reads as "less heavy". Both keep enough warmth that the
-   eye groups the actual columns together. */
+
+/* Sub-row month cells — warm amber that's clearly distinct from sub-row
+   text columns. Reads as "this firm billed this much in this month." */
 [data-theme="dark"] .invoice-table tr.invoice-sub-row td.month-actual {
-  background: #2A1E13;
-  color: #DDBC8A;
+  background: #4A3520;
+  color: #FAD9A0;
 }
 [data-theme="dark"] .invoice-table tr.invoice-sub-row td.month-proj {
-  background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--surface) 6px 7px);
+  background: repeating-linear-gradient(135deg, #2D2620 0 6px, #2B2723 6px 7px);
+  color: var(--text);
 }
-/* Prime + total rows keep their blue tone but with stronger blue mix in
-   dark so the band reads as cool/distinct against the warm actual cells. */
+
+/* Prime row month cells — warm base mixed with strong blue so the prime
+   bar reads as cool while still preserving the "actual" warmth. */
 [data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-prime-row td.month-actual {
-  background: color-mix(in srgb, var(--blue) 18%, #2C2014);
+  background: color-mix(in srgb, var(--blue) 36%, #4A3520);
+  color: #E8E1D4;
 }
 [data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-prime-row td.month-proj {
-  background: color-mix(in srgb, var(--blue) 14%, var(--surface-2));
+  background: color-mix(in srgb, var(--blue) 26%, #2D2620);
 }
+
+/* Project-total row — strong navy footer, makes the reconciliation
+   row read as authoritative. */
 [data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-total-row td.month-actual {
-  background: color-mix(in srgb, var(--blue) 28%, #2C2014);
+  background: color-mix(in srgb, var(--blue) 50%, #3A2A18);
+  color: #F4F0E8;
+  font-weight: 600;
 }
 [data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-total-row td.month-proj {
-  background: color-mix(in srgb, var(--blue) 20%, var(--bg-elev));
+  background: color-mix(in srgb, var(--blue) 36%, #2D2620);
 }
+
 /* Legend swatch reflects the new dark actual color so the on-screen
    legend matches what's actually painted in the grid. */
 [data-theme="dark"] .legend-sw.actual {
-  background: #2C2014;
-  border-color: color-mix(in srgb, #E8C896 35%, transparent);
+  background: #3A2A18;
+  border-color: color-mix(in srgb, #F4D7A0 50%, transparent);
 }
 
 .invoice-table td.month-today {
@@ -5440,10 +5478,17 @@ html, body { overflow-x: clip; }
   background: var(--bg-elev);
 }
 
-/* Sub-row treatment — italic name, indented sticky-2, tinted background */
+/* Sub-row treatment — italic name, indented sticky-2, tinted background.
+   The mix uses a warm surface tone so sub-rows feel like a clear "shelf"
+   beneath the parent project row in both themes. */
 .invoice-table tr.invoice-sub-row td {
   background: color-mix(in srgb, var(--surface-2) 70%, var(--accent-softer));
   font-size: 12px;
+}
+[data-theme="dark"] .invoice-table tr.invoice-sub-row td,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row td.sticky-1,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row td.sticky-2 {
+  background: #2E2520;
 }
 .invoice-table tr.invoice-sub-row td.sticky-1 {
   background: color-mix(in srgb, var(--surface-2) 70%, var(--accent-softer));
@@ -7553,4 +7598,204 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .await-pill.later,
 [data-theme="dark"] .await-pill.tba {
   border-color: var(--border-strong);
+}
+
+/* ============================================================================
+   Dark-mode Invoice — second pass, BOLD hierarchy
+   ----------------------------------------------------------------------------
+   The first pass (above) used muted color-mixes that collapsed visual
+   hierarchy. This block re-asserts saturated, intentionally-stepped tints
+   so the expand-area, prime/total rows, paperclip overlays, and Orange
+   probability rows all read at first glance — editorial financial dashboard,
+   not gray-on-gray.
+   ============================================================================ */
+
+/* PRIME tag — the small "PRIME" pill inside the expand-row company name.
+   In dark mode --blue is #8DA5C0; a 14% mix on transparent is whisper-quiet.
+   Bump to a real chip. */
+[data-theme="dark"] .invoice-prime-tag {
+  color: #E8EFF8;
+  background: color-mix(in srgb, var(--blue) 38%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 65%, transparent);
+  text-shadow: 0 1px 0 rgba(0,0,0,.25);
+}
+
+/* Project-total row — text columns explicitly tinted strong navy. Without
+   this override the cascade leaves them at the muted blue 20% over bg-elev
+   which is nearly indistinguishable from the surrounding expand shelf. */
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-total-row td,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-1,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-2 {
+  background: color-mix(in srgb, var(--blue) 38%, #1F2A38);
+  color: #F4F0E8;
+  border-top: 2px solid color-mix(in srgb, var(--blue) 75%, transparent);
+}
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-total-row td.sticky-2 {
+  color: #F4F0E8;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+[data-theme="dark"] .invoice-total-row-hint {
+  color: color-mix(in srgb, #F4F0E8 70%, transparent);
+}
+
+/* Prime row text columns — clear cool tint so the eye reads "this is MSMM
+   as prime" at a glance, distinct from the warm sub-row shelf above. */
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-prime-row td,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-prime-row td.sticky-1,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-prime-row td.sticky-2 {
+  background: color-mix(in srgb, var(--blue) 26%, #2E2520);
+  color: var(--text);
+}
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-prime-row td.sticky-2::before {
+  color: #C8DEF2;
+}
+
+/* Paperclip per-cell overlay — the original .has-files state used
+   --accent-softer (#2E2116 in dark) which is invisible on the new warm
+   month-actual #3A2A18. Switch to a brighter mix that pops against any
+   row background (warm month, sub shelf, prime blue, total navy). */
+[data-theme="dark"] .invoice-cell-clip {
+  color: color-mix(in srgb, var(--accent) 80%, white);
+}
+[data-theme="dark"] .invoice-cell-clip.has-files {
+  background: color-mix(in srgb, var(--accent) 35%, var(--surface));
+  color: #FFF1DC;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 1px 2px rgba(0,0,0,.4);
+}
+[data-theme="dark"] .invoice-cell-clip:hover {
+  background: color-mix(in srgb, var(--accent) 55%, var(--surface));
+  color: #FFF;
+  border-color: var(--accent);
+}
+[data-theme="dark"] .invoice-table td.invoice-cell:hover .invoice-cell-clip {
+  opacity: 0.9;
+}
+/* Firm-name paperclip (inline, in the expand-row company names) — same
+   visibility boost so attached files surface in both prime and sub rows. */
+[data-theme="dark"] .invoice-party-clip {
+  color: color-mix(in srgb, var(--text) 70%, var(--accent));
+}
+[data-theme="dark"] .invoice-party-clip.has-files {
+  background: color-mix(in srgb, var(--accent) 32%, var(--surface));
+  color: #FFF1DC;
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+[data-theme="dark"] .invoice-party-clip:hover {
+  background: color-mix(in srgb, var(--accent) 52%, var(--surface));
+  color: #FFF;
+  border-color: var(--accent);
+}
+
+/* Paid-cell sage tint — bump in dark for clear "paid" signal */
+[data-theme="dark"] .invoice-table tr.invoice-sub-row td.invoice-cell.paid,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row td.invoice-cell.paid.month-actual,
+[data-theme="dark"] .invoice-table tr.invoice-sub-row td.invoice-cell.paid.month-proj {
+  background: color-mix(in srgb, var(--sage) 40%, #2A2A1F);
+  color: #E8F0DD;
+}
+
+/* Probability row inset stripes — bump from 4px to 5px in dark so the
+   side stripe reads even when the row is on the bottom of a scroll
+   viewport and you only see a sliver. The widened sticky-1/2 sticky
+   tint mix gets the same treatment. */
+[data-theme="dark"] .trow[data-prob="high"],
+[data-theme="dark"] .trow[data-prob="medium"],
+[data-theme="dark"] .trow[data-prob="low"],
+[data-theme="dark"] .trow[data-prob="orange"] {
+  box-shadow: inset 5px 0 0 var(--prob-stripe, currentColor);
+}
+[data-theme="dark"] .trow[data-prob="high"]   { --prob-stripe: var(--prob-high);   }
+[data-theme="dark"] .trow[data-prob="medium"] { --prob-stripe: var(--prob-medium); }
+[data-theme="dark"] .trow[data-prob="low"]    { --prob-stripe: var(--prob-low);    }
+[data-theme="dark"] .trow[data-prob="orange"] { --prob-stripe: var(--prob-orange); }
+
+/* Invoice orange-row sticky cells in dark — the existing sticky rule
+   composites --prob-orange-bg over --surface, but our new --prob-orange-bg
+   is 32% so the composite reads cleanly. The inset stripe goes 5px to
+   match other prob stripes. */
+[data-theme="dark"] .invoice-table tr[data-prob="orange"] td.sticky-1,
+[data-theme="dark"] .invoice-table tr[data-prob="orange"] td.sticky-2 {
+  box-shadow: inset 5px 0 0 var(--prob-orange);
+}
+
+/* Chips in dark mode — pump background saturation so the eye can
+   distinguish sage / blue / rose / accent / probability variants at a
+   glance (was bleeding together in the screenshot). */
+[data-theme="dark"] .chip.sage {
+  background: color-mix(in srgb, var(--sage) 28%, var(--surface));
+  color: #DCE9CB;
+  border-color: color-mix(in srgb, var(--sage) 55%, transparent);
+}
+[data-theme="dark"] .chip.rose {
+  background: color-mix(in srgb, var(--rose) 26%, var(--surface));
+  color: #FAD0CC;
+  border-color: color-mix(in srgb, var(--rose) 55%, transparent);
+}
+[data-theme="dark"] .chip.blue {
+  background: color-mix(in srgb, var(--blue) 26%, var(--surface));
+  color: #DAE6F2;
+  border-color: color-mix(in srgb, var(--blue) 55%, transparent);
+}
+[data-theme="dark"] .chip.accent {
+  background: color-mix(in srgb, var(--accent) 28%, var(--surface));
+  color: #FFE3C0;
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* Probability chips — make the text colour read clearly against the
+   chip background using the lifted dark tokens. */
+[data-theme="dark"] .chip.prob-high {
+  background: color-mix(in srgb, var(--prob-high) 32%, var(--surface));
+  border-color: color-mix(in srgb, var(--prob-high) 55%, transparent);
+  color: #D3EBC8;
+}
+[data-theme="dark"] .chip.prob-medium {
+  background: color-mix(in srgb, var(--prob-medium) 28%, var(--surface));
+  border-color: color-mix(in srgb, var(--prob-medium) 55%, transparent);
+  color: #F8E27C;
+}
+[data-theme="dark"] .chip.prob-low {
+  background: color-mix(in srgb, var(--prob-low) 28%, var(--surface));
+  border-color: color-mix(in srgb, var(--prob-low) 55%, transparent);
+  color: #F4B6B3;
+}
+[data-theme="dark"] .chip.prob-orange {
+  background: color-mix(in srgb, var(--prob-orange) 30%, var(--surface));
+  border-color: color-mix(in srgb, var(--prob-orange) 55%, transparent);
+  color: #FCC998;
+}
+
+/* Status chip / ENG-PM tag — small uppercase mono pill on each row.
+   Make sure both ENG (orange) and PM (sage) read clearly in dark. */
+[data-theme="dark"] .chip.muted {
+  color: color-mix(in srgb, var(--text) 70%, transparent);
+  border-color: var(--border-strong);
+}
+
+/* Invoice expand-col header — was using --bg-elev which collapses with
+   the surrounding header bg in dark. Lift to --surface-2 so the chevron
+   column reads as part of the grid. */
+[data-theme="dark"] .invoice-table th.invoice-expand-col {
+  background: var(--surface-2);
+}
+
+/* Sub-add row — bump bg so the "+ Add sub" affordance is visible */
+[data-theme="dark"] .invoice-table tr.invoice-sub-row.invoice-sub-add-row td {
+  background: color-mix(in srgb, var(--accent) 8%, #2E2520);
+}
+
+/* Stronger orange row composite for invoice (the bottom-of-table rows
+   the user called out). The base rule composites at the new 32% alpha
+   over --surface — re-assert here at heightened alpha specifically for
+   invoice rows since the user explicitly wants to see them. */
+[data-theme="dark"] .invoice-table tr[data-prob="orange"] td:not(.sticky-1):not(.sticky-2):not(.month-actual):not(.month-proj):not(.total-cell):not(.invoice-expand-col) {
+  background-color: rgba(248, 167, 102, 0.22);
+}
+[data-theme="dark"] .invoice-table tr[data-prob="orange"] td.sticky-1,
+[data-theme="dark"] .invoice-table tr[data-prob="orange"] td.sticky-2 {
+  background:
+    linear-gradient(rgba(248, 167, 102, 0.22), rgba(248, 167, 102, 0.22)),
+    var(--surface);
 }
