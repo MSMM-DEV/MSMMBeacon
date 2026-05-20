@@ -531,9 +531,11 @@ function LoadingScreen({ error }) {
         </div>
         {error && (
           <pre style={{
-            marginTop: 18, textAlign: "left", background: "#FFF", border: "1px solid #E6DFD1",
+            marginTop: 18, textAlign: "left",
+            background: "var(--surface, #FFF)",
+            border: "1px solid var(--border, #E6DFD1)",
             borderRadius: 10, padding: 14, fontSize: 12, fontFamily: "var(--font-mono, monospace)",
-            color: "#B86B66", maxHeight: 240, overflow: "auto",
+            color: "var(--rose, #B86B66)", maxHeight: 240, overflow: "auto",
           }}>{String(error.message || error)}</pre>
         )}
       </div>
