@@ -1951,16 +1951,25 @@ export const InvoiceTable = ({
 
   // Auto-calculated defaults. Shown values respect per-row overrides from
   // the DB (ytdActualOverride / rollforwardOverride). NULL override = auto.
-  // YTD/Rollforward aggregate the MSMM monthly values so the parent row's
-  // line stays self-consistent (sum of visible months = YTD).
-  const ytdActualAuto    = (r) => Array.from({ length: TODAY_MONTH + 1 }, (_, i) => msmmAtMonth(r, i)).reduce((a,b) => a + b, 0);
+  // YTD Actual is the FULL-YEAR sum (Jan–Dec, actual + projected): editing
+  // any single month re-flows YTD automatically. Rollforward is the user's
+  // "remaining Jan 1" minus YTD — negative values are surfaced (no clamp)
+  // so contract overruns are visible at a glance.
   const totalAll         = (r) => r.values.reduce((a,b) => a + (b || 0), 0);
   const msmmTotalAll     = (r) => Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i)).reduce((a,b) => a + b, 0);
-  const rollforwardAuto  = (r) => Math.max(0, r.remainingStart - msmmTotalAll(r));
+  const ytdActualAuto    = (r) => msmmTotalAll(r);
+  const rollforwardAuto  = (r) => (Number(r.remainingStart) || 0) - ytdActualAuto(r);
   const ytdActualShown   = (r) => r.ytdActualOverride   != null ? r.ytdActualOverride   : ytdActualAuto(r);
   const rollforwardShown = (r) => r.rollforwardOverride != null ? r.rollforwardOverride : rollforwardAuto(r);
   const isYtdOverride    = (r) => r.ytdActualOverride   != null;
   const isRfOverride     = (r) => r.rollforwardOverride != null;
+  // Sub / prime / project-total YTD + RF — same semantics scoped to each
+  // line's own monthly amounts. "Remaining" baseline = the row's contract
+  // amount (subs/primes don't carry a separate remainingStart).
+  const subYtdAuto       = (s) => (s.amounts || []).reduce((a,b) => a + (b || 0), 0);
+  const subRollforward   = (s) => (Number(s.contractAmount) || 0) - subYtdAuto(s);
+  const projectYtdAuto   = (r) => (r.values || []).reduce((a,b) => a + (b || 0), 0);
+  const projectRollforward = (r) => (Number(r.amount) || 0) - projectYtdAuto(r);
   // v2 collapsed source_awarded_id + source_potential_id into a single
   // source_project_id (exposed as r.sourceId). orangeSourceIds is a Set of
   // Potential project ids tagged probability='Orange'; only those match.
@@ -2502,14 +2511,18 @@ export const InvoiceTable = ({
                       );
                     })}
                     <td className={"total-cell" + (isYtdOverride(r) ? " inv-override" : "")}
-                        title={isYtdOverride(r) ? "Manually overridden — clear the cell to reset to auto-calc" : "Auto-calculated — click to override"}>
+                        title={isYtdOverride(r)
+                          ? "Manually overridden — clear the cell to reset to auto-calc (sum of MSMM Jan–Dec)"
+                          : "Auto-calculated · sum of MSMM Jan–Dec (actual + projected). Click to override."}>
                       <EditableCell value={ytdActualShown(r)} type="number"
                         onChange={v => updateRow(r.id, { ytdActualOverride: v == null ? null : Number(v) })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
                     <td className={"total-cell" + (isRfOverride(r) ? " inv-override" : "")}
-                        style={{ color: "var(--accent-ink)" }}
-                        title={isRfOverride(r) ? "Manually overridden — clear the cell to reset to auto-calc" : "Auto-calculated — click to override"}>
+                        style={{ color: rollforwardShown(r) < 0 ? "var(--rose)" : "var(--accent-ink)" }}
+                        title={isRfOverride(r)
+                          ? "Manually overridden — clear the cell to reset to auto-calc (Remaining Jan 1 − YTD)"
+                          : "Auto-calculated · Remaining Jan 1 − YTD Actual. Negative = contract overrun. Click to override."}>
                       <EditableCell value={rollforwardShown(r)} type="number"
                         onChange={v => updateRow(r.id, { rollforwardOverride: v == null ? null : Number(v) })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
@@ -2683,10 +2696,33 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      <td className="total-cell mono">
-                        {fmtMoney(s.amounts.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b||0), 0)) || <span className="empty-cell">—</span>}
+                      {/* YTD Actual (sub) — sum of all 12 months, auto-updates
+                          as cells change. Rollforward (sub) — contract amount
+                          minus YTD; negative means the sub has billed past
+                          their contract amount (surfaced in rose so it reads
+                          as a warning, not a quiet zero). */}
+                      <td className="total-cell mono"
+                          title="Auto-calculated · sum of Jan–Dec billings on this sub">
+                        {(() => {
+                          const ytd = subYtdAuto(s);
+                          return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
+                        })()}
                       </td>
-                      <td className="total-cell"><span className="empty-cell">—</span></td>
+                      <td className="total-cell mono"
+                          title="Auto-calculated · contract amount − YTD actual">
+                        {(() => {
+                          const rf = subRollforward(s);
+                          if (!s.contractAmount && !subYtdAuto(s)) {
+                            return <span className="empty-cell">—</span>;
+                          }
+                          const overrun = rf < 0;
+                          return (
+                            <span style={overrun ? { color: "var(--rose)" } : undefined}>
+                              {fmtMoney(rf)}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td/>
                     </tr>
                     );
@@ -2780,10 +2816,31 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      <td className="total-cell mono">
-                        {fmtMoney(r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a + (b||0), 0)) || <span className="empty-cell">—</span>}
+                      {/* YTD Actual (project) — sum of all 12 monthly project
+                          totals. Rollforward (project) — Total CV − YTD,
+                          negative in rose to flag a contract overrun. */}
+                      <td className="total-cell mono"
+                          title="Auto-calculated · sum of Jan–Dec project totals">
+                        {(() => {
+                          const ytd = projectYtdAuto(r);
+                          return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
+                        })()}
                       </td>
-                      <td className="total-cell"/>
+                      <td className="total-cell mono"
+                          title="Auto-calculated · Total Contract Value − YTD actual">
+                        {(() => {
+                          const rf = projectRollforward(r);
+                          if (!r.amount && !projectYtdAuto(r)) {
+                            return <span className="empty-cell">—</span>;
+                          }
+                          const overrun = rf < 0;
+                          return (
+                            <span style={overrun ? { color: "var(--rose)" } : undefined}>
+                              {fmtMoney(rf)}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td/>
                     </tr>
                   )}

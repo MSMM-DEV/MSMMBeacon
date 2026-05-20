@@ -300,8 +300,19 @@ const EXPORT_COLUMNS = {
       label: m, wMm: 20, wrap: true, halign: "right",
       get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
     })),
-    { label: "YTD Actual",        wMm: 24, wrap: true, halign: "right", get: r => fmtMoney(r.ytdActualOverride != null ? r.ytdActualOverride : r.values.slice(0, TODAY_MONTH + 1).reduce((a,b) => a+(b||0), 0)) },
-    { label: "Rollforward",       wMm: 24, wrap: true, halign: "right", get: r => fmtMoney(r.rollforwardOverride != null ? r.rollforwardOverride : Math.max(0, (r.remainingStart || 0) - r.values.reduce((a,b) => a+(b||0), 0))) },
+    // YTD Actual = sum of all 12 monthly project totals (Jan–Dec, actual +
+    // projected). Auto-recalcs whenever a month changes; honored by the
+    // per-row override when the user explicitly set one. Rollforward =
+    // Remaining Jan 1 − YTD; negatives are kept so contract overruns
+    // are visible in the export.
+    { label: "YTD Actual",        wMm: 24, wrap: true, halign: "right",
+      get: r => fmtMoney(r.ytdActualOverride != null
+        ? r.ytdActualOverride
+        : (r.values || []).reduce((a,b) => a+(b||0), 0)) },
+    { label: "Rollforward",       wMm: 24, wrap: true, halign: "right",
+      get: r => fmtMoney(r.rollforwardOverride != null
+        ? r.rollforwardOverride
+        : (Number(r.remainingStart) || 0) - (r.values || []).reduce((a,b) => a+(b||0), 0)) },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
