@@ -14,7 +14,7 @@ import {
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
 } from "../data";
 import { PunchButton } from "./PunchButton";
-import { DayTimeline } from "./DayTimeline";
+import { DayCalendar } from "./DayCalendar";
 import { WeekSummary } from "./WeekSummary";
 import { CorrectionModal } from "./CorrectionModal";
 
@@ -135,31 +135,28 @@ export function TimesheetTab({ focusDate = null }) {
         </section>
       )}
 
-      {/* Day timeline + punches */}
-      <section className="tk-day-card">
+      {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
+      <section className="tk-day-card tk-day-card-cal">
         <header className="tk-day-card-head">
-          <h3>Day timeline</h3>
+          <div className="tk-day-card-head-meta">
+            <h3>Day timeline</h3>
+            <span className="tk-day-card-sub">
+              {(day.punches || []).length} {(day.punches || []).length === 1 ? "punch" : "punches"} ·{" "}
+              {(day.intervals || []).filter(i => i.endAt).length} closed
+              {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
+            </span>
+          </div>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowCorrect(true)} disabled={locked}>
             <Icon name="edit" size={13}/> Request correction
           </button>
         </header>
-        <DayTimeline
+        <DayCalendar
           date={date}
           intervals={day.intervals}
+          punches={day.punches}
           onIntervalClick={setFocusInterval}
+          onAddTagForInterval={setFocusInterval}
         />
-        <ul className="tk-punch-log">
-          {(day.punches || []).map(p => (
-            <li key={p.id} className="tk-punch-log-row">
-              <span className="tk-punch-time">{fmtClock(p.punchedAt)}</span>
-              <span className={`tk-punch-src tk-punch-src-${p.source}`}>{p.source.toUpperCase()}</span>
-              {p.note && <span className="tk-punch-note">{p.note}</span>}
-            </li>
-          ))}
-          {(day.punches || []).length === 0 && (
-            <li className="tk-punch-log-empty">No punches yet.</li>
-          )}
-        </ul>
       </section>
 
       {/* Week summary */}

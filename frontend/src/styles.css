@@ -8137,3 +8137,356 @@ html, body { overflow-x: clip; }
   .tk-approvals-row { grid-template-columns: 1fr; }
   .modal-wide { width: 100vw; height: 100vh; border-radius: 0; }
 }
+
+/* ================================================================
+   VERTICAL DAY CALENDAR (Timesheet tab)
+   ----------------------------------------------------------------
+   Looks like Outlook / Google day view but tuned to the Beacon
+   palette: cream rail with horizontal hairlines, interval cards
+   with category-toned fills and a 4 px accent stripe, floating
+   IN / OUT punch markers off to either side, animated "now" line.
+   ================================================================ */
+.tk-day-card-cal { padding: 0; overflow: hidden; }
+.tk-day-card-cal .tk-day-card-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.tk-day-card-head-meta {
+  display: flex; align-items: baseline; gap: 12px;
+}
+.tk-day-card-head-meta h3 { margin: 0; font-size: 15px; }
+.tk-day-card-sub {
+  font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+
+.tk-cal-wrap {
+  position: relative;
+  background:
+    radial-gradient(at top right, color-mix(in srgb, var(--accent) 5%, transparent), transparent 60%),
+    var(--surface);
+}
+.tk-cal-scroller {
+  position: relative;
+  max-height: min(72vh, 640px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+.tk-cal-scroller::-webkit-scrollbar { width: 8px; }
+.tk-cal-scroller::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  border-radius: 4px;
+}
+
+.tk-cal-track {
+  position: relative;
+  margin-left: 52px;       /* leave room for the hour gutter */
+  padding-right: 14px;
+  padding-top: 6px;
+  padding-bottom: 32px;
+}
+
+/* hour gutter on the very left */
+.tk-cal-gutter {
+  position: absolute;
+  top: 0; left: -52px;
+  width: 52px;
+  height: 100%;
+  pointer-events: none;
+}
+.tk-cal-hour-label {
+  position: absolute; left: 0; width: 48px;
+  text-align: right; padding-right: 8px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+/* faint horizontal hour grid */
+.tk-cal-grid {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+.tk-cal-hour-line {
+  position: absolute; left: 0; right: 0; height: 1px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+.tk-cal-half-line {
+  position: absolute; left: 0; right: 0; height: 1px;
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+/* interval cards layer */
+.tk-cal-cards { position: relative; }
+
+.tk-cal-card {
+  position: absolute;
+  left: 64px;            /* leave room for IN markers on the left */
+  right: 64px;           /* leave room for OUT markers on the right */
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 100ms ease, box-shadow 140ms ease;
+}
+.tk-cal-card-inner {
+  position: relative;
+  height: calc(100% - 4px);
+  margin: 2px 0;
+  padding: 6px 12px 6px 16px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: flex-start;
+}
+/* the colored left stripe — category-driven */
+.tk-cal-card-inner::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: var(--tk-stripe, var(--text-muted));
+}
+.tk-cal-card:hover .tk-cal-card-inner {
+  border-color: var(--tk-stripe, var(--border-strong));
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.tk-cal-card:active .tk-cal-card-inner { transform: translateY(1px); }
+
+/* tone variants drive both the stripe and a soft tint of the card fill */
+.tk-cal-card.tone-accent .tk-cal-card-inner { --tk-stripe: var(--accent);  background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.tk-cal-card.tone-sage   .tk-cal-card-inner { --tk-stripe: #6E8F62;        background: color-mix(in srgb, #6E8F62 7%, var(--surface)); }
+.tk-cal-card.tone-blue   .tk-cal-card-inner { --tk-stripe: #4A6EA9;        background: color-mix(in srgb, #4A6EA9 7%, var(--surface)); }
+.tk-cal-card.tone-rose   .tk-cal-card-inner { --tk-stripe: #B85C5C;        background: color-mix(in srgb, #B85C5C 9%, var(--surface)); }
+.tk-cal-card.tone-muted  .tk-cal-card-inner { --tk-stripe: var(--border-strong); background: color-mix(in srgb, var(--text-muted) 4%, var(--surface)); }
+
+/* untagged cards lean harder on the rose to nudge the user to label them */
+.tk-cal-card.is-untagged .tk-cal-card-inner {
+  background: repeating-linear-gradient(135deg,
+    color-mix(in srgb, #B85C5C 8%, var(--surface)) 0px,
+    color-mix(in srgb, #B85C5C 8%, var(--surface)) 8px,
+    color-mix(in srgb, #B85C5C 13%, var(--surface)) 8px,
+    color-mix(in srgb, #B85C5C 13%, var(--surface)) 16px);
+  border-color: color-mix(in srgb, #B85C5C 45%, var(--border));
+}
+
+/* open ("currently in") interval — pulse the left stripe */
+.tk-cal-card.is-open .tk-cal-card-inner::before {
+  background: linear-gradient(180deg,
+    var(--tk-stripe, var(--accent)) 0%,
+    color-mix(in srgb, var(--tk-stripe, var(--accent)) 40%, transparent) 100%);
+}
+.tk-cal-card-pulse {
+  position: absolute;
+  top: 6px; left: 0;
+  width: 4px;
+  height: 22px;
+  background: var(--tk-stripe, var(--accent));
+  border-radius: 2px;
+  animation: tk-cal-card-pulse 1.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes tk-cal-card-pulse {
+  0%   { opacity: 1; transform: scaleY(1);   }
+  70%  { opacity: 0; transform: scaleY(2.4); }
+  100% { opacity: 0; transform: scaleY(2.4); }
+}
+
+/* card content typography */
+.tk-cal-card-times {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text);
+}
+.tk-cal-card-time { font-weight: 600; }
+.tk-cal-card-arrow { color: var(--text-muted); }
+.tk-cal-card-duration {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.tk-cal-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.tk-cal-card-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.tk-cal-card-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--tk-stripe, var(--text-muted));
+}
+.tk-cal-card-cta {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: #8B2A2A;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.tk-cal-card-src {
+  display: inline-flex;
+  font-style: italic;
+  opacity: 0.7;
+}
+.tk-cal-card-src.is-user {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--tk-stripe);
+  font-style: normal;
+  font-weight: 600;
+  opacity: 1;
+}
+
+/* compact mode for short intervals — single line only */
+.tk-cal-card.is-compact .tk-cal-card-inner { padding: 3px 10px 3px 14px; gap: 0; }
+.tk-cal-card.is-compact .tk-cal-card-times { font-size: 11px; }
+.tk-cal-card.is-compact .tk-cal-card-title,
+.tk-cal-card.is-compact .tk-cal-card-foot { display: none; }
+
+/* IN / OUT markers floating outside the cards */
+.tk-cal-markers { position: relative; pointer-events: none; }
+.tk-cal-mark {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  border-radius: 11px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  pointer-events: auto;
+  white-space: nowrap;
+  color: var(--text);
+}
+.tk-cal-mark.side-left  { left:  0;   }
+.tk-cal-mark.side-right { right: 0;   }
+.tk-cal-mark-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.tk-cal-mark-in  .tk-cal-mark-dot { background: #6E8F62; box-shadow: 0 0 0 3px rgba(110,143,98,0.18); }
+.tk-cal-mark-out .tk-cal-mark-dot { background: #B85C5C; box-shadow: 0 0 0 3px rgba(184,92,92,0.18); }
+.tk-cal-mark-time {
+  font-weight: 700;
+  color: var(--text);
+}
+.tk-cal-mark-kind {
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  font-size: 9px;
+}
+.tk-cal-mark-in  .tk-cal-mark-kind { color: #2C3E27; }
+.tk-cal-mark-out .tk-cal-mark-kind { color: #5A1D1D; }
+.tk-cal-mark-src {
+  font-size: 9px;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.tk-cal-mark-src-nfc    { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); color: var(--accent-ink); }
+.tk-cal-mark-src-web    { background: color-mix(in srgb, #4A6EA9 22%, var(--surface-2)); color: #19315A; }
+.tk-cal-mark-src-mobile { background: color-mix(in srgb, #4A6EA9 22%, var(--surface-2)); color: #19315A; }
+.tk-cal-mark-src-manual { background: color-mix(in srgb, #C28C2C 24%, var(--surface-2)); color: #6B4912; }
+
+/* now line */
+.tk-cal-now {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  z-index: 3;
+  pointer-events: none;
+}
+.tk-cal-now-dot {
+  position: absolute;
+  left: -4px; top: -4px;
+  width: 9px; height: 9px;
+  background: #B85C5C;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(184,92,92,0.22);
+  animation: tk-cal-now-blip 2.4s ease-in-out infinite;
+}
+.tk-cal-now-line {
+  position: absolute;
+  left: 8px; right: 70px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(to right,
+    #B85C5C 0%,
+    color-mix(in srgb, #B85C5C 55%, transparent) 60%,
+    transparent 100%);
+}
+.tk-cal-now-label {
+  position: absolute;
+  right: 0; top: -8px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8B2A2A;
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, #B85C5C 30%, var(--border));
+}
+@keyframes tk-cal-now-blip {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(184,92,92,0.22); }
+  50%      { box-shadow: 0 0 0 7px rgba(184,92,92,0.08); }
+}
+
+/* empty state */
+.tk-cal-empty {
+  position: absolute;
+  top: 40%; left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* ---- phone breakpoint ---- */
+@media (max-width: 640px) {
+  .tk-cal-card {
+    /* shrink the side gutters so cards have more room; markers will overlap slightly */
+    left: 44px;
+    right: 44px;
+  }
+  .tk-cal-mark {
+    height: 18px;
+    padding: 0 6px 0 5px;
+    font-size: 9px;
+  }
+  .tk-cal-mark-kind { display: none; }   /* save horizontal room */
+  .tk-cal-card-title { font-size: 12px; }
+  .tk-cal-card-times { font-size: 11px; }
+}
