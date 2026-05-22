@@ -982,38 +982,51 @@ const AwaitingList = ({ awaiting, onOpen, limit = Infinity }) => {
 // leads first, then recent past. Click routes to the drawer.
 // ----------------------------------------------------------------------------
 const HotLeadsList = ({ hotLeads, onOpen, limit = 40 }) => {
-  const anchored = useMemo(() => {
+  const { undated, future, past } = useMemo(() => {
     const now = Date.now();
-    return (hotLeads || [])
-      .map(h => {
-        const iso = h.dateTime || null;
-        const t = iso ? new Date(iso).getTime() : null;
-        return { ...h, _t: t, _future: t != null && t >= now };
-      })
-      .filter(h => h._t != null)
-      .sort((a, b) => a._t - b._t);
+    const all = (hotLeads || []).map(h => {
+      const iso  = h.dateTime || null;
+      const t    = iso ? new Date(iso).getTime() : null;
+      const ct   = h.createdAt ? new Date(h.createdAt).getTime() : null;
+      const isDated = t != null && !Number.isNaN(t);
+      return { ...h, _t: isDated ? t : ct, _dated: isDated, _future: isDated && t >= now };
+    });
+    // Undated: anchor by created_at, newest first ("most recently logged" up top).
+    const u = all.filter(h => !h._dated)
+                 .sort((a, b) => (b._t ?? 0) - (a._t ?? 0));
+    const d = all.filter(h => h._dated);
+    return {
+      undated: u,
+      future:  d.filter(h => h._future).sort((a, b) => a._t - b._t),
+      past:    d.filter(h => !h._future).sort((a, b) => b._t - a._t),
+    };
   }, [hotLeads]);
 
-  if (anchored.length === 0) {
-    return <div className="quad-empty">No dated hot leads yet.</div>;
+  const total = undated.length + future.length + past.length;
+  if (total === 0) {
+    return <div className="quad-empty">No hot leads yet.</div>;
   }
 
-  const future = anchored.filter(h => h._future);
-  const past   = anchored.filter(h => !h._future).reverse();
-  const cap = limit === Infinity ? anchored.length : Math.min(limit, 40);
-  const ordered = [...future, ...past].slice(0, cap);
+  const cap = limit === Infinity ? total : Math.min(limit, 40);
+  const ordered = [...undated, ...future, ...past].slice(0, cap);
 
   return (
     <ul className="event-ledger">
       {ordered.map(h => {
         const firm = companyById(h.clientId);
+        const cls  = "evt"
+          + (!h._dated ? " undated" : h._future ? " future" : " past");
         return (
-          <li key={h.id}
-              className={"evt" + (h._future ? " future" : " past")}
-              onClick={() => onOpen(h)}>
+          <li key={h.id} className={cls} onClick={() => onOpen(h)}>
             <div className="evt-date">
-              <div className="evt-mo">{monthShort(h._t)}</div>
-              <div className="evt-day">{dayOf(h._t)}</div>
+              {h._t != null ? (
+                <>
+                  <div className="evt-mo">{monthShort(h._t)}</div>
+                  <div className="evt-day">{dayOf(h._t)}</div>
+                </>
+              ) : (
+                <div className="evt-mo" title="No date set">—</div>
+              )}
             </div>
             <div className="evt-body">
               <div className="evt-title">{h.title}</div>
@@ -1025,10 +1038,16 @@ const HotLeadsList = ({ hotLeads, onOpen, limit = 40 }) => {
                     {"★".repeat(h.stars)}
                   </span>
                 )}
-                <span className="evt-when">
-                  {new Date(h._t).toLocaleTimeString("en-US",
-                    { hour: "numeric", minute: "2-digit" })}
-                </span>
+                {h._dated ? (
+                  <span className="evt-when">
+                    {new Date(h._t).toLocaleTimeString("en-US",
+                      { hour: "numeric", minute: "2-digit" })}
+                  </span>
+                ) : (
+                  <span className="evt-when" style={{ fontStyle: "italic", opacity: 0.7 }}>
+                    pending date
+                  </span>
+                )}
               </div>
             </div>
           </li>

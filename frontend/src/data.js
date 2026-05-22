@@ -593,6 +593,7 @@ function adaptHotLead(r) {
     title: r.title,
     status: r.status || "Scheduled",
     dateTime: r.date_time || "",
+    createdAt: r.created_at || null,
     // Unified "Client or Firm" picker on Hot Leads: the adapter prefers the
     // real client_id when set, else falls back to prime_company_id so the
     // Client column always shows something the UI can resolve. Writes go
