@@ -323,6 +323,30 @@ deno_version = 1
 [functions.admin-users]
 verify_jwt = false
 
+# Outlook + alerts share the same dual-auth model: a service-role bearer
+# for cron callers OR an admin session JWT for the in-app trigger button.
+# The function code re-validates the bearer itself, so the gateway's
+# verify_jwt check is redundant and would block the cron path that uses
+# the sb_secret_* key (non-JWT format) for Authorization.
+[functions.outlook-sync]
+verify_jwt = false
+
+[functions.send-alert]
+verify_jwt = false
+
+# Timekeeping endpoints. Each handles its own auth:
+#   timeclock-punch    — TIMECLOCK_DEVICE_KEY (Pi) OR session JWT (web)
+#   timeclock-classify — service-role bearer (cron) OR admin JWT (button)
+#   timeclock-admin    — admin JWT only
+[functions.timeclock-punch]
+verify_jwt = false
+
+[functions.timeclock-classify]
+verify_jwt = false
+
+[functions.timeclock-admin]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
