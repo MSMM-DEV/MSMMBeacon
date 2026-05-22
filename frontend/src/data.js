@@ -1590,3 +1590,529 @@ export async function reloadInvoiceArtifacts(projects, companies) {
   }
   return { primeFilesByKey, subInvoicesMatrix };
 }
+
+// ============================================================================
+// TIMEKEEPING
+// ============================================================================
+// All shape adapters convert DB snake_case → UI camelCase. Mutators are thin
+// wrappers around supabase.from(...) writes; admin operations route through
+// the timeclock-admin Edge Function for service-role-only paths.
+
+const CT_TZ = "America/Chicago";
+
+// "YYYY-MM-DD" for today in Central Time. Used everywhere the day-rollup is
+// keyed (timesheet_days, week math). Mirrors the DB trigger's hardcoded tz.
+export function todayInCT() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: CT_TZ });
+}
+
+// Monday-aligned week_start for a given ISO date string.
+export function weekStartCT(isoDate) {
+  const base = isoDate ? new Date(`${String(isoDate).slice(0,10)}T12:00:00`) : new Date();
+  // Use Central Time wall clock to pick the day-of-week so weeks don't shift
+  // across DST around the boundary.
+  const local = new Date(base.toLocaleString("en-US", { timeZone: CT_TZ }));
+  const dow = (local.getDay() + 6) % 7; // 0 = Monday
+  local.setDate(local.getDate() - dow);
+  return local.toLocaleDateString("en-CA", { timeZone: CT_TZ });
+}
+
+export function fmtHM(min) {
+  if (!Number.isFinite(min) || min <= 0) return "0h";
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+export function fmtClock(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString("en-US", {
+    timeZone: CT_TZ, hour: "numeric", minute: "2-digit",
+  });
+}
+
+// ----------------------------------------------------------------------
+// Adapters
+// ----------------------------------------------------------------------
+export function adaptPunch(r) {
+  if (!r) return null;
+  return {
+    id:             r.id,
+    userId:         r.user_id,
+    punchedAt:      r.punched_at,
+    source:         r.source,
+    sourceDeviceId: r.source_device_id || null,
+    sourceNfcUid:   r.source_nfc_uid   || null,
+    note:           r.note             || null,
+    createdAt:      r.created_at,
+    createdBy:      r.created_by || null,
+  };
+}
+
+export function adaptInterval(r) {
+  if (!r) return null;
+  return {
+    id:                    r.id,
+    userId:                r.user_id,
+    startAt:               r.start_at,
+    endAt:                 r.end_at,
+    startPunchId:          r.start_punch_id || null,
+    endPunchId:            r.end_punch_id   || null,
+    category:              r.category,
+    categorySource:        r.category_source,
+    outlookEventId:        r.outlook_event_id        || null,
+    outlookEventSubject:   r.outlook_event_subject   || null,
+    outlookEventLocation:  r.outlook_event_location  || null,
+    notes:                 r.notes || null,
+    computedAt:            r.computed_at,
+    isOpen:                r.end_at == null,
+    durationMinutes: r.end_at
+      ? Math.max(0, Math.round((+new Date(r.end_at) - +new Date(r.start_at)) / 60000))
+      : null,
+  };
+}
+
+export function adaptTimesheetDay(r) {
+  if (!r) return null;
+  return {
+    userId:           r.user_id,
+    date:             r.date,
+    minutesWork:      r.minutes_work     ?? 0,
+    minutesLunch:     r.minutes_lunch    ?? 0,
+    minutesBreak:     r.minutes_break    ?? 0,
+    minutesMeeting:   r.minutes_meeting  ?? 0,
+    minutesTravel:    r.minutes_travel   ?? 0,
+    minutesUntagged:  r.minutes_untagged ?? 0,
+    minutesOff:       r.minutes_off      ?? 0,
+    firstIn:          r.first_in || null,
+    lastOut:          r.last_out || null,
+    approvalStatus:   r.approval_status || "open",
+    flags:            r.flags || {},
+    notes:            r.notes || null,
+    updatedAt:        r.updated_at,
+    minutesTotalCounted:
+      (r.minutes_work ?? 0) + (r.minutes_meeting ?? 0) + (r.minutes_travel ?? 0),
+  };
+}
+
+export function adaptTimesheetWeek(r) {
+  if (!r) return null;
+  return {
+    userId:         r.user_id,
+    weekStart:      r.week_start,
+    submittedAt:    r.submitted_at || null,
+    submittedBy:    r.submitted_by || null,
+    approvalStatus: r.approval_status,
+    approvedAt:     r.approved_at  || null,
+    approvedBy:     r.approved_by  || null,
+    rejectReason:   r.reject_reason || null,
+    locked:         !!r.locked,
+    totals:         r.totals || {},
+  };
+}
+
+export function adaptCorrection(r) {
+  if (!r) return null;
+  return {
+    id:           r.id,
+    userId:       r.user_id,
+    date:         r.date,
+    kind:         r.kind,
+    payload:      r.payload || {},
+    reason:       r.reason  || "",
+    status:       r.status,
+    submittedAt:  r.submitted_at,
+    reviewedAt:   r.reviewed_at || null,
+    reviewedBy:   r.reviewed_by || null,
+    reviewNote:   r.review_note || null,
+  };
+}
+
+export function adaptUserCalEvent(r) {
+  if (!r) return null;
+  return {
+    userId:           r.user_id,
+    outlookEventId:   r.outlook_event_id,
+    subject:          r.subject,
+    startAt:          r.start_at,
+    endAt:            r.end_at,
+    location:         r.location || null,
+    isAllDay:         !!r.is_all_day,
+    isCancelled:      !!r.is_cancelled,
+    sensitivity:      r.sensitivity || null,
+    showAs:           r.show_as     || null,
+    organizer:        r.organizer   || null,
+    attendees:        r.attendees   || [],
+    travelBufferMin:  r.travel_buffer_min ?? 30,
+    outlookWebLink:   r.outlook_web_link  || null,
+  };
+}
+
+export function adaptNfcTag(r) {
+  if (!r) return null;
+  return {
+    uid:            r.uid,
+    userId:         r.user_id,
+    label:          r.label || null,
+    active:         !!r.active,
+    enrolledAt:     r.enrolled_at,
+    enrolledBy:     r.enrolled_by || null,
+    retiredAt:      r.retired_at  || null,
+    lastSeenAt:     r.last_seen_at || null,
+    lastSeenDevice: r.last_seen_device || null,
+  };
+}
+
+// ----------------------------------------------------------------------
+// Read paths
+// ----------------------------------------------------------------------
+
+// State for the punch button: open interval + today's minutes.
+export async function loadPunchState(userId) {
+  const [{ data: openIv }, { data: day }] = await Promise.all([
+    supabase.from("time_intervals")
+      .select("*").eq("user_id", userId).is("end_at", null)
+      .order("start_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("timesheet_days")
+      .select("*").eq("user_id", userId).eq("date", todayInCT()).maybeSingle(),
+  ]);
+  return {
+    open: openIv ? adaptInterval(openIv) : null,
+    today: day ? adaptTimesheetDay(day) : null,
+  };
+}
+
+// One day of intervals (with punches if needed) for a user.
+export async function loadDayDetail(userId, date) {
+  const start = new Date(`${date}T00:00:00`).toISOString();
+  const end   = new Date(`${date}T23:59:59.999`).toISOString();
+  const [{ data: ivs }, { data: day }, { data: punches }] = await Promise.all([
+    supabase.from("time_intervals")
+      .select("*").eq("user_id", userId)
+      .gte("start_at", start).lte("start_at", end)
+      .order("start_at", { ascending: true }),
+    supabase.from("timesheet_days")
+      .select("*").eq("user_id", userId).eq("date", date).maybeSingle(),
+    supabase.from("time_punches")
+      .select("*").eq("user_id", userId)
+      .gte("punched_at", start).lte("punched_at", end)
+      .order("punched_at", { ascending: true }),
+  ]);
+  return {
+    date,
+    intervals: (ivs     || []).map(adaptInterval),
+    punches:   (punches || []).map(adaptPunch),
+    day:       day ? adaptTimesheetDay(day) : null,
+  };
+}
+
+// 7 days of (timesheet_days, timesheet_week) for one user, week-aligned to Monday.
+export async function loadMyWeek(userId, weekStart) {
+  const start = weekStart;
+  const endDate = new Date(`${weekStart}T00:00:00`);
+  endDate.setDate(endDate.getDate() + 7);
+  const end = endDate.toISOString().slice(0, 10);
+
+  const [{ data: days }, { data: week }] = await Promise.all([
+    supabase.from("timesheet_days")
+      .select("*").eq("user_id", userId)
+      .gte("date", start).lt("date", end)
+      .order("date", { ascending: true }),
+    supabase.from("timesheet_weeks")
+      .select("*").eq("user_id", userId).eq("week_start", weekStart).maybeSingle(),
+  ]);
+  return {
+    days: (days || []).map(adaptTimesheetDay),
+    week: week ? adaptTimesheetWeek(week) : { userId, weekStart, approvalStatus: "open", locked: false, totals: {} },
+  };
+}
+
+// Team-wide for a single day. One row per user with their intervals snippet.
+export async function loadTeamDay(date) {
+  const start = new Date(`${date}T00:00:00`).toISOString();
+  const end   = new Date(`${date}T23:59:59.999`).toISOString();
+  const { data: ivs } = await supabase
+    .from("time_intervals")
+    .select("*")
+    .gte("start_at", start)
+    .lte("start_at", end)
+    .order("start_at", { ascending: true });
+  const { data: days } = await supabase
+    .from("timesheet_days")
+    .select("*")
+    .eq("date", date);
+
+  const byUser = new Map();
+  for (const u of getUsers()) {
+    byUser.set(u.id, {
+      user: u, intervals: [], day: null,
+    });
+  }
+  for (const iv of (ivs || [])) {
+    const slot = byUser.get(iv.user_id);
+    if (slot) slot.intervals.push(adaptInterval(iv));
+  }
+  for (const d of (days || [])) {
+    const slot = byUser.get(d.user_id);
+    if (slot) slot.day = adaptTimesheetDay(d);
+  }
+  return [...byUser.values()];
+}
+
+// All pending submitted weeks across the team. Admin-only.
+export async function loadPendingApprovals() {
+  const { data, error } = await supabase
+    .from("timesheet_weeks")
+    .select("*")
+    .eq("approval_status", "submitted")
+    .order("week_start", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(adaptTimesheetWeek);
+}
+
+// Calendar events for a user in a window (for the classify-preview popover).
+export async function loadUserCalendarEvents(userId, startIso, endIso) {
+  const { data, error } = await supabase
+    .from("user_calendar_events")
+    .select("*")
+    .eq("user_id", userId)
+    .gte("end_at", startIso)
+    .lte("start_at", endIso)
+    .order("start_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(adaptUserCalEvent);
+}
+
+// All NFC tag rows (admin only).
+export async function loadNfcTags() {
+  const { data, error } = await supabase
+    .from("nfc_tags").select("*")
+    .order("enrolled_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(adaptNfcTag);
+}
+
+// Open admin's own NFC capture session row. Used by the enrollment UI to
+// surface the captured UID.
+export async function loadMyEnrollSession() {
+  const u = getCurrentBeaconUser();
+  if (!u) return null;
+  const { data } = await supabase
+    .from("nfc_enroll_sessions")
+    .select("*").eq("admin_user_id", u.id).maybeSingle();
+  return data || null;
+}
+
+// Pending correction requests across the team. Admin only.
+export async function loadPendingCorrections() {
+  const { data, error } = await supabase
+    .from("timesheet_corrections")
+    .select("*").eq("status", "pending")
+    .order("submitted_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(adaptCorrection);
+}
+
+// ----------------------------------------------------------------------
+// Mutators
+// ----------------------------------------------------------------------
+
+// User-facing PUNCH IN / PUNCH OUT — calls the Edge Function so de-dupe,
+// classification kick, and last-seen telemetry all happen server-side.
+export async function callTimeclockPunch({ source = "web", geo = null, note = null } = {}) {
+  const { data, error } = await supabase.functions.invoke("timeclock-punch", {
+    body: { source, geo, note },
+  });
+  if (error) {
+    let detail = error.message || "punch failed";
+    try {
+      const ctx = error.context;
+      const text = ctx && typeof ctx.text === "function" ? await ctx.text() : null;
+      if (text) {
+        try { detail = JSON.parse(text).message || JSON.parse(text).error || text; }
+        catch { detail = text; }
+      }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  if (data && data.ok === false) throw new Error(data.message || data.error || "punch failed");
+  return data;
+}
+
+// User reclassifies their own interval (category + optional outlook link).
+// DB RLS policy lets the row's owner UPDATE it directly.
+export async function setIntervalCategory(intervalId, { category, outlookEventId = null, notes = null }) {
+  const patch = {
+    category,
+    category_source: "user",
+    outlook_event_id: outlookEventId || null,
+    notes,
+    computed_at: new Date().toISOString(),
+  };
+  const { error } = await supabase
+    .from("time_intervals").update(patch).eq("id", intervalId);
+  if (error) throw error;
+}
+
+// User edits travel buffer on one of their calendar events.
+export async function setEventTravelBuffer(outlookEventId, minutes) {
+  const u = getCurrentBeaconUser();
+  if (!u) throw new Error("not signed in");
+  const m = Math.max(0, Math.min(240, Math.round(Number(minutes))));
+  const { error } = await supabase
+    .from("user_calendar_events")
+    .update({ travel_buffer_min: m })
+    .eq("user_id", u.id)
+    .eq("outlook_event_id", outlookEventId);
+  if (error) throw error;
+}
+
+// User submits a correction request. Status starts pending; admin reviews.
+export async function submitCorrection({ date, kind, payload, reason }) {
+  const u = getCurrentBeaconUser();
+  if (!u) throw new Error("not signed in");
+  const { data, error } = await supabase
+    .from("timesheet_corrections")
+    .insert({
+      user_id: u.id, date, kind, payload, reason,
+      status: "pending",
+    })
+    .select().single();
+  if (error) throw error;
+  return adaptCorrection(data);
+}
+
+// User withdraws their own pending correction.
+export async function withdrawCorrection(correctionId) {
+  const { error } = await supabase
+    .from("timesheet_corrections")
+    .update({ status: "withdrawn" })
+    .eq("id", correctionId);
+  if (error) throw error;
+}
+
+// User flips their week from open → submitted (asking for admin approval).
+// Re-submits after rejection use the same call.
+export async function submitWeek(userId, weekStart) {
+  // Upsert so the first call creates the row; subsequent calls update.
+  const { error } = await supabase
+    .from("timesheet_weeks")
+    .upsert({
+      user_id: userId, week_start: weekStart,
+      approval_status: "submitted",
+      submitted_at: new Date().toISOString(),
+      submitted_by: userId,
+    }, { onConflict: "user_id,week_start" });
+  if (error) throw error;
+}
+
+// ----------------------------------------------------------------------
+// Admin Edge Function actions
+// ----------------------------------------------------------------------
+export async function tkAdmin(action, payload = {}) {
+  const { data, error } = await supabase.functions.invoke("timeclock-admin", {
+    body: { action, payload },
+  });
+  if (error) {
+    let detail = error.message || "admin action failed";
+    try {
+      const ctx = error.context;
+      const text = ctx && typeof ctx.text === "function" ? await ctx.text() : null;
+      if (text) {
+        try { detail = JSON.parse(text).error || JSON.parse(text).message || text; }
+        catch { detail = text; }
+      }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  if (data && data.ok === false) throw new Error(data.error || data.message || "admin action failed");
+  return data;
+}
+
+export const tkApproveWeek       = (userId, weekStart)         => tkAdmin("approve-week",        { user_id: userId, week_start: weekStart });
+export const tkRejectWeek        = (userId, weekStart, reason) => tkAdmin("reject-week",         { user_id: userId, week_start: weekStart, reason });
+export const tkUnlockWeek        = (userId, weekStart)         => tkAdmin("unlock-week",         { user_id: userId, week_start: weekStart });
+export const tkEnrollTag         = (userId, uid, label)        => tkAdmin("enroll-tag",          { user_id: userId, uid, label });
+export const tkStartEnroll       = (userId)                    => tkAdmin("start-enroll",        { user_id: userId });
+export const tkCancelEnroll      = ()                          => tkAdmin("cancel-enroll",       {});
+export const tkResolveCorrection = (id, decision, note)        => tkAdmin("resolve-correction",  { correction_id: id, decision, note });
+export const tkReclassify        = (intervalId, category, eventId, notes) =>
+  tkAdmin("reclassify-interval", { interval_id: intervalId, category, outlook_event_id: eventId, notes });
+export const tkRegisterDevice    = (id, label, location)       => tkAdmin("register-device",     { id, label, location });
+export const tkRunClassifier     = (userId = null)             => supabase.functions.invoke("timeclock-classify", { body: userId ? { user_id: userId } : {} });
+
+// ----------------------------------------------------------------------
+// Settings
+// ----------------------------------------------------------------------
+export async function loadTimekeepingSettings() {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("tk_enabled, tk_business_tz, tk_workday_hours, tk_overtime_threshold_min, tk_eod_window_start, tk_eod_window_end, tk_lunch_window_start, tk_lunch_window_end, tk_untagged_alert_after_min, tk_office_ip_cidr, tk_holidays, tk_default_travel_buffer_min")
+    .eq("singleton", true).maybeSingle();
+  return data || null;
+}
+
+export async function updateTimekeepingSettings(patch) {
+  const { error } = await supabase
+    .from("app_settings").update(patch).eq("singleton", true);
+  if (error) throw error;
+}
+
+// ----------------------------------------------------------------------
+// Realtime subscription helpers — App.jsx wires these into useEffect.
+// ----------------------------------------------------------------------
+export function subscribeMyTimeState(userId, onChange) {
+  const ch = supabase
+    .channel(`tk:user:${userId}`)
+    .on("postgres_changes",
+      { event: "*", schema: "beacon_v2", table: "time_intervals", filter: `user_id=eq.${userId}` },
+      onChange)
+    .on("postgres_changes",
+      { event: "*", schema: "beacon_v2", table: "timesheet_days", filter: `user_id=eq.${userId}` },
+      onChange)
+    .subscribe();
+  return () => { supabase.removeChannel(ch); };
+}
+
+export function subscribeEnrollSession(adminUserId, onChange) {
+  const ch = supabase
+    .channel(`tk:enroll:${adminUserId}`)
+    .on("postgres_changes",
+      { event: "*", schema: "beacon_v2", table: "nfc_enroll_sessions", filter: `admin_user_id=eq.${adminUserId}` },
+      onChange)
+    .subscribe();
+  return () => { supabase.removeChannel(ch); };
+}
+
+// ----------------------------------------------------------------------
+// Category palette — used by DayTimeline + admin views. Tones reuse the
+// existing project palette so timekeeping bars feel consistent with events.
+// ----------------------------------------------------------------------
+export const TK_CATEGORY_TONE = {
+  work:             "accent",     // primary
+  meeting:          "blue",
+  travel:           "blue",       // grouped with meeting visually
+  lunch:            "sage",
+  break:            "muted",
+  eod:              "muted",
+  meeting_untagged: "rose",       // calls user's attention to tag
+  vacation:         "sage",
+  holiday:          "sage",
+  off:              "muted",
+};
+
+export const TK_CATEGORY_LABEL = {
+  work:             "Working",
+  meeting:          "Meeting",
+  travel:           "Travel",
+  lunch:            "Lunch",
+  break:            "Break",
+  eod:              "Off",
+  meeting_untagged: "Untagged",
+  vacation:         "Vacation",
+  holiday:          "Holiday",
+  off:              "Off",
+};
+

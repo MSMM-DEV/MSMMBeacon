@@ -7799,3 +7799,341 @@ html, body { overflow-x: clip; }
     linear-gradient(rgba(248, 167, 102, 0.22), rgba(248, 167, 102, 0.22)),
     var(--surface);
 }
+
+/* ================================================================
+   TIMEKEEPING
+   ================================================================ */
+
+/* Aliases so the timekeeping components can use hyphenated button class
+   names (btn-primary / btn-ghost / btn-sm / btn-warn) without touching the
+   project's existing `btn primary` / `btn ghost` / `btn sm` compound-class
+   pattern. */
+.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); }
+.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-muted); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.btn-sm { padding: 5px 9px; font-size: 12px; border-radius: 7px; }
+.btn-warn { background: #C28C2C; color: white; border-color: #C28C2C; }
+.btn-warn:hover:not(:disabled) { background: #A57420; border-color: #A57420; }
+
+/* Tone palette — reused from events calendar so timeline bars feel of-a-piece
+   with the rest of the app. */
+.tk-day-seg.tone-accent { background: color-mix(in srgb, var(--accent) 35%, var(--surface-2)); color: var(--accent-ink); border-color: var(--accent); }
+.tk-day-seg.tone-sage   { background: color-mix(in srgb, #6E8F62 30%, var(--surface-2)); color: #2C3E27; border-color: #6E8F62; }
+.tk-day-seg.tone-blue   { background: color-mix(in srgb, #4A6EA9 30%, var(--surface-2)); color: #19315A; border-color: #4A6EA9; }
+.tk-day-seg.tone-rose   { background: color-mix(in srgb, #B85C5C 32%, var(--surface-2)); color: #5A1D1D; border-color: #B85C5C; }
+.tk-day-seg.tone-muted  { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+[data-theme="dark"] .tk-day-seg.tone-accent { color: #FFE7C8; }
+[data-theme="dark"] .tk-day-seg.tone-sage   { color: #C8E0BF; }
+[data-theme="dark"] .tk-day-seg.tone-blue   { color: #BFD3F0; }
+[data-theme="dark"] .tk-day-seg.tone-rose   { color: #F0C4C4; }
+
+/* Modal variants used by timekeeping modals. The base .modal sizes itself
+   wider than these by default. */
+.modal-narrow { width: min(440px, 92vw); }
+.modal-wide   { width: min(880px, 96vw); }
+
+/* Generic form layout primitives used inside the timekeeping modals. */
+.form-row { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; }
+.form-label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.form-input {
+  width: 100%; box-sizing: border-box;
+  padding: 9px 12px; font-size: 14px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text);
+  font-family: inherit;
+}
+.form-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.form-help  { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.4; }
+.form-error { background: rgba(184, 92, 92, 0.12); color: #8B2A2A; border: 1px solid rgba(184, 92, 92, 0.35);
+              border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 8px 0; }
+.form-ok    { display: inline-flex; align-items: center; gap: 4px; color: #2F6E2F; font-size: 12px; margin-left: 10px; }
+.modal-head-meta { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; margin-left: auto; padding-right: 14px; }
+
+.page-empty { padding: 32px; text-align: center; color: var(--text-muted); font-size: 14px; }
+
+/* ---- Personal Timesheet tab ---- */
+.tk-timesheet-page { display: grid; gap: 16px; padding: 14px 0; }
+
+.tk-day-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tk-day-input {
+  padding: 7px 10px; font-size: 13px; font-family: inherit;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text);
+}
+
+.tk-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 20px;
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.tk-hero-side { display: grid; gap: 8px; align-content: center; min-width: 180px; }
+.tk-hero-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.tk-hero-key { color: var(--text-muted); }
+.tk-hero-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tk-hero-warn { color: #8B2A2A; align-items: center; gap: 6px; }
+
+/* The big PUNCH button. Tactile, sized for thumb reach on phones. */
+.tk-punch-wrap { display: grid; gap: 6px; }
+.tk-punch-btn {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 180px;
+  padding: 24px;
+  border: none;
+  border-radius: 18px;
+  font-family: inherit;
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12), inset 0 -3px 0 rgba(0,0,0,0.10);
+  transition: transform 80ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+.tk-punch-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.tk-punch-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.tk-punch-in   { background: linear-gradient(160deg, #6E8F62 0%, #557049 100%); }
+.tk-punch-out  { background: linear-gradient(160deg, #B85C5C 0%, #8E3F3F 100%); }
+.tk-punch-locked { background: var(--surface-2); color: var(--text-muted); box-shadow: none; }
+.tk-punch-error  { background: linear-gradient(160deg, #C28C2C 0%, #9B6E1F 100%); }
+.tk-punch-btn.is-loading { filter: saturate(60%); }
+.tk-punch-icon  { opacity: 0.85; }
+.tk-punch-label { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; }
+.tk-punch-sub   { font-size: 13px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+.tk-punch-since { font-size: 12px; color: var(--text-muted); text-align: center; }
+.tk-punch-error-msg { font-size: 13px; color: #8B2A2A; padding: 6px 0; }
+
+/* Day timeline (horizontal hour ruler + colored interval bars) */
+.tk-day-timeline { position: relative; width: 100%; }
+.tk-day-grid { position: absolute; inset: 0; pointer-events: none; }
+.tk-day-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--border); }
+.tk-day-tick-label {
+  position: absolute; top: -16px; left: 2px;
+  font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.tk-day-track {
+  position: relative;
+  width: 100%; height: 100%;
+  background: var(--surface-2);
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 22px;
+}
+.tk-day-seg {
+  position: absolute; top: 2px; bottom: 2px;
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
+  font-size: 11px; font-family: inherit; font-weight: 500;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 4px;
+  overflow: hidden; white-space: nowrap;
+  cursor: pointer;
+  text-align: left;
+}
+.tk-day-seg-label { overflow: hidden; text-overflow: ellipsis; }
+.tk-day-seg[data-source="user"]  { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.18); }
+.tk-day-seg[data-source="admin"] { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.28); }
+.tk-day-empty { color: var(--text-muted); font-size: 12px; padding: 6px 8px; }
+
+.tk-day-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px;
+}
+.tk-day-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.tk-day-card-head h3 { margin: 0; font-size: 15px; }
+
+.tk-punch-log { list-style: none; padding: 10px 0 0; margin: 12px 0 0; border-top: 1px solid var(--border); display: grid; gap: 4px; }
+.tk-punch-log-row { display: flex; gap: 12px; font-size: 13px; align-items: center; }
+.tk-punch-time { font-variant-numeric: tabular-nums; font-weight: 500; min-width: 72px; }
+.tk-punch-src  { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--surface-2); color: var(--text-muted); letter-spacing: 0.06em; }
+.tk-punch-src-nfc    { background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); color: var(--accent-ink); }
+.tk-punch-src-web    { background: color-mix(in srgb, #4A6EA9 18%, var(--surface-2)); color: #19315A; }
+.tk-punch-src-mobile { background: color-mix(in srgb, #4A6EA9 18%, var(--surface-2)); color: #19315A; }
+.tk-punch-src-manual { background: color-mix(in srgb, #C28C2C 22%, var(--surface-2)); color: #6B4912; }
+.tk-punch-note { color: var(--text-muted); font-style: italic; }
+.tk-punch-log-empty { color: var(--text-muted); font-size: 13px; padding: 6px 0; }
+
+/* Week summary card */
+.tk-week-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+.tk-week-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+.tk-week-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.tk-week-title { font-size: 18px; margin: 2px 0 0; }
+.tk-week-meta { display: grid; gap: 4px; justify-items: end; }
+.tk-week-total { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tk-week-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); letter-spacing: 0.04em; }
+.tk-week-chip.status-approved  { background: color-mix(in srgb, #6E8F62 25%, var(--surface-2)); color: #2C3E27; }
+.tk-week-chip.status-submitted { background: color-mix(in srgb, #4A6EA9 25%, var(--surface-2)); color: #19315A; }
+.tk-week-chip.status-rejected  { background: color-mix(in srgb, #B85C5C 25%, var(--surface-2)); color: #5A1D1D; }
+.tk-week-days { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.tk-week-day  { display: grid; grid-template-columns: 40px 1fr auto auto; gap: 10px; align-items: center; }
+.tk-week-day-label  { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.tk-week-day-bar    { position: relative; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.tk-week-day-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
+.tk-week-day-total  { font-variant-numeric: tabular-nums; font-size: 13px; min-width: 56px; text-align: right; }
+.tk-week-day-flag   { color: #C28C2C; }
+.tk-week-flags { list-style: none; padding: 8px 10px; margin: 12px 0 0; background: rgba(194, 140, 44, 0.08); border-radius: 8px; font-size: 12px; color: #6B4912; display: grid; gap: 3px; }
+.tk-week-reject-note { padding: 8px 10px; margin: 12px 0 0; background: rgba(184, 92, 92, 0.10); border-radius: 8px; font-size: 13px; color: #5A1D1D; }
+.tk-week-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.tk-week-locked-note { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+
+/* Admin tab shell */
+.tk-admin-page { display: grid; gap: 16px; padding: 14px 0; }
+.tk-admin-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.tk-admin-nav  { display: flex; gap: 4px; flex-wrap: wrap; }
+.tk-admin-tab  {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; font-size: 13px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted); cursor: pointer;
+}
+.tk-admin-tab.is-active { background: var(--accent); color: white; border-color: var(--accent); }
+.tk-admin-tools { display: inline-flex; align-items: center; gap: 10px; }
+.tk-admin-msg { font-size: 12px; color: var(--text-muted); }
+.tk-admin-body { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; min-height: 320px; }
+
+.tk-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.tk-section-head h3 { margin: 0; font-size: 15px; }
+.tk-section-sub { font-size: 12px; color: var(--text-muted); }
+
+/* Team day view */
+.tk-team-day { display: grid; gap: 12px; }
+.tk-team-day-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.tk-team-day-date { display: inline-flex; align-items: center; gap: 6px; }
+.tk-team-day-stats { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.tk-team-day-stats .dot { width: 3px; height: 3px; background: var(--text-muted); border-radius: 50%; opacity: 0.5; }
+.tk-loading { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.tk-team-rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.tk-team-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 72px 32px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.tk-team-row:hover { background: var(--surface-2); }
+.tk-team-row-name {
+  background: transparent; border: none; padding: 0; text-align: left;
+  color: var(--text); font-size: 13px; cursor: pointer;
+}
+.tk-team-row-name:hover { color: var(--accent-ink); }
+.tk-team-row-timeline { height: 22px; }
+.tk-team-row-total { font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; color: var(--text-muted); }
+.tk-team-row-state {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  padding: 2px 4px; border-radius: 3px; text-align: center; color: var(--text-muted);
+}
+.tk-team-row-state.is-in { background: #6E8F62; color: white; }
+.tk-team-empty { padding: 16px; text-align: center; color: var(--text-muted); }
+
+/* Approvals queue */
+.tk-approvals { display: grid; gap: 12px; }
+.tk-approvals-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.tk-approvals-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr auto auto;
+  gap: 12px; align-items: center;
+  padding: 8px 12px;
+  background: var(--surface-2); border-radius: 8px;
+}
+.tk-approvals-week { font-weight: 500; font-size: 14px; }
+.tk-approvals-sub  { font-size: 12px; color: var(--text-muted); }
+.tk-approvals-empty { padding: 16px; text-align: center; color: var(--text-muted); }
+
+/* Week review modal day cards */
+.tk-week-review-days { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.tk-week-review-day  { padding: 8px 10px; background: var(--surface-2); border-radius: 8px; display: grid; gap: 6px; }
+.tk-week-review-day-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tk-week-review-day-label { font-weight: 600; color: var(--text-muted); width: 30px; }
+.tk-week-review-day-date  { color: var(--text-muted); width: 50px; font-variant-numeric: tabular-nums; }
+.tk-week-review-day-total { font-variant-numeric: tabular-nums; margin-left: auto; font-weight: 600; }
+.tk-week-flag-chip { font-size: 10px; padding: 1px 6px; border-radius: 999px; }
+.tk-week-flag-chip.tone-rose { background: rgba(184, 92, 92, 0.18); color: #5A1D1D; }
+.tk-week-flag-chip.tone-blue { background: rgba(74, 110, 169, 0.18); color: #19315A; }
+
+.tk-banner { padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 10px; }
+.tk-banner-warn { background: rgba(194, 140, 44, 0.12); color: #6B4912; }
+
+.tk-reject-pane { background: var(--surface-2); padding: 12px; border-radius: 8px; margin-top: 12px; display: grid; gap: 6px; }
+
+/* NFC enrollment */
+.tk-enroll       { display: grid; gap: 16px; }
+.tk-enroll-form  { background: var(--surface-2); padding: 14px; border-radius: 10px; display: grid; gap: 10px; }
+.tk-enroll-captured { padding: 10px; background: rgba(110, 143, 98, 0.12); border-radius: 8px; display: grid; gap: 8px; }
+.tk-enroll-uid     { font-family: ui-monospace, monospace; }
+.tk-enroll-uid code { background: var(--surface); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.tk-enroll-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.tk-enroll-waiting { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
+.tk-pulse {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 0 rgba(193, 124, 60, 0.55);
+  animation: tk-pulse 1.6s infinite;
+}
+@keyframes tk-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(193, 124, 60, 0.55); }
+  70%  { box-shadow: 0 0 0 14px rgba(193, 124, 60, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(193, 124, 60, 0); }
+}
+.tk-enroll-list h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-muted); }
+.tk-enroll-list ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.tk-enroll-row {
+  display: grid;
+  grid-template-columns: 220px minmax(120px, 1fr) 1fr auto;
+  gap: 10px; align-items: center;
+  padding: 6px 10px; background: var(--surface-2); border-radius: 6px;
+  font-size: 13px;
+}
+.tk-enroll-row code { font-family: ui-monospace, monospace; font-size: 12px; }
+.tk-enroll-row-label { color: var(--text-muted); }
+.tk-enroll-row-seen  { color: var(--text-muted); font-size: 11px; }
+.tk-enroll-empty { padding: 12px; text-align: center; color: var(--text-muted); }
+
+/* Settings panel */
+.tk-settings { display: grid; gap: 16px; }
+.tk-settings-toggle { display: flex; gap: 10px; padding: 12px; background: var(--surface-2); border-radius: 8px; font-size: 13px; }
+.tk-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+.tk-settings-foot { display: flex; align-items: center; gap: 10px; }
+.tk-settings-note { font-size: 12px; color: var(--text-muted); padding: 10px 12px; background: var(--surface-2); border-radius: 8px; line-height: 1.5; }
+
+/* Tiny chip used in the reclassify popover */
+.tk-category-chip { margin-top: 6px; }
+.tk-cat {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+.tk-cat.tone-accent { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); color: var(--accent-ink); }
+.tk-cat.tone-sage   { background: color-mix(in srgb, #6E8F62 22%, var(--surface-2)); color: #2C3E27; }
+.tk-cat.tone-blue   { background: color-mix(in srgb, #4A6EA9 22%, var(--surface-2)); color: #19315A; }
+.tk-cat.tone-rose   { background: color-mix(in srgb, #B85C5C 24%, var(--surface-2)); color: #5A1D1D; }
+.tk-cat.tone-muted  { background: var(--surface-2); color: var(--text-muted); }
+
+/* ---- Phone breakpoint: thumb-reach punch button, simpler layouts ---- */
+@media (max-width: 640px) {
+  .tk-hero { grid-template-columns: 1fr; padding: 16px; }
+  .tk-hero-side { min-width: 0; }
+  .tk-punch-btn  { min-height: 240px; }
+  .tk-punch-label { font-size: 26px; }
+  .tk-settings-grid { grid-template-columns: 1fr; }
+  .tk-admin-nav { width: 100%; overflow-x: auto; }
+  .tk-team-row { grid-template-columns: 1fr; gap: 4px; padding: 8px 6px; border-bottom: 1px solid var(--border); border-radius: 0; }
+  .tk-team-row-timeline { height: 24px; }
+  .tk-enroll-row { grid-template-columns: 1fr; gap: 4px; }
+  .tk-approvals-row { grid-template-columns: 1fr; }
+  .modal-wide { width: 100vw; height: 100vh; border-radius: 0; }
+}

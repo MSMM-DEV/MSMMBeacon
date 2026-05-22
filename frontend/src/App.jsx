@@ -14,6 +14,8 @@ import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
 import { AdminPanel } from "./admin.jsx";
+import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
+import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import {
@@ -59,6 +61,8 @@ const TAB_META = [
   { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "directory", label: "Directory",        stage: "stage-clients",   group: "side" },
+  { key: "timesheet", label: "Timesheet",        stage: "stage-events",    group: "side" },
+  { key: "time-admin",label: "Time Admin",       stage: "stage-events",    group: "side", adminOnly: true },
 ];
 
 const PAGE_META = {
@@ -71,6 +75,8 @@ const PAGE_META = {
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and hot leads at a glance." },
+  timesheet: { title: "Timesheet", desc: "Your daily punches, this week's hours, and corrections. Punch in or out with the big button or tap your fob on the front-door reader." },
+  "time-admin": { title: "Time Admin", desc: "Team-wide view, weekly approvals, NFC enrollment, and timekeeping settings." },
 };
 
 const DEFAULT_TWEAKS = {
@@ -756,16 +762,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get("tab");
-      const rowParam = params.get("rowId");
+      const tabParam  = params.get("tab");
+      const rowParam  = params.get("rowId");
+      const dateParam = params.get("date");
       if (tabParam && TAB_META.some(t => t.key === tabParam)) setTab(tabParam);
-      if (rowParam) setPendingFocusRowId(rowParam);
-      if (tabParam || rowParam) {
+      if (rowParam)  setPendingFocusRowId(rowParam);
+      // Timesheet deep link uses ?tab=timesheet&date=YYYY-MM-DD (the
+      // "tag your meeting" alert email goes here).
+      if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+        setTimesheetFocusDate(dateParam);
+      }
+      if (tabParam || rowParam || dateParam) {
         window.history.replaceState(null, "", window.location.pathname);
       }
     } catch { /* malformed params — ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const [timesheetFocusDate, setTimesheetFocusDate] = useState(null);
 
   // Data state
   const [potential, setPotential] = useState(initial.potential);
@@ -2588,6 +2602,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     hotleads: hotLeads.length,
     directory: clients.length + companies.length,
     quad: null,
+    timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
+    "time-admin": null,
   };
 
   const currentMeta = PAGE_META[tab];
@@ -2698,7 +2714,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             </React.Fragment>
           ))}
           <div style={{ width: 14 }}/>
-          {TAB_META.filter(t => t.group === "side").map(t => (
+          {TAB_META.filter(t => t.group === "side" && (!t.adminOnly || isAdmin)).map(t => (
             <button key={t.key}
               className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}
               onClick={() => setTab(t.key)} role="tab">
@@ -2989,6 +3005,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             />
           );
         })()}
+
+        {tab === "timesheet" && (
+          <TimesheetTab focusDate={timesheetFocusDate}/>
+        )}
+
+        {tab === "time-admin" && isAdmin && (
+          <TimeAdminTab
+            onOpenUserDay={({ userId, date }) => {
+              // Drill into the chosen user's day: switch the signed-in admin
+              // to their own Timesheet tab — temporary v1 UX. v1.1: a per-user
+              // day detail drawer that doesn't require switching user.
+              setTimesheetFocusDate(date);
+              void userId;
+              setTab("timesheet");
+            }}
+          />
+        )}
       </div>
 
       {drawer && (() => {

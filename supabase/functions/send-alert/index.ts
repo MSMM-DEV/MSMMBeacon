@@ -1,10 +1,15 @@
 // Supabase Edge Function · send-alert
 //
 // Called every minute by the GitHub Actions workflow alert-tick.yml. Pulls
-// due rows from beacon.alert_fires, renders a row-specific email, sends via
-// Resend, and records the result. Run idempotently — safe to invoke as many
-// times as you like; claim_pending_fires uses FOR UPDATE SKIP LOCKED so two
-// concurrent invocations can't double-send the same fire.
+// due rows from beacon_v2.alert_fires, renders a row-specific email, sends
+// via Resend, and records the result. Run idempotently — safe to invoke as
+// many times as you like; claim_pending_fires uses FOR UPDATE SKIP LOCKED so
+// two concurrent invocations can't double-send the same fire.
+//
+// MIGRATED to beacon_v2 (was pinned to legacy beacon schema). The v2
+// alert_subject_enum collapsed from 8 values to 4 — project (covers all four
+// pipeline statuses), invoice, event, lead — and added 'timesheet' for the
+// timekeeping classifier's "tag your meeting" reminders.
 //
 // Deploy:
 //   supabase functions deploy send-alert --project-ref ggqlcsppojypgaiyhods
@@ -54,17 +59,17 @@ function json(body: unknown, status = 200): Response {
 }
 
 // --------------------------------------------------------------------------
-// Enum → DB table name. Matches the do-block in 20260424120000_alerts_wiring.
+// Enum → DB table name. v2 collapsed the pipeline tables into one
+// (projects, keyed on status) and renamed hot_leads → leads.
+// 'timesheet' is special: subject_row_id is a users.id, the email body is
+// rendered from alert.message (set by the timekeeping classifier).
 // --------------------------------------------------------------------------
 const SUBJECT_TABLE: Record<string, string> = {
-  potential:   "potential_projects",
-  awaiting:    "awaiting_verdict",
-  awarded:     "awarded_projects",
-  soq:         "soq",
-  closed_out:  "closed_out_projects",
+  project:     "projects",
   invoice:     "anticipated_invoice",
   event:       "events",
-  hotlead:     "hot_leads",
+  lead:        "leads",
+  timesheet:   "users",         // surrogate — body comes from alert.message
 };
 
 // Friendly labels for anchor_field keys when phrased in an email.
@@ -124,57 +129,42 @@ function fmtDate(d: string | null | undefined): string {
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function render(subjectTable: string, row: any): Rendered {
+// Per-status subject phrasings + tab names for the consolidated v2 'project'
+// subject. Branched off row.status.
+const PROJECT_STATUS_PHRASE: Record<string, { label: string; tab: string; subjectPrefix: string }> = {
+  potential:  { label: "Next action",        tab: "potential", subjectPrefix: "Next action" },
+  awaiting:   { label: "Verdict expected",   tab: "awaiting",  subjectPrefix: "Verdict expected" },
+  awarded:    { label: "Contract expiry",    tab: "awarded",   subjectPrefix: "Contract expiry" },
+  closed_out: { label: "Follow-up",          tab: "closed",    subjectPrefix: "Follow-up" },
+};
+
+function render(subjectTable: string, row: any, alert: Alert): Rendered {
   switch (subjectTable) {
-    case "potential": return {
-      subject:      `Beacon · Next action: "${row.project_name}"${row.next_action_date ? ` (${fmtDate(row.next_action_date)})` : ""}`,
-      deepLinkTab:  "potential",
-      summaryLines: [
-        row.project_number ? `Project #: ${row.project_number}` : null,
-        row.total_contract_amount ? `Contract: ${fmt$(row.total_contract_amount)}` : null,
-        row.msmm_amount ? `MSMM: ${fmt$(row.msmm_amount)}` : null,
-        row.next_action_date ? `Next action: ${fmtDate(row.next_action_date)}` : null,
-        row.next_action_note ? `Notes: ${row.next_action_note}` : null,
-      ].filter(Boolean) as string[],
-    };
-    case "awaiting": return {
-      subject:      `Beacon · Verdict expected: "${row.project_name}"${row.anticipated_result_date ? ` (${fmtDate(row.anticipated_result_date)})` : ""}`,
-      deepLinkTab:  "awaiting",
-      summaryLines: [
-        row.project_number ? `Project #: ${row.project_number}` : null,
-        row.date_submitted ? `Submitted: ${fmtDate(row.date_submitted)}` : null,
-        row.anticipated_result_date ? `Anticipated result: ${fmtDate(row.anticipated_result_date)}` : null,
-        row.msmm_contract_number ? `MSMM contract: ${row.msmm_contract_number}` : null,
-      ].filter(Boolean) as string[],
-    };
-    case "awarded": return {
-      subject:      `Beacon · Contract expiry: "${row.project_name}"${row.contract_expiry_date ? ` (${fmtDate(row.contract_expiry_date)})` : ""}`,
-      deepLinkTab:  "awarded",
-      summaryLines: [
-        row.project_number ? `Project #: ${row.project_number}` : null,
-        row.contract_expiry_date ? `Contract expires: ${fmtDate(row.contract_expiry_date)}` : null,
-        row.msmm_remaining ? `MSMM remaining: ${fmt$(row.msmm_remaining)}` : null,
-      ].filter(Boolean) as string[],
-    };
-    case "soq": return {
-      subject:      `Beacon · SOQ reminder: "${row.project_name}"`,
-      deepLinkTab:  "soq",
-      summaryLines: [
-        row.project_number ? `Project #: ${row.project_number}` : null,
-        row.start_date ? `Start date: ${fmtDate(row.start_date)}` : null,
-        row.contract_expiry_date ? `Contract expires: ${fmtDate(row.contract_expiry_date)}` : null,
-        row.recurring ? `Recurring: ${row.recurring}` : null,
-      ].filter(Boolean) as string[],
-    };
-    case "closed_out": return {
-      subject:      `Beacon · Follow-up: "${row.project_name}"`,
-      deepLinkTab:  "closed",
-      summaryLines: [
-        row.project_number ? `Project #: ${row.project_number}` : null,
-        row.date_closed ? `Closed: ${fmtDate(row.date_closed)}` : null,
-        row.reason_for_closure ? `Reason: ${row.reason_for_closure}` : null,
-      ].filter(Boolean) as string[],
-    };
+    case "project": {
+      const phr = PROJECT_STATUS_PHRASE[row.status as string] || PROJECT_STATUS_PHRASE.potential;
+      const dateField =
+        row.status === "potential"  ? row.next_action_date :
+        row.status === "awaiting"   ? row.anticipated_result_date :
+        row.status === "awarded"    ? row.contract_expiry_date :
+        row.status === "closed_out" ? row.date_closed : null;
+      return {
+        subject:      `Beacon · ${phr.subjectPrefix}: "${row.project_name}"${dateField ? ` (${fmtDate(dateField)})` : ""}`,
+        deepLinkTab:  phr.tab,
+        summaryLines: [
+          row.project_number ? `Project #: ${row.project_number}` : null,
+          row.total_contract_amount ? `Contract: ${fmt$(row.total_contract_amount)}` : null,
+          row.msmm_amount ? `MSMM: ${fmt$(row.msmm_amount)}` : null,
+          row.status === "potential"  && row.next_action_date        ? `Next action: ${fmtDate(row.next_action_date)}`             : null,
+          row.status === "potential"  && row.next_action_note        ? `Notes: ${row.next_action_note}`                            : null,
+          row.status === "awaiting"   && row.date_submitted          ? `Submitted: ${fmtDate(row.date_submitted)}`                 : null,
+          row.status === "awaiting"   && row.anticipated_result_date ? `Anticipated result: ${fmtDate(row.anticipated_result_date)}` : null,
+          row.status === "awarded"    && row.contract_expiry_date    ? `Contract expires: ${fmtDate(row.contract_expiry_date)}`    : null,
+          row.status === "awarded"    && row.msmm_remaining          ? `MSMM remaining: ${fmt$(row.msmm_remaining)}`               : null,
+          row.status === "closed_out" && row.date_closed             ? `Closed: ${fmtDate(row.date_closed)}`                       : null,
+          row.status === "closed_out" && row.reason_for_closure      ? `Reason: ${row.reason_for_closure}`                         : null,
+        ].filter(Boolean) as string[],
+      };
+    }
     case "invoice": return {
       subject:      `Beacon · Invoice reminder: "${row.project_name}"`,
       deepLinkTab:  "invoice",
@@ -194,7 +184,7 @@ function render(subjectTable: string, row: any): Rendered {
         row.type ? `Type: ${row.type}` : null,
       ].filter(Boolean) as string[],
     };
-    case "hotlead": return {
+    case "lead": return {
       subject:      `Beacon · Hot lead: "${row.title}"${row.date_time ? ` (${fmtDate(row.date_time)})` : ""}`,
       deepLinkTab:  "hotleads",
       summaryLines: [
@@ -203,6 +193,21 @@ function render(subjectTable: string, row: any): Rendered {
         row.notes ? `Notes: ${row.notes}` : null,
       ].filter(Boolean) as string[],
     };
+    case "timesheet": {
+      // 'row' is the users.id surrogate; we use alert.message verbatim. Try
+      // to extract a YYYY-MM-DD from the message for a focused deep link.
+      const msg   = (alert.message || "").trim();
+      const dmatch = msg.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+      const date  = dmatch ? dmatch[1] : "";
+      return {
+        subject:      `Beacon · Timesheet attention needed`,
+        deepLinkTab:  date ? `timesheet&date=${date}` : `timesheet`,
+        summaryLines: [
+          date ? `Day: ${fmtDate(date)}` : null,
+          msg  ? msg : null,
+        ].filter(Boolean) as string[],
+      };
+    }
     default: return {
       subject:      `Beacon reminder`,
       deepLinkTab:  "invoice",
@@ -329,7 +334,7 @@ Deno.serve(async (req) => {
   if (!isServiceCall) {
     // Treat as a user JWT. Verify via anon-key client + confirm Admin role.
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      db: { schema: "beacon" },
+      db: { schema: "beacon_v2" },
       global: { headers: { Authorization: `Bearer ${bearer}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -352,7 +357,7 @@ Deno.serve(async (req) => {
   }
 
   const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    db: { schema: "beacon" },
+    db: { schema: "beacon_v2" },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
@@ -421,8 +426,12 @@ Deno.serve(async (req) => {
       }
 
       // 5. Render + send.
-      const rendered  = render(alert.subject_table, row);
-      const deepLink  = `${APP_URL}?tab=${rendered.deepLinkTab}&rowId=${encodeURIComponent(alert.subject_row_id)}`;
+      const rendered  = render(alert.subject_table, row, alert);
+      // For 'timesheet' alerts, deepLinkTab already encodes the date param so
+      // we omit the rowId (the date is the relevant focus, not the user id).
+      const deepLink  = alert.subject_table === "timesheet"
+        ? `${APP_URL}?tab=${rendered.deepLinkTab}`
+        : `${APP_URL}?tab=${rendered.deepLinkTab}&rowId=${encodeURIComponent(alert.subject_row_id)}`;
       const anchorLn  = anchorPhrase(alert, row);
 
       for (const rec of recipients) {

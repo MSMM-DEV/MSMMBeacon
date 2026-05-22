@@ -1,0 +1,42 @@
+name: timekeeping-classify-tick
+
+# Every 5 minutes, POST to the Supabase Edge Function `timeclock-classify` so
+# it can sweep recent punches, correlate them against per-user Outlook events,
+# and fire "tag your meeting" alerts for untagged out-of-office gaps that
+# stayed unclassified past tk_untagged_alert_after_min.
+#
+# Repo secrets required:
+#   TIMECLOCK_CLASSIFY_URL   https://<project-ref>.supabase.co/functions/v1/timeclock-classify
+#   TIMECLOCK_CLASSIFY_AUTH  the Supabase service-role key for this project
+#
+# Kill switch: set app_settings.tk_enabled=false in Studio to short-circuit
+# the punch endpoint; the classifier no-ops gracefully when no punches arrive.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: timekeeping-classify-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: POST to timeclock-classify
+        env:
+          TIMECLOCK_CLASSIFY_URL:  ${{ secrets.TIMECLOCK_CLASSIFY_URL }}
+          TIMECLOCK_CLASSIFY_AUTH: ${{ secrets.TIMECLOCK_CLASSIFY_AUTH }}
+        run: |
+          if [ -z "$TIMECLOCK_CLASSIFY_URL" ] || [ -z "$TIMECLOCK_CLASSIFY_AUTH" ]; then
+            echo "Missing TIMECLOCK_CLASSIFY_URL or TIMECLOCK_CLASSIFY_AUTH repo secret." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$TIMECLOCK_CLASSIFY_URL" \
+            -H "Authorization: Bearer $TIMECLOCK_CLASSIFY_AUTH" \
+            -H "Content-Type: application/json" \
+            --max-time 200 \
+            -d '{}'

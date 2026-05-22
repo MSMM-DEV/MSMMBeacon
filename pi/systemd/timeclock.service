@@ -1,0 +1,29 @@
+[Unit]
+Description=MSMM Beacon Timeclock (NFC tap-in daemon)
+Documentation=https://github.com/rmehta-msmm/MSMMBeacon/tree/main/pi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=beacon
+Group=beacon
+WorkingDirectory=/opt/beacon-timeclock
+ExecStart=/opt/beacon-timeclock/.venv/bin/python /opt/beacon-timeclock/timeclock.py --config /etc/beacon-timeclock/config.ini
+Restart=on-failure
+RestartSec=4
+StandardOutput=journal
+StandardError=journal
+; Don't restart in a hard loop on systematic auth failures
+StartLimitIntervalSec=120
+StartLimitBurst=10
+; Hardening
+ProtectSystem=strict
+ReadWritePaths=/var/log/beacon-timeclock
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+
+[Install]
+WantedBy=multi-user.target
