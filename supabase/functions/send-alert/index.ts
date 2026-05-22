@@ -32,7 +32,17 @@
 //   { ok: true, processed: N, sent: X, failed: Y, skipped: Z, disabled?: true }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { RRule } from "npm:rrule@2.8.1";
+// rrule import temporarily disabled — the Supabase edge runtime currently
+// fails to resolve npm:rrule@2.8.1 (BOOT_ERROR on cold start). Custom RRULE
+// recurrences are unused in v1; the stub below preserves the API surface so
+// the dispatch code below still compiles. Re-enable with a working ESM
+// mirror (e.g. https://esm.sh/rrule@2.8.1) when the first custom recurrence
+// is actually scheduled.
+const RRule = {
+  fromString(_s: string) {
+    return { after(_d: Date, _inclusive: boolean): Date | null { return null; } };
+  },
+};
 
 const SUPABASE_URL           = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY               = Deno.env.get("SUPABASE_ANON_KEY")!;
