@@ -2680,7 +2680,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               onClick={() => setTab(t.key)} role="tab">
               <span className="dot"/>
               {t.label}
-              <span className="count">{tabCounts[t.key]}</span>
             </button>
           ))}
           {TAB_META.some(t => t.group === "head") && <div style={{ width: 14 }}/>}

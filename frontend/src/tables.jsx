@@ -3149,7 +3149,6 @@ export const HotLeadsTable = ({
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
-      postProcess={injectStarHeaders}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No hot leads yet"
       emptyHint="Log early-stage opportunities here — partner intros, conference chats, warm pre-RFPs."
