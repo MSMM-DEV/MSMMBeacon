@@ -342,14 +342,15 @@ end;
 $$;
 
 --------------------------------------------------------------------------------
--- 8. fn_punch_reconcile — fires after each time_punches insert. Closes the
---    open interval (if any), opens a new one starting at the punch, classifies
---    the now-closed one, and triggers a day-level recompute.
+-- 8. fn_punch_reconcile — fires after each time_punches insert. Proper TOGGLE
+--    semantics: if the user has an open interval, this punch closes it (they
+--    were IN, now they're OUT); otherwise this punch opens a new interval
+--    (they were OUT, now they're IN). Never both.
 --
---    Append-only semantics: this trigger only operates on the user's currently
---    open interval and the just-inserted punch. Back-dated admin edits go
---    through fn_rebuild_user_day (the Edge Function calls it after correction
---    approvals).
+--    Append-only forward-direction semantics: only operates on the user's
+--    currently-open interval and the just-inserted punch. Back-dated admin
+--    edits flow through fn_rebuild_user_day (the timeclock-admin Edge Function
+--    calls it after correction approvals).
 --------------------------------------------------------------------------------
 create or replace function beacon_v2.fn_punch_reconcile()
 returns trigger
@@ -367,18 +368,21 @@ begin
    for update;
 
   if _open_id is not null then
+    -- User was IN → this punch toggles them OUT. Close the open interval.
+    -- DO NOT open a new one.
     update beacon_v2.time_intervals
        set end_at       = new.punched_at,
            end_punch_id = new.id,
            computed_at  = now()
      where id = _open_id;
     perform beacon_v2.fn_classify_interval(_open_id);
+  else
+    -- User was OUT → this punch toggles them IN. Open a new interval.
+    insert into beacon_v2.time_intervals
+      (user_id, start_at, start_punch_id, category, category_source)
+    values
+      (new.user_id, new.punched_at, new.id, 'work', 'auto');
   end if;
-
-  insert into beacon_v2.time_intervals
-    (user_id, start_at, start_punch_id, category, category_source)
-  values
-    (new.user_id, new.punched_at, new.id, 'work', 'auto');
 
   _date := (new.punched_at at time zone 'America/Chicago')::date;
   perform beacon_v2.fn_recompute_day(new.user_id, _date);
@@ -410,6 +414,7 @@ declare
   _punches    record;
   _prev_punch beacon_v2.time_punches%rowtype;
   _new_id     uuid;
+  _idx        int := 0;
 begin
   -- Snapshot overrides keyed by (start_at, end_at) → {category, source, notes}
   select coalesce(
@@ -437,7 +442,9 @@ begin
      and start_at >= _day_start
      and start_at <  _day_end;
 
-  -- Re-derive intervals from chronological punches for this day
+  -- Pair punches: odd index (1st, 3rd, 5th, ...) = IN (start of an interval);
+  -- even index (2nd, 4th, 6th, ...) = OUT (end of the previous interval).
+  -- An odd total leaves a trailing IN as the user's currently-open interval.
   _prev_punch := null;
   for _punches in
     select * from beacon_v2.time_punches
@@ -446,7 +453,9 @@ begin
        and punched_at <  _day_end
      order by punched_at asc
   loop
-    if _prev_punch.id is not null then
+    _idx := _idx + 1;
+    if _idx % 2 = 0 then
+      -- OUT punch: pair with the previous IN to make a closed interval.
       insert into beacon_v2.time_intervals
         (user_id, start_at, end_at, start_punch_id, end_punch_id,
          category, category_source)
@@ -455,15 +464,18 @@ begin
          _prev_punch.id, _punches.id, 'work', 'auto')
       returning id into _new_id;
       perform beacon_v2.fn_classify_interval(_new_id);
+      _prev_punch := null;
+    else
+      -- IN punch: remember for pairing on the next iteration.
+      _prev_punch := _punches;
     end if;
-    _prev_punch := _punches;
   end loop;
 
-  -- Tail: last punch becomes a new open interval ONLY if it's today AND the
-  -- last punch is the user's globally most-recent (no later punch on another
-  -- day). For past-day rebuilds, leave it closed via the immediately following
-  -- punch in the next day; if none, we still leave the tail "open" — caller
-  -- (Edge Function) is responsible for noticing the missing_out flag.
+  -- Odd count → an unpaired IN punch. Open the trailing interval ONLY if it's
+  -- the user's globally most-recent punch (no later punch crossed into the
+  -- next day after a missing OUT). Cross-day "forgot to OUT" cases get flagged
+  -- via timesheet_days.flags.missing_out and resolved through admin
+  -- corrections.
   if _prev_punch.id is not null
      and not exists (
        select 1 from beacon_v2.time_punches
