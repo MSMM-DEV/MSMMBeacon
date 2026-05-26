@@ -17,10 +17,15 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
   const [loading,    setLoading]    = useState(true);
   const [loadErr,    setLoadErr]    = useState(null);
 
-  // Committed edits per interval: { [intervalId]: { startLocal: "HH:MM"|null, endLocal: "HH:MM"|null } }
+  // Committed edits per interval:
+  //   { [intervalId]: { startLocal: "HH:MM"|null, endLocal: "HH:MM"|null, description: string } }
   const [edits,      setEdits]      = useState({});
   const [expandedId, setExpandedId] = useState(null);
-  const [draft,      setDraft]      = useState({ start: "", end: "" });
+  const [draft,      setDraft]      = useState({ start: "", end: "", description: "" });
+
+  // User-added new blocks (not tied to an existing interval).
+  //   each: { id: localKey, start: "HH:MM", end: "HH:MM", description: string }
+  const [newBlocks, setNewBlocks] = useState([]);
 
   const [busy,       setBusy]       = useState(false);
   const [submitErr,  setSubmitErr]  = useState(null);
@@ -32,6 +37,7 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
     setLoadErr(null);
     setEdits({});
     setExpandedId(null);
+    setNewBlocks([]);
     loadDayDetail(me.id, date)
       .then(d => { if (!cancelled) setIntervals(d.intervals || []); })
       .catch(e => { if (!cancelled) setLoadErr(e.message || "failed to load day"); })
@@ -43,8 +49,9 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
     const e = edits[iv.id] || {};
     setExpandedId(iv.id);
     setDraft({
-      start: e.startLocal ?? toLocalHHMM(iv.startAt),
-      end:   e.endLocal   ?? (iv.endAt ? toLocalHHMM(iv.endAt) : ""),
+      start:       e.startLocal  ?? toLocalHHMM(iv.startAt),
+      end:         e.endLocal    ?? (iv.endAt ? toLocalHHMM(iv.endAt) : ""),
+      description: e.description ?? "",
     });
   };
 
@@ -58,20 +65,31 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
       delete next[iv.id];
     } else {
       next[iv.id] = {
-        startLocal: startChanged ? draft.start : null,
-        endLocal:   endChanged   ? draft.end   : null,
+        startLocal:  startChanged ? draft.start : null,
+        endLocal:    endChanged   ? draft.end   : null,
+        description: draft.description.trim(),
       };
     }
     setEdits(next);
     setExpandedId(null);
   };
 
-  const cancelEdit = () => { setExpandedId(null); setDraft({ start: "", end: "" }); };
+  const cancelEdit = () => { setExpandedId(null); setDraft({ start: "", end: "", description: "" }); };
 
   const clearEdit = (id) => {
     const next = { ...edits };
     delete next[id];
     setEdits(next);
+  };
+
+  const addNewBlock = () => {
+    setNewBlocks(b => [...b, { id: `new-${Date.now()}-${b.length}`, start: "", end: "", description: "" }]);
+  };
+  const updateNewBlock = (id, patch) => {
+    setNewBlocks(b => b.map(x => x.id === id ? { ...x, ...patch } : x));
+  };
+  const removeNewBlock = (id) => {
+    setNewBlocks(b => b.filter(x => x.id !== id));
   };
 
   const changeCount = useMemo(() => {
@@ -80,8 +98,12 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
       if (e.startLocal) n++;
       if (e.endLocal)   n++;
     }
+    for (const nb of newBlocks) {
+      if (nb.start) n++;
+      if (nb.end)   n++;
+    }
     return n;
-  }, [edits]);
+  }, [edits, newBlocks]);
 
   const submit = async () => {
     if (changeCount === 0) return;
@@ -91,12 +113,14 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
       for (const iv of intervals) {
         const e = edits[iv.id];
         if (!e) continue;
+        const desc = (e.description || "").trim();
+        const prefix = desc ? `${desc} — ` : "";
         if (e.startLocal && iv.startPunchId) {
           tasks.push(submitCorrection({
             date,
             kind:    "edit_punch",
             payload: { punch_id: iv.startPunchId, punched_at: localToISO(date, e.startLocal) },
-            reason:  `Edit start of block ${fmtClock(iv.startAt)} → ${fmtLocalHHMM(e.startLocal)}`,
+            reason:  `${prefix}Edit start of block ${fmtClock(iv.startAt)} → ${fmtLocalHHMM(e.startLocal)}`,
           }));
         }
         if (e.endLocal && iv.endPunchId) {
@@ -104,7 +128,28 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
             date,
             kind:    "edit_punch",
             payload: { punch_id: iv.endPunchId, punched_at: localToISO(date, e.endLocal) },
-            reason:  `Edit end of block ${fmtClock(iv.endAt)} → ${fmtLocalHHMM(e.endLocal)}`,
+            reason:  `${prefix}Edit end of block ${fmtClock(iv.endAt)} → ${fmtLocalHHMM(e.endLocal)}`,
+          }));
+        }
+      }
+      for (const nb of newBlocks) {
+        if (!nb.start && !nb.end) continue;
+        const desc = (nb.description || "").trim();
+        const prefix = desc ? `${desc} — ` : "";
+        if (nb.start) {
+          tasks.push(submitCorrection({
+            date,
+            kind:    "add_punch",
+            payload: { punched_at: localToISO(date, nb.start), note: desc || null },
+            reason:  `${prefix}Add new punch at ${fmtLocalHHMM(nb.start)}`,
+          }));
+        }
+        if (nb.end) {
+          tasks.push(submitCorrection({
+            date,
+            kind:    "add_punch",
+            payload: { punched_at: localToISO(date, nb.end), note: desc || null },
+            reason:  `${prefix}Add new punch at ${fmtLocalHHMM(nb.end)}`,
           }));
         }
       }
@@ -124,7 +169,7 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
         <div className="modal-head">
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="modal-eyebrow">Timesheet</div>
-            <h3 className="modal-title">Request a correction</h3>
+            <h3 className="modal-title">Request a Correction</h3>
           </div>
           <button className="modal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" size={16}/>
@@ -150,10 +195,10 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
             <label className="form-label">Your time blocks</label>
             {loading && <p className="form-help">Loading…</p>}
             {loadErr && <div className="form-error">{loadErr}</div>}
-            {!loading && !loadErr && intervals.length === 0 && (
-              <p className="form-help">No time blocks on this day. Pick a different day.</p>
+            {!loading && !loadErr && intervals.length === 0 && newBlocks.length === 0 && (
+              <p className="form-help">No time blocks on this day. Pick a different day, or click <strong>Add New Time</strong>.</p>
             )}
-            {!loading && intervals.length > 0 && (
+            {!loading && (intervals.length > 0 || newBlocks.length > 0) && (
               <ul className="tk-correction-blocks">
                 {intervals.map(iv => {
                   const e = edits[iv.id];
@@ -198,6 +243,14 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
                               disabled={!iv.endPunchId}
                               onChange={evt => setDraft(d => ({ ...d, end: evt.target.value }))}/>
                           </label>
+                          <label className="tk-correction-block-field tk-correction-block-field-wide">
+                            <span className="form-label">Description</span>
+                            <textarea className="form-input" rows={2}
+                              placeholder="What were you doing during this block?"
+                              value={draft.description}
+                              maxLength={400}
+                              onChange={evt => setDraft(d => ({ ...d, description: evt.target.value }))}/>
+                          </label>
                           <div className="tk-correction-block-edit-actions">
                             <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>Cancel</button>
                             <button className="btn btn-primary btn-sm" onClick={() => saveEdit(iv)}>Save</button>
@@ -207,6 +260,42 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
                     </li>
                   );
                 })}
+                {newBlocks.map(nb => (
+                  <li key={nb.id} className="tk-correction-block is-new">
+                    <div className="tk-correction-block-row">
+                      <span className="tk-correction-block-time">
+                        <em className="tk-correction-block-open">New time block</em>
+                      </span>
+                      <div className="tk-correction-block-actions">
+                        <button className="btn btn-ghost btn-sm" onClick={() => removeNewBlock(nb.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                    <div className="tk-correction-block-edit">
+                      <label className="tk-correction-block-field">
+                        <span className="form-label">Start</span>
+                        <input type="time" className="form-input"
+                          value={nb.start}
+                          onChange={evt => updateNewBlock(nb.id, { start: evt.target.value })}/>
+                      </label>
+                      <label className="tk-correction-block-field">
+                        <span className="form-label">End</span>
+                        <input type="time" className="form-input"
+                          value={nb.end}
+                          onChange={evt => updateNewBlock(nb.id, { end: evt.target.value })}/>
+                      </label>
+                      <label className="tk-correction-block-field tk-correction-block-field-wide">
+                        <span className="form-label">Description</span>
+                        <textarea className="form-input" rows={2}
+                          placeholder="What were you doing during this block?"
+                          value={nb.description}
+                          maxLength={400}
+                          onChange={evt => updateNewBlock(nb.id, { description: evt.target.value })}/>
+                      </label>
+                    </div>
+                  </li>
+                ))}
               </ul>
             )}
           </div>
@@ -216,9 +305,14 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
 
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy || changeCount === 0}>
-            {busy ? "Submitting…" : "Request change"}
-          </button>
+          <div className="tk-correction-foot-right">
+            <button className="btn btn-ghost" onClick={addNewBlock} disabled={busy || loading}>
+              Add New Time
+            </button>
+            <button className="btn btn-primary" onClick={submit} disabled={busy || changeCount === 0}>
+              {busy ? "Submitting…" : "Request change"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

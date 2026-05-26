@@ -8273,6 +8273,14 @@ html, body { overflow-x: clip; }
 }
 .tk-correction-block-field { display: grid; gap: 4px; }
 .tk-correction-block-field .form-label { margin: 0; }
+.tk-correction-block-field-wide { grid-column: 1 / -1; }
+.tk-correction-block-field-wide textarea.form-input { resize: vertical; min-height: 44px; }
+.tk-correction-block.is-new {
+  border-style: dashed;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.tk-correction-foot-right { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .tk-correction-block-edit-actions {
   grid-column: 1 / -1;
   display: flex; justify-content: flex-end; gap: 6px;
