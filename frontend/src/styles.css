@@ -8238,6 +8238,46 @@ html, body { overflow-x: clip; }
 .tk-punch-note { color: var(--text-muted); font-style: italic; }
 .tk-punch-log-empty { color: var(--text-muted); font-size: 13px; padding: 6px 0; }
 
+/* CorrectionModal — time-block list with per-block inline editor */
+.tk-correction-date { max-width: 220px; }
+.tk-correction-blocks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tk-correction-block {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.tk-correction-block.is-edited {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.tk-correction-block-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.tk-correction-block-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 500;
+  display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+}
+.tk-correction-block-sep { color: var(--text-muted); }
+.tk-correction-block-open { color: var(--text-muted); font-style: italic; font-weight: 400; }
+.tk-correction-orig { color: var(--text-muted); text-decoration: line-through; }
+.tk-correction-block-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.tk-correction-block-edit {
+  margin-top: 10px;
+  display: grid; gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  align-items: end;
+}
+.tk-correction-block-field { display: grid; gap: 4px; }
+.tk-correction-block-field .form-label { margin: 0; }
+.tk-correction-block-edit-actions {
+  grid-column: 1 / -1;
+  display: flex; justify-content: flex-end; gap: 6px;
+}
+
 /* Week summary card */
 .tk-week-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
 .tk-week-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; gap: 12px; }

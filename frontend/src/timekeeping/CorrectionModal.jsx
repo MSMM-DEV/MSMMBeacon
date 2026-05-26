@@ -1,42 +1,118 @@
-// CorrectionModal — user submits a punch-correction request.
-//
-// Kinds:
-//   add_punch     — "I forgot to punch out at 17:30"
-//   edit_punch    — admin-only in v1; user-facing UI hides this kind
-//   delete_punch  — admin-only in v1
-//   note          — pure annotation, no payload effect
-//
-// Pending requests appear in the admin's ApprovalsQueue.
+// CorrectionModal — user picks a day, sees their time intervals as blocks,
+// and proposes start/end edits per block. Each modified punch generates one
+// pending `edit_punch` correction row for the admin to review.
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
-import { submitCorrection } from "../data";
+import {
+  submitCorrection, loadDayDetail, getCurrentBeaconUser,
+  fmtClock, todayInCT,
+} from "../data";
 
-export function CorrectionModal({ date, onClose, onSubmitted }) {
-  const [kind,     setKind]   = useState("add_punch");
-  const [time,     setTime]   = useState("17:00");
-  const [reason,   setReason] = useState("");
-  const [note,     setNote]   = useState("");
-  const [busy,     setBusy]   = useState(false);
-  const [err,      setErr]    = useState(null);
+export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
+  const me = getCurrentBeaconUser();
 
-  const valid = reason.trim().length > 3 && (kind !== "add_punch" || time);
+  const [date,       setDate]       = useState(initialDate || todayInCT());
+  const [intervals,  setIntervals]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [loadErr,    setLoadErr]    = useState(null);
+
+  // Committed edits per interval: { [intervalId]: { startLocal: "HH:MM"|null, endLocal: "HH:MM"|null } }
+  const [edits,      setEdits]      = useState({});
+  const [expandedId, setExpandedId] = useState(null);
+  const [draft,      setDraft]      = useState({ start: "", end: "" });
+
+  const [busy,       setBusy]       = useState(false);
+  const [submitErr,  setSubmitErr]  = useState(null);
+
+  useEffect(() => {
+    if (!me?.id) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setLoadErr(null);
+    setEdits({});
+    setExpandedId(null);
+    loadDayDetail(me.id, date)
+      .then(d => { if (!cancelled) setIntervals(d.intervals || []); })
+      .catch(e => { if (!cancelled) setLoadErr(e.message || "failed to load day"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [me?.id, date]);
+
+  const startEdit = (iv) => {
+    const e = edits[iv.id] || {};
+    setExpandedId(iv.id);
+    setDraft({
+      start: e.startLocal ?? toLocalHHMM(iv.startAt),
+      end:   e.endLocal   ?? (iv.endAt ? toLocalHHMM(iv.endAt) : ""),
+    });
+  };
+
+  const saveEdit = (iv) => {
+    const origStart = toLocalHHMM(iv.startAt);
+    const origEnd   = iv.endAt ? toLocalHHMM(iv.endAt) : null;
+    const startChanged = !!iv.startPunchId && !!draft.start && draft.start !== origStart;
+    const endChanged   = !!iv.endPunchId   && !!origEnd     && !!draft.end && draft.end !== origEnd;
+    const next = { ...edits };
+    if (!startChanged && !endChanged) {
+      delete next[iv.id];
+    } else {
+      next[iv.id] = {
+        startLocal: startChanged ? draft.start : null,
+        endLocal:   endChanged   ? draft.end   : null,
+      };
+    }
+    setEdits(next);
+    setExpandedId(null);
+  };
+
+  const cancelEdit = () => { setExpandedId(null); setDraft({ start: "", end: "" }); };
+
+  const clearEdit = (id) => {
+    const next = { ...edits };
+    delete next[id];
+    setEdits(next);
+  };
+
+  const changeCount = useMemo(() => {
+    let n = 0;
+    for (const e of Object.values(edits)) {
+      if (e.startLocal) n++;
+      if (e.endLocal)   n++;
+    }
+    return n;
+  }, [edits]);
 
   const submit = async () => {
-    setBusy(true); setErr(null);
+    if (changeCount === 0) return;
+    setBusy(true); setSubmitErr(null);
     try {
-      let payload = {};
-      if (kind === "add_punch") {
-        const iso = new Date(`${date}T${time}:00`).toISOString();
-        payload = { punched_at: iso, note: note || null };
-      } else {
-        payload = { note: note || null };
+      const tasks = [];
+      for (const iv of intervals) {
+        const e = edits[iv.id];
+        if (!e) continue;
+        if (e.startLocal && iv.startPunchId) {
+          tasks.push(submitCorrection({
+            date,
+            kind:    "edit_punch",
+            payload: { punch_id: iv.startPunchId, punched_at: localToISO(date, e.startLocal) },
+            reason:  `Edit start of block ${fmtClock(iv.startAt)} → ${fmtLocalHHMM(e.startLocal)}`,
+          }));
+        }
+        if (e.endLocal && iv.endPunchId) {
+          tasks.push(submitCorrection({
+            date,
+            kind:    "edit_punch",
+            payload: { punch_id: iv.endPunchId, punched_at: localToISO(date, e.endLocal) },
+            reason:  `Edit end of block ${fmtClock(iv.endAt)} → ${fmtLocalHHMM(e.endLocal)}`,
+          }));
+        }
       }
-      await submitCorrection({ date, kind, payload, reason });
+      await Promise.all(tasks);
       onSubmitted?.();
       onClose?.();
     } catch (e) {
-      setErr(e.message || "submission failed");
+      setSubmitErr(e.message || "submission failed");
     } finally {
       setBusy(false);
     }
@@ -56,52 +132,126 @@ export function CorrectionModal({ date, onClose, onSubmitted }) {
         </div>
 
         <div className="modal-body">
-          <p className="form-help">
-            Day: <strong>{date}</strong>. Your admin will review the request before it lands on your timesheet.
-          </p>
-
           <div className="form-row">
-            <label className="form-label">What needs to change?</label>
-            <select className="form-input" value={kind} onChange={e => setKind(e.target.value)}>
-              <option value="add_punch">Add a missing punch</option>
-              <option value="note">Add a note (no time change)</option>
-            </select>
-          </div>
-
-          {kind === "add_punch" && (
-            <div className="form-row">
-              <label className="form-label">Punch time (24-hour)</label>
-              <input type="time" className="form-input" value={time}
-                onChange={e => setTime(e.target.value)}/>
-              <p className="form-help">
-                Note: the system will toggle your state (IN ↔ OUT) at this moment.
-              </p>
-            </div>
-          )}
-
-          <div className="form-row">
-            <label className="form-label">Reason</label>
-            <input className="form-input" type="text" value={reason}
-              placeholder="e.g. forgot to tap out before leaving"
-              onChange={e => setReason(e.target.value)} maxLength={200}/>
+            <label className="form-label">Day</label>
+            <input
+              type="date"
+              className="form-input tk-correction-date"
+              value={date}
+              max={todayInCT()}
+              onChange={e => setDate(e.target.value || todayInCT())}
+            />
+            <p className="form-help">
+              Your admin will review the request before it lands on your timesheet.
+            </p>
           </div>
 
           <div className="form-row">
-            <label className="form-label">Optional note</label>
-            <textarea className="form-input" rows={2} value={note}
-              onChange={e => setNote(e.target.value)} maxLength={400}/>
+            <label className="form-label">Your time blocks</label>
+            {loading && <p className="form-help">Loading…</p>}
+            {loadErr && <div className="form-error">{loadErr}</div>}
+            {!loading && !loadErr && intervals.length === 0 && (
+              <p className="form-help">No time blocks on this day. Pick a different day.</p>
+            )}
+            {!loading && intervals.length > 0 && (
+              <ul className="tk-correction-blocks">
+                {intervals.map(iv => {
+                  const e = edits[iv.id];
+                  const isExpanded = expandedId === iv.id;
+                  return (
+                    <li key={iv.id} className={`tk-correction-block${e ? " is-edited" : ""}`}>
+                      <div className="tk-correction-block-row">
+                        <span className="tk-correction-block-time">
+                          {renderTime(iv.startAt, e?.startLocal)}
+                          <span className="tk-correction-block-sep">—</span>
+                          {iv.endAt
+                            ? renderTime(iv.endAt, e?.endLocal)
+                            : <em className="tk-correction-block-open">Open</em>}
+                        </span>
+                        {!isExpanded && (
+                          <div className="tk-correction-block-actions">
+                            {e && (
+                              <button className="btn btn-ghost btn-sm" onClick={() => clearEdit(iv.id)}
+                                title="Undo this block's edit">
+                                Undo
+                              </button>
+                            )}
+                            <button className="btn btn-ghost btn-sm" onClick={() => startEdit(iv)}>
+                              Modify
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {isExpanded && (
+                        <div className="tk-correction-block-edit">
+                          <label className="tk-correction-block-field">
+                            <span className="form-label">Start</span>
+                            <input type="time" className="form-input"
+                              value={draft.start}
+                              disabled={!iv.startPunchId}
+                              onChange={evt => setDraft(d => ({ ...d, start: evt.target.value }))}/>
+                          </label>
+                          <label className="tk-correction-block-field">
+                            <span className="form-label">End</span>
+                            <input type="time" className="form-input"
+                              value={draft.end}
+                              disabled={!iv.endPunchId}
+                              onChange={evt => setDraft(d => ({ ...d, end: evt.target.value }))}/>
+                          </label>
+                          <div className="tk-correction-block-edit-actions">
+                            <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>Cancel</button>
+                            <button className="btn btn-primary btn-sm" onClick={() => saveEdit(iv)}>Save</button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
-          {err && <div className="form-error">{err}</div>}
+          {submitErr && <div className="form-error">{submitErr}</div>}
         </div>
 
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>
-            {busy ? "Submitting…" : "Submit request"}
+          <button className="btn btn-primary" onClick={submit} disabled={busy || changeCount === 0}>
+            {busy ? "Submitting…" : "Request change"}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+function renderTime(originalIso, newLocal) {
+  if (!newLocal) return <span>{fmtClock(originalIso)}</span>;
+  return (
+    <span>
+      <s className="tk-correction-orig">{fmtClock(originalIso)}</s>
+      &nbsp;<strong>{fmtLocalHHMM(newLocal)}</strong>
+    </span>
+  );
+}
+
+function toLocalHHMM(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function localToISO(dateYMD, hhmm) {
+  return new Date(`${dateYMD}T${hhmm}:00`).toISOString();
+}
+
+function fmtLocalHHMM(hhmm) {
+  if (!hhmm) return "";
+  const [hStr, mStr] = hhmm.split(":");
+  let h = parseInt(hStr, 10);
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${(mStr || "00").padStart(2, "0")} ${ampm}`;
 }
