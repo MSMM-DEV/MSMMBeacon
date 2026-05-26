@@ -8147,7 +8147,8 @@ html, body { overflow-x: clip; }
 .tk-punch-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .tk-punch-in   { background: linear-gradient(160deg, #6E8F62 0%, #557049 100%); }
 .tk-punch-out  { background: linear-gradient(160deg, #B85C5C 0%, #8E3F3F 100%); }
-.tk-punch-locked { background: var(--surface-2); color: var(--text-muted); box-shadow: none; }
+.tk-punch-locked  { background: var(--surface-2); color: var(--text-muted); box-shadow: none; }
+.tk-punch-offline { background: linear-gradient(160deg, #8A7A6E 0%, #6B5C50 100%); color: #F2ECE0; box-shadow: none; }
 .tk-punch-error  { background: linear-gradient(160deg, #C28C2C 0%, #9B6E1F 100%); }
 .tk-punch-loading { background: var(--surface-2); color: var(--text-muted); box-shadow: none; }
 .tk-punch-btn.is-loading { filter: saturate(60%); }
@@ -10492,4 +10493,160 @@ html, body { overflow-x: clip; }
   .tk-stat-grid { grid-template-columns: repeat(2, 1fr); }
   .tk-custom-matrix-head,
   .tk-custom-matrix-row { grid-template-columns: 200px 1fr 90px 70px 100px; gap: 10px; }
+}
+
+/* ============================================================
+   PWA — install chip, offline pill, update-available toast
+   ============================================================ */
+
+/* Install chip — lives in the topbar between offline pill and bell */
+.pwa-install-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  appearance: none;
+  padding: 5px 10px 5px 9px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 999px;
+  font-family: var(--font-display, inherit);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 100ms ease;
+}
+.pwa-install-chip:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.pwa-install-chip:active { transform: translateY(1px); }
+.pwa-install-chip-label { line-height: 1; }
+
+/* Offline pill — lives in the topbar */
+.pwa-offline-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px;
+  background: color-mix(in srgb, #B85C5C 14%, var(--surface));
+  color: #6E2A2A;
+  border: 1px solid color-mix(in srgb, #B85C5C 30%, var(--border));
+  border-radius: 999px;
+  font-family: var(--font-display, inherit);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+[data-theme="dark"] .pwa-offline-chip { color: #F0C4C4; }
+.pwa-offline-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #B85C5C;
+  box-shadow: 0 0 0 0 color-mix(in srgb, #B85C5C 60%, transparent);
+  animation: pwaOfflinePulse 2s ease-out infinite;
+}
+@keyframes pwaOfflinePulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, #B85C5C 60%, transparent); }
+  70%  { box-shadow: 0 0 0 6px color-mix(in srgb, #B85C5C 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, #B85C5C 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pwa-offline-dot { animation: none; }
+}
+
+/* Update-available toast — bottom-right floating card */
+.pwa-toast {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 200;
+  width: min(360px, calc(100vw - 32px));
+  display: grid; gap: 10px;
+  padding: 14px 16px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  animation: pwaToastIn 240ms cubic-bezier(.18,.89,.36,1.1);
+}
+@keyframes pwaToastIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.pwa-toast-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.pwa-toast-icon {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  flex-shrink: 0;
+}
+.pwa-toast-text { min-width: 0; }
+.pwa-toast-title {
+  font-family: var(--font-display, inherit);
+  font-size: 13px; font-weight: 700; letter-spacing: -0.005em;
+  color: var(--text);
+}
+.pwa-toast-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.pwa-toast-actions {
+  display: flex; justify-content: flex-end; gap: 6px;
+  margin-top: 2px;
+}
+.pwa-toast-btn {
+  appearance: none;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+.pwa-toast-btn:hover { color: var(--text); border-color: var(--border-strong); }
+.pwa-toast-btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.pwa-toast-btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+  border-color: color-mix(in srgb, var(--accent) 88%, black);
+  color: white;
+}
+
+/* Offline banner — inline above page content if the topbar chip is scrolled off */
+.pwa-offline-banner {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, #B85C5C 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, #B85C5C 22%, var(--border));
+  border-radius: 8px;
+  color: #6E2A2A;
+  font-size: 12px;
+}
+[data-theme="dark"] .pwa-offline-banner { color: #F0C4C4; }
+
+/* Mobile — keep the topbar chips visible but smaller; toast goes full-width */
+@media (max-width: 640px) {
+  .pwa-install-chip-label,
+  .pwa-offline-chip > span:last-child {
+    display: none;     /* save room — icon + dot are enough on phones */
+  }
+  .pwa-install-chip   { padding: 6px; min-width: 32px; justify-content: center; }
+  .pwa-offline-chip   { padding: 6px 8px; }
+  .pwa-toast {
+    left:  10px;
+    right: 10px;
+    width: auto;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .pwa-toast-actions .pwa-toast-btn { min-height: 40px; padding: 8px 16px; }
 }

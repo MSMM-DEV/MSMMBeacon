@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!--
+    MSMM Beacon — app icon.
+
+    Designed so the visual content occupies the central 80% of the canvas
+    (~52 px padding all around). That way a single source can satisfy
+    BOTH manifest purposes:
+      • "any"      — terracotta squircle with B monogram + sage status dot
+      • "maskable" — Android crops to circle/squircle; padding survives the cut
+
+    Palette mirrors the app: terracotta accent (#C8823B), warm cream surface
+    (#F7F3EC), sage "you-were-here" green (#6E8F62).
+  -->
+
+  <!-- 1. Terracotta squircle background — radial gradient for warmth -->
+  <defs>
+    <radialGradient id="bgGrad" cx="38%" cy="32%" r="78%">
+      <stop offset="0%"   stop-color="#D89243"/>
+      <stop offset="60%"  stop-color="#C8823B"/>
+      <stop offset="100%" stop-color="#A8682A"/>
+    </radialGradient>
+    <linearGradient id="dotGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#8FAF7F"/>
+      <stop offset="100%" stop-color="#5E7F52"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- 2. Sage status dot in upper-right corner — within safe zone -->
+  <circle cx="384" cy="128" r="34" fill="url(#dotGrad)"/>
+  <circle cx="384" cy="128" r="14" fill="#F7F3EC" opacity="0.95"/>
+
+  <!-- 3. Custom-drawn "B" monogram in cream — path-based so it never
+       depends on a system font. Two horizontal "bays" (the eyes of the B)
+       echo the calendar/timeline blocks elsewhere in the UI. -->
+  <path
+    fill="#F7F3EC"
+    d="M 158 102
+       L 158 410
+       L 310 410
+       C 366 410 402 380 402 332
+       C 402 302 384 280 354 270
+       C 376 258 390 236 390 208
+       C 390 160 358 102 308 102
+       Z
+
+       M 222 162
+       L 296 162
+       C 318 162 330 180 330 206
+       C 330 232 318 250 296 250
+       L 222 250
+       Z
+
+       M 222 306
+       L 302 306
+       C 326 306 340 322 340 346
+       C 340 370 326 386 302 386
+       L 222 386
+       Z"
+  />
+
+  <!-- 4. A thin cream beam mark below the B — subtle, evokes a beacon's
+       horizontal stripe of light without making the icon literal. -->
+  <rect x="158" y="438" width="244" height="6" rx="3" fill="#F7F3EC" opacity="0.4"/>
+</svg>

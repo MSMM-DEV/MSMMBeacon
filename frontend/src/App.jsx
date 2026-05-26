@@ -18,6 +18,7 @@ import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
 import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
+import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR,
@@ -2669,6 +2670,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <span className="kbd">⌘K</span>
         </div>
         <div className="top-actions">
+          <PwaOfflineChip/>
+          <PwaInstallChip/>
           <button className="iconbtn" title="Notifications"><Icon name="bell" size={16}/></button>
           <button
             className="iconbtn"
@@ -3371,6 +3374,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {tweaksOpen && (
         <TweaksPanel tweaks={tweaks} setTweak={setTweak} onClose={() => setTweaksOpen(false)}/>
       )}
+
+      {/* PWA update prompt — bottom-right floating toast when a new SW is waiting. */}
+      <PwaUpdateToast/>
     </div>
   );
 }

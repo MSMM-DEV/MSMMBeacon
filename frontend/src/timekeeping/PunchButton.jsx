@@ -22,6 +22,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
 import { callTimeclockPunch, fmtHM, fmtClock } from "../data";
+import { usePwa } from "../pwa";
 
 const ELAPSED_TICK_MS = 30_000;
 const GEO_TIMEOUT_MS  = 1200;
@@ -59,6 +60,7 @@ export function PunchButton({
   const [error, setError] = useState(null);
   const [, force] = useState(0);
   const inFlightRef = useRef(false);           // hard guard against double-fire
+  const { online } = usePwa();
 
   // Tick the elapsed display every 30 s while currently in.
   useEffect(() => {
@@ -74,6 +76,7 @@ export function PunchButton({
     if (inFlightRef.current) return;           // hard idempotency on rapid taps
     if (phase !== "ready") return;             // don't fire when state is unknown
     if (locked) return;
+    if (!online) return;                       // offline guard — never silently fail
     inFlightRef.current = true;
     setBusy(true); setError(null);
     try {
@@ -86,7 +89,7 @@ export function PunchButton({
       setBusy(false);
       inFlightRef.current = false;
     }
-  }, [phase, locked, onPunched]);
+  }, [phase, locked, online, onPunched]);
 
   const handleClick = () => {
     if (error) {
@@ -108,9 +111,10 @@ export function PunchButton({
   const showOut = !isUnknown && !isFetchErr && !locked && !error && state === "out";
 
   let label;
-  if (locked)        label = "WEEK LOCKED";
-  else if (busy)     label = state === "in" ? "Punching out…" : "Punching in…";
-  else if (error)    label = "RETRY";
+  if (!online)         label = "OFFLINE";
+  else if (locked)     label = "WEEK LOCKED";
+  else if (busy)       label = state === "in" ? "Punching out…" : "Punching in…";
+  else if (error)      label = "RETRY";
   else if (isFetchErr) label = "RETRY";
   else if (isUnknown)  label = "Checking…";
   else if (showIn)     label = "PUNCH OUT";
@@ -118,20 +122,22 @@ export function PunchButton({
 
   const cls = [
     "tk-punch-btn",
+    !online      ? "tk-punch-offline" : "",
     locked       ? "tk-punch-locked"  : "",
     error || isFetchErr ? "tk-punch-error"  : "",
     isUnknown    ? "tk-punch-loading" : "",
-    showIn       ? "tk-punch-out"     : "",
-    showOut      ? "tk-punch-in"      : "",
+    online && showIn   ? "tk-punch-out" : "",
+    online && showOut  ? "tk-punch-in"  : "",
     busy         ? "is-loading"       : "",
   ].filter(Boolean).join(" ");
 
-  const iconName = isUnknown ? "clock"
+  const iconName = !online   ? "ban"
+                 : isUnknown ? "clock"
                  : locked    ? "lock"
                  : showIn    ? "lock"   // we're IN → button means "PUNCH OUT" (lock the day)
                  : "bolt";              // we're OUT or unknown → PUNCH IN
 
-  const disabled = locked || busy || isUnknown;
+  const disabled = !online || locked || busy || isUnknown;
 
   const elapsed = state === "in" ? elapsedMin(openSince) : 0;
 
@@ -156,10 +162,15 @@ export function PunchButton({
           <span className="tk-punch-sub">today · {fmtHM(todayMinutesWork || 0)}</span>
         )}
       </button>
-      {error && (
+      {!online && (
+        <div className="tk-punch-error-msg" role="status">
+          You're offline — punching needs a connection. Try again once you're back online.
+        </div>
+      )}
+      {online && error && (
         <div className="tk-punch-error-msg" role="alert">{error}</div>
       )}
-      {!error && isFetchErr && (
+      {online && !error && isFetchErr && (
         <div className="tk-punch-error-msg" role="alert">Couldn't load your timesheet. Tap to retry.</div>
       )}
       {showIn && openSince && (
