@@ -46,8 +46,10 @@ export function CorrectionModal({ date, onClose, onSubmitted }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal-narrow" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <div className="modal-eyebrow">Timesheet</div>
-          <h3 className="modal-title">Request a correction</h3>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="modal-eyebrow">Timesheet</div>
+            <h3 className="modal-title">Request a correction</h3>
+          </div>
           <button className="modal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" size={16}/>
           </button>
