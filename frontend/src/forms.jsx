@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Icon } from "./icons.jsx";
-import { supabase, THIS_YEAR, MONTHS, fmtMoney } from "./data.js";
+import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf } from "./data.js";
 import { SearchableSelect, StarRating } from "./primitives.jsx";
 
 // ============ CREATE MODAL ============
@@ -28,6 +28,7 @@ const DB_TABLES = {
   clients:   "clients",
   companies: "companies",
   invoice:   "anticipated_invoice",
+  openbids:  "open_bids",
 };
 
 const TITLES = {
@@ -39,6 +40,7 @@ const TITLES = {
   clients:   { title: "New client",              icon: "users"     },
   companies: { title: "New company",             icon: "briefcase" },
   invoice:   { title: "New invoice row",         icon: "trend"     },
+  openbids:  { title: "New open bid",            icon: "flag"      },
 };
 
 // Columns that the DB accepts directly. Anything NOT in this list is
@@ -92,6 +94,14 @@ const DB_COLUMNS = {
   invoice: [
     "project_name", "year", "project_number", "type",
     "contract_amount", "msmm_amount", "msmm_remaining_to_bill_year_start",
+  ],
+  // beacon_v2.open_bids — pre-Awaiting tracker. PDF upload is NOT a DB column;
+  // it's a storage write that happens after the row insert, see onSubmit.
+  // Approval columns are NOT in the create form — every new bid starts as
+  // approval_status='pending' (the DB default) and an admin promotes it later.
+  openbids: [
+    "rfq_rfp_number", "client_id", "service_description",
+    "due_at", "web_link", "notes",
   ],
 };
 
@@ -200,6 +210,15 @@ const INITIAL = {
     msmm_remaining_to_bill_year_start: "",
     pm_user_ids: [],
   },
+  openbids: {
+    rfq_rfp_number: "",
+    client_id: "",
+    service_description: "",
+    due_at: "",
+    web_link: "",
+    notes: "",
+    _pdf_file: null,        // staged File object; uploaded after row insert
+  },
 };
 
 const REQUIRED = {
@@ -211,6 +230,7 @@ const REQUIRED = {
   clients:   ["name"],
   companies: ["name"],
   invoice:   ["project_name", "year"],
+  openbids:  ["rfq_rfp_number"],
 };
 
 // --------------------- shared sub-editor ---------------------
@@ -547,6 +567,18 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             .insert(pmIds.map(uid => ({ anticipated_invoice_id: row.id, user_id: uid })));
           if (eIP) throw eIP;
           extras.pmIds = pmIds;
+        }
+      } else if (table === "openbids") {
+        // PDF upload is a separate write to storage + an update on the bid
+        // row. The bid row already exists, so a failed PDF upload only
+        // surfaces a partial-save warning; the row still appears in the UI.
+        const stagedFile = form._pdf_file;
+        if (stagedFile) {
+          const updated = await uploadOpenBidPdf({ bidId: row.id, file: stagedFile });
+          // Mirror the fresh pdf_* columns back onto the inserted dbRow
+          // so adaptInsertedRow picks them up.
+          row.pdf_file_path = updated.pdfPath;
+          row.pdf_file_name = updated.pdfName;
         }
       }
     } catch (e) {
@@ -1074,6 +1106,93 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
               onChange={(ids) => set("pm_user_ids", ids)}
               placeholder="Pick PMs…"/>
           </Field>
+        </>
+      );
+    }
+
+    if (table === "openbids") {
+      const stagedFile = form._pdf_file;
+      return (
+        <>
+          <Field label="RFQ/RFP Number *">
+            <input className="input" autoFocus value={form.rfq_rfp_number}
+                   onChange={e => set("rfq_rfp_number", e.target.value)}
+                   placeholder="e.g. RFQ-2026-014 or 0x4F2"
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Client / Parish">
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOptions}
+              placeholder="Search clients…"
+              onChange={v => set("client_id", v || "")}
+            />
+          </Field>
+          <Field label="Description of Service">
+            <select className="select" value={form.service_description}
+                    onChange={e => set("service_description", e.target.value)}>
+              <option value="">—</option>
+              {BID_SERVICE_OPTIONS.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Due Date">
+            <input className="input" type="datetime-local"
+                   value={form.due_at ? String(form.due_at).slice(0, 16) : ""}
+                   onChange={e => set("due_at", e.target.value ? new Date(e.target.value).toISOString() : "")}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="RFQ PDF File">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <label className="tool-chip" style={{ cursor: "pointer" }}>
+                <Icon name="plus" size={11}/>
+                {stagedFile ? "Choose another…" : "Choose PDF…"}
+                <input type="file" accept="application/pdf,.pdf"
+                       style={{ display: "none" }}
+                       onChange={e => set("_pdf_file", e.target.files?.[0] || null)}/>
+              </label>
+              {stagedFile && (
+                <>
+                  <span style={{ fontSize: 12, color: "var(--text-soft)", maxWidth: 220,
+                                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={stagedFile.name}>
+                    {stagedFile.name}
+                  </span>
+                  <button type="button" className="row-btn" title="Remove"
+                          onClick={() => set("_pdf_file", null)}
+                          style={{ color: "var(--rose)" }}>
+                    <Icon name="x" size={11}/>
+                  </button>
+                </>
+              )}
+              <span style={{ fontSize: 11, color: "var(--text-muted)", flexBasis: "100%" }}>
+                Uploaded after the bid is created. You can also attach a PDF later from the row.
+              </span>
+            </div>
+          </Field>
+          <Field label="Web Link">
+            <input className="input" type="url" value={form.web_link}
+                   onChange={e => set("web_link", e.target.value)}
+                   placeholder="https://…"/>
+          </Field>
+          <Field label="Notes" multiline>
+            <textarea className="textarea" value={form.notes}
+                      onChange={e => set("notes", e.target.value)}
+                      placeholder="Anything to flag for the approver…"/>
+          </Field>
+          <div style={{
+            background: "var(--surface-2)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "10px 12px",
+            fontSize: 12,
+            color: "var(--text-soft)",
+            marginTop: 4,
+          }}>
+            <Icon name="lock" size={11}/> New bids start as <strong>Pending</strong>.
+            An Admin approves the bid before it can move forward to Awaiting Verdict.
+          </div>
         </>
       );
     }

@@ -3,7 +3,7 @@ import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
-  InvoiceTable, EventsTable, HotLeadsTable, DirectoryTable,
+  InvoiceTable, EventsTable, HotLeadsTable, DirectoryTable, OpenBidsTable,
 } from "./tables.jsx";
 // Note: SoqTable was removed — SOQ is no longer surfaced in v2.
 // ClientsTable + CompaniesTable were merged into DirectoryTable.
@@ -22,7 +22,7 @@ import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
-  MONTHS, TODAY_MONTH, THIS_YEAR,
+  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
   routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
@@ -32,6 +32,9 @@ import {
   ensureSubInvoiceRow, setSubInvoicePaid,
   setProjectRole, setProjectPrimeCompany,
   findOrCreateProjectForInvoice, linkInvoiceToProject,
+  createOpenBid, updateOpenBid as updateOpenBidDb, deleteOpenBid as deleteOpenBidDb,
+  setOpenBidApproval, markOpenBidMovedForward,
+  uploadOpenBidPdf, deleteOpenBidPdf, getOpenBidPdfSignedUrl,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -54,6 +57,7 @@ const countRefs = (id) => {
 // a bogus Invoice → Potential flow.
 const TAB_META = [
   { key: "quad",      label: "Quad Sheet",       stage: "stage-quad",      group: "head" },
+  { key: "openbids",  label: "Open Bids",        stage: "stage-openbids",  group: "pipeline" },
   { key: "awaiting",  label: "Awaiting Verdict", stage: "stage-awaiting",  group: "pipeline" },
   { key: "awarded",   label: "Awarded",          stage: "stage-awarded",   group: "pipeline" },
   { key: "closed",    label: "Closed Out",       stage: "stage-closed",    group: "pipeline" },
@@ -68,6 +72,7 @@ const TAB_META = [
 ];
 
 const PAGE_META = {
+  openbids:  { title: "Open Bids", desc: "RFQ/RFPs under evaluation. Admins approve a bid before it can be moved forward to Awaiting Verdict." },
   potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
   awaiting:  { title: "Awaiting Verdict", desc: "Entry point for submitted proposals. Add here, then mark as Awarded or Closed Out when the verdict lands." },
   awarded:   { title: "Awarded Projects", desc: "Won contracts. Move to Potential to track as a billing candidate, or directly to Invoice when billing starts." },
@@ -93,6 +98,17 @@ const DEFAULT_TWEAKS = {
 // The 'all' key means no filter; returns the row unchanged.
 // ======================================================================
 const FILTERS = {
+  openbids: {
+    all:      () => true,
+    pending:  r => r.approvalStatus === "pending",
+    approved: r => r.approvalStatus === "approved",
+    rejected: r => r.approvalStatus === "rejected",
+    dueSoon:  r => {
+      if (!r.dueAt) return false;
+      const days = (new Date(r.dueAt).getTime() - Date.now()) / 86400000;
+      return days > 0 && days <= 7;
+    },
+  },
   potential: {
     all:   () => true,
     prime: r => r.role === "Prime",
@@ -146,6 +162,13 @@ const FILTERS = {
 };
 
 const FILTER_CHIPS = {
+  openbids: [
+    { key: "all",      label: "All" },
+    { key: "pending",  label: "Pending",  icon: "clock" },
+    { key: "approved", label: "Approved", icon: "check" },
+    { key: "rejected", label: "Rejected", icon: "x" },
+    { key: "dueSoon",  label: "Due ≤ 7 days", icon: "clock" },
+  ],
   potential: [
     { key: "all",   label: "All" },
     { key: "prime", label: "Prime", icon: "flag" },
@@ -209,7 +232,25 @@ const awardedBucketOf = (stage) => {
   return "others";
 };
 
+// Approval-state pretty-print for the Open Bids export.
+const _approvalLabel = (r) => {
+  const u = r.approvedBy ? userById(r.approvedBy)?.name : null;
+  if (r.approvalStatus === "approved") return `Approved${u ? ` · ${u}` : ""}${r.approvedAt ? ` · ${fmtDate(r.approvedAt)}` : ""}`;
+  if (r.approvalStatus === "rejected") return `Rejected${u ? ` · ${u}` : ""}${r.approvedAt ? ` · ${fmtDate(r.approvedAt)}` : ""}`;
+  return "Pending";
+};
+
 const EXPORT_COLUMNS = {
+  openbids: [
+    { label: "RFQ/RFP #",       wMm: 26,  get: r => r.rfqNumber || "" },
+    { label: "Client / Parish",           get: r => companyById(r.clientId)?.name || "" },
+    { label: "Service",                   get: r => r.serviceDescription || "" },
+    { label: "Due Date",        wMm: 32,  get: r => fmtDateTime(r.dueAt) },
+    { label: "Web Link",                  get: r => r.webLink || "" },
+    { label: "PDF",             wMm: 30,  get: r => r.pdfName || (r.pdfPath ? "(uploaded)" : "") },
+    { label: "Approval",        wMm: 60,  get: r => _approvalLabel(r), wrap: true },
+    { label: "Notes",                     get: r => r.notes || "" },
+  ],
   potential: [
     { label: "Year",              wMm: 14,  get: r => r._total ? "" : r.year },
     { label: "Project",                     get: r => r._total
@@ -516,6 +557,25 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       primeFiles: Array.from({ length: 12 }, () => []),
     };
   }
+  if (table === "openbids") {
+    return {
+      id: dbRow.id,
+      rfqNumber:          dbRow.rfq_rfp_number || "",
+      clientId:           dbRow.client_id || null,
+      serviceDescription: dbRow.service_description || "",
+      dueAt:              dbRow.due_at || "",
+      pdfPath:            dbRow.pdf_file_path || "",
+      pdfName:            dbRow.pdf_file_name || "",
+      webLink:            dbRow.web_link || "",
+      notes:              dbRow.notes || "",
+      approvalStatus:     dbRow.approval_status || "pending",
+      approvedBy:         dbRow.approved_by || null,
+      approvedAt:         dbRow.approved_at || null,
+      movedToProjectId:   dbRow.moved_to_project_id || null,
+      createdBy:          dbRow.created_by || null,
+      createdAt:          dbRow.created_at || null,
+    };
+  }
   return dbRow;
 }
 
@@ -803,6 +863,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [invoice,   setInvoice]   = useState(initial.invoices);
   const [events,    setEvents]    = useState(initial.events);
   const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
+  const [openBids,  setOpenBids]  = useState(initial.openBids || []);
   const [clients,   setClients]   = useState(() => getClientsOnly());
   const [companies, setCompanies] = useState(() => getCompaniesOnly());
   // Workspace-wide settings (singleton). Today: monthlyInvoiceBenchmark drives
@@ -815,14 +876,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
     potential: "all", awaiting: "all", awarded: "all", closed: "all",
-    events: "all", hotleads: "all", directory: "all",
+    events: "all", hotleads: "all", directory: "all", openbids: "all",
   });
 
   // Year filter state. null = All years; number = filter to that year.
   const [yearFilter, setYearFilter] = useState({
     potential: null, awaiting: null, awarded: null,
     closed: null, invoice: null, events: null,
-    hotleads: null,
+    hotleads: null, openbids: null,
   });
   const setYear = (t, y) => setYearFilter(f => ({ ...f, [t]: y }));
 
@@ -1236,6 +1297,99 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if ("attendees" in patch) {
       syncJoinUsers(id, existing.attendees, patch.attendees,
         "lead_attendees", "lead_id");
+    }
+  };
+
+  // -------------------- Open Bids handlers --------------------
+  // Optimistic local update + scoped PATCH. Mirrors the existing
+  // pipeline-tab pattern. The OPEN_BID_COL_MAP in data.js filters out
+  // approval-state fields — those flow through approveOpenBid /
+  // rejectOpenBid / clearOpenBidApproval below (which the DB trigger
+  // gates to Admins).
+  const updateOpenBids = (id, patch) => {
+    const existing = openBids.find(r => r.id === id);
+    if (!existing) return;
+    setOpenBids(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+    updateOpenBidDb(id, patch).catch(e => {
+      showToast(`Save failed: ${e.message || e}`, "x");
+    });
+  };
+
+  const setBidApproval = async (id, status) => {
+    const existing = openBids.find(r => r.id === id);
+    if (!existing) return;
+    // Optimistic stamp with the current admin's id + now() so the UI
+    // reflects the change instantly. The server-side trigger is the
+    // authoritative gate.
+    const me = currentUser;
+    const stampedAt = status === "pending" ? null : new Date().toISOString();
+    const stampedBy = status === "pending" ? null : (me?.id || null);
+    setOpenBids(rs => rs.map(r => r.id === id
+      ? { ...r, approvalStatus: status, approvedBy: stampedBy, approvedAt: stampedAt }
+      : r));
+    try {
+      const fresh = await setOpenBidApproval(id, status);
+      // Re-sync from DB (canonical approver/timestamp) in case our optimistic
+      // stamp diverged (e.g. clock skew, race).
+      setOpenBids(rs => rs.map(r => r.id === id ? { ...r, ...fresh } : r));
+      showToast(
+        status === "approved" ? "Bid approved" :
+        status === "rejected" ? "Bid rejected" :
+        "Approval cleared",
+        status === "rejected" ? "x" : "check"
+      );
+    } catch (e) {
+      // Roll back the optimistic stamp on error.
+      setOpenBids(rs => rs.map(r => r.id === id ? existing : r));
+      showToast(`Approval failed: ${e.message || e}`, "x");
+    }
+  };
+
+  const uploadBidPdf = async (id, file) => {
+    if (!file) return;
+    try {
+      const fresh = await uploadOpenBidPdf({ bidId: id, file });
+      setOpenBids(rs => rs.map(r => r.id === id ? { ...r, ...fresh } : r));
+      showToast("PDF uploaded", "check");
+    } catch (e) {
+      showToast(`Upload failed: ${e.message || e}`, "x");
+    }
+  };
+
+  const removeBidPdf = async (id) => {
+    const existing = openBids.find(r => r.id === id);
+    if (!existing?.pdfPath) return;
+    const prev = existing;
+    setOpenBids(rs => rs.map(r => r.id === id ? { ...r, pdfPath: "", pdfName: "" } : r));
+    try {
+      const fresh = await deleteOpenBidPdf({ bidId: id, filePath: existing.pdfPath });
+      setOpenBids(rs => rs.map(r => r.id === id ? { ...r, ...fresh } : r));
+      showToast("PDF removed", "check");
+    } catch (e) {
+      setOpenBids(rs => rs.map(r => r.id === id ? prev : r));
+      showToast(`Remove failed: ${e.message || e}`, "x");
+    }
+  };
+
+  const openBidPdfInNewTab = async (row) => {
+    if (!row?.pdfPath) return;
+    try {
+      const url = await getOpenBidPdfSignedUrl(row.pdfPath, 60);
+      if (url) window.open(url, "_blank", "noopener");
+    } catch (e) {
+      showToast(`Open failed: ${e.message || e}`, "x");
+    }
+  };
+
+  const deleteOpenBidRow = async (id) => {
+    const prev = openBids;
+    setOpenBids(rs => rs.filter(r => r.id !== id));
+    try {
+      await deleteOpenBidDb(id);
+      showToast("Open bid deleted", "check");
+    } catch (e) {
+      setOpenBids(prev);
+      showToast(`Delete failed: ${e.message || e}`, "x");
     }
   };
 
@@ -2312,6 +2466,102 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           showToast(`Reopen failed: ${e.message || e}`, "x");
         }
       })();
+    } else if (from === "openbids" && to === "awaiting") {
+      // Open Bid → Awaiting Verdict: MOVE-like semantics but the open_bids
+      // row is preserved as the historical breadcrumb (moved_to_project_id
+      // links forward). DB trigger gates approval changes; the UI also
+      // disables Move Forward when approval_status !== 'approved', so by
+      // the time we get here the bid is already approved.
+      if (row.approvalStatus !== "approved") {
+        showToast("Bid must be approved before moving forward.", "lock");
+        setMoving(null);
+        return;
+      }
+      const bidNoteLine =
+        `RFQ #${row.rfqNumber || "—"}` +
+        (row.serviceDescription ? ` · ${row.serviceDescription}` : "") +
+        (row.dueAt ? ` · due ${fmtDate(row.dueAt)}` : "");
+      const userNotes = (newData.notes || "").trim();
+      const combinedNotes = userNotes ? `${bidNoteLine}\n${userNotes}` : bidNoteLine;
+
+      const tempProjectId = mkId();
+      const awaitingRow = {
+        id: tempProjectId,
+        year: Number(newData.year) || THIS_YEAR,
+        name: newData.projectName || "",
+        role: "Prime",
+        clientId: row.clientId || null,
+        amount: null,
+        msmm: Number(newData.msmmRemaining) || 0,
+        subs: [],
+        pmIds: [],
+        notes: combinedNotes,
+        dates: "",
+        projectNumber: newData.projectNumber || "",
+        status: "Awaiting Verdict",
+        dateSubmitted: newData.dateSubmitted || new Date().toISOString().substr(0, 10),
+        anticipatedResultDate: newData.anticipatedResultDate || "",
+        clientContract: newData.clientContract || "",
+        msmmContract: newData.msmmContract || "",
+        msmmUsed: Number(newData.msmmUsed) || 0,
+        msmmRemaining: Number(newData.msmmRemaining) || 0,
+        sourceId: row.id,
+      };
+      const prevOpenBids = openBids;
+      const prevAwaiting = awaiting;
+      setAwaiting(rs => [awaitingRow, ...rs]);
+      setOpenBids(rs => rs.map(r => r.id === row.id
+        ? { ...r, movedToProjectId: tempProjectId }
+        : r));
+      setFlashId(tempProjectId);
+      setTab("awaiting");
+      (async () => {
+        try {
+          const insertPayload = {
+            status: "awaiting",
+            project_name: awaitingRow.name,
+            year: awaitingRow.year,
+            client_id: awaitingRow.clientId,
+            date_submitted: awaitingRow.dateSubmitted || null,
+            anticipated_result_date: awaitingRow.anticipatedResultDate || null,
+            client_contract_number: awaitingRow.clientContract || null,
+            msmm_contract_number: awaitingRow.msmmContract || null,
+            msmm_used: awaitingRow.msmmUsed || null,
+            msmm_remaining: awaitingRow.msmmRemaining || null,
+            project_number: awaitingRow.projectNumber || null,
+            notes: combinedNotes || null,
+          };
+          const { data: projData, error: projErr } = await supabase
+            .from("projects").insert(insertPayload).select().single();
+          if (projErr) throw projErr;
+          // Forward-link the open_bids row to the new project so the
+          // breadcrumb survives a reload.
+          await markOpenBidMovedForward(row.id, projData.id);
+          // Replace the temp local id with the real one across both slices.
+          setAwaiting(rs => rs.map(r => r.id === tempProjectId
+            ? { ...r, id: projData.id }
+            : r));
+          setOpenBids(rs => rs.map(r => r.id === row.id
+            ? { ...r, movedToProjectId: projData.id }
+            : r));
+          setFlashId(projData.id);
+          offerUndo(
+            "Moved to Awaiting Verdict",
+            snap,
+            async () => {
+              // Reverse: drop the new project + clear the forward link.
+              const { error: dErr } = await supabase
+                .from("projects").delete().eq("id", projData.id);
+              if (dErr) throw dErr;
+              await markOpenBidMovedForward(row.id, null);
+            }
+          );
+        } catch (e) {
+          setAwaiting(prevAwaiting);
+          setOpenBids(prevOpenBids);
+          showToast(`Move failed: ${e.message || e}`, "x");
+        }
+      })();
     }
     setMoving(null);
     setTimeout(() => setFlashId(null), 1500);
@@ -2398,6 +2648,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
     if (table === "companies")  setCompanies(rs => [uiRow, ...rs]);
     if (table === "invoice")    setInvoice(rs => [uiRow, ...rs]);
+    if (table === "openbids")   setOpenBids(rs => [uiRow, ...rs]);
     // Orange potential auto-creates an Anticipated Invoice row tagged with
     // source_potential_id so the Invoice tab picks up the stripe.
     if (table === "potential" && extras.invoiceRow) {
@@ -2547,8 +2798,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       invoice:   uniq(invoice),
       events:    uniqFromDate(events, "date"),
       hotleads:  uniqFromDate(hotLeads, "dateTime"),
+      openbids:  uniqFromDate(openBids, "dueAt"),
     };
-  }, [potential, awaiting, awarded, closed, invoice, events, hotLeads]);
+  }, [potential, awaiting, awarded, closed, invoice, events, hotLeads, openBids]);
 
   // Apply year filter, then category filter. Events filter against the year
   // component of the ISO event_date, not a dedicated year column.
@@ -2561,6 +2813,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       }
       if (key === "hotleads") {
         return rows.filter(r => r.dateTime && Number(String(r.dateTime).slice(0, 4)) === y);
+      }
+      if (key === "openbids") {
+        return rows.filter(r => r.dueAt && Number(String(r.dueAt).slice(0, 4)) === y);
       }
       return rows.filter(r => r.year === y);
     };
@@ -2585,9 +2840,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       invoice:   applyYear("invoice", invoice),
       events:    apply("events",    events),
       hotleads:  apply("hotleads",  hotLeads),
+      openbids:  apply("openbids",  openBids),
       directory: apply("directory", [...clients, ...companies]),
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoice, events, hotLeads, openBids, clients, companies]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -2615,6 +2871,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           : (({
               potential, awaiting, awarded, closed,
               events, hotleads: hotLeads,
+              openbids: openBids,
               directory: [...clients, ...companies],
             })[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
       : null,
@@ -2636,6 +2893,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   }, [potential, awaiting, awarded, invoice]);
 
   const tabCounts = {
+    openbids: openBids.length,
     potential: potential.length, awaiting: awaiting.length,
     awarded: awarded.length, closed: closed.length,
     invoice: invoice.length, events: events.length,
@@ -2657,13 +2915,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Directory's primary "New X" defaults to client (the more common entry).
   // Companies are typically created via the sub-picker on a project rather
   // than from this tab.
-  const newForTab = { awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients" };
+  const newForTab = { openbids: "openbids", awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
                  : tab === "hotleads" ? "New hot lead"
                  : tab === "directory" ? "New client"
                  : tab === "awaiting" ? "New awaiting verdict"
                  : tab === "awarded" ? "New awarded project"
+                 : tab === "openbids" ? "New open bid"
                  : "New project";
 
   return (
@@ -2812,6 +3071,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </div>
         )}
 
+        {tab === "openbids" && (
+          <OpenBidsTable rows={filtered.openbids}
+            updateRow={updateOpenBids}
+            isAdmin={isAdmin}
+            onOpenDrawer={r => openDrawer(r, "openbids")}
+            onForward={r => triggerForward(r, "openbids", "awaiting")}
+            onApprove={(r) => setBidApproval(r.id, "approved")}
+            onReject={(r) => setBidApproval(r.id, "rejected")}
+            onClearApproval={(r) => setBidApproval(r.id, "pending")}
+            onUploadPdf={uploadBidPdf}
+            onRemovePdf={removeBidPdf}
+            onOpenPdf={openBidPdfInNewTab}
+            onDelete={deleteOpenBidRow}
+            flashId={flashId}
+            filters={chipsFor("openbids")}
+            tab="openbids"
+            yearOptions={availableYears.openbids}
+            yearValue={yearFilter.openbids}
+            onYearChange={(y) => setYear("openbids", y)}/>
+        )}
         {tab === "potential" && (
           <PotentialTable rows={filtered.potential} updateRow={updatePotential}
             onOpenDrawer={r => openDrawer(r, "potential")}
@@ -3116,6 +3395,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "invoice"   ? updateInvoice   :
             drawer.table === "events"    ? updateEvents    :
             drawer.table === "hotleads"  ? updateHotLeads  :
+            drawer.table === "openbids"  ? updateOpenBids  :
             drawer.table === "directory"
               ? (id, patch) => {
                   const inClients = clients.some(c => c.id === id);
@@ -3128,9 +3408,43 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "awaiting"  ? () => { triggerForward(liveRow, "awaiting", "awarded"); setDrawer(null); } :
             drawer.table === "awarded"   ? () => { triggerForward(liveRow, "awarded", "invoice"); setDrawer(null); } :
             drawer.table === "potential" ? () => { triggerForward(liveRow, "potential", "invoice"); setDrawer(null); } :
+            drawer.table === "openbids" && liveRow.approvalStatus === "approved"
+              ? () => { triggerForward(liveRow, "openbids", "awaiting"); setDrawer(null); } :
             null
           }
-          onAlert={() => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          onAlert={drawer.table === "openbids" ? null : () => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          isAdmin={isAdmin}
+          onApproveBid={
+            drawer.table === "openbids" && isAdmin
+              ? () => setBidApproval(liveRow.id, "approved")
+              : null
+          }
+          onRejectBid={
+            drawer.table === "openbids" && isAdmin
+              ? () => setBidApproval(liveRow.id, "rejected")
+              : null
+          }
+          onClearBidApproval={
+            drawer.table === "openbids" && isAdmin
+              && (liveRow.approvalStatus === "approved" || liveRow.approvalStatus === "rejected")
+              ? () => setBidApproval(liveRow.id, "pending")
+              : null
+          }
+          onUploadBidPdf={
+            drawer.table === "openbids"
+              ? (file) => uploadBidPdf(liveRow.id, file)
+              : null
+          }
+          onRemoveBidPdf={
+            drawer.table === "openbids" && liveRow.pdfPath
+              ? () => removeBidPdf(liveRow.id)
+              : null
+          }
+          onOpenBidPdf={
+            drawer.table === "openbids" && liveRow.pdfPath
+              ? () => openBidPdfInNewTab(liveRow)
+              : null
+          }
           onCloseOut={
             drawer.table === "invoice"
               ? () => { triggerForward(liveRow, "invoice", "closed"); setDrawer(null); }
@@ -3177,6 +3491,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   const label = liveRow.title || liveRow.name || "this lead";
                   if (!window.confirm(`Delete hot lead "${label}"? This cannot be undone.`)) return;
                   deleteHotLead(liveRow.id);
+                  setDrawer(null);
+                }
+              : drawer.table === "openbids"
+              ? () => {
+                  const label = liveRow.rfqNumber || "this open bid";
+                  if (!window.confirm(`Delete open bid "${label}"? This cannot be undone.`)) return;
+                  deleteOpenBidRow(liveRow.id);
                   setDrawer(null);
                 }
               : null

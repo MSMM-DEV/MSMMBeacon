@@ -41,6 +41,8 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     logout:   <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></>,
     shield:   <><path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6l-8-3Z"/></>,
     ban:      <><circle cx="12" cy="12" r="9"/><path d="m5.5 5.5 13 13"/></>,
+    thumbsUp:   <><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0V8a3 3 0 0 1 3-3l1 4v2h6a2 2 0 0 1 2 2l-2 7a2 2 0 0 1-2 1H7"/></>,
+    thumbsDown: <><path d="M17 13V4h3a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-3Zm0 0v3a3 3 0 0 1-3 3l-1-4v-2H7a2 2 0 0 1-2-2l2-7a2 2 0 0 1 2-1h8"/></>,
   };
   const d = paths[name];
   return (

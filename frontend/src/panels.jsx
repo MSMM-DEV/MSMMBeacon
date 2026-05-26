@@ -185,7 +185,15 @@ export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
 }
 
 // ============ DETAIL DRAWER (read/edit a row) ============
-export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert, onDelete, onCloseOut, onDemoteFromOrange, onMoveBack, linkedProjects, onOpenProject, linkedSubs, onAddSub }) => {
+export const DetailDrawer = ({
+  row, table, onClose, onUpdate, onForward, onAlert, onDelete,
+  onCloseOut, onDemoteFromOrange, onMoveBack,
+  linkedProjects, onOpenProject, linkedSubs, onAddSub,
+  // Open Bids extras — all optional; only `openbids` table passes them.
+  isAdmin = false,
+  onApproveBid, onRejectBid, onClearBidApproval,
+  onUploadBidPdf, onRemoveBidPdf, onOpenBidPdf,
+}) => {
   if (!row) return null;
 
   // Two distinct lists:
@@ -333,6 +341,35 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
       { k: "phone",          label: "Phone" },
       { k: "address",        label: "Address" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
+    ],
+    openbids: [
+      { k: "rfqNumber",          label: "RFQ/RFP Number",           type: "mono" },
+      { k: "clientId",           label: "Client / Parish",          type: "company" },
+      { k: "serviceDescription", label: "Description of Service",
+        type: "select",
+        options: [
+          "Civil Engineering Design Services",
+          "Drainage and Stormwater Engineering",
+          "Roadway and Infrastructure Design",
+          "Water and Sewer Engineering Services",
+          "Construction Engineering and Inspection",
+          "Project Management Services",
+          "Engineering Planning and Feasibility Studies",
+          "Environmental and Coastal Engineering",
+          "Traffic and Transportation Engineering",
+          "Site Development Engineering",
+          "Utility Infrastructure Engineering",
+          "Flood Mitigation and Resilience Planning",
+          "Surveying and Mapping Services",
+          "Grant Support and Technical Assistance",
+          "On-Call Engineering Services",
+        ] },
+      { k: "dueAt",              label: "Due Date",                 type: "datetime" },
+      { k: "webLink",            label: "Web Link" },
+      { k: "notes",              label: "Notes",                    type: "textarea" },
+      // Approval fields render via the dedicated approval panel below, NOT
+      // as generic editable fields — admins flip status through the panel,
+      // and the DB trigger gates writes anyway.
     ],
   }[fieldsKey] || [];
 
@@ -521,6 +558,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
     events:    "Event",
     clients:   "Client",
     companies: "Company",
+    openbids:  "Open Bid",
   };
   const titleLabel = table === "directory"
     ? (row.type === "Client" ? "Client" : "Company")
@@ -537,7 +575,7 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
               {titleLabel}
               {row.projectNumber && <span className="mono" style={{ marginLeft: 6, color: "var(--text-soft)" }}>· {row.projectNumber}</span>}
             </div>
-            <h3 className="drawer-title">{row.name || row.title}</h3>
+            <h3 className="drawer-title">{row.name || row.title || row.rfqNumber || "—"}</h3>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             {onForward && <button className="btn sm primary" onClick={onForward}><Icon name="forward" size={13}/>Move forward</button>}
@@ -607,6 +645,110 @@ export const DetailDrawer = ({ row, table, onClose, onUpdate, onForward, onAlert
               </div>
             </div>
           ))}
+          {table === "openbids" && (() => {
+            const approver = row.approvedBy ? userById(row.approvedBy) : null;
+            const stampedAt = row.approvedAt;
+            const isPending  = (row.approvalStatus || "pending") === "pending";
+            const isApproved = row.approvalStatus === "approved";
+            const isRejected = row.approvalStatus === "rejected";
+            return (
+              <>
+                <div className="section-title" style={{ marginTop: 22 }}>
+                  <Icon name="check" size={12}/>Approval
+                </div>
+                <div className="bid-approval-panel">
+                  <div className="bid-approval-state">
+                    <span className={"chip " + (isApproved ? "sage" : isRejected ? "rose" : "muted")}
+                          style={{ fontWeight: 600 }}>
+                      <span className="chip-dot"/>
+                      {isApproved ? "Approved" : isRejected ? "Rejected" : "Pending"}
+                    </span>
+                    {(isApproved || isRejected) && approver && (
+                      <span className="bid-approval-meta-large">
+                        by <strong>{approver.name}</strong>
+                        {stampedAt && <> · <span className="mono">{new Date(stampedAt).toLocaleString()}</span></>}
+                      </span>
+                    )}
+                  </div>
+                  {isAdmin ? (
+                    <div className="bid-approval-controls">
+                      {!isApproved && onApproveBid && (
+                        <button className="btn sm" onClick={onApproveBid}
+                                style={{ borderColor: "var(--sage)", color: "var(--sage)" }}>
+                          <Icon name="thumbsUp" size={13}/>Approve
+                        </button>
+                      )}
+                      {!isRejected && onRejectBid && (
+                        <button className="btn sm" onClick={onRejectBid}
+                                style={{ borderColor: "var(--rose)", color: "var(--rose)" }}>
+                          <Icon name="thumbsDown" size={13}/>Reject
+                        </button>
+                      )}
+                      {(isApproved || isRejected) && onClearBidApproval && (
+                        <button className="btn sm" onClick={onClearBidApproval}>
+                          <Icon name="undo" size={13}/>Clear
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    isPending && (
+                      <div style={{ fontSize: 12, color: "var(--text-soft)" }}>
+                        <Icon name="lock" size={11}/> Only Admins can approve or reject a bid.
+                      </div>
+                    )
+                  )}
+                </div>
+
+                <div className="section-title" style={{ marginTop: 22 }}>
+                  <Icon name="export" size={12}/>RFQ/RFP PDF
+                </div>
+                <div className="bid-pdf-panel">
+                  {row.pdfPath ? (
+                    <div className="bid-pdf-row">
+                      <button type="button" className="tool-chip on" onClick={onOpenBidPdf}
+                              title={row.pdfName || "Open PDF"}>
+                        <Icon name="check" size={11}/>
+                        <span className="bid-pdf-name">{row.pdfName || "PDF attached"}</span>
+                      </button>
+                      {onRemoveBidPdf && (
+                        <button type="button" className="row-btn" title="Remove PDF"
+                                onClick={onRemoveBidPdf} style={{ color: "var(--rose)" }}>
+                          <Icon name="x" size={11}/>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "var(--text-soft)", marginBottom: 8 }}>
+                      No PDF attached.
+                    </div>
+                  )}
+                  <label className="tool-chip" style={{ cursor: "pointer" }}>
+                    <Icon name="plus" size={11}/>
+                    {row.pdfPath ? "Replace PDF…" : "Upload PDF…"}
+                    <input type="file" accept="application/pdf,.pdf"
+                           style={{ display: "none" }}
+                           onChange={e => {
+                             const f = e.target.files?.[0];
+                             if (f && onUploadBidPdf) onUploadBidPdf(f);
+                             e.target.value = "";
+                           }}/>
+                  </label>
+                </div>
+
+                {row.movedToProjectId && (
+                  <>
+                    <div className="section-title" style={{ marginTop: 22 }}>
+                      <Icon name="forward" size={12}/>Moved Forward
+                    </div>
+                    <div className="chip accent" style={{ fontSize: 12 }}>
+                      <Icon name="forward" size={11}/>
+                      Linked to Awaiting Verdict project · {row.movedToProjectId.slice(0, 8)}
+                    </div>
+                  </>
+                )}
+              </>
+            );
+          })()}
           {table === "events" && (row.outlookExternalAttendees || []).length > 0 && (
             <>
               <div className="section-title" style={{ marginTop: 22 }}>
@@ -778,6 +920,29 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "_amount",    label: "Contract Amount (optional)", type: "money", value: 0 },
         { k: "_remaining", label: "MSMM Remaining (optional)", type: "money", value: 0 },
       ]
+    },
+    // Open Bid → Awaiting Verdict. The bid's RFQ #, service description,
+    // and due date carry into the Awaiting row's `notes` (handled in
+    // confirmMove); everything else is captured here. clientId carries
+    // straight through. Bid row stays as historical breadcrumb linked via
+    // moved_to_project_id.
+    "openbids→awaiting": {
+      title: "Move to Awaiting Verdict",
+      subtitle: "Carries to Awaiting Verdict · Open Bid stays as historical record",
+      carried: ["clientId"],
+      newFields: [
+        { k: "projectName",      label: "Project Name *",                placeholder: "Working title for the submitted proposal" },
+        { k: "year",             label: "Year",                          type: "number", value: new Date().getFullYear() },
+        { k: "projectNumber",    label: "Project Number",                placeholder: "e.g. 24-101" },
+        { k: "dateSubmitted",    label: "Date Submitted",                type: "date", value: new Date().toISOString().substr(0, 10) },
+        { k: "anticipatedResultDate", label: "Anticipated Result Date",  type: "date" },
+        { k: "clientContract",   label: "Client Contract #",             placeholder: "e.g. POSL-2026-045" },
+        { k: "msmmContract",     label: "MSMM Contract #",               placeholder: "e.g. MSMM-2026-045" },
+        { k: "msmmUsed",         label: "MSMM Used",                     type: "money", value: 0 },
+        { k: "msmmRemaining",    label: "MSMM Remaining",                type: "money", value: 0 },
+        { k: "notes",            label: "Notes",                         type: "textarea",
+          placeholder: "RFQ # / service / due date are appended automatically." },
+      ],
     },
   };
 

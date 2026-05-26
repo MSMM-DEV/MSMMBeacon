@@ -328,6 +328,8 @@ html, body { overflow-x: clip; }
 .tab.stage-invoice.active .dot { background: var(--blue); }
 .tab.stage-events.active .dot { background: var(--accent); }
 .tab.stage-clients.active .dot { background: var(--text); }
+.tab.stage-openbids.active .dot { background: var(--accent); }
+.tab.stage-quad.active .dot { background: var(--text); }
 .tab .count {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -11033,3 +11035,143 @@ html, body { overflow-x: clip; }
 @media (max-width: 640px) {
   .tk-day-matrix-wrap > .tk-day-matrix-axis { display: none; }
 }
+
+/* ====================================================================
+ * Open Bids — pre-Awaiting pipeline stage
+ * ==================================================================== */
+
+/* Subtle left-edge stripe by approval state so a glance down the table
+ * reads "where's the work blocked." Mirrors how Potential stripes rows
+ * by probability. Pending stays neutral (no stripe) — it's the default
+ * and we don't want to visually punish the entry workflow. */
+.trow[data-approval="approved"] {
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--sage) 14%, transparent) 0, transparent 3px),
+    transparent;
+}
+.trow[data-approval="rejected"] {
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--rose) 14%, transparent) 0, transparent 3px),
+    transparent;
+}
+
+/* ----- Table cells ----- */
+
+/* PDF cell — uploaded state shows the file name as a tool-chip with a
+ * remove button next to it. Empty state is a single "Upload" chip. */
+.bid-pdf-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+.bid-pdf-name {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* Web Link cell — anchor styled like a quiet chip so it sits flush in
+ * the column without overpowering the surrounding numeric data. */
+.bid-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-ink);
+  text-decoration: none;
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+}
+.bid-link:hover { text-decoration: underline; }
+.bid-link > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Approval cell — state chip + (optional) meta line + (admin-only)
+ * thumbs-up / thumbs-down buttons. Flex-wrap so the actions fall to a
+ * second line on narrow viewports instead of clipping. */
+.bid-approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.bid-approval-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.bid-approval-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.bid-approver {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+/* ----- Drawer panel ----- */
+
+.bid-approval-panel {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bid-approval-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bid-approval-meta-large {
+  font-size: 12.5px;
+  color: var(--text-soft);
+}
+.bid-approval-controls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bid-pdf-panel {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bid-pdf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.bid-pdf-panel .bid-pdf-name {
+  max-width: 320px;
+}
+
+/* ----- Responsive tightening ----- */
+/* On phones the approval cell can squeeze the actions onto a second
+ * line — keep the meta short and let the chip stay legible. */
+@media (max-width: 640px) {
+  .bid-approval-meta { display: none; }
+  .bid-pdf-name      { max-width: 80px; }
+}
+
