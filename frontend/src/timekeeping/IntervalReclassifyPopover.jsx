@@ -48,10 +48,12 @@ export function IntervalReclassifyPopover({ interval, locked, onClose, onSaved }
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal-narrow" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <div className="modal-eyebrow">Interval</div>
-          <h3 className="modal-title">
-            {fmtClock(interval.startAt)} – {interval.endAt ? fmtClock(interval.endAt) : "now"}
-          </h3>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="modal-eyebrow">Interval</div>
+            <h3 className="modal-title">
+              {fmtClock(interval.startAt)} – {interval.endAt ? fmtClock(interval.endAt) : "now"}
+            </h3>
+          </div>
           <button className="modal-close" onClick={onClose}><Icon name="x" size={16}/></button>
         </div>
         <div className="modal-body">
