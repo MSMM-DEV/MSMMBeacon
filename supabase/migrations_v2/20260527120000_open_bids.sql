@@ -198,3 +198,13 @@ create policy "bid_rfqs_auth_update" on storage.objects
 create policy "bid_rfqs_auth_delete" on storage.objects
   for delete to authenticated
   using (bucket_id = 'bid-rfqs');
+
+--------------------------------------------------------------------------------
+-- 7. PostgREST schema-cache reload.
+--    Supabase usually auto-detects CREATE TABLE and reloads PostgREST, but
+--    there's a brief window (sometimes ~30s) where the new table 404s from
+--    the API. NOTIFY forces an immediate reload so the frontend can insert
+--    into open_bids the moment this migration finishes running.
+--------------------------------------------------------------------------------
+notify pgrst, 'reload schema';
+

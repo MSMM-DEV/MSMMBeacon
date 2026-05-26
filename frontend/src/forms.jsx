@@ -1112,6 +1112,26 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
 
     if (table === "openbids") {
       const stagedFile = form._pdf_file;
+      // Due Date is stored as a single ISO string in `form.due_at`, but we
+      // surface it as two separate native inputs (date + time) so neither
+      // depends on the browser's datetime-local picker chrome — that one
+      // doesn't have a "Done" button on several mobile/desktop variants
+      // and confused users. Either field can be left blank.
+      const dueDate = form.due_at ? String(form.due_at).slice(0, 10) : "";
+      const dueTime = form.due_at ? String(form.due_at).slice(11, 16) : "";
+      const setDuePart = (part, value) => {
+        const nextDate = part === "date" ? value : dueDate;
+        const nextTime = part === "time" ? value : dueTime;
+        if (!nextDate && !nextTime) { set("due_at", ""); return; }
+        // Time-only with no date is meaningless — drop it.
+        if (!nextDate) { set("due_at", ""); return; }
+        // Date-only is fine; default time to 23:59 so "due Friday" reads
+        // as "anytime before midnight Friday" instead of midnight-into-Friday.
+        const t = nextTime || "23:59";
+        const combined = new Date(`${nextDate}T${t}`);
+        if (Number.isNaN(combined.getTime())) { set("due_at", ""); return; }
+        set("due_at", combined.toISOString());
+      };
       return (
         <>
           <Field label="RFQ/RFP Number *">
@@ -1120,7 +1140,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
                    placeholder="e.g. RFQ-2026-014 or 0x4F2"
                    style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
-          <Field label="Client / Parish">
+          <Field label="Client / Parish (optional)">
             <SearchableSelect
               value={form.client_id || ""}
               options={clientOptions}
@@ -1128,7 +1148,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
               onChange={v => set("client_id", v || "")}
             />
           </Field>
-          <Field label="Description of Service">
+          <Field label="Description of Service (optional)">
             <select className="select" value={form.service_description}
                     onChange={e => set("service_description", e.target.value)}>
               <option value="">—</option>
@@ -1137,13 +1157,29 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
               ))}
             </select>
           </Field>
-          <Field label="Due Date">
-            <input className="input" type="datetime-local"
-                   value={form.due_at ? String(form.due_at).slice(0, 16) : ""}
-                   onChange={e => set("due_at", e.target.value ? new Date(e.target.value).toISOString() : "")}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
+          <Field label="Due Date (optional)">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input className="input" type="date" value={dueDate}
+                     onChange={e => setDuePart("date", e.target.value)}
+                     style={{ fontFamily: "var(--font-mono)", flex: "1 1 160px" }}
+                     aria-label="Due date"/>
+              <input className="input" type="time" value={dueTime}
+                     onChange={e => setDuePart("time", e.target.value)}
+                     style={{ fontFamily: "var(--font-mono)", flex: "0 1 130px" }}
+                     aria-label="Due time"
+                     disabled={!dueDate}
+                     title={!dueDate ? "Pick a date first" : ""}/>
+              {form.due_at && (
+                <button type="button" className="row-btn"
+                        title="Clear due date"
+                        onClick={() => set("due_at", "")}
+                        style={{ color: "var(--rose)" }}>
+                  <Icon name="x" size={11}/>
+                </button>
+              )}
+            </div>
           </Field>
-          <Field label="RFQ PDF File">
+          <Field label="RFQ PDF File (optional)">
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <label className="tool-chip" style={{ cursor: "pointer" }}>
                 <Icon name="plus" size={11}/>
@@ -1167,16 +1203,19 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
                 </>
               )}
               <span style={{ fontSize: 11, color: "var(--text-muted)", flexBasis: "100%" }}>
-                Uploaded after the bid is created. You can also attach a PDF later from the row.
+                Uploads after the bid is created. You can also attach a PDF later from the row or drawer.
               </span>
             </div>
           </Field>
-          <Field label="Web Link">
-            <input className="input" type="url" value={form.web_link}
+          <Field label="Web Link (optional)">
+            {/* type="text" not "url" so the browser doesn't refuse a value
+                like "google.com". We don't validate the format at the DB
+                level either — the field is a free-text hyperlink hint. */}
+            <input className="input" type="text" value={form.web_link}
                    onChange={e => set("web_link", e.target.value)}
                    placeholder="https://…"/>
           </Field>
-          <Field label="Notes" multiline>
+          <Field label="Notes (optional)" multiline>
             <textarea className="textarea" value={form.notes}
                       onChange={e => set("notes", e.target.value)}
                       placeholder="Anything to flag for the approver…"/>
