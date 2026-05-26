@@ -5,11 +5,12 @@
 // Phone-first layout: the punch button is the visual anchor and sized for
 // thumb reach (~240 px tall on ≤640).
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
 import {
   getCurrentBeaconUser, todayInCT, weekStartCT, fmtHM, fmtClock,
   loadPunchState, loadDayDetail, loadMyWeek,
+  loadCachedPunchState, saveCachedPunchState, adaptPunchResponseToState,
   setIntervalCategory, subscribeMyTimeState,
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
 } from "../data";
@@ -29,36 +30,79 @@ const CATEGORY_USER_OPTIONS = [
 ];
 
 export function TimesheetTab({ focusDate = null }) {
-  const me = getCurrentBeaconUser();
-  const [date,         setDate]         = useState(focusDate || todayInCT());
-  const [state,        setState]        = useState({ open: null, today: null });
-  const [day,          setDay]          = useState({ date, intervals: [], punches: [], day: null });
-  const [week,         setWeek]         = useState({ days: [], week: null });
-  const [showCorrect,  setShowCorrect]  = useState(false);
-  const [focusInterval,setFocusInterval]= useState(null);
-
+  const me        = getCurrentBeaconUser();
   const userId    = me?.id;
+  const [date,    setDate]    = useState(focusDate || todayInCT());
   const weekStart = weekStartCT(date);
 
-  const refresh = useCallback(async () => {
+  // Punch state — hydrate from localStorage so reload shows the correct
+  // IN/OUT toggle instantly. Background fetch reconciles within ~200 ms.
+  // `phase` distinguishes "we genuinely don't know yet" from "we know they're
+  // out" — critical so the button doesn't default to PUNCH IN while loading.
+  const [state, setState] = useState(() => loadCachedPunchState(userId) || { open: null, today: null });
+  const [phase, setPhase] = useState(() => loadCachedPunchState(userId) ? "ready" : "loading");
+  const [phaseError, setPhaseError] = useState(null);
+
+  const [day,           setDay]           = useState({ date, intervals: [], punches: [], day: null });
+  const [week,          setWeek]          = useState({ days: [], week: null });
+  const [showCorrect,   setShowCorrect]   = useState(false);
+  const [focusInterval, setFocusInterval] = useState(null);
+
+  // Persist whenever state changes so reloads/cross-tab opens see truth.
+  useEffect(() => { if (userId) saveCachedPunchState(userId, state); }, [userId, state]);
+
+  // Track the latest in-flight refresh so a stale fetch can't overwrite
+  // newer state (e.g. realtime fires while a manual refresh is pending).
+  const refreshSeqRef = useRef(0);
+
+  const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!userId) return;
-    const [st, d, w] = await Promise.all([
-      loadPunchState(userId),
-      loadDayDetail(userId, date),
-      loadMyWeek(userId, weekStart),
-    ]);
-    setState(st); setDay(d); setWeek(w);
+    const seq = ++refreshSeqRef.current;
+    if (!silent) setPhaseError(null);
+    try {
+      const [st, d, w] = await Promise.all([
+        loadPunchState(userId),
+        loadDayDetail(userId, date),
+        loadMyWeek(userId, weekStart),
+      ]);
+      if (seq !== refreshSeqRef.current) return;  // a newer refresh superseded us
+      setState(st);
+      setDay(d);
+      setWeek(w);
+      setPhase("ready");
+    } catch (err) {
+      if (seq !== refreshSeqRef.current) return;
+      // If we have cached state, stay in "ready" and just surface the error
+      // as a soft warning. If we don't, this is a hard error — show it.
+      setPhaseError(err.message || "could not load timesheet");
+      setPhase(prev => prev === "ready" ? "ready" : "error");
+    }
   }, [userId, date, weekStart]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Realtime: re-fetch when our own intervals or day rollup change. The DB
-  // trigger updates rollups synchronously after each punch, but Realtime
-  // confirms across multiple tabs / Pi punches.
+  // Realtime: re-fetch when our own intervals or day rollup change. Cross-tab
+  // and Pi-punch updates flow through here. Note: this requires
+  // beacon_v2.time_intervals + timesheet_days to be in the supabase_realtime
+  // publication (see migration 20260601120600_timekeeping_realtime.sql).
   useEffect(() => {
     if (!userId) return undefined;
-    return subscribeMyTimeState(userId, () => { refresh(); });
+    return subscribeMyTimeState(userId, () => { refresh({ silent: true }); });
   }, [userId, refresh]);
+
+  // Apply the Edge Function response directly so the button reflects the new
+  // state without a round trip. This kills the post-click flicker where the
+  // UI briefly showed the pre-click state until the background fetch landed.
+  const applyPunchResponse = useCallback((response) => {
+    const next = adaptPunchResponseToState(response, state.today);
+    if (next) {
+      setState(next);
+      setPhase("ready");
+    }
+    // Fire a silent background refresh to pull the full day timeline / week
+    // rollups (which need column data the response doesn't carry).
+    refresh({ silent: true });
+  }, [refresh, state.today]);
 
   if (!me) {
     return <div className="page-empty">Sign in to view your timesheet.</div>;
@@ -102,12 +146,19 @@ export function TimesheetTab({ focusDate = null }) {
       {isToday && (
         <section className="tk-hero">
           <PunchButton
+            phase={phase}
             state={punchedIn ? "in" : "out"}
             openSince={state.open?.startAt || null}
             todayMinutesWork={todayMinutes}
             locked={locked}
-            onPunched={refresh}
+            onPunched={applyPunchResponse}
+            onRetry={() => refresh()}
           />
+          {phaseError && phase === "ready" && (
+            <div className="tk-hero-warn-banner" role="alert">
+              <Icon name="bell" size={12}/> Couldn't refresh — showing last-known state. <button className="link-btn" type="button" onClick={() => refresh()}>Retry</button>
+            </div>
+          )}
           <div className="tk-hero-side">
             <div className="tk-hero-row">
               <span className="tk-hero-key">Today</span>

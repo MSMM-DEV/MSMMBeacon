@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Calendar, dateFnsLocalizer } from "react-big-calendar";
-import { format, parse, startOfWeek, getDay } from "date-fns";
+import { format, parse, startOfWeek, getDay, differenceInMinutes } from "date-fns";
 import { enUS } from "date-fns/locale";
 import "react-big-calendar/lib/css/react-big-calendar.css";
 
@@ -65,13 +65,23 @@ const toRBCEvent = (row) => {
   };
 };
 
+const fmtTime = (d) => {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const hh = ((h + 11) % 12) + 1;
+  const ampm = h < 12 ? "am" : "pm";
+  return m === 0 ? `${hh}${ampm}` : `${hh}:${String(m).padStart(2, "0")}${ampm}`;
+};
+
+// Month view: compact horizontal pill (room is tight — title + signals only).
 function EventBlock({ event }) {
   const r = event.resource;
   const externalCount = (r.outlookExternalAttendees || []).length;
   const tone = TYPE_TONE[r.type] || "muted";
   const stars = r.stars;
   return (
-    <div className={`cal-event tone-${tone}${r.outlookIsCancelled ? " cancelled" : ""}`}>
+    <div className={`cal-event cal-event-pill tone-${tone}${r.outlookIsCancelled ? " cancelled" : ""}`}>
       <span className="cal-event-stripe" aria-hidden />
       <span className="cal-event-body">
         {r.source === "outlook" && (
@@ -95,6 +105,65 @@ function EventBlock({ event }) {
             title={`${externalCount} external invitee${externalCount === 1 ? "" : "s"}`}
           >
             +{externalCount}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+// Week / Day view: tall card that fills the absolutely-positioned rbc-event slot
+// so the visual block actually spans start → end. Density adapts to duration so
+// 15-minute events don't overflow their time and 4-hour events don't waste space.
+function TimeBlockEvent({ event }) {
+  const r = event.resource;
+  const tone = TYPE_TONE[r.type] || "muted";
+  const stars = r.stars;
+  const externalCount = (r.outlookExternalAttendees || []).length;
+  const minutes = Math.max(0, differenceInMinutes(event.end, event.start));
+  // Density tiers control how much chrome we render inside the block.
+  // <30 min: title only (cramped). 30–59: title + time. ≥60: title + time + signals.
+  const density = minutes < 30 ? "xs" : minutes < 60 ? "sm" : "lg";
+  const showTime = density !== "xs";
+  const showSignals = density === "lg";
+  return (
+    <div
+      className={
+        `cal-event cal-event-block tone-${tone} density-${density}` +
+        (r.outlookIsCancelled ? " cancelled" : "")
+      }
+    >
+      <span className="cal-event-stripe" aria-hidden />
+      <span className="cal-event-block-body">
+        <span className="cal-event-block-head">
+          {r.source === "outlook" && (
+            <span className="cal-event-source" title="Synced from Outlook">
+              <Icon name="link" size={9} stroke={2} />
+            </span>
+          )}
+          <span className="cal-event-title">{event.title}</span>
+          {stars > 0 && showSignals && (
+            <span
+              className={`cal-event-stars stars-set-${stars}`}
+              title={`${stars} of 5 stars`}
+            >
+              ★{stars}
+            </span>
+          )}
+        </span>
+        {showTime && (
+          <span className="cal-event-time">
+            {fmtTime(event.start)} – {fmtTime(event.end)}
+          </span>
+        )}
+        {showSignals && externalCount > 0 && (
+          <span className="cal-event-meta">
+            <span
+              className="cal-event-ext"
+              title={`${externalCount} external invitee${externalCount === 1 ? "" : "s"}`}
+            >
+              +{externalCount} external
+            </span>
           </span>
         )}
       </span>
@@ -214,8 +283,15 @@ export function EventsCalendar({
   const effectiveView = isMobile ? "agenda" : viewMode;
   const viewsAvailable = isMobile ? ["agenda"] : DESKTOP_VIEWS;
 
+  // Open week/day at the start of the business day so users don't land at 12am.
+  const scrollToTime = useMemo(() => {
+    const t = new Date();
+    t.setHours(7, 0, 0, 0);
+    return t;
+  }, []);
+
   return (
-    <div className="cal-shell">
+    <div className={`cal-shell cal-view-${effectiveView}`}>
       <Calendar
         localizer={localizer}
         events={rbcEvents}
@@ -232,8 +308,9 @@ export function EventsCalendar({
         selectable
         step={30}
         timeslots={2}
+        scrollToTime={scrollToTime}
         components={{
-          event: EventBlock,
+          event: EventBlock,                  // month + fallback
           toolbar: (props) => (
             <CalendarToolbar
               {...props}
@@ -243,6 +320,8 @@ export function EventsCalendar({
               syncing={syncing}
             />
           ),
+          week:   { event: TimeBlockEvent },  // tall card for time-grid views
+          day:    { event: TimeBlockEvent },
           agenda: { event: AgendaEventRow },
         }}
         onSelectEvent={(e) => onOpenDrawer && onOpenDrawer(e.resource)}
@@ -255,7 +334,13 @@ export function EventsCalendar({
           dayRangeHeaderFormat: ({ start, end }, _c, l) =>
             `${l.format(start, "MMM d")} — ${l.format(end, "MMM d, yyyy")}`,
           weekdayFormat:        (d, _c, l) => l.format(d, "EEE").toUpperCase(),
-          timeGutterFormat:     (d, _c, l) => l.format(d, "h:mma").toLowerCase(),
+          // Week-view column headers: "MON · 26" — uppercase day code, then date.
+          dayFormat:            (d, _c, l) =>
+            `${l.format(d, "EEE").toUpperCase()} · ${l.format(d, "d")}`,
+          timeGutterFormat:     (d, _c, l) =>
+            d.getMinutes() === 0
+              ? l.format(d, "h a").toLowerCase().replace(" ", "")
+              : "",
           eventTimeRangeFormat: ({ start, end }, _c, l) =>
             `${l.format(start, "h:mma").toLowerCase()} – ${l.format(end, "h:mma").toLowerCase()}`,
           agendaTimeFormat:     (d, _c, l) => l.format(d, "h:mma").toLowerCase(),

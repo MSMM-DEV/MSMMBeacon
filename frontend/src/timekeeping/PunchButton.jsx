@@ -1,37 +1,64 @@
 // PunchButton — the big tactile toggle in the Timesheet tab.
 //
-// State machine:
-//   out          → primary green "PUNCH IN"        → POST source=web
-//   in           → primary red   "PUNCH OUT"       → POST source=web
-//   loading      → grey, disabled                  → ... while in-flight
-//   locked       → muted, disabled                 → "week is locked"
-//   error        → rose, "RETRY"                   → re-issue
+// State machine (driven by props):
+//   phase=loading            → grey, disabled "Checking…"  (we don't know yet)
+//   phase=error              → rose, "Retry" (parent fetch failed and no cache)
+//   locked                   → muted, disabled "Week locked"
+//   in-flight (local)        → grey, "Punching in…" / "Punching out…"
+//   error (local)            → rose,  "Retry"
+//   state=out                → green, "PUNCH IN"
+//   state=in                 → red,   "PUNCH OUT"
 //
-// Geolocation: the browser asks for it once on first PUNCH IN. We don't block
-// the punch if the user declines — geo is captured for audit / future
-// geofencing but never required.
+// Crucially: the button must NEVER default to "PUNCH IN" while the parent is
+// still loading. If we don't know whether the user is in or out, a click in
+// that window sends a punch that the DB trigger toggles based on actual DB
+// state — which means the user can punch the wrong direction. The phase
+// prop forces a neutral disabled state until we have ground truth.
+//
+// Geolocation: best-effort, capped at 1200 ms so the punch never blocks on
+// it. Captured for audit / future geofencing; declines or timeouts don't
+// affect the punch.
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
 import { callTimeclockPunch, fmtHM, fmtClock } from "../data";
 
 const ELAPSED_TICK_MS = 30_000;
+const GEO_TIMEOUT_MS  = 1200;
 
 function elapsedMin(openSinceIso) {
   if (!openSinceIso) return 0;
-  return Math.floor((Date.now() - +new Date(openSinceIso)) / 60_000);
+  return Math.max(0, Math.floor((Date.now() - +new Date(openSinceIso)) / 60_000));
+}
+
+function captureGeo() {
+  if (!navigator.geolocation) return Promise.resolve(null);
+  return new Promise(res => {
+    const timer = setTimeout(() => res(null), GEO_TIMEOUT_MS);
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        clearTimeout(timer);
+        res({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy_m: p.coords.accuracy });
+      },
+      () => { clearTimeout(timer); res(null); },
+      { timeout: GEO_TIMEOUT_MS, maximumAge: 60_000, enableHighAccuracy: false },
+    );
+  });
 }
 
 export function PunchButton({
-  state,             // 'in' | 'out'
-  openSince,         // ISO string when state === 'in'
-  todayMinutesWork,  // for inline summary
+  phase = "ready",      // 'loading' | 'ready' | 'error'
+  state,                // 'in' | 'out'  — only meaningful when phase==='ready'
+  openSince,            // ISO string when state === 'in'
+  todayMinutesWork,     // for inline summary when out
   locked = false,
-  onPunched,         // (response) => void
+  onPunched,            // (response) => void — parent applies the new state
+  onRetry,              // () => void — parent re-fetches state on error
 }) {
-  const [loading, setLoading]   = useState(false);
-  const [error,   setError]     = useState(null);
-  const [_, force]              = useState(0);
+  const [busy,  setBusy]  = useState(false);   // local in-flight flag
+  const [error, setError] = useState(null);
+  const [, force] = useState(0);
+  const inFlightRef = useRef(false);           // hard guard against double-fire
 
   // Tick the elapsed display every 30 s while currently in.
   useEffect(() => {
@@ -40,42 +67,71 @@ export function PunchButton({
     return () => clearInterval(id);
   }, [state, openSince]);
 
-  const punch = useCallback(async () => {
-    setLoading(true); setError(null);
-    let geo = null;
-    if (navigator.geolocation) {
-      // Best-effort, 3 s ceiling — we never block on it.
-      geo = await new Promise(res => {
-        const timer = setTimeout(() => res(null), 3_000);
-        navigator.geolocation.getCurrentPosition(
-          p => { clearTimeout(timer); res({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy_m: p.coords.accuracy }); },
-          () => { clearTimeout(timer); res(null); },
-          { timeout: 3_000, maximumAge: 60_000, enableHighAccuracy: false },
-        );
-      });
-    }
-    try {
-      const r = await callTimeclockPunch({ source: "web", geo });
-      onPunched?.(r);
-    } catch (e) {
-      setError(e.message || "punch failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [onPunched]);
+  // If the parent recovers from error (phase becomes 'ready'), clear our local error.
+  useEffect(() => { if (phase === "ready") setError(null); }, [phase]);
 
-  const label = locked  ? "WEEK LOCKED"
-              : error   ? "RETRY"
-              : loading ? "…"
-              : state === "in" ? "PUNCH OUT" : "PUNCH IN";
+  const punch = useCallback(async () => {
+    if (inFlightRef.current) return;           // hard idempotency on rapid taps
+    if (phase !== "ready") return;             // don't fire when state is unknown
+    if (locked) return;
+    inFlightRef.current = true;
+    setBusy(true); setError(null);
+    try {
+      const geo = await captureGeo();
+      const response = await callTimeclockPunch({ source: "web", geo });
+      onPunched?.(response);
+    } catch (e) {
+      setError(e?.message || "punch failed");
+    } finally {
+      setBusy(false);
+      inFlightRef.current = false;
+    }
+  }, [phase, locked, onPunched]);
+
+  const handleClick = () => {
+    if (error) {
+      // Two retry paths: local punch failure → retry the punch; parent fetch
+      // failure → retry the fetch via onRetry.
+      setError(null);
+      punch();
+    } else if (phase === "error") {
+      onRetry?.();
+    } else {
+      punch();
+    }
+  };
+
+  // ----- Label + class derivation -----------------------------------------
+  const isUnknown = phase === "loading";
+  const isFetchErr = phase === "error" && !error;
+  const showIn  = !isUnknown && !isFetchErr && !locked && !error && state === "in";
+  const showOut = !isUnknown && !isFetchErr && !locked && !error && state === "out";
+
+  let label;
+  if (locked)        label = "WEEK LOCKED";
+  else if (busy)     label = state === "in" ? "Punching out…" : "Punching in…";
+  else if (error)    label = "RETRY";
+  else if (isFetchErr) label = "RETRY";
+  else if (isUnknown)  label = "Checking…";
+  else if (showIn)     label = "PUNCH OUT";
+  else                 label = "PUNCH IN";
+
   const cls = [
     "tk-punch-btn",
-    locked ? "tk-punch-locked" : "",
-    error  ? "tk-punch-error"  : "",
-    !error && !locked && state === "in"  ? "tk-punch-out" : "",
-    !error && !locked && state === "out" ? "tk-punch-in"  : "",
-    loading ? "is-loading" : "",
+    locked       ? "tk-punch-locked"  : "",
+    error || isFetchErr ? "tk-punch-error"  : "",
+    isUnknown    ? "tk-punch-loading" : "",
+    showIn       ? "tk-punch-out"     : "",
+    showOut      ? "tk-punch-in"      : "",
+    busy         ? "is-loading"       : "",
   ].filter(Boolean).join(" ");
+
+  const iconName = isUnknown ? "clock"
+                 : locked    ? "lock"
+                 : showIn    ? "lock"   // we're IN → button means "PUNCH OUT" (lock the day)
+                 : "bolt";              // we're OUT or unknown → PUNCH IN
+
+  const disabled = locked || busy || isUnknown;
 
   const elapsed = state === "in" ? elapsedMin(openSince) : 0;
 
@@ -84,25 +140,30 @@ export function PunchButton({
       <button
         type="button"
         className={cls}
-        onClick={punch}
-        disabled={loading || locked}
+        onClick={handleClick}
+        disabled={disabled}
+        aria-busy={busy || isUnknown}
+        aria-label={label}
       >
         <span className="tk-punch-icon">
-          <Icon name={state === "in" ? "lock" : "bolt"} size={28}/>
+          <Icon name={iconName} size={28}/>
         </span>
         <span className="tk-punch-label">{label}</span>
-        {state === "in" && !locked && !error && (
+        {showIn && (
           <span className="tk-punch-sub">in for {fmtHM(elapsed)}</span>
         )}
-        {state === "out" && !locked && !error && (
+        {showOut && (
           <span className="tk-punch-sub">today · {fmtHM(todayMinutesWork || 0)}</span>
         )}
       </button>
       {error && (
-        <div className="tk-punch-error-msg">{error}</div>
+        <div className="tk-punch-error-msg" role="alert">{error}</div>
       )}
-      {openSince && state === "in" && (
-        <div className="tk-punch-since">Last punch · {fmtClock(openSince)}</div>
+      {!error && isFetchErr && (
+        <div className="tk-punch-error-msg" role="alert">Couldn't load your timesheet. Tap to retry.</div>
+      )}
+      {showIn && openSince && (
+        <div className="tk-punch-since">In since · {fmtClock(openSince)}</div>
       )}
     </div>
   );

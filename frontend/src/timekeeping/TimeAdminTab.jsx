@@ -1,28 +1,70 @@
 // TimeAdminTab — admin-only shell for the timekeeping system.
-// View picker:  Team day · Approvals · NFC enrollment · Settings.
 //
-// A "Reclassify now" button kicks the timeclock-classify Edge Function
-// against the current view so the admin can see the impact of a settings
-// change immediately.
+// View picker: Team · Approvals · NFC enrollment · Settings
+//
+// Within Team, the user chooses a range mode (Day / Week / Month / Custom)
+// and which people are visible. All of this is persisted per-admin via
+// localStorage (useAdminTimePrefs) so refreshing the page returns the admin
+// to exactly the same view they left.
+//
+// A small "Reclassify now" button kicks the timeclock-classify Edge Function
+// against the current admin so the impact of a settings change is visible.
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Icon } from "../icons";
-import { todayInCT, tkRunClassifier } from "../data";
-import { TeamDayView }      from "./TeamDayView";
-import { ApprovalsQueue }   from "./ApprovalsQueue";
-import { NfcEnrollPanel }   from "./NfcEnrollPanel";
-import { TimeSettingsPanel} from "./TimeSettingsPanel";
+import {
+  todayInCT, tkRunClassifier, getCurrentBeaconUser, loadTeamDay,
+} from "../data";
+import { useAdminTimePrefs } from "./useAdminTimePrefs";
+import { TeamRangeView }     from "./TeamRangeView";
+import { PeopleFilter }      from "./PeopleFilter";
+import { ApprovalsQueue }    from "./ApprovalsQueue";
+import { NfcEnrollPanel }    from "./NfcEnrollPanel";
+import { TimeSettingsPanel } from "./TimeSettingsPanel";
 
 const VIEWS = [
-  { key: "day",       label: "Team day",        icon: "users" },
+  { key: "team",      label: "Team",            icon: "users" },
   { key: "approvals", label: "Approvals",       icon: "check" },
   { key: "nfc",       label: "NFC enrollment",  icon: "link" },
   { key: "settings",  label: "Settings",        icon: "settings" },
 ];
 
+const RANGES = [
+  { key: "day",    label: "Day"    },
+  { key: "week",   label: "Week"   },
+  { key: "month",  label: "Month"  },
+  { key: "custom", label: "Custom" },
+];
+
 export function TimeAdminTab({ onOpenUserDay }) {
-  const [view, setView] = useState("day");
-  const [date, setDate] = useState(todayInCT());
+  const me      = getCurrentBeaconUser();
+  const adminId = me?.id;
+
+  const [view, setView]     = useState("team");
+  const [prefs, updatePrefs] = useAdminTimePrefs(adminId);
+
+  // Lightweight signals fetch: who's currently in / active today. Used by
+  // the PeopleFilter for "Currently in" + "Active today" quick-picks.
+  // Cheap query (today's snapshot only) so it can run on every tab open.
+  const [signals, setSignals] = useState({ activeToday: new Set(), currentlyIn: new Set() });
+  useEffect(() => {
+    if (view !== "team") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await loadTeamDay(todayInCT());
+        if (cancelled) return;
+        const at = new Set(), ci = new Set();
+        for (const r of rows) {
+          if (r.intervals.length > 0) at.add(r.user.id);
+          if (r.intervals.some(i => !i.endAt)) ci.add(r.user.id);
+        }
+        setSignals({ activeToday: at, currentlyIn: ci });
+      } catch { /* non-critical */ }
+    })();
+    return () => { cancelled = true; };
+  }, [view, prefs.anchorDate, prefs.range]);
+
   const [reBusy, setReBusy] = useState(false);
   const [reMsg,  setReMsg]  = useState(null);
 
@@ -41,32 +83,134 @@ export function TimeAdminTab({ onOpenUserDay }) {
     }
   };
 
+  const setRange = useCallback((next) => {
+    // When jumping to a range, anchor it sensibly relative to today.
+    const t = todayInCT();
+    updatePrefs(prev => {
+      const patch = { range: next };
+      if (!prev.anchorDate) patch.anchorDate = t;
+      if (next === "custom") {
+        if (!prev.customStart) patch.customStart = t;
+        if (!prev.customEnd)   patch.customEnd   = t;
+      }
+      return patch;
+    });
+  }, [updatePrefs]);
+
   return (
     <div className="tk-admin-page">
+      {/* Top nav — tabs + global tools */}
       <header className="tk-admin-head">
-        <nav className="tk-admin-nav">
+        <nav className="tk-admin-nav" aria-label="Admin sections">
           {VIEWS.map(v => (
-            <button key={v.key}
+            <button key={v.key} type="button"
               className={`tk-admin-tab ${view === v.key ? "is-active" : ""}`}
-              onClick={() => setView(v.key)}>
+              onClick={() => setView(v.key)}
+              aria-current={view === v.key ? "page" : undefined}>
               <Icon name={v.icon} size={13}/> {v.label}
             </button>
           ))}
         </nav>
         <div className="tk-admin-tools">
           {reMsg && <span className="tk-admin-msg">{reMsg}</span>}
-          <button className="btn btn-ghost btn-sm" onClick={runReclassify} disabled={reBusy}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={runReclassify} disabled={reBusy}>
             <Icon name="sparkles" size={13}/> {reBusy ? "Running…" : "Reclassify now"}
           </button>
         </div>
       </header>
 
+      {/* Team-specific control bar — range selector, search, people filter */}
+      {view === "team" && (
+        <div className="tk-admin-controls">
+          <div className="tk-admin-controls-left">
+            <SegmentedRange value={prefs.range} onChange={setRange}/>
+          </div>
+          <div className="tk-admin-controls-right">
+            <SearchBox
+              value={prefs.search}
+              onChange={(v) => updatePrefs({ search: v })}
+            />
+            <PeopleFilter
+              visibleUsers={prefs.visibleUsers}
+              onChange={(next) => updatePrefs({ visibleUsers: next })}
+              signals={signals}
+            />
+            <DensityToggle
+              value={prefs.density}
+              onChange={(v) => updatePrefs({ density: v })}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Body */}
       <div className="tk-admin-body">
-        {view === "day"       && <TeamDayView date={date} onDate={setDate} onUserDay={onOpenUserDay}/>}
+        {view === "team" && (
+          <TeamRangeView
+            prefs={prefs}
+            onPrefsChange={updatePrefs}
+            onOpenUserDay={onOpenUserDay}
+          />
+        )}
         {view === "approvals" && <ApprovalsQueue/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
         {view === "settings"  && <TimeSettingsPanel/>}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components: segmented range picker, search, density toggle
+// ---------------------------------------------------------------------------
+
+function SegmentedRange({ value, onChange }) {
+  return (
+    <div className="tk-segmented" role="tablist" aria-label="Range">
+      {RANGES.map(r => (
+        <button key={r.key} type="button" role="tab"
+          aria-selected={value === r.key}
+          className={`tk-segmented-btn ${value === r.key ? "is-active" : ""}`}
+          onClick={() => onChange(r.key)}>
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SearchBox({ value, onChange }) {
+  return (
+    <label className="tk-search-box">
+      <Icon name="search" size={13}/>
+      <input
+        type="search"
+        className="tk-search-input"
+        placeholder="Search names…"
+        value={value || ""}
+        onChange={e => onChange(e.target.value)}
+      />
+      {value && (
+        <button type="button" className="tk-search-clear"
+          onClick={() => onChange("")} aria-label="Clear search">
+          <Icon name="x" size={11}/>
+        </button>
+      )}
+    </label>
+  );
+}
+
+function DensityToggle({ value, onChange }) {
+  const next = value === "compact" ? "comfortable" : "compact";
+  return (
+    <button
+      type="button"
+      className={`tk-density-btn ${value === "compact" ? "is-compact" : ""}`}
+      onClick={() => onChange(next)}
+      title={`Switch to ${next} density`}
+      aria-label={`Switch to ${next} density`}
+    >
+      <Icon name={value === "compact" ? "columns" : "more"} size={13}/>
+    </button>
   );
 }

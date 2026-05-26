@@ -1771,18 +1771,148 @@ export function adaptNfcTag(r) {
 // ----------------------------------------------------------------------
 
 // State for the punch button: open interval + today's minutes.
+//
+// Production hardening: errors are surfaced (not silently swallowed) so the
+// UI can show an "unknown state" rather than incorrectly defaulting to OUT.
+// The open-interval query intentionally takes the *most recent* row when
+// `.maybeSingle()` would otherwise reject on multi-row results (the partial
+// unique index makes that should-never-happen, but a bug elsewhere shouldn't
+// brick the punch button).
 export async function loadPunchState(userId) {
-  const [{ data: openIv }, { data: day }] = await Promise.all([
+  if (!userId) throw new Error("loadPunchState: userId required");
+  const [openRes, dayRes] = await Promise.all([
     supabase.from("time_intervals")
       .select("*").eq("user_id", userId).is("end_at", null)
-      .order("start_at", { ascending: false }).limit(1).maybeSingle(),
+      .order("start_at", { ascending: false }).limit(1),
     supabase.from("timesheet_days")
       .select("*").eq("user_id", userId).eq("date", todayInCT()).maybeSingle(),
   ]);
+  if (openRes.error) throw new Error(`loadPunchState (open): ${openRes.error.message}`);
+  if (dayRes.error  && dayRes.error.code !== "PGRST116") {
+    // PGRST116 = "Results contain 0 rows" — fine, that's expected before any punch today.
+    throw new Error(`loadPunchState (day): ${dayRes.error.message}`);
+  }
+  const openIv = (openRes.data || [])[0] || null;
   return {
     open: openIv ? adaptInterval(openIv) : null,
-    today: day ? adaptTimesheetDay(day) : null,
+    today: dayRes.data ? adaptTimesheetDay(dayRes.data) : null,
   };
+}
+
+// localStorage cache for last-known punch state per user. Lets the page render
+// the correct IN/OUT toggle instantly on reload while the DB query is in
+// flight. Stale cache is preferred over a wrong default — the background fetch
+// reconciles within ~200 ms.
+const PUNCH_CACHE_VERSION = 1;
+const PUNCH_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;  // 12 h (past that, treat as unknown)
+
+function punchCacheKey(userId) {
+  return `beacon.tk.punchState.v${PUNCH_CACHE_VERSION}.${userId}`;
+}
+
+export function loadCachedPunchState(userId) {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(punchCacheKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.savedAt !== "number") return null;
+    if (Date.now() - parsed.savedAt > PUNCH_CACHE_MAX_AGE_MS) return null;
+    return { open: parsed.open || null, today: parsed.today || null };
+  } catch { return null; }
+}
+
+export function saveCachedPunchState(userId, state) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(punchCacheKey(userId), JSON.stringify({
+      open:    state?.open  || null,
+      today:   state?.today || null,
+      savedAt: Date.now(),
+    }));
+  } catch { /* quota/private-mode — silently ignore */ }
+}
+
+// Per-admin Time Admin view preferences. Persisted to localStorage so the
+// chosen range, anchor date, visible-users allowlist, and search query all
+// survive reload until the admin changes them. Keyed by admin user id so
+// two admins can have independent preferences in the same browser.
+const ADMIN_PREFS_VERSION = 1;
+function adminPrefsKey(adminUserId) {
+  return `beacon.tk.admin.prefs.v${ADMIN_PREFS_VERSION}.${adminUserId}`;
+}
+export const DEFAULT_ADMIN_TIME_PREFS = {
+  range:        "day",       // 'day' | 'week' | 'month' | 'custom'
+  anchorDate:   null,        // 'YYYY-MM-DD' — null means "today (CT)" at render time
+  customStart:  null,        // 'YYYY-MM-DD'
+  customEnd:    null,        // 'YYYY-MM-DD' (inclusive)
+  visibleUsers: "all",       // 'all' | string[]  (array = explicit allowlist)
+  search:       "",          // free-text name filter
+  density:      "comfortable",  // 'comfortable' | 'compact'
+};
+export function loadAdminTimePrefs(adminUserId) {
+  if (!adminUserId) return { ...DEFAULT_ADMIN_TIME_PREFS };
+  try {
+    const raw = localStorage.getItem(adminPrefsKey(adminUserId));
+    if (!raw) return { ...DEFAULT_ADMIN_TIME_PREFS };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_ADMIN_TIME_PREFS, ...(parsed || {}) };
+  } catch { return { ...DEFAULT_ADMIN_TIME_PREFS }; }
+}
+export function saveAdminTimePrefs(adminUserId, prefs) {
+  if (!adminUserId) return;
+  try {
+    localStorage.setItem(adminPrefsKey(adminUserId), JSON.stringify(prefs || {}));
+  } catch { /* quota — silently ignore */ }
+}
+
+// Map a timeclock-punch Edge Function response into the same shape
+// loadPunchState produces, so the TimesheetTab can apply it as authoritative
+// state without an extra round trip. The synthesized "interval" only has the
+// fields the PunchButton actually reads (startAt); everything else is null.
+export function adaptPunchResponseToState(response, prevToday = null) {
+  if (!response) return null;
+  const isIn = response.state === "in";
+  const open = isIn ? {
+    id:                    null,
+    userId:                response.user?.id || null,
+    startAt:               response.open_since || null,
+    endAt:                 null,
+    startPunchId:          response.punch_id || null,
+    endPunchId:            null,
+    category:              "work",
+    categorySource:        "auto",
+    outlookEventId:        null,
+    outlookEventSubject:   null,
+    outlookEventLocation:  null,
+    notes:                 null,
+    computedAt:            new Date().toISOString(),
+    isOpen:                true,
+    durationMinutes:       null,
+  } : null;
+  // Merge today's minutes into the existing rollup if we have one — the
+  // response only tells us minutes_work, not the full per-category breakdown.
+  const today = prevToday
+    ? { ...prevToday, minutesWork: response.today_minutes_work ?? prevToday.minutesWork }
+    : (response.today_minutes_work != null ? {
+        userId:           response.user?.id || null,
+        date:             todayInCT(),
+        minutesWork:      response.today_minutes_work,
+        minutesLunch:     0,
+        minutesBreak:     0,
+        minutesMeeting:   0,
+        minutesTravel:    0,
+        minutesUntagged:  0,
+        minutesOff:       0,
+        firstIn:          response.open_since || null,
+        lastOut:          null,
+        approvalStatus:   "pending",
+        flags:            {},
+        notes:            null,
+        updatedAt:        new Date().toISOString(),
+        minutesTotalCounted: response.today_minutes_work,
+      } : null);
+  return { open, today };
 }
 
 // One day of intervals (with punches if needed) for a user.
@@ -1828,6 +1958,40 @@ export async function loadMyWeek(userId, weekStart) {
     days: (days || []).map(adaptTimesheetDay),
     week: week ? adaptTimesheetWeek(week) : { userId, weekStart, approvalStatus: "open", locked: false, totals: {} },
   };
+}
+
+// Team-wide for a date range. Returns one row per user with their per-day
+// rollups in the range, plus their currently-open interval (if any).
+// `endDateExclusive` is a 'YYYY-MM-DD' string treated as exclusive — pass
+// the first day AFTER the range. Used by the Time Admin Week/Month/Custom
+// views.
+export async function loadTeamRange(startDate, endDateExclusive) {
+  const [{ data: days, error: dayErr }, { data: openIvs, error: ivErr }] = await Promise.all([
+    supabase.from("timesheet_days")
+      .select("*")
+      .gte("date", startDate)
+      .lt("date", endDateExclusive)
+      .order("date", { ascending: true }),
+    supabase.from("time_intervals")
+      .select("user_id, start_at")
+      .is("end_at", null),
+  ]);
+  if (dayErr) throw new Error(`loadTeamRange (days): ${dayErr.message}`);
+  if (ivErr)  throw new Error(`loadTeamRange (open): ${ivErr.message}`);
+
+  const byUser = new Map();
+  for (const u of getUsers()) {
+    byUser.set(u.id, { user: u, days: [], openSince: null });
+  }
+  for (const d of (days || [])) {
+    const slot = byUser.get(d.user_id);
+    if (slot) slot.days.push(adaptTimesheetDay(d));
+  }
+  for (const iv of (openIvs || [])) {
+    const slot = byUser.get(iv.user_id);
+    if (slot) slot.openSince = iv.start_at;
+  }
+  return [...byUser.values()];
 }
 
 // Team-wide for a single day. One row per user with their intervals snippet.
