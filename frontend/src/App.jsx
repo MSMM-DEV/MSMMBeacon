@@ -1357,6 +1357,35 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     showToast("Invoice row deleted", "check");
   };
 
+  // Events delete — `event_attendees` cascades; the generic BEFORE DELETE
+  // trigger deactivates any related alerts. Optimistic local removal first,
+  // restore on DB error.
+  const deleteEvent = async (id) => {
+    const prev = events;
+    setEvents(rows => rows.filter(r => r.id !== id));
+    const { error } = await supabase.from("events").delete().eq("id", id);
+    if (error) {
+      setEvents(prev);
+      showToast(`Delete failed: ${error.message}`, "x");
+      return;
+    }
+    showToast("Event deleted", "check");
+  };
+
+  // Hot Leads delete — v2 table is `leads`; `lead_attendees` cascades;
+  // generic deactivate-alerts trigger fires. Same optimistic pattern.
+  const deleteHotLead = async (id) => {
+    const prev = hotLeads;
+    setHotLeads(rows => rows.filter(r => r.id !== id));
+    const { error } = await supabase.from("leads").delete().eq("id", id);
+    if (error) {
+      setHotLeads(prev);
+      showToast(`Delete failed: ${error.message}`, "x");
+      return;
+    }
+    showToast("Hot lead deleted", "check");
+  };
+
   // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
   // The invoice rows + sub matrix get re-fetched together so primeFiles/files
   // stay in sync with whatever the user just saved.
@@ -3121,6 +3150,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               ? () => {
                   if (!window.confirm(`Delete invoice row "${liveRow.name || ""}"? This cannot be undone.`)) return;
                   deleteInvoice(liveRow.id);
+                  setDrawer(null);
+                }
+              : drawer.table === "events"
+              ? () => {
+                  const label = liveRow.title || liveRow.name || "this event";
+                  if (!window.confirm(`Delete event "${label}"? This removes it from the calendar and the event list. This cannot be undone.`)) return;
+                  deleteEvent(liveRow.id);
+                  setDrawer(null);
+                }
+              : drawer.table === "hotleads"
+              ? () => {
+                  const label = liveRow.title || liveRow.name || "this lead";
+                  if (!window.confirm(`Delete hot lead "${label}"? This cannot be undone.`)) return;
+                  deleteHotLead(liveRow.id);
                   setDrawer(null);
                 }
               : null

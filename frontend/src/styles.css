@@ -8460,9 +8460,8 @@ html, body { overflow-x: clip; }
   .tk-admin-nav      { width: 100%; overflow-x: auto; }
   .tk-team-row       { grid-template-columns: 1fr; gap: 4px; padding: 8px 6px; border-bottom: 1px solid var(--border); border-radius: 0; }
   .tk-team-row-timeline { height: 24px; }
-  .tk-enroll-row     { grid-template-columns: 1fr; gap: 4px; }
-  .tk-approvals-row  { grid-template-columns: 1fr; }
-  .modal-wide        { width: 100vw; height: 100vh; border-radius: 0; }
+  /* (tk-enroll-row, tk-approvals-row, modal-wide handled by the comprehensive
+     mobile pass at the end of this file — see "MOBILE RESPONSIVENESS PASS") */
 
   /* Bottom-sheet for the reclassify popover + correction modal in
      portrait phones. Overrides the centered absolute positioning that
@@ -9969,4 +9968,528 @@ html, body { overflow-x: clip; }
     gap: 6px;
   }
   .tk-punch-prompt .tk-prompt-chip { padding: 12px; font-size: 14px; }
+}
+
+/* ============================================================
+   MOBILE RESPONSIVENESS PASS (Timesheet + Time Admin)
+   ----------------------------------------------------------------
+   Single source of truth for phone-only layout fixes. Loaded last
+   so it wins specificity contests. Touch targets ≥ 44 px, form
+   inputs ≥ 16 px (prevents iOS zoom-on-focus), no horizontal
+   overflow at 320 px, modals become true sheets with sticky
+   header/footer + scrollable body.
+   ============================================================ */
+
+@media (max-width: 640px) {
+
+  /* ===== A. Modal infrastructure ============================ */
+
+  /* Every form input inside any modal: 16 px text + comfortable
+     touch height. Prevents iOS Safari's auto-zoom on focus. */
+  .modal .form-input,
+  .modal select.form-input,
+  .modal input.form-input,
+  .modal textarea.form-input {
+    font-size: 16px;
+    min-height: 44px;
+    line-height: 1.3;
+  }
+  .modal textarea.form-input { min-height: 88px; }
+
+  /* Make every modal footer button touch-comfortable. */
+  .modal .modal-foot .btn { min-height: 44px; }
+
+  /* ----- .modal-wide → full-screen sheet ------------------- */
+  /* (WeekApprovalModal + any future wide modals.) Overrides the
+     centered absolute positioning the base .modal ships with. */
+  .modal.modal-wide {
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; height: 100vh;
+    max-width: 100vw; max-height: 100vh;
+    transform: none;
+    margin: 0;
+    border-radius: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .modal.modal-wide .modal-head {
+    flex-wrap: wrap;
+    padding: 12px 14px 10px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    position: relative;
+    z-index: 2;
+  }
+  .modal.modal-wide .modal-title {
+    flex: 1 1 100%;
+    font-size: 17px;
+    line-height: 1.25;
+    margin: 2px 0 0;
+    word-break: break-word;
+  }
+  .modal.modal-wide .modal-eyebrow {
+    flex: 1 1 100%;
+  }
+  .modal.modal-wide .modal-head-meta {
+    margin-left: 0;
+    padding-right: 0;
+    flex: 0 0 auto;
+    order: 3;
+  }
+  .modal.modal-wide .modal-close {
+    margin-left: auto;
+    order: 4;
+    min-width: 36px; min-height: 36px;
+  }
+  .modal.modal-wide .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 14px;
+  }
+  .modal.modal-wide .modal-foot {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 14px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev);
+    z-index: 2;
+  }
+  .modal.modal-wide .modal-foot .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-height: 44px;
+    font-size: 14px;
+  }
+  /* If there's an odd 3rd button (e.g. WeekApprovalModal), let the
+     primary action take the full second row so it gets full thumb width. */
+  .modal.modal-wide .modal-foot .btn.btn-primary:last-child {
+    flex-basis: 100%;
+  }
+
+  /* ===== B. WeekApprovalModal — day cards =================== */
+  .modal.modal-wide .tk-week-review-day { padding: 10px 12px; }
+  .tk-week-review-day-head {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    column-gap: 8px;
+  }
+  .tk-week-review-day-label,
+  .tk-week-review-day-date { width: auto; }
+  .tk-week-review-day-total {
+    margin-left: auto;
+    font-size: 14px;
+  }
+  .tk-week-flag-chip { flex-basis: auto; }
+  .tk-reject-pane textarea.form-input {
+    font-size: 16px; min-height: 88px;
+  }
+
+  /* ===== C. CorrectionModal / IntervalReclassify / PunchPrompt
+     (.modal-narrow bottom-sheet) ============================ */
+  .modal.modal-narrow .modal-eyebrow { font-size: 11px; }
+  .modal.modal-narrow .modal-title   { font-size: 17px; line-height: 1.3; }
+  .modal.modal-narrow .modal-body    { padding: 14px 18px; }
+  .modal.modal-narrow .modal-close   { min-width: 36px; min-height: 36px; }
+  .tk-category-chip { gap: 6px; flex-wrap: wrap; }
+  .tk-category-chip .tk-cat { font-size: 12px; }
+
+  /* ===== D. Time Admin shell + controls ===================== */
+  .tk-admin-page { gap: 12px; padding: 8px 0 18px; }
+  .tk-admin-head {
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .tk-admin-nav {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    margin: 0 -4px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .tk-admin-nav::-webkit-scrollbar { display: none; }
+  .tk-admin-tab {
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .tk-admin-tools {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tk-admin-tools .btn { min-height: 36px; }
+  .tk-admin-msg { flex: 1 1 100%; font-size: 11px; }
+  .tk-admin-body { padding: 12px; }
+
+  /* Admin controls bar (segmented + search + people + density) */
+  .tk-admin-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+  }
+  .tk-admin-controls-left,
+  .tk-admin-controls-right {
+    width: 100%;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .tk-segmented {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    width: 100%;
+    padding: 3px;
+  }
+  .tk-segmented-btn {
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    text-align: center;
+  }
+  .tk-search-box {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 40px;
+  }
+  .tk-search-input { font-size: 16px; }       /* prevent iOS zoom */
+  .tk-density-btn  { width: 40px; height: 40px; flex-shrink: 0; }
+  .tk-people-chip  { min-height: 40px; padding: 8px 12px; font-size: 12px; }
+
+  /* ===== E. TeamRangeView header ============================ */
+  .tk-range { gap: 10px; }
+  .tk-range-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+  .tk-range-nav {
+    display: grid;
+    grid-template-columns: 36px 1fr 36px;
+    grid-template-rows: auto;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+  }
+  .tk-range-nav > .tk-icon-btn:nth-of-type(1) { grid-column: 1; grid-row: 1; }
+  .tk-range-nav > .tk-icon-btn:nth-of-type(2) { grid-column: 3; grid-row: 1; }
+  .tk-range-title-wrap {
+    grid-column: 2; grid-row: 1;
+    text-align: center;
+    min-width: 0;
+  }
+  .tk-range-title {
+    font-size: 16px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tk-range-eyebrow { font-size: 9px; letter-spacing: 0.16em; }
+  .tk-range-nav > .tk-pill-btn {
+    grid-column: 1 / -1; grid-row: 2;
+    justify-self: center;
+    margin-top: 4px;
+    min-height: 32px;
+  }
+  .tk-icon-btn { min-width: 36px; min-height: 36px; }
+  .tk-range-side {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tk-range-side .tk-day-input {
+    flex: 1; min-width: 0;
+    font-size: 16px;
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+  .tk-custom-inputs {
+    display: flex; width: 100%; gap: 6px;
+    align-items: center;
+  }
+  .tk-custom-inputs .tk-day-input { flex: 1; min-width: 0; }
+  .tk-custom-sep { font-size: 14px; }
+
+  /* Stat tiles — already 2x2; tighten + prevent value clipping */
+  .tk-stat-grid { gap: 8px; }
+  .tk-stat-tile { padding: 10px 12px; min-width: 0; }
+  .tk-stat-tile-label { font-size: 9px; letter-spacing: 0.14em; }
+  .tk-stat-tile-value {
+    font-size: 20px;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tk-stat-tile-sub { font-size: 10px; }
+
+  .tk-range-empty { padding: 32px 12px; }
+  .tk-range-empty-row { padding: 24px 12px; font-size: 12px; }
+
+  /* ===== F. CustomMatrix — stack on phone =================== */
+  .tk-custom-matrix-head { display: none; }
+  .tk-custom-matrix-row {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto auto;
+    column-gap: 12px;
+    row-gap: 6px;
+    padding: 12px 14px;
+    align-items: center;
+  }
+  .tk-custom-matrix-name { grid-column: 1; grid-row: 1; min-width: 0; }
+  .tk-custom-matrix-name-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tk-custom-total { grid-column: 2; grid-row: 1; font-size: 15px; }
+  .tk-custom-bar   { grid-column: 1 / -1; grid-row: 2; }
+  .tk-custom-avg   { grid-column: 1; grid-row: 3; text-align: left; font-size: 11px; }
+  .tk-custom-flags { grid-column: 2; grid-row: 3; text-align: right; font-size: 11px; }
+  .tk-custom-avg::before {
+    content: "Avg/day "; color: var(--text-soft);
+    font-family: var(--font-mono); letter-spacing: 0.04em;
+  }
+  .tk-custom-flags::before {
+    content: "Flags "; color: var(--text-soft);
+    font-family: var(--font-mono); letter-spacing: 0.04em;
+  }
+
+  /* ===== G. PeopleFilter popover → bottom sheet on phones === */
+  .tk-people-pop {
+    position: fixed;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-height: min(72vh, 560px);
+    border-radius: 14px;
+    transform-origin: bottom right;
+  }
+  .tk-people-pop-head { padding: 12px 14px; }
+  .tk-people-search   { font-size: 16px; min-height: 36px; }
+  .tk-people-clear    { min-width: 28px; min-height: 28px; }
+  .tk-people-quick    { padding: 10px 12px; }
+  .tk-people-quick-btn { min-height: 32px; font-size: 12px; padding: 6px 12px; }
+  .tk-people-list     { -webkit-overflow-scrolling: touch; }
+  .tk-people-row      { min-height: 48px; padding: 10px 14px; gap: 12px; }
+  .tk-people-check    { width: 20px; height: 20px; }
+  .tk-people-name     {
+    font-size: 14px;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tk-people-foot {
+    padding: 12px 14px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .tk-people-foot .btn { min-height: 44px; padding: 8px 18px; }
+
+  /* ===== H. UserDayModal — full-screen, sticky head ========= */
+  .tk-user-day-modal {
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; max-width: 100vw;
+    height: 100vh; max-height: 100vh;
+    transform: none;
+    border-radius: 0;
+    padding-bottom: 0;
+    display: flex; flex-direction: column;
+  }
+  .tk-user-day-head {
+    padding: 12px 14px 10px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    position: sticky; top: 0; z-index: 3;
+  }
+  .tk-user-day-eyebrow { font-size: 9px; }
+  .tk-user-day-title   { font-size: 16px; }
+  .tk-user-day-toolbar {
+    padding: 10px 14px;
+    gap: 8px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .tk-user-day-nav    { width: 100%; flex-wrap: wrap; gap: 6px; }
+  .tk-user-day-nav .tk-day-input { flex: 1; min-width: 0; font-size: 16px; min-height: 44px; }
+  .tk-user-day-nav .tk-icon-btn  { min-width: 40px; min-height: 40px; }
+  .tk-user-day-date {
+    font-size: 12px;
+    width: 100%;
+    text-align: left;
+  }
+  .tk-user-day-stats {
+    padding: 10px 14px;
+    gap: 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+  .tk-user-day-stat        { flex-shrink: 0; min-width: 0; padding-right: 14px; }
+  .tk-user-day-stat-label  { font-size: 9px; }
+  .tk-user-day-stat-value  { font-size: 14px; white-space: nowrap; }
+  .tk-user-day-body {
+    flex: 1 1 auto; min-height: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tk-user-day-err { margin: 0 14px 8px; font-size: 12px; }
+
+  /* ===== I. ApprovalsQueue rows ============================ */
+  .tk-approvals-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto auto;
+    column-gap: 12px; row-gap: 2px;
+    padding: 12px;
+    align-items: center;
+  }
+  .tk-approvals-row > :first-child  { grid-column: 1; grid-row: 1; }
+  .tk-approvals-week { grid-column: 1; grid-row: 2; font-size: 13px; }
+  .tk-approvals-sub  { grid-column: 1; grid-row: 3; font-size: 11px; }
+  .tk-approvals-row .btn {
+    grid-column: 2; grid-row: 1 / -1;
+    align-self: center;
+    min-height: 44px;
+    padding: 8px 16px;
+  }
+
+  /* ===== J. NfcEnrollPanel ================================= */
+  .tk-enroll       { gap: 14px; }
+  .tk-enroll-form  { padding: 12px; gap: 10px; }
+  .tk-enroll-form .btn,
+  .tk-enroll-actions .btn { min-height: 44px; }
+  .tk-enroll-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: stretch;
+  }
+  .tk-enroll-actions .btn { flex: 1 1 calc(50% - 4px); }
+  .tk-enroll-captured { padding: 12px; gap: 10px; }
+  .tk-enroll-uid {
+    font-size: 12px;
+    word-break: break-all;
+    line-height: 1.4;
+  }
+  .tk-enroll-uid code { font-size: 12px; word-break: break-all; }
+  .tk-enroll-waiting {
+    flex-wrap: wrap; row-gap: 6px;
+    font-size: 12px;
+  }
+  .tk-enroll-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 10px 12px;
+  }
+  .tk-enroll-row code        { word-break: break-all; font-size: 11px; }
+  .tk-enroll-row-label,
+  .tk-enroll-row-seen        { font-size: 11px; }
+
+  /* ===== K. TimeSettingsPanel ============================== */
+  .tk-settings-toggle {
+    padding: 14px;
+    font-size: 13px;
+    align-items: flex-start;
+  }
+  .tk-settings-toggle input[type="checkbox"] {
+    width: 22px; height: 22px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .tk-settings-grid { gap: 12px; }
+  .tk-settings-grid .form-input,
+  .tk-settings-grid select.form-input {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  .tk-settings-foot {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .tk-settings-foot .btn { width: 100%; min-height: 44px; }
+  .tk-settings-foot .form-ok { margin-left: 0; }
+  .tk-settings-note { font-size: 11px; }
+
+  /* ===== L. Personal Timesheet — touch-up =================== */
+  .tk-hero-warn-banner {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    align-items: flex-start;
+  }
+  .tk-hero-warn-banner .link-btn {
+    padding: 4px 8px;
+    min-height: 30px;
+  }
+  /* Calendar day-card head — wrap correction button below stats */
+  .tk-day-card-cal .tk-day-card-head { gap: 6px 8px; }
+  .tk-day-card-cal .tk-day-card-head .btn {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  /* Day timeline calendar — ensure correction button doesn't overlap title */
+  .tk-day-card-head-meta { min-width: 0; flex: 1; }
+  .tk-day-card-head-meta h3 { font-size: 13px; }
+  .tk-day-card-sub { font-size: 11px; }
+
+  /* ===== M. Day matrix axis (admin) — already hidden on phone === */
+  /* Confirm the row collapses cleanly */
+  .tk-day-matrix-row {
+    grid-template-columns: 1fr 88px;
+    grid-template-rows: auto auto;
+    gap: 6px 12px;
+    padding: 10px 12px;
+  }
+  .tk-day-matrix-name { grid-column: 1 / -1; grid-row: 1; min-width: 0; }
+  .tk-day-matrix-name-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tk-day-matrix-times { font-size: 10px; }
+  .tk-day-matrix-times-extra { display: none; }     /* save horizontal room */
+  .tk-day-matrix-timeline { grid-column: 1; grid-row: 2; min-width: 0; }
+  .tk-day-matrix-total    { grid-column: 2; grid-row: 2; align-self: end; }
+
+  /* ===== N. Section heads (Approvals, NFC) — wrap cleanly === */
+  .tk-section-head { flex-wrap: wrap; gap: 8px; }
+  .tk-section-head h3 { font-size: 14px; }
+
+  /* ===== O. Global guards =================================== */
+  /* Prevent any in-page horizontal scroll from leaking out of components. */
+  .tk-timesheet-page,
+  .tk-admin-page { overflow-x: hidden; }
+  /* But keep horizontal scroll WITHIN the matrices that need it. */
+  .tk-week-matrix, .tk-month-matrix { max-width: 100%; }
+}
+
+/* ===== Tiny phones (≤ 360 px) — extra-aggressive density =====
+   Pixel 4a-class devices and below. Targeted overrides only. */
+@media (max-width: 360px) {
+  .tk-segmented-btn { font-size: 11px; padding: 6px 4px; }
+  .tk-people-chip   { padding: 6px 10px; }
+  .tk-people-chip-label { font-size: 11px; }
+  .tk-stat-tile-value { font-size: 17px; }
+  .tk-range-title     { font-size: 15px; }
+  .tk-user-day-title  { font-size: 15px; }
+  .modal.modal-wide .modal-title { font-size: 16px; }
+  .tk-punch-prompt .tk-prompt-grid { grid-template-columns: 1fr; }
+}
+
+/* ===== Tablet portrait (641 – 900) ===========================
+   Refinements so the Time Admin Day matrix still feels rich. */
+@media (min-width: 641px) and (max-width: 900px) {
+  .tk-admin-controls { padding: 10px 12px; gap: 10px; }
+  .tk-admin-controls-right { flex-wrap: wrap; gap: 8px; }
+  .tk-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .tk-custom-matrix-head,
+  .tk-custom-matrix-row { grid-template-columns: 200px 1fr 90px 70px 100px; gap: 10px; }
 }
