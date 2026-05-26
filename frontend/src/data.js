@@ -218,6 +218,28 @@ export const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 export const TODAY_MONTH = new Date().getMonth();
 export const THIS_YEAR   = new Date().getFullYear();
 
+// Open Bids → Service Description dropdown options. Mirrors the
+// beacon_v2.bid_service_enum values defined in 20260527120000_open_bids.sql.
+// Keep these two in sync — adding a new service requires both an ALTER TYPE
+// in a follow-up migration AND a new entry here.
+export const BID_SERVICE_OPTIONS = [
+  "Civil Engineering Design Services",
+  "Drainage and Stormwater Engineering",
+  "Roadway and Infrastructure Design",
+  "Water and Sewer Engineering Services",
+  "Construction Engineering and Inspection",
+  "Project Management Services",
+  "Engineering Planning and Feasibility Studies",
+  "Environmental and Coastal Engineering",
+  "Traffic and Transportation Engineering",
+  "Site Development Engineering",
+  "Utility Infrastructure Engineering",
+  "Flood Mitigation and Resilience Planning",
+  "Surveying and Mapping Services",
+  "Grant Support and Technical Assistance",
+  "On-Call Engineering Services",
+];
+
 export const mkId = () => "r_" + Math.random().toString(36).slice(2, 10);
 
 export const fmtMoney = (n, showCents = true) => {
@@ -605,6 +627,26 @@ function adaptHotLead(r) {
   };
 }
 
+function adaptOpenBid(r) {
+  return {
+    id: r.id,
+    rfqNumber:          r.rfq_rfp_number || "",
+    clientId:           r.client_id || null,
+    serviceDescription: r.service_description || "",
+    dueAt:              r.due_at || "",
+    pdfPath:            r.pdf_file_path || "",
+    pdfName:            r.pdf_file_name || "",
+    webLink:            r.web_link || "",
+    notes:              r.notes || "",
+    approvalStatus:     r.approval_status || "pending",
+    approvedBy:         r.approved_by || null,
+    approvedAt:         r.approved_at || null,
+    movedToProjectId:   r.moved_to_project_id || null,
+    createdBy:          r.created_by || null,
+    createdAt:          r.created_at || null,
+  };
+}
+
 // app_settings is a singleton row. Null benchmark = "no target set" (chart
 // renders bars in a neutral color and hides the benchmark line).
 function adaptAppSettings(row) {
@@ -707,6 +749,7 @@ export async function loadBeacon() {
   const [
     users, clients, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
+    openBidRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -774,6 +817,15 @@ export async function loadBeacon() {
     supabase.from("app_settings").select("*").limit(1)
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] app_settings fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    // Open Bids — pre-Awaiting pipeline stage. Newest due first; rows without
+    // a due date sort last. Gracefully degrade if the migration hasn't landed.
+    supabase.from("open_bids")
+      .select("*")
+      .order("due_at", { ascending: true, nullsFirst: false })
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] open_bids fetch skipped:", error.message); return []; }
         return data || [];
       }),
   ]);
@@ -1006,6 +1058,7 @@ export async function loadBeacon() {
     invoices:  adaptedInvoices,
     events:    events.map(adaptEvent),
     hotLeads:  hotLeads.map(adaptHotLead),
+    openBids:  (openBidRows || []).map(adaptOpenBid),
     clients:   _companies,
     users:     _users,
     subInvoices: subInvoicesMatrix,
@@ -2401,5 +2454,160 @@ export function computeOutGaps({ intervals, date }) {
   if (cursor < cutoff) gaps.push([cursor, cutoff]);
 
   return gaps;
+}
+
+// ============================================================
+// Open Bids — CRUD + storage helpers
+// ============================================================
+// Permissive-for-authenticated RLS today, with a BEFORE UPDATE trigger
+// (see 20260527120000_open_bids.sql) that rejects approval-column writes
+// from non-Admins. The UI also gates the approve/reject buttons; trigger
+// is defense-in-depth.
+
+// UI patch ({ rfqNumber, clientId, … }) → DB payload. Only keys that map
+// to columns are forwarded; everything else is dropped silently.
+const OPEN_BID_COL_MAP = {
+  rfqNumber:          "rfq_rfp_number",
+  clientId:           "client_id",
+  serviceDescription: "service_description",
+  dueAt:              "due_at",
+  webLink:            "web_link",
+  notes:              "notes",
+  // pdfPath / pdfName are written by upload/delete helpers below, not via
+  // generic updateOpenBid — keeps file lifecycle paired with storage ops.
+};
+
+function buildOpenBidDbPatch(patch) {
+  const out = {};
+  for (const [k, v] of Object.entries(patch || {})) {
+    const col = OPEN_BID_COL_MAP[k];
+    if (!col) continue;
+    out[col] = v === "" ? null : v;
+  }
+  return out;
+}
+
+export async function createOpenBid(payload) {
+  const me = getCurrentBeaconUser();
+  const dbPatch = buildOpenBidDbPatch(payload);
+  if (!dbPatch.rfq_rfp_number) {
+    throw new Error("RFQ/RFP Number is required");
+  }
+  if (me?.id) dbPatch.created_by = me.id;
+  const { data, error } = await supabase
+    .from("open_bids").insert(dbPatch).select("*").single();
+  if (error) throw new Error(`open_bids insert: ${error.message}`);
+  return adaptOpenBid(data);
+}
+
+export async function updateOpenBid(id, patch) {
+  const dbPatch = buildOpenBidDbPatch(patch);
+  if (Object.keys(dbPatch).length === 0) return null;
+  const { data, error } = await supabase
+    .from("open_bids").update(dbPatch).eq("id", id).select("*").single();
+  if (error) throw new Error(`open_bids update: ${error.message}`);
+  return adaptOpenBid(data);
+}
+
+export async function deleteOpenBid(id) {
+  // If a PDF was uploaded, remove the binary too. We do this best-effort
+  // BEFORE the DB delete so a successful row delete doesn't leave an
+  // orphan binary; if the storage remove fails the bid row stays.
+  const { data: existing } = await supabase
+    .from("open_bids").select("pdf_file_path").eq("id", id).maybeSingle();
+  if (existing?.pdf_file_path) {
+    const rm = await supabase.storage.from("bid-rfqs").remove([existing.pdf_file_path]);
+    if (rm.error) throw new Error(`storage remove: ${rm.error.message}`);
+  }
+  const { error } = await supabase.from("open_bids").delete().eq("id", id);
+  if (error) throw new Error(`open_bids delete: ${error.message}`);
+}
+
+// Admin-only in practice (the DB trigger enforces this and will raise
+// 42501 / "open_bids approval can only be changed by an Admin" for
+// non-admin sessions). The UI also hides the buttons for non-admins.
+// `status` ∈ {'approved','rejected','pending'}. Pending nulls out
+// approver + timestamp; approved/rejected stamp both with current admin
+// + now().
+export async function setOpenBidApproval(id, status) {
+  const me = getCurrentBeaconUser();
+  if (status !== "pending" && status !== "approved" && status !== "rejected") {
+    throw new Error(`Invalid approval status: ${status}`);
+  }
+  const dbPatch = status === "pending"
+    ? { approval_status: "pending", approved_by: null, approved_at: null }
+    : { approval_status: status, approved_by: me?.id || null, approved_at: new Date().toISOString() };
+  const { data, error } = await supabase
+    .from("open_bids").update(dbPatch).eq("id", id).select("*").single();
+  if (error) throw new Error(`open_bids approval: ${error.message}`);
+  return adaptOpenBid(data);
+}
+
+// Link an open_bid to the freshly-created Awaiting Verdict project. Called
+// from confirmMove after the projects insert succeeds — keeps the
+// historical breadcrumb intact (open_bid row stays, points forward).
+export async function markOpenBidMovedForward(id, projectId) {
+  const { error } = await supabase
+    .from("open_bids")
+    .update({ moved_to_project_id: projectId })
+    .eq("id", id);
+  if (error) throw new Error(`open_bids forward-link: ${error.message}`);
+}
+
+// ----- Storage: bid-rfqs bucket -----
+// One PDF per bid (1:1 — replacing an existing upload removes the old
+// binary first). Path: <bid_id>/<stamp>-<safe-name>.
+export function buildOpenBidStoragePath({ bidId, originalName }) {
+  const fileName = uploadFilename(originalName);
+  return `${bidId}/${fileName}`;
+}
+
+export async function uploadOpenBidPdf({ bidId, file }) {
+  if (!bidId || !file) throw new Error("uploadOpenBidPdf requires bidId + file");
+  // Remove an existing upload first so each bid keeps at most one binary.
+  const { data: existing } = await supabase
+    .from("open_bids").select("pdf_file_path").eq("id", bidId).maybeSingle();
+  if (existing?.pdf_file_path) {
+    const rm = await supabase.storage.from("bid-rfqs").remove([existing.pdf_file_path]);
+    if (rm.error) throw new Error(`storage remove (replace): ${rm.error.message}`);
+  }
+  const path = buildOpenBidStoragePath({ bidId, originalName: file.name || "rfq.pdf" });
+  const up = await supabase.storage.from("bid-rfqs").upload(path, file, {
+    upsert: false, cacheControl: "3600",
+  });
+  if (up.error) throw new Error(`storage upload: ${up.error.message}`);
+  const { data, error } = await supabase
+    .from("open_bids")
+    .update({ pdf_file_path: path, pdf_file_name: file.name || "rfq.pdf" })
+    .eq("id", bidId)
+    .select("*").single();
+  if (error) {
+    // DB write failed but binary is up — try to roll back the binary so
+    // we don't accumulate orphans in the bucket.
+    await supabase.storage.from("bid-rfqs").remove([path]).catch(() => {});
+    throw new Error(`open_bids pdf link: ${error.message}`);
+  }
+  return adaptOpenBid(data);
+}
+
+export async function deleteOpenBidPdf({ bidId, filePath }) {
+  if (filePath) {
+    const rm = await supabase.storage.from("bid-rfqs").remove([filePath]);
+    if (rm.error) throw new Error(`storage remove: ${rm.error.message}`);
+  }
+  const { data, error } = await supabase
+    .from("open_bids")
+    .update({ pdf_file_path: null, pdf_file_name: null })
+    .eq("id", bidId)
+    .select("*").single();
+  if (error) throw new Error(`open_bids pdf clear: ${error.message}`);
+  return adaptOpenBid(data);
+}
+
+export async function getOpenBidPdfSignedUrl(filePath, expiresInSeconds = 60) {
+  const { data, error } = await supabase.storage.from("bid-rfqs")
+    .createSignedUrl(filePath, expiresInSeconds);
+  if (error) throw new Error(`signed url: ${error.message}`);
+  return data?.signedUrl;
 }
 

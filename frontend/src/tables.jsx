@@ -12,6 +12,7 @@ import {
   fmtMoney, fmtDate, fmtDateTime,
   MONTHS, TODAY_MONTH, THIS_YEAR,
   linkedProjectsFor,
+  BID_SERVICE_OPTIONS,
 } from "./data.js";
 import { LinkedProjectsSection } from "./panels.jsx";
 import { setCurrentTableSnapshot } from "./table-state.js";
@@ -3229,6 +3230,263 @@ export const HotLeadsTable = ({
         return (
           <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
                data-stars={r.stars != null ? String(r.stars) : undefined}
+               style={{ gridTemplateColumns: gridCols, cursor: "default" }}
+               onDoubleClick={() => onOpenDrawer(r)}>
+            {renderOrderedCells(visibleColumns, cells)}
+          </div>
+        );
+      }}
+    />
+  );
+};
+
+
+// ---------- Open Bids ----------
+// Pre-Awaiting-Verdict pipeline stage. Tracks RFQ/RFPs under evaluation.
+// Inline-editable RFQ # / Client / Service / Due / Web Link / Notes.
+// PDF cell renders an upload chip (one PDF per bid). Approval cell renders
+// a state chip plus thumbs-up / thumbs-down toggle for Admins; non-admins
+// see the state plus approver + timestamp in read-only form.
+//
+// Row stripe by approval state (pending/approved/rejected) via
+// `data-approval` on the trow — see styles.css `.trow[data-approval=…]`.
+//
+// Move Forward is gated on approval_status==='approved'. The button stays
+// rendered (so users can see it exists) but disabled with a tooltip.
+export const OpenBidsTable = ({
+  tab, rows, updateRow = _noopUpdate, isAdmin = false,
+  onOpenDrawer, onForward,
+  onApprove, onReject, onClearApproval,
+  onUploadPdf, onRemovePdf, onOpenPdf,
+  onDelete,
+  flashId, filters,
+  yearOptions, yearValue, onYearChange,
+}) => {
+  const cols = [
+    { label: "__select", w: "42px", locked: true },
+    { label: "RFQ/RFP #", w: "minmax(120px, 1fr)", sortKey: "rfqNumber" },
+    { label: "Client / Parish", w: "minmax(180px, 1.4fr)", sortKey: "clientName",
+      sortValue: r => companyById(r.clientId)?.name || "" },
+    { label: "Service", w: "minmax(220px, 1.6fr)", sortKey: "serviceDescription" },
+    { label: "Due Date", w: "170px", sortKey: "dueAt" },
+    { label: "PDF", w: "150px" },
+    { label: "Web Link", w: "minmax(160px, 1.2fr)", sortKey: "webLink" },
+    { label: "Approval", w: "200px", sortKey: "approvalStatus" },
+    { label: "Approved By", w: "150px", sortKey: "approverName", defaultHidden: true,
+      sortValue: r => userById(r.approvedBy)?.name || "" },
+    { label: "Notes", w: "minmax(160px, 1.2fr)", sortKey: "notes", defaultHidden: true },
+    { label: "__actions", w: "150px", locked: true },
+  ];
+
+  const { clientOptions } = buildOptions();
+  const serviceOptions = BID_SERVICE_OPTIONS.map(s => ({ value: s, label: s }));
+
+  // File-input refs keyed by bid id so each row's "Upload PDF" button can
+  // trigger its own hidden <input type=file>. Refs live in a Map so the
+  // table re-renders don't churn through them.
+  const fileInputs = useRef(new Map());
+  const triggerUpload = (id) => {
+    const el = fileInputs.current.get(id);
+    if (el) el.click();
+  };
+
+  // Approval state → chip class. sage = approved (positive, matches "check"
+  // semantics elsewhere); rose = rejected; muted = pending/awaiting.
+  const approvalChipClass = (status) => ({
+    approved: "sage",
+    rejected: "rose",
+    pending:  "muted",
+  })[status] || "muted";
+  const approvalLabel = (status) => ({
+    approved: "Approved",
+    rejected: "Rejected",
+    pending:  "Pending",
+  })[status] || "Pending";
+
+  return (
+    <TableView
+      tab={tab}
+      filters={filters}
+      columns={cols} rows={rows}
+      yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
+      emptyTitle="No open bids yet"
+      emptyHint="Add an RFQ/RFP to track it through review. Admins approve a bid before it can be moved to Awaiting Verdict."
+      emptyIcon="briefcase"
+      renderRow={(r, _i, gridCols, visibleColumns) => {
+        const approver = r.approvedBy ? userById(r.approvedBy) : null;
+        const stampedAt = r.approvedAt ? fmtDateTime(r.approvedAt) : "";
+        const isApproved  = r.approvalStatus === "approved";
+        const isRejected  = r.approvalStatus === "rejected";
+
+        const cells = {
+          "__select": (
+            <div className="td row-check" onClick={e => e.stopPropagation()}>
+              <input type="checkbox"/>
+            </div>
+          ),
+          "RFQ/RFP #": (
+            <div className="td mono" style={{ fontSize: 12.5, fontWeight: 500 }}>
+              <EditableCell value={r.rfqNumber}
+                onChange={v => updateRow(r.id, { rfqNumber: v })}/>
+            </div>
+          ),
+          "Client / Parish": (
+            <div className="td subtle">
+              <EditableCell value={r.clientId} type="combobox" options={clientOptions}
+                onChange={v => updateRow(r.id, { clientId: v })}
+                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Service": (
+            <div className="td subtle" style={{ fontSize: 12.5 }}>
+              <EditableCell value={r.serviceDescription} type="select" options={serviceOptions}
+                onChange={v => updateRow(r.id, { serviceDescription: v || null })}
+                render={v => v
+                  ? <span className="chip muted" title={v} style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
+                  : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Due Date": (
+            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+              <EditableCell value={r.dueAt ? String(r.dueAt).slice(0, 16) : ""} type="datetime-local"
+                onChange={v => updateRow(r.id, { dueAt: v ? new Date(v).toISOString() : null })}
+                format={v => v ? fmtDateTime(v) : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "PDF": (
+            <div className="td" onClick={e => e.stopPropagation()}>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                style={{ display: "none" }}
+                ref={el => {
+                  if (el) fileInputs.current.set(r.id, el);
+                  else    fileInputs.current.delete(r.id);
+                }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUploadPdf?.(r.id, f);
+                  e.target.value = "";   // allow re-pick of same file
+                }}
+              />
+              {r.pdfPath ? (
+                <div className="bid-pdf-cell">
+                  <button type="button" className="tool-chip on" title={r.pdfName || "Open PDF"}
+                          onClick={() => onOpenPdf?.(r)}>
+                    <Icon name="check" size={11}/>
+                    <span className="bid-pdf-name">{r.pdfName || "PDF"}</span>
+                  </button>
+                  <button type="button" className="row-btn" title="Remove PDF"
+                          onClick={() => onRemovePdf?.(r.id)}
+                          style={{ color: "var(--rose)" }}>
+                    <Icon name="x" size={11}/>
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="tool-chip" onClick={() => triggerUpload(r.id)}
+                        title="Upload an RFQ/RFP PDF (max ~50 MB)">
+                  <Icon name="plus" size={11}/>Upload
+                </button>
+              )}
+            </div>
+          ),
+          "Web Link": (
+            <div className="td subtle" style={{ fontSize: 12.5 }}>
+              <EditableCell value={r.webLink}
+                onChange={v => updateRow(r.id, { webLink: v })}
+                placeholder="https://…"
+                render={v => v
+                  ? <a href={v} target="_blank" rel="noopener noreferrer"
+                       onClick={e => e.stopPropagation()}
+                       className="bid-link" title={v}>
+                      <Icon name="link" size={11}/>
+                      <span>{(() => {
+                        try { return new URL(v).hostname.replace(/^www\./, ""); }
+                        catch { return v; }
+                      })()}</span>
+                    </a>
+                  : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Approval": (
+            <div className="td" onClick={e => e.stopPropagation()}>
+              <div className="bid-approval">
+                <span className={`chip ${approvalChipClass(r.approvalStatus)}`}
+                      title={approver ? `${approvalLabel(r.approvalStatus)} by ${approver.name}${stampedAt ? " · " + stampedAt : ""}` : approvalLabel(r.approvalStatus)}>
+                  <span className="chip-dot"/>{approvalLabel(r.approvalStatus)}
+                </span>
+                {(isApproved || isRejected) && approver && (
+                  <span className="bid-approval-meta" title={stampedAt}>
+                    {approver.name} · {fmtDate(r.approvedAt)}
+                  </span>
+                )}
+                {isAdmin && (
+                  <div className="bid-approval-actions">
+                    {!isApproved && (
+                      <button type="button" className="row-btn" title="Approve"
+                              onClick={() => onApprove?.(r)} style={{ color: "var(--sage)" }}>
+                        <Icon name="thumbsUp" size={13}/>
+                      </button>
+                    )}
+                    {!isRejected && (
+                      <button type="button" className="row-btn" title="Reject"
+                              onClick={() => onReject?.(r)} style={{ color: "var(--rose)" }}>
+                        <Icon name="thumbsDown" size={13}/>
+                      </button>
+                    )}
+                    {(isApproved || isRejected) && (
+                      <button type="button" className="row-btn" title="Clear approval"
+                              onClick={() => onClearApproval?.(r)}>
+                        <Icon name="x" size={12}/>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ),
+          "Approved By": (
+            <div className="td subtle" style={{ fontSize: 12.5 }}>
+              {approver
+                ? <span className="bid-approver">{approver.name}{stampedAt ? ` · ${fmtDate(r.approvedAt)}` : ""}</span>
+                : <span className="empty-cell">—</span>}
+            </div>
+          ),
+          "Notes": (
+            <div className="td subtle" style={{ fontSize: 12.5 }}>
+              <EditableCell value={r.notes} type="textarea"
+                onChange={v => updateRow(r.id, { notes: v })}
+                format={v => truncCell(v)}/>
+            </div>
+          ),
+          "__actions": (
+            <div className="td" style={{ justifyContent: "flex-end", gap: 4 }}>
+              <div className="row-actions" onClick={e => e.stopPropagation()}>
+                <button
+                  className="row-btn forward"
+                  title={isApproved
+                    ? "Move to Awaiting Verdict"
+                    : "Approve this bid before moving forward"}
+                  disabled={!isApproved}
+                  onClick={() => isApproved && onForward?.(r)}>
+                  <Icon name="forward" size={14}/>
+                </button>
+                <button className="row-btn" title="Delete bid"
+                        onClick={() => {
+                          if (confirm("Delete this open bid? This cannot be undone.")) {
+                            onDelete?.(r.id);
+                          }
+                        }}
+                        style={{ color: "var(--rose)" }}>
+                  <Icon name="trash" size={13}/>
+                </button>
+              </div>
+            </div>
+          ),
+        };
+        return (
+          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+               data-approval={r.approvalStatus}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}
