@@ -10650,3 +10650,348 @@ html, body { overflow-x: clip; }
   }
   .pwa-toast-actions .pwa-toast-btn { min-height: 40px; padding: 8px 16px; }
 }
+
+/* ============================================================
+   MOBILE — Personal Day Calendar list view
+   ----------------------------------------------------------------
+   Replaces the absolute-positioned hour rail with a vertical list.
+   Reverse-chronological so the live/most-recent interval sits at
+   the top of the list (where the thumb naturally lands).
+   ============================================================ */
+.tk-day-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface);
+}
+.tk-day-list-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding: 4px 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-soft);
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.tk-day-list-meta-band {
+  color: color-mix(in srgb, var(--accent-ink) 85%, transparent);
+  font-weight: 600;
+}
+.tk-day-list-meta-stat {
+  display: inline-flex; align-items: center; gap: 6px;
+  text-transform: none; letter-spacing: 0;
+  font-family: var(--font-display);
+  font-size: 11px; font-weight: 500;
+  color: var(--text-muted);
+}
+.tk-day-list-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px;
+  padding: 32px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Interval card — full-width, generous touch target, tone-coloured
+   left stripe + chip dot. Stacks cleanly; never overlaps. */
+.tk-day-list-card {
+  appearance: none;
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-left-color: var(--tk-stripe, var(--border-strong));
+  border-radius: 12px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 100ms ease;
+}
+.tk-day-list-card:hover { border-color: var(--border-strong); }
+.tk-day-list-card:active { transform: translateY(1px); }
+.tk-day-list-card.tone-green  { --tk-stripe: #557049; background: color-mix(in srgb, #6E8F62 8%, var(--surface)); }
+.tk-day-list-card.tone-sage   { --tk-stripe: #6E8F62; background: color-mix(in srgb, #6E8F62 6%, var(--surface)); }
+.tk-day-list-card.tone-blue   { --tk-stripe: #4A6EA9; background: color-mix(in srgb, #4A6EA9 5%, var(--surface)); }
+.tk-day-list-card.tone-rose   { --tk-stripe: #B85C5C; background: color-mix(in srgb, #B85C5C 6%, var(--surface)); }
+.tk-day-list-card.tone-accent { --tk-stripe: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.tk-day-list-card.tone-muted  { --tk-stripe: var(--border-strong); background: color-mix(in srgb, var(--text-muted) 3%, var(--surface)); }
+.tk-day-list-card.is-untagged {
+  border-left-color: #B85C5C;
+  background: color-mix(in srgb, #B85C5C 10%, var(--surface));
+}
+.tk-day-list-card.is-open {
+  outline: 2px solid color-mix(in srgb, var(--tk-stripe, var(--accent)) 35%, transparent);
+  outline-offset: -2px;
+}
+.tk-day-list-card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+}
+.tk-day-list-card-time {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px; font-weight: 600;
+  color: var(--text);
+}
+.tk-day-list-card-time .icon { color: var(--text-soft); }
+.tk-day-list-card-time-to { color: var(--text); }
+.tk-day-list-card-dur {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--tk-stripe, var(--text));
+}
+.tk-day-list-card-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center;
+}
+.tk-day-list-card-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px 3px 8px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tk-stripe, var(--text-muted)) 14%, var(--surface));
+  color: var(--tk-stripe, var(--text-muted));
+  border: 1px solid color-mix(in srgb, var(--tk-stripe, var(--border)) 30%, var(--border));
+}
+.tk-day-list-card-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--tk-stripe, var(--text-soft));
+}
+.tk-day-list-card-chip-outlook {
+  background: color-mix(in srgb, #4A6EA9 12%, var(--surface));
+  color: #19315A;
+  border-color: color-mix(in srgb, #4A6EA9 28%, var(--border));
+}
+[data-theme="dark"] .tk-day-list-card-chip-outlook { color: #BFD3F0; }
+.tk-day-list-card-chip-confirmed {
+  background: color-mix(in srgb, #6E8F62 14%, var(--surface));
+  color: #2C3E27;
+  border-color: color-mix(in srgb, #6E8F62 30%, var(--border));
+}
+[data-theme="dark"] .tk-day-list-card-chip-confirmed { color: #C8E0BF; }
+.tk-day-list-card-chip-cta {
+  background: color-mix(in srgb, #B85C5C 14%, var(--surface));
+  color: #5A1D1D;
+  border-color: color-mix(in srgb, #B85C5C 30%, var(--border));
+}
+[data-theme="dark"] .tk-day-list-card-chip-cta { color: #F0C4C4; }
+.tk-day-list-card-outlook-line {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tk-day-list-card-loc { color: var(--text-soft); font-style: normal; }
+.tk-day-list-card-note {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.tk-day-list-card-note .icon { color: var(--text-soft); margin-top: 2px; flex-shrink: 0; }
+.tk-day-list-card-note span { word-break: break-word; }
+
+/* Gap row — slim, italic, red diagonal stripe accent. */
+.tk-day-list-gap {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, #B85C5C 12%, var(--surface)) 0 6px,
+      color-mix(in srgb, #B85C5C 7%, var(--surface)) 6px 12px
+    );
+  border: 1px solid color-mix(in srgb, #B85C5C 24%, var(--border));
+  border-left: 3px solid color-mix(in srgb, #B85C5C 60%, transparent);
+  border-radius: 10px;
+}
+.tk-day-list-gap-icon {
+  display: grid; place-items: center;
+  width: 22px; height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #B85C5C 18%, var(--surface));
+  color: #6E2A2A;
+}
+.tk-day-list-gap-text { line-height: 1.3; }
+.tk-day-list-gap-label {
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #6E2A2A;
+}
+.tk-day-list-gap-range {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+[data-theme="dark"] .tk-day-list-gap-label,
+[data-theme="dark"] .tk-day-list-gap-icon { color: #F5D2D0; }
+
+/* On phones, the day-card wrapper is edge-to-edge and the list bleeds
+   into it without inner padding fighting. */
+@media (max-width: 640px) {
+  .tk-day-card-cal .tk-day-list { padding: 10px; }
+}
+
+/* ============================================================
+   MOBILE — Time Admin Day Matrix row
+   ----------------------------------------------------------------
+   Replaces the unreadable horizontal mini-timeline with a clean
+   3-line layout. Tap target = full row → UserDayModal.
+   ============================================================ */
+.tk-day-matrix-mobile {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  list-style: none;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.tk-day-matrix-mob {
+  background: var(--surface);
+  border-radius: 0;
+  padding: 0;
+  position: relative;
+}
+.tk-day-matrix-mob:not(:last-child) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.tk-day-matrix-mob.is-in::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: #6E8F62;
+}
+.tk-day-matrix-mob.has-flag::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: var(--rose);
+}
+.tk-day-matrix-mob-btn {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 12px 14px;
+  font-family: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  min-height: 64px;
+}
+.tk-day-matrix-mob-btn:active { background: color-mix(in srgb, var(--accent-softer) 30%, transparent); }
+.tk-day-matrix-mob-head {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0;
+}
+.tk-day-matrix-mob-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tk-day-matrix-mob-total {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-display);
+  font-size: 13px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+.tk-day-matrix-mob-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tk-day-matrix-mob-status > .icon { flex-shrink: 0; color: var(--text-soft); }
+.tk-day-matrix-mob-status-text {
+  display: inline-flex; flex-wrap: wrap; align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+.tk-day-matrix-mob-status.is-in {
+  color: #3E5734;
+  font-weight: 600;
+}
+.tk-day-matrix-mob-status.is-in > .icon { color: #6E8F62; }
+.tk-day-matrix-mob-status.is-empty { color: var(--text-soft); font-style: italic; }
+.tk-day-matrix-mob-status-cat {
+  font-weight: 700;
+  color: var(--text);
+}
+.tk-day-matrix-mob-status.is-in .tk-day-matrix-mob-status-cat { color: #3E5734; }
+.tk-day-matrix-mob-status-tag {
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-soft);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+.tk-day-matrix-mob-status-sep { color: var(--text-soft); padding: 0 2px; }
+.tk-day-matrix-mob-cat-chip {
+  display: inline-flex; align-items: center;
+  padding: 1px 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tk-stripe, var(--text-muted)) 14%, var(--surface));
+  color: var(--tk-stripe, var(--text));
+  border: 1px solid color-mix(in srgb, var(--tk-stripe, var(--border)) 30%, var(--border));
+}
+.tk-day-matrix-mob-cat-chip.tone-green  { --tk-stripe: #557049; color: #2C3E27; }
+.tk-day-matrix-mob-cat-chip.tone-sage   { --tk-stripe: #6E8F62; color: #2C3E27; }
+.tk-day-matrix-mob-cat-chip.tone-blue   { --tk-stripe: #4A6EA9; color: #19315A; }
+.tk-day-matrix-mob-cat-chip.tone-rose   { --tk-stripe: #B85C5C; color: #5A1D1D; }
+.tk-day-matrix-mob-cat-chip.tone-accent { --tk-stripe: var(--accent); color: var(--accent-ink); }
+.tk-day-matrix-mob-cat-chip.tone-muted  { --tk-stripe: var(--text-soft); color: var(--text-muted); }
+.tk-day-matrix-mob-empty {
+  font-style: italic;
+  font-family: var(--font-display);
+}
+.tk-day-matrix-mob-note {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.tk-day-matrix-mob-note .icon { color: var(--text-soft); margin-top: 2px; flex-shrink: 0; }
+.tk-day-matrix-mob-note span {
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Hide the desktop hour-axis row + the column-grid layout on phones —
+   we render the mobile list above. */
+@media (max-width: 640px) {
+  .tk-day-matrix-wrap > .tk-day-matrix-axis { display: none; }
+}

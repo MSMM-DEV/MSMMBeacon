@@ -28,8 +28,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
 import {
   TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM,
-  computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN,
+  computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN, ctMinutesOfIso,
 } from "../data";
+import { useIsMobile } from "../use-mobile";
 
 const TZ                = "America/Chicago";
 const TRACK_START_HOUR  = 6;
@@ -88,7 +89,10 @@ export function DayCalendar({
   onIntervalClick,
   onAddTagForInterval,        // optional — opens reclassify on an untagged interval
 }) {
+  const isMobile = useIsMobile();
   const isToday = date === new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+  // ALL hooks must run on every render before any conditional return — rules
+  // of hooks. We compute everything the desktop layout needs, then branch.
   const [nowTick, setNowTick] = useState(0);
   const scrollerRef = useRef(null);
 
@@ -164,6 +168,21 @@ export function DayCalendar({
   const nowLineTop = isToday
     ? pxForHour(hoursInCT(new Date().toISOString()))
     : null;
+
+  // Mobile branch — vertical list view. Defers to <DayList/> so the
+  // hour-rail data prep above stays a no-op when phones render.
+  if (isMobile) {
+    return (
+      <DayList
+        date={date}
+        intervals={intervals}
+        gaps={gaps}
+        onIntervalClick={onIntervalClick}
+        onAddTagForInterval={onAddTagForInterval}
+        isToday={isToday}
+      />
+    );
+  }
 
   return (
     <div className="tk-cal-wrap">
@@ -329,6 +348,161 @@ export function DayCalendar({
               </span>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DayList — phone-first vertical list. Replaces the absolute-positioned
+// hour rail on viewports ≤ 640 px so:
+//   • Short intervals (a 2-min break) get a full row instead of a 2-px sliver
+//   • Adjacent / overlapping events stack vertically; no overlap possible
+//   • Category + note + Outlook subject + source are always visible
+//   • Tap target is the full row (~64+ px tall)
+//
+// Items are intervals + computed OUT-gap rows, interleaved in REVERSE-CHRONO
+// so the currently-open / most-recent activity sits at the top of the list
+// (where the user's thumb naturally lands after scrolling past the hero).
+// ---------------------------------------------------------------------------
+function DayList({
+  date,
+  intervals = [],
+  gaps = [],
+  onIntervalClick,
+  onAddTagForInterval,
+  isToday,
+}) {
+  // Sort + interleave (interval startMin, gap startMin).
+  const items = [];
+  for (const iv of intervals) {
+    items.push({ kind: "interval", startMin: ctMinutesOfIso(iv.startAt), iv });
+  }
+  for (const [s, e] of gaps) {
+    items.push({ kind: "gap", startMin: s, endMin: e });
+  }
+  items.sort((a, b) => b.startMin - a.startMin);
+
+  const closedCount = intervals.filter(i => i.endAt).length;
+  const openCount   = intervals.filter(i => !i.endAt).length;
+
+  return (
+    <div className="tk-day-list">
+      <div className="tk-day-list-meta">
+        <span className="tk-day-list-meta-band">Workday · 8a – 5p</span>
+        <span className="tk-day-list-meta-stat">
+          {intervals.length} {intervals.length === 1 ? "interval" : "intervals"}
+          {openCount > 0 && <> · <span className="tk-pulse-dot"/> 1 open</>}
+          {gaps.length > 0 && ` · ${gaps.length} gap${gaps.length === 1 ? "" : "s"}`}
+        </span>
+      </div>
+
+      {items.length === 0 && (
+        <div className="tk-day-list-empty">
+          <Icon name="clock" size={18}/>
+          <span>No punches on this day</span>
+        </div>
+      )}
+
+      {items.map((item, i) =>
+        item.kind === "interval"
+          ? <DayListIntervalCard
+              key={item.iv.id || `iv-${i}`}
+              iv={item.iv}
+              isToday={isToday}
+              onClick={() => {
+                const isUntag = item.iv.category === "meeting_untagged" &&
+                  item.iv.categorySource !== "user" &&
+                  item.iv.categorySource !== "admin";
+                if (isUntag && onAddTagForInterval) onAddTagForInterval(item.iv);
+                else onIntervalClick?.(item.iv);
+              }}
+            />
+          : <DayListGapRow
+              key={`gap-${item.startMin}-${item.endMin}`}
+              startMin={item.startMin}
+              endMin={item.endMin}
+            />
+      )}
+    </div>
+  );
+}
+
+function DayListIntervalCard({ iv, isToday, onClick }) {
+  const isOpen     = iv.endAt == null;
+  const isUntagged = iv.category === "meeting_untagged" && iv.categorySource !== "user" && iv.categorySource !== "admin";
+  const tone       = TK_CATEGORY_TONE[iv.category] || "muted";
+  const minutes    = iv.durationMinutes != null
+    ? iv.durationMinutes
+    : Math.max(0, Math.floor((Date.now() - +new Date(iv.startAt)) / 60_000));
+
+  return (
+    <button
+      type="button"
+      className={`tk-day-list-card tone-${tone} ${isOpen ? "is-open" : ""} ${isUntagged ? "is-untagged" : ""}`}
+      onClick={onClick}
+      data-category={iv.category}
+      data-source={iv.categorySource}
+    >
+      <div className="tk-day-list-card-head">
+        <div className="tk-day-list-card-time">
+          <span className="tk-day-list-card-time-from">{fmtClock(iv.startAt)}</span>
+          <Icon name="forward" size={11}/>
+          <span className="tk-day-list-card-time-to">
+            {iv.endAt ? fmtClock(iv.endAt) : "now"}
+          </span>
+        </div>
+        <div className="tk-day-list-card-dur">
+          {isOpen && isToday ? <><span className="tk-pulse-dot"/> {fmtHM(minutes)}</> : fmtHM(minutes)}
+        </div>
+      </div>
+
+      <div className="tk-day-list-card-chips">
+        <span className="tk-day-list-card-chip">
+          <span className="tk-day-list-card-dot"/>
+          {TK_CATEGORY_LABEL[iv.category] || iv.category}
+        </span>
+        {iv.outlookEventId && (
+          <span className="tk-day-list-card-chip tk-day-list-card-chip-outlook">
+            <Icon name="link" size={11}/> Outlook
+          </span>
+        )}
+        {(iv.categorySource === "user" || iv.categorySource === "admin") && (
+          <span className="tk-day-list-card-chip tk-day-list-card-chip-confirmed">
+            <Icon name="check" size={11}/> {iv.categorySource}
+          </span>
+        )}
+        {isUntagged && (
+          <span className="tk-day-list-card-chip tk-day-list-card-chip-cta">
+            <Icon name="edit" size={11}/> tag this
+          </span>
+        )}
+      </div>
+
+      {iv.outlookEventSubject && (
+        <div className="tk-day-list-card-outlook-line">
+          📅 {iv.outlookEventSubject}
+          {iv.outlookEventLocation && <span className="tk-day-list-card-loc"> · {iv.outlookEventLocation}</span>}
+        </div>
+      )}
+      {iv.notes && (
+        <div className="tk-day-list-card-note">
+          <Icon name="edit" size={11}/> <span>{iv.notes}</span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+function DayListGapRow({ startMin, endMin }) {
+  return (
+    <div className="tk-day-list-gap" aria-hidden="false">
+      <div className="tk-day-list-gap-icon"><Icon name="ban" size={12}/></div>
+      <div className="tk-day-list-gap-text">
+        <div className="tk-day-list-gap-label">Out · {fmtHM(endMin - startMin)}</div>
+        <div className="tk-day-list-gap-range">
+          {fmtFromMin(startMin)} → {fmtFromMin(endMin)}
         </div>
       </div>
     </div>

@@ -19,6 +19,7 @@ import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
+import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR,
@@ -725,6 +726,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // attribute below so unused-var lint stays happy; re-render is the goal.
   const [rosterTick, setRosterTick] = useState(0);
   const [tab, setTab] = useState(() => {
+    // Mobile-first: when a user opens Beacon on a phone, the most common
+    // intent is "punch in / out" — so we override the persisted desktop
+    // tab and land them on Timesheet. URL ?tab=X deep links (handled in
+    // the effect below) still win; this only kicks in for a fresh open
+    // with no explicit destination.
+    if (isMobileNow()) {
+      const urlTab = new URLSearchParams(window.location.search).get("tab");
+      if (!urlTab) return "timesheet";
+    }
     const saved = localStorage.getItem("beacon-tab") || "quad";
     // Migrate legacy values: the v2 UI merged clients + companies into
     // "directory" and dropped soq. Anyone whose last-used tab was one of

@@ -16,8 +16,10 @@ import { Icon } from "../icons";
 import {
   todayInCT, weekStartCT, fmtHM, fmtClock,
   loadTeamDay, loadTeamRange, getUsers,
+  TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
 } from "../data";
 import { DayTimeline } from "./DayTimeline";
+import { useIsMobile } from "../use-mobile";
 
 const TARGET_DAY_MIN = 480;   // 8h workday — bar goal
 const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -468,8 +470,33 @@ function rangeWord(r) {
 // DayMatrix — one row per user with horizontal timeline
 // ---------------------------------------------------------------------------
 function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
+  const isMobile = useIsMobile();
   const span = TRACK_END_HOUR - TRACK_START_HOUR;
   const hourTicks = Array.from({ length: span + 1 }, (_, i) => TRACK_START_HOUR + i);
+
+  // Mobile — compact tappable rows with a text-based status line. The
+  // horizontal mini-timeline is unreadable at phone widths (intervals
+  // collapse to a few pixels, gap stripes overlap empty-state text), so
+  // we strip it and surface the same info as plain text. Tap → opens
+  // the full UserDayModal (vertical day calendar) for the chosen user.
+  if (isMobile) {
+    return (
+      <ul className="tk-day-matrix tk-day-matrix-mobile">
+        {rows.map(r => (
+          <DayMatrixMobileRow
+            key={r.user.id}
+            row={r}
+            date={date}
+            onOpenUserDay={onOpenUserDay}
+          />
+        ))}
+        {rows.length === 0 && (
+          <li className="tk-range-empty-row">No activity for the visible people on this day.</li>
+        )}
+      </ul>
+    );
+  }
+
   return (
     <div className="tk-day-matrix-wrap">
       {/* Shared hour grid above all rows so positions are readable. */}
@@ -530,6 +557,94 @@ function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
         )}
       </ul>
     </div>
+  );
+}
+
+// Phone row — replaces the horizontal mini-timeline with a clean
+// 3-line layout. Built to be tap-comfortable + glance-readable.
+function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
+  const openSince = openSinceFromDayRow(row);
+  const isIn      = !!openSince;
+  const total     = row.day
+    ? liveTotalForDay(row.day, openSince)
+    : (openSince ? Math.max(0, Math.floor((Date.now() - +new Date(openSince)) / 60_000)) : 0);
+  const flags     = row.day?.flags || {};
+  const showFlag  = flags.missing_out || flags.untagged_meeting;
+
+  // Status line:
+  //   currently in   → "Working · since 9:27 AM"
+  //   has activity   → "Last: Break · 9:27 AM"   (most-recent closed interval)
+  //   no activity    → "No activity today"
+  let statusKind, statusBody;
+  if (isIn) {
+    statusKind = "in";
+    statusBody = (
+      <>
+        <span className="tk-day-matrix-mob-status-cat">Working</span>
+        <span className="tk-day-matrix-mob-status-sep">·</span>
+        <span>since {fmtClock(openSince)}</span>
+      </>
+    );
+  } else {
+    const lastClosed = (row.intervals || [])
+      .filter(i => i.endAt)
+      .slice()
+      .sort((a, b) => +new Date(b.endAt) - +new Date(a.endAt))[0];
+    if (lastClosed) {
+      const catLabel = TK_CATEGORY_LABEL[lastClosed.category] || lastClosed.category;
+      statusKind = "last";
+      statusBody = (
+        <>
+          <span className="tk-day-matrix-mob-status-tag">Last</span>
+          <span className={`tk-day-matrix-mob-cat-chip tone-${TK_CATEGORY_TONE[lastClosed.category] || "muted"}`}>
+            {catLabel}
+          </span>
+          <span className="tk-day-matrix-mob-status-sep">·</span>
+          <span>{fmtClock(lastClosed.endAt)}</span>
+        </>
+      );
+    } else {
+      statusKind = "empty";
+      statusBody = <span className="tk-day-matrix-mob-empty">No activity today</span>;
+    }
+  }
+
+  // Surface the open interval's note if there is one (short notes only;
+  // longer fall through to UserDayModal where they wrap properly).
+  const openIv = (row.intervals || []).find(i => !i.endAt);
+  const noteToShow = openIv?.notes ||
+    (statusKind === "last" && (row.intervals || []).find(i => i.endAt && i.notes)?.notes);
+
+  return (
+    <li className={`tk-day-matrix-row tk-day-matrix-mob ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
+      <button
+        type="button"
+        className="tk-day-matrix-mob-btn"
+        onClick={() => onOpenUserDay?.({ userId: row.user.id, date })}
+      >
+        <div className="tk-day-matrix-mob-head">
+          <span className={`avatar xs ${row.user.color}`}>{row.user.initials}</span>
+          <span className="tk-day-matrix-mob-name">{row.user.name}</span>
+          {isIn && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
+          <span className="tk-day-matrix-mob-total">
+            {fmtHM(total, { always: true })}
+            {showFlag && <span className="tk-flag-dot" title={flagTitle(flags)}/>}
+          </span>
+        </div>
+
+        <div className={`tk-day-matrix-mob-status is-${statusKind}`}>
+          <Icon name="clock" size={11}/>
+          <span className="tk-day-matrix-mob-status-text">{statusBody}</span>
+        </div>
+
+        {noteToShow && (
+          <div className="tk-day-matrix-mob-note">
+            <Icon name="edit" size={11}/>
+            <span>{noteToShow}</span>
+          </div>
+        )}
+      </button>
+    </li>
   );
 }
 
