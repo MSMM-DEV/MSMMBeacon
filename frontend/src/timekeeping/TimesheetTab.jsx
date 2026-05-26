@@ -204,12 +204,22 @@ export function TimesheetTab({ focusDate = null }) {
             <Icon name="edit" size={13}/> Request correction
           </button>
         </header>
+        {/*
+          List-view across every viewport width. The absolute-positioned
+          hour rail can't avoid overlap when several punches cluster within
+          a short window (punch markers collide with interval cards at the
+          card boundaries; back-to-back intervals abut). The list scales
+          linearly with the count, never overlaps, and surfaces category /
+          note / source / Outlook subject as primary content. Matches what
+          the admin's UserDayModal already does.
+        */}
         <DayCalendar
           date={date}
           intervals={day.intervals}
           punches={day.punches}
           onIntervalClick={setFocusInterval}
           onAddTagForInterval={setFocusInterval}
+          forceList
         />
       </section>
 

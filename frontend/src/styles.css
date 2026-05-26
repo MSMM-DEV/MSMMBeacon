@@ -10842,10 +10842,32 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .tk-day-list-gap-label,
 [data-theme="dark"] .tk-day-list-gap-icon { color: #F5D2D0; }
 
+/* Personal Timesheet day-card on desktop: bigger card + more breathing
+   room since the list now replaces the hour-rail at every width. The
+   wider canvas lets us show times in a larger weight and give each
+   card a clearer affordance. Capped so very wide screens don't make
+   cards feel like billboards. */
+.tk-day-card-cal .tk-day-list {
+  padding: 18px 22px 22px;
+  gap: 12px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.tk-day-card-cal .tk-day-list-meta { padding: 4px 4px 10px; }
+.tk-day-card-cal .tk-day-list-card { padding: 16px 18px 16px 20px; }
+.tk-day-card-cal .tk-day-list-card-time { font-size: 15px; }
+.tk-day-card-cal .tk-day-list-card-dur  { font-size: 14px; }
+.tk-day-card-cal .tk-day-list-card-note { font-size: 13px; line-height: 1.45; }
+
 /* On phones, the day-card wrapper is edge-to-edge and the list bleeds
    into it without inner padding fighting. */
 @media (max-width: 640px) {
-  .tk-day-card-cal .tk-day-list { padding: 10px; }
+  .tk-day-card-cal .tk-day-list {
+    padding: 10px;
+    max-width: none;
+  }
+  .tk-day-card-cal .tk-day-list-card { padding: 12px 14px 12px 16px; }
+  .tk-day-card-cal .tk-day-list-card-time { font-size: 14px; }
 }
 
 /* Inside the per-user admin modal — the list also renders at desktop
