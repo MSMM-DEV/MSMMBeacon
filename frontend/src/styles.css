@@ -10848,6 +10848,22 @@ html, body { overflow-x: clip; }
   .tk-day-card-cal .tk-day-list { padding: 10px; }
 }
 
+/* Inside the per-user admin modal — the list also renders at desktop
+   widths because UserDayModal forces it. Tighten gap, raise card
+   typography so the wider space reads as an investigation surface. */
+.tk-user-day-body .tk-day-list {
+  padding: 14px 16px 18px;
+  gap: 10px;
+  background: var(--surface);
+  min-height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.tk-user-day-body .tk-day-list-card-time { font-size: 15px; }
+.tk-user-day-body .tk-day-list-card-dur  { font-size: 14px; }
+.tk-user-day-body .tk-day-list-card-note { font-size: 13px; }
+.tk-user-day-body .tk-day-list-card      { padding: 14px 16px 14px 18px; }
+
 /* ============================================================
    MOBILE — Time Admin Day Matrix row
    ----------------------------------------------------------------

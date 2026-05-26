@@ -88,6 +88,7 @@ export function DayCalendar({
   punches = [],
   onIntervalClick,
   onAddTagForInterval,        // optional — opens reclassify on an untagged interval
+  forceList = false,          // true → always render the list view (UserDayModal opts in)
 }) {
   const isMobile = useIsMobile();
   const isToday = date === new Date().toLocaleDateString("en-CA", { timeZone: TZ });
@@ -169,9 +170,12 @@ export function DayCalendar({
     ? pxForHour(hoursInCT(new Date().toISOString()))
     : null;
 
-  // Mobile branch — vertical list view. Defers to <DayList/> so the
-  // hour-rail data prep above stays a no-op when phones render.
-  if (isMobile) {
+  // List-view branch. Two callers ask for it:
+  //   • viewport ≤ 640 px (phones) — auto via useIsMobile()
+  //   • UserDayModal at any width — opts in via `forceList` because the
+  //     ~720 px modal is space-constrained and the hour rail can't avoid
+  //     overlap when several punches cluster within a few hours.
+  if (isMobile || forceList) {
     return (
       <DayList
         date={date}

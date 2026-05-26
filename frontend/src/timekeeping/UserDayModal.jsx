@@ -159,12 +159,17 @@ export function UserDayModal({ userId, initialDate, onClose }) {
         {err && <div className="tk-user-day-err" role="alert">Couldn't load: {err}</div>}
 
         <div className="tk-user-day-body">
+          {/* Always use the list view here. The modal is space-constrained
+              (max-width 720 px); the hour rail overlaps when intervals
+              cluster, and admins investigating a user's day care more
+              about category + note + source than visual positioning. */}
           <DayCalendar
             date={date}
             intervals={day.intervals}
             punches={day.punches}
             onIntervalClick={setFocusInterval}
             onAddTagForInterval={setFocusInterval}
+            forceList
           />
         </div>
 
