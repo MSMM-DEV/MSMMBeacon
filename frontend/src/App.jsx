@@ -2708,7 +2708,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               >
                 <span className="dot"/>
                 {t.label}
-                <span className="count">{tabCounts[t.key]}</span>
+                {tabCounts[t.key] != null && (
+                  <span className="count">{tabCounts[t.key]}</span>
+                )}
               </button>
               {i < arr.length - 1 && <span className="tab-sep">→</span>}
             </React.Fragment>
@@ -2720,7 +2722,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               onClick={() => setTab(t.key)} role="tab">
               <span className="dot"/>
               {t.label}
-              <span className="count">{tabCounts[t.key]}</span>
+              {tabCounts[t.key] != null && (
+                <span className="count">{tabCounts[t.key]}</span>
+              )}
             </button>
           ))}
         </div>
@@ -3012,14 +3016,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
         {tab === "time-admin" && isAdmin && (
           <TimeAdminTab
-            onOpenUserDay={({ userId, date }) => {
-              // Drill into the chosen user's day: switch the signed-in admin
-              // to their own Timesheet tab — temporary v1 UX. v1.1: a per-user
-              // day detail drawer that doesn't require switching user.
-              setTimesheetFocusDate(date);
-              void userId;
-              setTab("timesheet");
-            }}
+            // The per-user day drill-down is now handled in-place by TimeAdminTab's
+            // <UserDayModal/>. We keep this hook around so external callers (e.g.
+            // future deep links) can still seed the focus date if useful.
+            onOpenUserDay={({ date }) => setTimesheetFocusDate(date)}
           />
         )}
       </div>

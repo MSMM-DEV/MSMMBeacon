@@ -26,7 +26,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
-import { TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM } from "../data";
+import {
+  TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM,
+  computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN,
+} from "../data";
 
 const TZ                = "America/Chicago";
 const TRACK_START_HOUR  = 6;
@@ -34,6 +37,15 @@ const TRACK_END_HOUR    = 20;
 const HOUR_HEIGHT       = 56;           // px per hour
 const TRACK_HEIGHT      = (TRACK_END_HOUR - TRACK_START_HOUR) * HOUR_HEIGHT;
 const NOW_TICK_MS       = 30_000;
+
+// Convert "minutes since midnight CT" to a vertical px position in the track,
+// clamped to the visible 6 AM – 8 PM window. Mirrors pxForHour but for finer
+// resolution (the coverage overlay needs to start/end mid-hour).
+function pxForMin(minSinceMidnight) {
+  const h = minSinceMidnight / 60;
+  const clamped = Math.max(TRACK_START_HOUR, Math.min(TRACK_END_HOUR, h));
+  return (clamped - TRACK_START_HOUR) * HOUR_HEIGHT;
+}
 
 function hoursInCT(iso) {
   // Fractional hours since CT midnight for any ISO timestamp.
@@ -58,6 +70,15 @@ function fmtHourLabel(hour) {
   if (hour === 12)  return "noon";
   if (hour < 12)    return `${hour}a`;
   return `${hour - 12}p`;
+}
+
+// "minutes since midnight" → "9:15a" / "12:30p" — used in gap tooltips.
+function fmtFromMin(min) {
+  const h24 = Math.floor(min / 60);
+  const m   = min % 60;
+  const ampm = h24 >= 12 ? "p" : "a";
+  const h12  = ((h24 + 11) % 12) + 1;
+  return `${h12}:${m.toString().padStart(2, "0")}${ampm}`;
 }
 
 export function DayCalendar({
@@ -132,6 +153,13 @@ export function DayCalendar({
     };
   }).filter(Boolean);
 
+  // ----- coverage overlay (workday band + red OUT gaps) -----
+  // Recompute on every nowTick so the cutoff trails real time.
+  void nowTick;
+  const workdayTop    = pxForMin(WORKDAY_START_MIN);
+  const workdayBottom = pxForMin(WORKDAY_END_MIN);
+  const gaps = computeOutGaps({ intervals, date });
+
   // ----- "now" line -----
   const nowLineTop = isToday
     ? pxForHour(hoursInCT(new Date().toISOString()))
@@ -167,6 +195,39 @@ export function DayCalendar({
             ))}
           </div>
 
+          {/* Workday window band — quietly delineates 8a–5p so the user
+              knows what "expected to be working" means. Behind everything. */}
+          <div
+            className="tk-cal-workday-band"
+            style={{ top: workdayTop, height: workdayBottom - workdayTop }}
+            aria-hidden="true"
+          >
+            <span className="tk-cal-workday-tag">Workday · 8a – 5p</span>
+          </div>
+
+          {/* Red OUT-gap overlay. Sits between the workday band and the
+              interval cards so cards still receive clicks. */}
+          {gaps.map(([startMin, endMin], i) => {
+            const top    = pxForMin(startMin);
+            const height = Math.max(8, pxForMin(endMin) - top);
+            const span   = endMin - startMin;
+            return (
+              <div
+                key={`gap-${i}`}
+                className="tk-cal-gap"
+                style={{ top, height }}
+                title={`Out · ${fmtHM(span)} (${fmtFromMin(startMin)} – ${fmtFromMin(endMin)})`}
+                aria-hidden="true"
+              >
+                {height > 30 && (
+                  <span className="tk-cal-gap-label">
+                    Out · {fmtHM(span)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+
           {/* interval cards */}
           <div className="tk-cal-cards">
             {blocks.map(({ iv, top, height, isOpen }) => {
@@ -198,6 +259,12 @@ export function DayCalendar({
                         {iv.outlookEventSubject || TK_CATEGORY_LABEL[iv.category] || iv.category}
                       </div>
                     )}
+                    {!compact && iv.notes && (
+                      <div className="tk-cal-card-note" title={iv.notes}>
+                        <Icon name="edit" size={11}/>
+                        <span className="tk-cal-card-note-text">{iv.notes}</span>
+                      </div>
+                    )}
                     {!compact && (
                       <div className="tk-cal-card-foot">
                         <span className="tk-cal-card-tag">
@@ -218,6 +285,13 @@ export function DayCalendar({
                           </span>
                         )}
                       </div>
+                    )}
+                    {compact && iv.notes && (
+                      <span
+                        className="tk-cal-card-note-dot"
+                        title={iv.notes}
+                        aria-label={`Note: ${iv.notes}`}
+                      />
                     )}
                   </div>
                 </button>

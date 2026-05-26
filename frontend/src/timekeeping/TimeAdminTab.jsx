@@ -21,6 +21,7 @@ import { PeopleFilter }      from "./PeopleFilter";
 import { ApprovalsQueue }    from "./ApprovalsQueue";
 import { NfcEnrollPanel }    from "./NfcEnrollPanel";
 import { TimeSettingsPanel } from "./TimeSettingsPanel";
+import { UserDayModal }      from "./UserDayModal";
 
 const VIEWS = [
   { key: "team",      label: "Team",            icon: "users" },
@@ -42,6 +43,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
 
   const [view, setView]     = useState("team");
   const [prefs, updatePrefs] = useAdminTimePrefs(adminId);
+  const [userDay, setUserDay] = useState(null);   // { userId, date } | null
 
   // Lightweight signals fetch: who's currently in / active today. Used by
   // the PeopleFilter for "Currently in" + "Active today" quick-picks.
@@ -149,13 +151,24 @@ export function TimeAdminTab({ onOpenUserDay }) {
           <TeamRangeView
             prefs={prefs}
             onPrefsChange={updatePrefs}
-            onOpenUserDay={onOpenUserDay}
+            onOpenUserDay={(payload) => {
+              setUserDay(payload);
+              onOpenUserDay?.(payload);   // allow parent to mirror the focus too
+            }}
           />
         )}
         {view === "approvals" && <ApprovalsQueue/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
         {view === "settings"  && <TimeSettingsPanel/>}
       </div>
+
+      {userDay && (
+        <UserDayModal
+          userId={userDay.userId}
+          initialDate={userDay.date}
+          onClose={() => setUserDay(null)}
+        />
+      )}
     </div>
   );
 }

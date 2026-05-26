@@ -8022,10 +8022,44 @@ html, body { overflow-x: clip; }
 .tk-day-seg.tone-blue   { background: color-mix(in srgb, #4A6EA9 30%, var(--surface-2)); color: #19315A; border-color: #4A6EA9; }
 .tk-day-seg.tone-rose   { background: color-mix(in srgb, #B85C5C 32%, var(--surface-2)); color: #5A1D1D; border-color: #B85C5C; }
 .tk-day-seg.tone-muted  { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+/* "green" = punchier than sage — used for `work` intervals so they read as
+   "you were on the clock". Matches the PUNCH IN button's green family. */
+.tk-day-seg.tone-green  { background: linear-gradient(180deg, #7FA572 0%, #6E8F62 100%); color: #1F3318; border-color: #557049; }
 [data-theme="dark"] .tk-day-seg.tone-accent { color: #FFE7C8; }
 [data-theme="dark"] .tk-day-seg.tone-sage   { color: #C8E0BF; }
 [data-theme="dark"] .tk-day-seg.tone-blue   { color: #BFD3F0; }
 [data-theme="dark"] .tk-day-seg.tone-rose   { color: #F0C4C4; }
+[data-theme="dark"] .tk-day-seg.tone-green  { color: #E2F2D8; }
+
+/* Workday window band in the horizontal track — subtle cream tint behind
+   8a–5p so the user understands the "expected to be working" zone. */
+.tk-day-track-workday {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--accent-softer) 36%, transparent);
+  border-left:  1px dashed color-mix(in srgb, var(--accent) 30%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--accent) 30%, transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+/* Red OUT-gap overlay — diagonal stripes to read as "missing time" without
+   competing with the solid interval cards above it. */
+.tk-day-gap {
+  position: absolute;
+  top: 3px; bottom: 3px;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, #B85C5C 32%, transparent) 0 6px,
+      color-mix(in srgb, #B85C5C 18%, transparent) 6px 12px
+    );
+  border-left:  2px solid color-mix(in srgb, #B85C5C 70%, transparent);
+  border-right: 2px solid color-mix(in srgb, #B85C5C 70%, transparent);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 0;
+}
+.tk-day-seg { z-index: 1; }   /* keep interval cards above the overlay */
 
 /* Modal variants used by timekeeping modals. The base .modal sizes itself
    wider than these by default. */
@@ -8154,6 +8188,11 @@ html, body { overflow-x: clip; }
   text-align: left;
 }
 .tk-day-seg-label { overflow: hidden; text-overflow: ellipsis; }
+.tk-day-seg-note-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(0,0,0,0.35);
+  flex-shrink: 0;
+}
 .tk-day-seg[data-source="user"]  { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.18); }
 .tk-day-seg[data-source="admin"] { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.28); }
 .tk-day-empty { color: var(--text-muted); font-size: 12px; padding: 6px 8px; }
@@ -8338,19 +8377,157 @@ html, body { overflow-x: clip; }
 .tk-cat.tone-rose   { background: color-mix(in srgb, #B85C5C 24%, var(--surface-2)); color: #5A1D1D; }
 .tk-cat.tone-muted  { background: var(--surface-2); color: var(--text-muted); }
 
+/* ---- Tablet (≥641 and <1024): two-column Timesheet ----------------- */
+@media (min-width: 760px) and (max-width: 1023px) {
+  .tk-timesheet-page {
+    grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+    column-gap: 16px;
+    row-gap: 14px;
+  }
+  /* Day picker spans both columns at the top. */
+  .tk-day-bar      { grid-column: 1 / -1; }
+  /* Hero punch panel lives in the left column; day calendar + week summary
+     stack on the right. */
+  .tk-hero         { grid-column: 1; align-self: start; }
+  .tk-day-card-cal { grid-column: 2; grid-row: 2 / span 2; }
+  .tk-week-card    { grid-column: 1; align-self: start; }
+}
+
 /* ---- Phone breakpoint: thumb-reach punch button, simpler layouts ---- */
 @media (max-width: 640px) {
-  .tk-hero { grid-template-columns: 1fr; padding: 16px; }
-  .tk-hero-side { min-width: 0; }
-  .tk-punch-btn  { min-height: 240px; }
-  .tk-punch-label { font-size: 26px; }
-  .tk-settings-grid { grid-template-columns: 1fr; }
-  .tk-admin-nav { width: 100%; overflow-x: auto; }
-  .tk-team-row { grid-template-columns: 1fr; gap: 4px; padding: 8px 6px; border-bottom: 1px solid var(--border); border-radius: 0; }
+  /* Outer page hugs the viewport — no wasted side padding. */
+  .tk-timesheet-page {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 10px 0 20px;
+  }
+
+  /* Day picker bar: full-width date input, controls don't crowd. */
+  .tk-day-bar {
+    gap: 6px;
+    flex-wrap: nowrap;
+    width: 100%;
+  }
+  .tk-day-bar .tk-day-input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;            /* taller for touch */
+    font-size: 14px;
+  }
+  .tk-day-bar .btn.btn-sm {
+    min-width: 36px; min-height: 36px;   /* touch targets */
+    padding: 6px 10px;
+  }
+
+  /* Hero collapses to a single column; tighten padding. */
+  .tk-hero { grid-template-columns: 1fr; padding: 14px; gap: 12px; }
+  .tk-hero-side { min-width: 0; gap: 6px; }
+  .tk-punch-btn  { min-height: 220px; }
+  .tk-punch-label { font-size: 24px; }
+  .tk-hero-warn-banner { font-size: 12px; padding: 8px 10px; }
+
+  /* Day card calendar — no card chrome, just the calendar. */
+  .tk-day-card-cal {
+    border-radius: 12px;
+    margin: 0 -4px;                /* let the cards breathe edge-to-edge */
+  }
+  .tk-day-card-cal .tk-day-card-head {
+    padding: 10px 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .tk-day-card-cal .tk-day-card-head .btn { min-height: 32px; }
+
+  /* Week summary — day rows stack the bar on a second line so the label,
+     bar, hours and flag never collide. */
+  .tk-week-card { padding: 14px 14px 12px; }
+  .tk-week-head { flex-wrap: wrap; }
+  .tk-week-meta { justify-items: start; align-items: flex-start; }
+  .tk-week-total { font-size: 18px; }
+  .tk-week-day {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-rows: auto;
+    column-gap: 8px;
+  }
+  .tk-week-day .tk-week-day-flag { grid-row: 1; }
+  .tk-week-day-total { min-width: 0; font-size: 13px; }
+  .tk-week-day-bar   { height: 7px; }
+  .tk-week-foot { flex-wrap: wrap; gap: 8px; }
+  .tk-week-foot .btn { width: 100%; }
+
+  /* Admin / Other prior phone rules — preserved */
+  .tk-settings-grid  { grid-template-columns: 1fr; }
+  .tk-admin-nav      { width: 100%; overflow-x: auto; }
+  .tk-team-row       { grid-template-columns: 1fr; gap: 4px; padding: 8px 6px; border-bottom: 1px solid var(--border); border-radius: 0; }
   .tk-team-row-timeline { height: 24px; }
-  .tk-enroll-row { grid-template-columns: 1fr; gap: 4px; }
-  .tk-approvals-row { grid-template-columns: 1fr; }
-  .modal-wide { width: 100vw; height: 100vh; border-radius: 0; }
+  .tk-enroll-row     { grid-template-columns: 1fr; gap: 4px; }
+  .tk-approvals-row  { grid-template-columns: 1fr; }
+  .modal-wide        { width: 100vw; height: 100vh; border-radius: 0; }
+
+  /* Bottom-sheet for the reclassify popover + correction modal in
+     portrait phones. Overrides the centered absolute positioning that
+     `.modal` ships with so the dialog anchors to the bottom edge for
+     thumb-reach. Adds a grab-handle bar and slide-up animation. */
+  .modal.modal-narrow {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100vw;
+    max-width: 100vw;
+    border-radius: 16px 16px 0 0;
+    margin: 0;
+    max-height: 92vh;
+    overflow-y: auto;
+    animation: tkSheetUp 220ms cubic-bezier(.18,.89,.36,1.1);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .modal.modal-narrow .modal-head {
+    padding-top: 22px;
+    position: relative;
+  }
+  .modal.modal-narrow .modal-head::before {
+    content: "";
+    position: absolute; top: 7px; left: 50%; transform: translateX(-50%);
+    width: 38px; height: 4px; border-radius: 999px;
+    background: var(--border-strong);
+  }
+  .modal.modal-narrow .form-input,
+  .modal.modal-narrow select.form-input {
+    min-height: 44px;       /* touch-comfortable */
+    font-size: 16px;        /* prevents iOS zoom-on-focus */
+  }
+  .modal.modal-narrow .modal-foot { gap: 8px; flex-wrap: wrap; }
+  .modal.modal-narrow .modal-foot .btn {
+    min-height: 44px;
+    flex: 1 1 120px;
+  }
+  .tk-category-chip { flex-wrap: wrap; }
+}
+
+@keyframes tkSheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Landscape phones: re-center modals so the bottom-sheet doesn't cover
+   the entire viewport at short heights. */
+@media (max-height: 500px) and (max-width: 900px) {
+  .modal.modal-narrow {
+    top: 50%;
+    left: 50%;
+    bottom: auto;
+    right: auto;
+    transform: translate(-50%, -50%);
+    border-radius: 12px;
+    width: min(440px, 92vw);
+    max-width: 92vw;
+    max-height: 92vh;
+    animation: none;
+    padding-bottom: 0;
+  }
+  .modal.modal-narrow .modal-head::before { display: none; }
 }
 
 /* ================================================================
@@ -8483,6 +8660,66 @@ html, body { overflow-x: clip; }
 .tk-cal-card.tone-blue   .tk-cal-card-inner { --tk-stripe: #4A6EA9;        background: color-mix(in srgb, #4A6EA9 7%, var(--surface)); }
 .tk-cal-card.tone-rose   .tk-cal-card-inner { --tk-stripe: #B85C5C;        background: color-mix(in srgb, #B85C5C 9%, var(--surface)); }
 .tk-cal-card.tone-muted  .tk-cal-card-inner { --tk-stripe: var(--border-strong); background: color-mix(in srgb, var(--text-muted) 4%, var(--surface)); }
+/* "green" = bold "you were on the clock" tone, used for `work` intervals. */
+.tk-cal-card.tone-green  .tk-cal-card-inner { --tk-stripe: #557049;        background: color-mix(in srgb, #6E8F62 14%, var(--surface)); }
+
+/* Workday window band — subtle cream wash behind the 8a–5p portion of the
+   track. Helps the user read which gaps "count". */
+.tk-cal-workday-band {
+  position: absolute;
+  left: 60px; right: 12px;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-softer) 55%, transparent) 0%,
+    color-mix(in srgb, var(--accent-softer) 28%, transparent) 100%);
+  border-top:    1px dashed color-mix(in srgb, var(--accent) 38%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 0;
+}
+.tk-cal-workday-tag {
+  position: absolute;
+  top: 4px; right: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent-ink) 75%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* Red OUT-gap overlay (vertical). Diagonal stripes signal "missing time"
+   distinctly from the solid interval cards. Pointer-events disabled so
+   clicks pass through to whatever interval card the user is aiming for. */
+.tk-cal-gap {
+  position: absolute;
+  left: 60px; right: 12px;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, #B85C5C 32%, transparent) 0 8px,
+      color-mix(in srgb, #B85C5C 18%, transparent) 8px 16px
+    );
+  border-left:  3px solid color-mix(in srgb, #B85C5C 70%, transparent);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+  z-index: 1;   /* above workday band, below interval cards */
+}
+.tk-cal-gap-label {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: #6A1B1B;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, #B85C5C 30%, transparent);
+}
+[data-theme="dark"] .tk-cal-gap-label { color: #F5D2D0; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+/* Interval cards must sit above the gap overlay so the click target wins. */
+.tk-cal-card { z-index: 2; }
 
 /* untagged cards lean harder on the rose to nudge the user to label them */
 .tk-cal-card.is-untagged .tk-cal-card-inner {
@@ -8540,6 +8777,36 @@ html, body { overflow-x: clip; }
   white-space: nowrap;
   color: var(--text);
 }
+/* Note text under the card title — wraps to two lines max so big cards
+   stay legible at a glance without exploding the layout. */
+.tk-cal-card-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-style: italic;
+  min-width: 0;
+}
+.tk-cal-card-note > .icon { flex-shrink: 0; margin-top: 2px; opacity: 0.7; }
+.tk-cal-card-note-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.tk-cal-card-note-dot {
+  position: absolute;
+  top: 5px; right: 5px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--tk-stripe, var(--accent));
+  opacity: 0.7;
+}
+
 .tk-cal-card-foot {
   margin-top: auto;
   display: flex;
@@ -9512,4 +9779,194 @@ html, body { overflow-x: clip; }
   .tk-segmented { gap: 0; padding: 2px; }
   .tk-stat-tile { padding: 10px 12px; }
   .tk-stat-tile-value { font-size: 18px; }
+}
+
+/* ============================================================
+   POST-PUNCH PROMPT MODAL
+   Bold one-tap category chips + optional note field. Inherits
+   the bottom-sheet behaviour on phones from .modal-narrow above.
+   ============================================================ */
+.tk-punch-prompt .modal-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--text-soft);
+}
+.tk-punch-prompt .modal-title {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 4px 0 0;
+}
+.tk-prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.tk-prompt-chip {
+  appearance: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 13px; font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 100ms ease;
+}
+.tk-prompt-chip:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--accent-softer) 35%, var(--surface));
+}
+.tk-prompt-chip:active { transform: translateY(1px); }
+.tk-prompt-chip-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--text-soft);
+  flex-shrink: 0;
+}
+.tk-prompt-chip.tone-accent .tk-prompt-chip-dot { background: var(--accent); }
+.tk-prompt-chip.tone-sage   .tk-prompt-chip-dot { background: #6E8F62; }
+.tk-prompt-chip.tone-blue   .tk-prompt-chip-dot { background: #4A6EA9; }
+.tk-prompt-chip.tone-rose   .tk-prompt-chip-dot { background: #B85C5C; }
+.tk-prompt-chip.tone-muted  .tk-prompt-chip-dot { background: var(--text-soft); }
+.tk-prompt-chip.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent),
+              0 2px 6px rgba(60,46,18,0.08);
+  color: var(--accent-ink);
+}
+.tk-prompt-chip.is-active.tone-sage   { box-shadow: inset 0 0 0 2px color-mix(in srgb, #6E8F62 50%, transparent), 0 2px 6px rgba(60,46,18,0.08); }
+.tk-prompt-chip.is-active.tone-blue   { box-shadow: inset 0 0 0 2px color-mix(in srgb, #4A6EA9 50%, transparent), 0 2px 6px rgba(60,46,18,0.08); }
+.tk-prompt-chip.is-active.tone-rose   { box-shadow: inset 0 0 0 2px color-mix(in srgb, #B85C5C 50%, transparent), 0 2px 6px rgba(60,46,18,0.08); }
+.form-label-soft {
+  color: var(--text-soft);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+
+/* ============================================================
+   USER DAY MODAL (Time Admin per-user view)
+   ============================================================ */
+.tk-user-day-modal {
+  width: min(720px, 96vw);
+  max-height: 92vh;
+  padding: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.tk-user-day-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent-softer) 35%, var(--bg-elev));
+  position: relative;
+}
+.tk-user-day-id {
+  display: inline-flex; align-items: center; gap: 12px;
+  flex: 1; min-width: 0;
+}
+.tk-user-day-title-wrap { display: grid; gap: 2px; min-width: 0; }
+.tk-user-day-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--text-soft);
+}
+.tk-user-day-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tk-user-day-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.tk-user-day-nav { display: inline-flex; align-items: center; gap: 6px; }
+.tk-user-day-date {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tk-user-day-stats {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.tk-user-day-stat {
+  display: grid; gap: 1px;
+  padding-right: 18px;
+  border-right: 1px solid var(--border);
+}
+.tk-user-day-stat:last-of-type { border-right: none; padding-right: 0; }
+.tk-user-day-stat-label {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-soft);
+}
+.tk-user-day-stat-value {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.tk-user-day-stat.is-warn .tk-user-day-stat-value { color: #8B2A2A; }
+.tk-user-day-stat.is-meta .tk-user-day-stat-value {
+  font-size: 13px; font-weight: 500; color: var(--text-muted);
+}
+.tk-user-day-busy {
+  align-self: center;
+  font-size: 11px; color: var(--text-soft); font-style: italic;
+}
+.tk-user-day-err {
+  margin: 0 22px 12px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--rose) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--rose) 24%, var(--border));
+  border-radius: 8px;
+  color: #6E2A2A; font-size: 13px;
+}
+.tk-user-day-body {
+  flex: 1; min-height: 0;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.tk-user-day-body .tk-cal-wrap {
+  flex: 1; min-height: 0;
+  border-radius: 0;
+  background: var(--surface);
+}
+
+/* phone: full-screen sheet, tighter padding */
+@media (max-width: 640px) {
+  .tk-user-day-modal {
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; max-width: 100vw;
+    height: 100vh; max-height: 100vh;
+    transform: none;
+    border-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .tk-user-day-head     { padding: 14px 14px 10px; }
+  .tk-user-day-title    { font-size: 17px; }
+  .tk-user-day-toolbar  { padding: 10px 14px; }
+  .tk-user-day-stats    { padding: 10px 14px; gap: 10px; overflow-x: auto; }
+  .tk-user-day-stat     { padding-right: 12px; }
+  .tk-user-day-stat-value { font-size: 14px; }
+  .tk-user-day-err      { margin: 0 14px 10px; }
+
+  .tk-punch-prompt .tk-prompt-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+  .tk-punch-prompt .tk-prompt-chip { padding: 12px; font-size: 14px; }
 }

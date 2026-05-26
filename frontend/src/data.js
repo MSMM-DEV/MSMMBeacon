@@ -2091,6 +2091,36 @@ export async function loadPendingCorrections() {
 // Mutators
 // ----------------------------------------------------------------------
 
+// Fetch the user's most-recent interval. `kind`:
+//   "open"   → the currently-open interval (end_at IS NULL)
+//   "closed" → the most-recently-closed one (max end_at)
+// Used by the PunchPromptModal flow: after a successful PUNCH IN we look up
+// the freshly-opened interval; after PUNCH OUT we look up the just-closed
+// one. Returns the adapted interval or null.
+export async function loadLatestInterval(userId, kind = "open") {
+  if (!userId) return null;
+  let q = supabase.from("time_intervals").select("*").eq("user_id", userId);
+  if (kind === "open") {
+    q = q.is("end_at", null).order("start_at", { ascending: false }).limit(1);
+  } else {
+    q = q.not("end_at", "is", null).order("end_at", { ascending: false }).limit(1);
+  }
+  const { data, error } = await q;
+  if (error) throw new Error(`loadLatestInterval: ${error.message}`);
+  const row = (data || [])[0];
+  return row ? adaptInterval(row) : null;
+}
+
+// Update only the note on an interval (keeps existing category + source).
+// Used by the PunchPromptModal when the user opts not to change category.
+export async function setIntervalNote(intervalId, note) {
+  const { error } = await supabase
+    .from("time_intervals")
+    .update({ notes: note || null, computed_at: new Date().toISOString() })
+    .eq("id", intervalId);
+  if (error) throw error;
+}
+
 // User-facing PUNCH IN / PUNCH OUT — calls the Edge Function so de-dupe,
 // classification kick, and last-seen telemetry all happen server-side.
 export async function callTimeclockPunch({ source = "web", geo = null, note = null } = {}) {
@@ -2263,12 +2293,12 @@ export function subscribeEnrollSession(adminUserId, onChange) {
 // existing project palette so timekeeping bars feel consistent with events.
 // ----------------------------------------------------------------------
 export const TK_CATEGORY_TONE = {
-  work:             "accent",     // primary
+  work:             "green",      // "you were on the clock" — bold green
   meeting:          "blue",
   travel:           "blue",       // grouped with meeting visually
-  lunch:            "sage",
+  lunch:            "sage",       // muted olive — distinct from work green
   break:            "muted",
-  eod:              "muted",
+  eod:              "muted",      // "Done for the day" — quiet end-of-day card
   meeting_untagged: "rose",       // calls user's attention to tag
   vacation:         "sage",
   holiday:          "sage",
@@ -2281,10 +2311,95 @@ export const TK_CATEGORY_LABEL = {
   travel:           "Travel",
   lunch:            "Lunch",
   break:            "Break",
-  eod:              "Off",
+  eod:              "Done for the day",   // signals "leaving the office" — stops the red gap overlay
   meeting_untagged: "Untagged",
   vacation:         "Vacation",
   holiday:          "Holiday",
   off:              "Off",
 };
+
+// ----------------------------------------------------------------------
+// Workday coverage — green-IN / red-OUT timeline overlay
+// ----------------------------------------------------------------------
+// Render rule: inside the workday window, every minute is either covered
+// by an interval (green/colored) or uncovered (red diagonal stripe).
+// Outside the window, no overlay. After a "Done for the day" interval, the
+// overlay truncates. computeOutGaps() returns the [startMin, endMin] ranges
+// that should render red on a given day.
+//
+// 8 AM → 5 PM is the conventional MSMM workday. Wire to a setting later if
+// teams diverge; for now hardcoded so it works without backend changes.
+
+export const WORKDAY_START_MIN = 8 * 60;   // 08:00 CT
+export const WORKDAY_END_MIN   = 17 * 60;  // 17:00 CT
+
+// Categories that signal "I'm not expected to be working" — they truncate
+// the red gap overlay after their end_at.
+const EOD_LIKE_CATEGORIES = new Set(["eod", "vacation", "holiday", "off"]);
+
+// Minutes-since-CT-midnight for an ISO timestamp.
+export function ctMinutesOfIso(iso) {
+  if (!iso) return 0;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: CT_TZ, hour12: false, hour: "2-digit", minute: "2-digit",
+  }).formatToParts(new Date(iso));
+  const h = +parts.find(p => p.type === "hour")?.value   || 0;
+  const m = +parts.find(p => p.type === "minute")?.value || 0;
+  return h * 60 + m;
+}
+
+export function computeOutGaps({ intervals, date }) {
+  const today = todayInCT();
+  const isToday = date === today;
+  const isPast  = date < today;
+  const nowMin  = ctMinutesOfIso(new Date().toISOString());
+
+  // Coverage: each interval contributes [startMin, endMin]. Open intervals
+  // (no end_at) extend to "now" on today, or to end-of-day on past dates
+  // (which the user should never see since past days have a final close).
+  const covered = [];
+  for (const iv of (intervals || [])) {
+    const ivDate = new Date(iv.startAt).toLocaleDateString("en-CA", { timeZone: CT_TZ });
+    if (ivDate !== date) continue;            // not this calendar day
+    const start = ctMinutesOfIso(iv.startAt);
+    const end   = iv.endAt
+      ? ctMinutesOfIso(iv.endAt)
+      : (isToday ? nowMin : 24 * 60);
+    if (end <= start) continue;
+    covered.push([start, end]);
+  }
+
+  // Cutoff: stop showing red after the LATEST "Done for the day" / vacation
+  // / holiday interval, or at workday end, whichever is earlier. On TODAY,
+  // additionally clamp to now() — future minutes aren't "missed" yet.
+  let lastEodEnd = null;
+  for (const iv of (intervals || [])) {
+    if (!EOD_LIKE_CATEGORIES.has(iv.category)) continue;
+    if (!iv.endAt) continue;
+    const e = ctMinutesOfIso(iv.endAt);
+    if (lastEodEnd == null || e > lastEodEnd) lastEodEnd = e;
+  }
+
+  let cutoff = WORKDAY_END_MIN;
+  if (lastEodEnd != null && lastEodEnd < cutoff) cutoff = lastEodEnd;
+  if (isToday && nowMin < cutoff) cutoff = nowMin;
+  if (!isToday && !isPast) return [];        // future day → no red
+
+  if (cutoff <= WORKDAY_START_MIN) return [];
+
+  // Walk [WORKDAY_START_MIN, cutoff] subtracting covered ranges.
+  covered.sort((a, b) => a[0] - b[0]);
+  const gaps = [];
+  let cursor = WORKDAY_START_MIN;
+  for (const [s, e] of covered) {
+    if (e <= cursor) continue;
+    if (s >= cutoff) break;
+    if (s > cursor) gaps.push([cursor, Math.min(s, cutoff)]);
+    cursor = Math.max(cursor, e);
+    if (cursor >= cutoff) break;
+  }
+  if (cursor < cutoff) gaps.push([cursor, cutoff]);
+
+  return gaps;
+}
 

@@ -12,11 +12,23 @@
 
 import React from "react";
 import { Icon } from "../icons";
-import { TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM } from "../data";
+import {
+  TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM,
+  computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN,
+} from "../data";
 
 const TRACK_START_HOUR = 6;
 const TRACK_END_HOUR   = 20;
 const TZ               = "America/Chicago";
+
+// Convert "minutes-since-CT-midnight" to a [0,1] position within the visible
+// track window. Clamps so anything outside 6a-8p is pinned to the edges.
+function trackFractionForMin(min) {
+  const startMin = TRACK_START_HOUR * 60;
+  const endMin   = TRACK_END_HOUR   * 60;
+  const m = Math.max(startMin, Math.min(endMin, min));
+  return (m - startMin) / (endMin - startMin);
+}
 
 function hoursInCT(iso) {
   // Returns fractional hours from start of CT day for an ISO timestamp.
@@ -77,6 +89,37 @@ export function DayTimeline({
       )}
 
       <div className="tk-day-track">
+        {/* Workday window — subtle band 8a–5p */}
+        {(() => {
+          const left  = trackFractionForMin(WORKDAY_START_MIN) * 100;
+          const right = trackFractionForMin(WORKDAY_END_MIN)   * 100;
+          if (right <= left) return null;
+          return (
+            <div
+              className="tk-day-track-workday"
+              style={{ left: `${left}%`, width: `${right - left}%` }}
+              aria-hidden="true"
+            />
+          );
+        })()}
+
+        {/* Red OUT-gap overlay — behind interval cards so cards still click */}
+        {date && computeOutGaps({ intervals, date }).map(([sMin, eMin], i) => {
+          const leftFrac  = trackFractionForMin(sMin);
+          const rightFrac = trackFractionForMin(eMin);
+          const widthFrac = Math.max(0, rightFrac - leftFrac);
+          if (widthFrac <= 0) return null;
+          return (
+            <div
+              key={`gap-${i}`}
+              className="tk-day-gap"
+              style={{ left: `${leftFrac * 100}%`, width: `${widthFrac * 100}%` }}
+              title={`Out ${fmtHM(eMin - sMin)}`}
+              aria-hidden="true"
+            />
+          );
+        })}
+
         {segments.map(({ iv, start, end }) => {
           const left  = ((start - TRACK_START_HOUR) / span) * 100;
           const width = ((end   - start)            / span) * 100;
@@ -100,6 +143,9 @@ export function DayTimeline({
               {iv.outlookEventId && width > 8 && (
                 <Icon name="link" size={11} />
               )}
+              {iv.notes && width > 4 && (
+                <span className="tk-day-seg-note-dot" aria-hidden="true"/>
+              )}
             </button>
           );
         })}
@@ -118,6 +164,7 @@ function tooltipFor(iv) {
     iv.durationMinutes != null ? fmtHM(iv.durationMinutes) : null,
     iv.outlookEventSubject ? `📅 ${iv.outlookEventSubject}` : null,
     iv.outlookEventLocation ? `📍 ${iv.outlookEventLocation}` : null,
+    iv.notes ? `📝 ${iv.notes}` : null,
     iv.categorySource === "user"   ? "set by user" :
     iv.categorySource === "admin"  ? "set by admin" :
     iv.categorySource === "outlook"? "auto-tagged from calendar" :

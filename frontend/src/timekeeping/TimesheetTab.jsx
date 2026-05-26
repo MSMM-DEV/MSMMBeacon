@@ -8,26 +8,17 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
 import {
-  getCurrentBeaconUser, todayInCT, weekStartCT, fmtHM, fmtClock,
+  getCurrentBeaconUser, todayInCT, weekStartCT, fmtHM,
   loadPunchState, loadDayDetail, loadMyWeek,
   loadCachedPunchState, saveCachedPunchState, adaptPunchResponseToState,
-  setIntervalCategory, subscribeMyTimeState,
-  TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
+  subscribeMyTimeState, loadLatestInterval,
 } from "../data";
 import { PunchButton } from "./PunchButton";
 import { DayCalendar } from "./DayCalendar";
 import { WeekSummary } from "./WeekSummary";
 import { CorrectionModal } from "./CorrectionModal";
-
-const CATEGORY_USER_OPTIONS = [
-  ["work",             "Working"],
-  ["meeting",          "Meeting"],
-  ["travel",           "Travel"],
-  ["lunch",            "Lunch"],
-  ["break",            "Break"],
-  ["eod",              "Personal / off"],
-  ["meeting_untagged", "(leave as untagged)"],
-];
+import { PunchPromptModal } from "./PunchPromptModal";
+import { IntervalReclassifyPopover } from "./IntervalReclassifyPopover";
 
 export function TimesheetTab({ focusDate = null }) {
   const me        = getCurrentBeaconUser();
@@ -47,6 +38,7 @@ export function TimesheetTab({ focusDate = null }) {
   const [week,          setWeek]          = useState({ days: [], week: null });
   const [showCorrect,   setShowCorrect]   = useState(false);
   const [focusInterval, setFocusInterval] = useState(null);
+  const [prompt,        setPrompt]        = useState(null);   // { kind, interval } | null
 
   // Persist whenever state changes so reloads/cross-tab opens see truth.
   useEffect(() => { if (userId) saveCachedPunchState(userId, state); }, [userId, state]);
@@ -93,16 +85,27 @@ export function TimesheetTab({ focusDate = null }) {
   // Apply the Edge Function response directly so the button reflects the new
   // state without a round trip. This kills the post-click flicker where the
   // UI briefly showed the pre-click state until the background fetch landed.
-  const applyPunchResponse = useCallback((response) => {
+  // After applying, fetch the affected interval (new-open after PUNCH IN,
+  // just-closed after PUNCH OUT) and open the PunchPromptModal so the user
+  // can attach a category + note while the context is fresh.
+  const applyPunchResponse = useCallback(async (response) => {
     const next = adaptPunchResponseToState(response, state.today);
     if (next) {
       setState(next);
       setPhase("ready");
     }
-    // Fire a silent background refresh to pull the full day timeline / week
-    // rollups (which need column data the response doesn't carry).
     refresh({ silent: true });
-  }, [refresh, state.today]);
+
+    if (!userId || !response || response.deduped) return;
+    try {
+      const kind = response.state === "in" ? "in" : "out";
+      const iv   = await loadLatestInterval(userId, kind === "in" ? "open" : "closed");
+      if (iv) setPrompt({ kind, interval: iv });
+    } catch {
+      // Don't block the punch flow on prompt-fetch failure; user can
+      // always edit later via the calendar.
+    }
+  }, [refresh, state.today, userId]);
 
   if (!me) {
     return <div className="page-empty">Sign in to view your timesheet.</div>;
@@ -235,6 +238,14 @@ export function TimesheetTab({ focusDate = null }) {
           onSaved={refresh}
         />
       )}
+      {prompt && (
+        <PunchPromptModal
+          kind={prompt.kind}
+          interval={prompt.interval}
+          onClose={() => setPrompt(null)}
+          onSaved={() => refresh({ silent: true })}
+        />
+      )}
     </div>
   );
 }
@@ -245,67 +256,3 @@ function shiftDay(date, setDate, delta) {
   setDate(d.toISOString().slice(0, 10));
 }
 
-function IntervalReclassifyPopover({ interval, locked, onClose, onSaved }) {
-  const [category, setCategory] = useState(interval.category);
-  const [notes,    setNotes]    = useState(interval.notes || "");
-  const [busy,     setBusy]     = useState(false);
-  const [err,      setErr]      = useState(null);
-
-  const save = async () => {
-    if (locked) { onClose?.(); return; }
-    setBusy(true); setErr(null);
-    try {
-      await setIntervalCategory(interval.id, {
-        category, outlookEventId: interval.outlookEventId, notes: notes || null,
-      });
-      onSaved?.();
-      onClose?.();
-    } catch (e) { setErr(e.message || "save failed"); }
-    finally { setBusy(false); }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div className="modal-eyebrow">Interval</div>
-          <h3 className="modal-title">
-            {fmtClock(interval.startAt)} – {interval.endAt ? fmtClock(interval.endAt) : "now"}
-          </h3>
-          <button className="modal-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
-        <div className="modal-body">
-          {interval.outlookEventSubject && (
-            <div className="form-help">
-              <Icon name="link" size={12}/> Linked to Outlook event: <strong>{interval.outlookEventSubject}</strong>
-              {interval.outlookEventLocation && <> · {interval.outlookEventLocation}</>}
-            </div>
-          )}
-          <div className="form-row">
-            <label className="form-label">Category</label>
-            <select className="form-input" value={category} onChange={e => setCategory(e.target.value)}>
-              {CATEGORY_USER_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <div className="tk-category-chip">
-              <span className={`tk-cat tone-${TK_CATEGORY_TONE[category] || "muted"}`}>
-                {TK_CATEGORY_LABEL[category] || category}
-              </span>
-            </div>
-          </div>
-          <div className="form-row">
-            <label className="form-label">Note</label>
-            <textarea className="form-input" rows={2} value={notes}
-              onChange={e => setNotes(e.target.value)} maxLength={400}/>
-          </div>
-          {err && <div className="form-error">{err}</div>}
-        </div>
-        <div className="modal-foot">
-          <button className="btn btn-ghost"   onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={save}    disabled={busy || locked}>
-            {busy ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
