@@ -1618,10 +1618,17 @@ export function weekStartCT(isoDate) {
   return local.toLocaleDateString("en-CA", { timeZone: CT_TZ });
 }
 
-export function fmtHM(min) {
-  if (!Number.isFinite(min) || min <= 0) return "0h";
+// Format a minute count as "Xh Ym".
+//   default     → collapses zero parts ("5m", "1h", "1h 5m") for narrow UI
+//   always:true → always shows both units ("0h 5m", "1h 0m", "0h 0m") — used
+//                 by the Time Admin tabular views so every cell scans the
+//                 same way and a 5-minute punch is never mistaken for empty.
+export function fmtHM(min, opts) {
+  const always = opts && opts.always === true;
+  if (!Number.isFinite(min) || min <= 0) return always ? "0h 0m" : "0h";
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
+  if (always) return `${h}h ${m}m`;
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;

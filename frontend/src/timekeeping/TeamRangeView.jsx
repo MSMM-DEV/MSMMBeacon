@@ -14,13 +14,16 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Icon } from "../icons";
 import {
-  todayInCT, weekStartCT, fmtHM,
+  todayInCT, weekStartCT, fmtHM, fmtClock,
   loadTeamDay, loadTeamRange, getUsers,
 } from "../data";
 import { DayTimeline } from "./DayTimeline";
 
 const TARGET_DAY_MIN = 480;   // 8h workday — bar goal
 const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const LIVE_TICK_MS = 30_000;   // refresh "in since" + open-interval totals
+const TRACK_START_HOUR = 6;
+const TRACK_END_HOUR   = 20;
 
 // ---------------------------------------------------------------------------
 // Date helpers (all in CT business tz logic, matching the rest of the system)
@@ -70,6 +73,36 @@ function endOfMonthExclusive(isoDate) {
 function totalMinForDay(d) {
   if (!d) return 0;
   return (d.minutesWork || 0) + (d.minutesMeeting || 0) + (d.minutesTravel || 0);
+}
+
+// Live total = stored day rollup + (open interval's elapsed minutes if any).
+// The DB rollup is computed only on each punch, so between punches the
+// currently-open interval's contribution is stale at 0. This compensates.
+function liveTotalForDay(d, openSinceIso) {
+  const stored = totalMinForDay(d);
+  if (!openSinceIso) return stored;
+  const elapsed = Math.max(0, Math.floor((Date.now() - +new Date(openSinceIso)) / 60_000));
+  return stored + elapsed;
+}
+
+// Most recent open interval's start (Day-mode rows carry intervals[], Range-
+// mode rows carry an `openSince` string).
+function openSinceFromDayRow(row) {
+  const open = (row.intervals || []).find(i => !i.endAt);
+  return open ? open.startAt : null;
+}
+
+// First-in / last-out for a day, derived from intervals (preferred) or the
+// rollup's first_in / last_out (fallback). Returns ISO strings or null.
+function dayPunchBounds(row) {
+  const ivs = row.intervals || [];
+  if (ivs.length > 0) {
+    const sorted = ivs.slice().sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt));
+    const firstIn = sorted[0].startAt;
+    const lastClosed = sorted.slice().reverse().find(i => i.endAt);
+    return { firstIn, lastOut: lastClosed ? lastClosed.endAt : null };
+  }
+  return { firstIn: row.day?.firstIn || null, lastOut: row.day?.lastOut || null };
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +167,20 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Live tick — forces re-render every 30 s so "in since" displays and
+  // currently-in totals advance without a full data refetch. Only ticks when
+  // someone in the current set is actually in.
+  const [, forceTick] = useState(0);
+  const anyoneIn = useMemo(() => {
+    if (range === "day") return dayRows.some(r => r.intervals.some(i => !i.endAt));
+    return rows.some(r => !!r.openSince);
+  }, [range, dayRows, rows]);
+  useEffect(() => {
+    if (!anyoneIn) return undefined;
+    const id = setInterval(() => forceTick(n => n + 1), LIVE_TICK_MS);
+    return () => clearInterval(id);
+  }, [anyoneIn]);
+
   // ---------- Filter visible users (allowlist + search)
   const visibleSet = useMemo(() => {
     const allIds = getUsers().map(u => u.id);
@@ -177,10 +224,14 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
       const list = eligible("day", dayRows);
       for (const r of list) {
         if (r.intervals.length > 0) activeUsers++;
-        if (r.intervals.some(i => !i.endAt)) inNow++;
+        const openSince = openSinceFromDayRow(r);
+        if (openSince) inNow++;
         if (r.day) {
-          totalMin += totalMinForDay(r.day);
+          totalMin += liveTotalForDay(r.day, openSince);
           if (r.day.flags?.missing_out || r.day.flags?.untagged_meeting) daysWithFlags++;
+        } else if (openSince) {
+          // Open interval with no day rollup yet — still credit the elapsed time.
+          totalMin += Math.max(0, Math.floor((Date.now() - +new Date(openSince)) / 60_000));
         }
       }
       return { totalMin, activeUsers, inNow, daysWithFlags, peopleShown: list.length };
@@ -189,9 +240,16 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
     for (const r of list) {
       if (r.days.length > 0) activeUsers++;
       if (r.openSince) inNow++;
+      const todayDate = todayInCT();
       for (const d of r.days) {
-        totalMin += totalMinForDay(d);
+        // Only the today-row should get the open-interval credit.
+        const openCredit = (r.openSince && d.date === todayDate) ? r.openSince : null;
+        totalMin += liveTotalForDay(d, openCredit);
         if (d.flags?.missing_out || d.flags?.untagged_meeting) daysWithFlags++;
+      }
+      // Open interval started today but no rollup row yet — still credit.
+      if (r.openSince && !r.days.some(d => d.date === todayDate)) {
+        totalMin += Math.max(0, Math.floor((Date.now() - +new Date(r.openSince)) / 60_000));
       }
     }
     return { totalMin, activeUsers, inNow, daysWithFlags, peopleShown: list.length };
@@ -383,7 +441,7 @@ function StatTiles({ stats, range }) {
   const tiles = [
     { key: "in",     label: "Currently in",  value: stats.inNow,      sub: "right now",  tone: "accent", pulse: stats.inNow > 0 },
     { key: "active", label: "Active",        value: stats.activeUsers, sub: "people",     tone: "sage" },
-    { key: "hours",  label: "Hours logged",  value: fmtHM(stats.totalMin), sub: rangeWord(range), tone: "blue", asString: true },
+    { key: "hours",  label: "Hours logged",  value: fmtHM(stats.totalMin, { always: true }), sub: rangeWord(range), tone: "blue", asString: true },
     { key: "flags",  label: "Needs review",  value: stats.daysWithFlags, sub: "flagged days", tone: stats.daysWithFlags > 0 ? "rose" : "muted" },
   ];
   return (
@@ -410,40 +468,101 @@ function rangeWord(r) {
 // DayMatrix — one row per user with horizontal timeline
 // ---------------------------------------------------------------------------
 function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
+  const span = TRACK_END_HOUR - TRACK_START_HOUR;
+  const hourTicks = Array.from({ length: span + 1 }, (_, i) => TRACK_START_HOUR + i);
   return (
-    <ul className="tk-day-matrix">
-      {rows.map(r => {
-        const isIn  = r.intervals.some(i => !i.endAt);
-        const total = r.day ? totalMinForDay(r.day) : 0;
-        const flags = r.day?.flags || {};
-        const showFlag = flags.missing_out || flags.untagged_meeting;
-        return (
-          <li key={r.user.id} className={`tk-day-matrix-row ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
-            <button className="tk-day-matrix-name" onClick={() => onOpenUserDay?.({ userId: r.user.id, date })}>
-              <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
-              <span className="tk-day-matrix-name-label">{r.user.name}</span>
-              {isIn && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
-            </button>
-            <div className="tk-day-matrix-timeline">
-              <DayTimeline
-                date={date}
-                intervals={r.intervals}
-                onIntervalClick={() => onOpenUserDay?.({ userId: r.user.id, date })}
-                height={isCompact ? 18 : 24}
-                showHourGrid={false}
-              />
-            </div>
-            <div className="tk-day-matrix-total">
-              <span className="tk-num">{fmtHM(total)}</span>
-              {showFlag && <span className="tk-flag-dot" title={flagTitle(flags)}/>}
-            </div>
-          </li>
-        );
-      })}
-      {rows.length === 0 && (
-        <li className="tk-range-empty-row">No activity for the visible people on this day.</li>
-      )}
-    </ul>
+    <div className="tk-day-matrix-wrap">
+      {/* Shared hour grid above all rows so positions are readable. */}
+      <div className="tk-day-matrix-axis" aria-hidden="true">
+        <div className="tk-day-matrix-axis-spacer"/>
+        <div className="tk-day-matrix-axis-track">
+          {hourTicks.map(h => (
+            <span key={h} className="tk-day-matrix-axis-tick"
+              style={{ left: `${((h - TRACK_START_HOUR) / span) * 100}%` }}>
+              {h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`}
+            </span>
+          ))}
+        </div>
+        <div className="tk-day-matrix-axis-spacer"/>
+      </div>
+
+      <ul className="tk-day-matrix">
+        {rows.map(r => {
+          const openSince = openSinceFromDayRow(r);
+          const isIn  = !!openSince;
+          const total = r.day ? liveTotalForDay(r.day, openSince)
+                      : (openSince ? Math.max(0, Math.floor((Date.now() - +new Date(openSince)) / 60_000)) : 0);
+          const flags = r.day?.flags || {};
+          const showFlag = flags.missing_out || flags.untagged_meeting;
+          const bounds = dayPunchBounds(r);
+          return (
+            <li key={r.user.id} className={`tk-day-matrix-row ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
+              <button className="tk-day-matrix-name" onClick={() => onOpenUserDay?.({ userId: r.user.id, date })}>
+                <div className="tk-day-matrix-name-top">
+                  <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
+                  <span className="tk-day-matrix-name-label">{r.user.name}</span>
+                  {isIn && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
+                </div>
+                <PunchTimesLine
+                  firstIn={bounds.firstIn}
+                  lastOut={bounds.lastOut}
+                  openSince={openSince}
+                />
+              </button>
+              <div className="tk-day-matrix-timeline">
+                <DayTimeline
+                  date={date}
+                  intervals={r.intervals}
+                  onIntervalClick={() => onOpenUserDay?.({ userId: r.user.id, date })}
+                  height={isCompact ? 18 : 24}
+                  showHourGrid={false}
+                />
+              </div>
+              <div className="tk-day-matrix-total">
+                <span className="tk-num">{fmtHM(total, { always: true })}</span>
+                {showFlag && <span className="tk-flag-dot" title={flagTitle(flags)}/>}
+              </div>
+            </li>
+          );
+        })}
+        {rows.length === 0 && (
+          <li className="tk-range-empty-row">No activity for the visible people on this day.</li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+// Small line under the name showing the actual clock times. Switches between
+// "In since 9:30a" (currently in), "9:30a → 9:38a" (clocked out), and a
+// neutral "No punches yet" when the row is empty.
+function PunchTimesLine({ firstIn, lastOut, openSince }) {
+  if (openSince) {
+    return (
+      <div className="tk-day-matrix-times is-in">
+        <Icon name="clock" size={10}/>
+        <span className="tk-num">In since {fmtClock(openSince)}</span>
+        {firstIn && firstIn !== openSince && (
+          <span className="tk-day-matrix-times-extra">
+            · first in {fmtClock(firstIn)}
+          </span>
+        )}
+      </div>
+    );
+  }
+  if (firstIn) {
+    return (
+      <div className="tk-day-matrix-times">
+        <Icon name="clock" size={10}/>
+        <span className="tk-num">{fmtClock(firstIn)} → {lastOut ? fmtClock(lastOut) : "—"}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="tk-day-matrix-times is-empty">
+      <Icon name="clock" size={10}/>
+      <span>No punches yet</span>
+    </div>
   );
 }
 
@@ -487,9 +606,9 @@ function WeekMatrix({ rows, columns, today, onOpenUserDay, isCompact }) {
                     type="button"
                     className={`tk-week-cell ${isToday ? "is-today" : ""} ${future ? "is-future" : ""} ${mins === 0 ? "is-empty" : ""} ${ot ? "is-ot" : ""}`}
                     onClick={() => onOpenUserDay?.({ userId: r.user.id, date: d })}
-                    title={`${fmtDateShort(d)} · ${fmtHM(mins)}`}
+                    title={`${fmtDateShort(d)} · ${fmtHM(mins, { always: true })}`}
                   >
-                    <div className="tk-week-cell-num">{mins > 0 ? fmtHM(mins) : "—"}</div>
+                    <div className="tk-week-cell-num">{mins > 0 ? fmtHM(mins, { always: true }) : "—"}</div>
                     <div className="tk-week-cell-bar">
                       <div className="tk-week-cell-bar-fill" style={{ width: `${pct}%` }}/>
                       {ot && <div className="tk-week-cell-bar-ot"/>}
@@ -497,7 +616,7 @@ function WeekMatrix({ rows, columns, today, onOpenUserDay, isCompact }) {
                   </button>
                 );
               })}
-              <div className="tk-week-matrix-total">{fmtHM(weekTotal)}</div>
+              <div className="tk-week-matrix-total">{fmtHM(weekTotal, { always: true })}</div>
             </li>
           );
         })}
@@ -561,16 +680,16 @@ function MonthMatrix({ rows, weeks, anchorDate, today, onOpenUserDay, isCompact 
                     type="button"
                     className={`tk-month-cell ${mins === 0 ? "is-empty" : ""}`}
                     onClick={() => onOpenUserDay?.({ userId: r.user.id, date: wkStart })}
-                    title={`Week of ${fmtDateShort(wkStart)} · ${fmtHM(mins)}`}
+                    title={`Week of ${fmtDateShort(wkStart)} · ${fmtHM(mins, { always: true })}`}
                   >
-                    <div className="tk-month-cell-num">{mins > 0 ? fmtHM(mins) : "—"}</div>
+                    <div className="tk-month-cell-num">{mins > 0 ? fmtHM(mins, { always: true }) : "—"}</div>
                     <div className="tk-month-cell-bar">
                       <div className="tk-month-cell-bar-fill" style={{ width: `${pct}%` }}/>
                     </div>
                   </button>
                 );
               })}
-              <div className="tk-month-matrix-total">{fmtHM(monthTotal)}</div>
+              <div className="tk-month-matrix-total">{fmtHM(monthTotal, { always: true })}</div>
             </li>
           );
         })}
@@ -619,9 +738,9 @@ function CustomMatrix({ rows, start, endExclusive, onOpenUserDay }) {
               <div className="tk-custom-bar">
                 <div className="tk-custom-bar-fill" style={{ width: `${pct}%` }}/>
               </div>
-              <div className="tk-custom-avg">{fmtHM(r.avg)}</div>
+              <div className="tk-custom-avg">{fmtHM(r.avg, { always: true })}</div>
               <div className="tk-custom-flags">{r.flagDays > 0 ? `${r.flagDays}` : "—"}</div>
-              <div className="tk-custom-total">{fmtHM(r.total)}</div>
+              <div className="tk-custom-total">{fmtHM(r.total, { always: true })}</div>
             </li>
           );
         })}

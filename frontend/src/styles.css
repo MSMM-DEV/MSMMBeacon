@@ -9104,10 +9104,44 @@ html, body { overflow-x: clip; }
 }
 
 /* Day matrix --------------------------------------------------------- */
-.tk-day-matrix { list-style: none; padding: 0; margin: 0; display: grid; gap: 1px; background: var(--border); border-radius: 12px; overflow: hidden; }
+.tk-day-matrix-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Shared hour axis above all rows */
+.tk-day-matrix-axis {
+  display: grid;
+  grid-template-columns: 240px 1fr 96px;
+  align-items: center; gap: 14px;
+  padding: 8px 16px 10px;
+  background: color-mix(in srgb, var(--accent-softer) 40%, var(--surface));
+  border-bottom: 1px solid var(--border);
+}
+.tk-day-matrix-axis-spacer { min-height: 1px; }
+.tk-day-matrix-axis-track {
+  position: relative;
+  height: 14px;
+}
+.tk-day-matrix-axis-tick {
+  position: absolute; top: 0;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.06em;
+  color: var(--text-soft);
+}
+.tk-day-matrix-axis-tick::after {
+  content: ""; position: absolute; left: 50%; top: 14px;
+  width: 1px; height: 4px; background: var(--border);
+  transform: translateX(-50%);
+}
+
+.tk-day-matrix { list-style: none; padding: 0; margin: 0; display: grid; gap: 1px; background: var(--border); }
 .tk-day-matrix-row {
   display: grid;
-  grid-template-columns: 220px 1fr 88px;
+  grid-template-columns: 240px 1fr 96px;
   align-items: center; gap: 14px;
   padding: 12px 16px;
   background: var(--surface);
@@ -9123,12 +9157,39 @@ html, body { overflow-x: clip; }
 .tk-day-matrix-row.has-flag::before { background: var(--rose); }
 .tk-day-matrix-name {
   appearance: none; background: transparent; border: none; padding: 0;
-  display: inline-flex; align-items: center; gap: 8px;
+  display: grid; gap: 4px;
   font-size: 13px; color: var(--text); cursor: pointer;
   text-align: left;
+  min-width: 0;
 }
 .tk-day-matrix-name:hover { color: var(--accent-ink); }
-.tk-day-matrix-name-label { font-weight: 500; }
+.tk-day-matrix-name-top {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-width: 0;
+}
+.tk-day-matrix-name-label {
+  font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tk-day-matrix-times {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.01em;
+  color: var(--text-muted);
+  padding-left: 1px;
+}
+.tk-day-matrix-times.is-in {
+  color: #3E5734;
+  font-weight: 600;
+}
+.tk-day-matrix-times.is-empty {
+  color: var(--text-soft);
+  font-style: italic;
+}
+.tk-day-matrix-times-extra {
+  color: var(--text-soft);
+  font-weight: 400;
+}
 .tk-day-matrix-timeline { min-width: 0; }
 .tk-day-matrix-total {
   text-align: right;
@@ -9136,8 +9197,10 @@ html, body { overflow-x: clip; }
   color: var(--text);
   font-variant-numeric: tabular-nums;
   display: inline-flex; align-items: center; justify-content: flex-end;
+  white-space: nowrap;
 }
 .tk-range.is-compact .tk-day-matrix-row { padding: 6px 14px; }
+.tk-range.is-compact .tk-day-matrix-times { display: none; }
 
 /* Week matrix -------------------------------------------------------- */
 .tk-week-matrix {
@@ -9407,7 +9470,8 @@ html, body { overflow-x: clip; }
     grid-template-columns: 160px repeat(7, minmax(58px, 1fr)) 76px;
   }
   .tk-week-matrix-col-date { font-size: 12px; }
-  .tk-day-matrix-row { grid-template-columns: 180px 1fr 76px; }
+  .tk-day-matrix-row { grid-template-columns: 200px 1fr 88px; }
+  .tk-day-matrix-axis { grid-template-columns: 200px 1fr 88px; }
   .tk-custom-matrix-head, .tk-custom-matrix-row { grid-template-columns: 180px 1fr 80px 60px 90px; }
 }
 @media (max-width: 720px) {
@@ -9421,14 +9485,16 @@ html, body { overflow-x: clip; }
   .tk-range-title { font-size: 18px; }
 
   /* Day matrix → name on top, timeline + total beneath */
+  .tk-day-matrix-axis { display: none; }   /* axis is too wide on phones */
   .tk-day-matrix-row {
-    grid-template-columns: 1fr 76px;
+    grid-template-columns: 1fr 88px;
     grid-template-rows: auto auto;
     gap: 6px 12px;
   }
   .tk-day-matrix-name { grid-column: 1 / -1; grid-row: 1; }
   .tk-day-matrix-timeline { grid-column: 1; grid-row: 2; }
-  .tk-day-matrix-total    { grid-column: 2; grid-row: 2; }
+  .tk-day-matrix-total    { grid-column: 2; grid-row: 2; align-self: end; }
+  .tk-day-matrix-times { font-size: 10px; }
 
   /* Week matrix → horizontal scroll on phones */
   .tk-week-matrix { overflow-x: auto; }
