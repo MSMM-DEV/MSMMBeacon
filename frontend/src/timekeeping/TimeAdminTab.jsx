@@ -48,8 +48,24 @@ export function TimeAdminTab({ onOpenUserDay }) {
   // Bumped whenever the admin resolves a correction or a week submission.
   // Passed to TeamRangeView so it refetches after each approval (otherwise
   // the Team page stays stale until the admin reloads or remounts the tab).
+  //
+  // The payload also carries the affected date (correction.date) or week
+  // (week_start) so we can navigate the Team view's anchor to where the
+  // change landed. Otherwise approving a correction for May 26 while the
+  // Team view is anchored to May 27 (today) looks like nothing happened.
   const [dataVersion, setDataVersion] = useState(0);
-  const bumpDataVersion = useCallback(() => setDataVersion(v => v + 1), []);
+  const handleApprovalResolved = useCallback((payload) => {
+    setDataVersion(v => v + 1);
+    if (!payload) return;
+    // Only navigate on approvals — rejections leave the data unchanged, so
+    // jumping the Team view's anchor would be surprising and unhelpful.
+    if (payload.decision === "rejected") return;
+    if (payload.kind === "correction" && payload.date) {
+      updatePrefs({ range: "day", anchorDate: payload.date });
+    } else if (payload.kind === "week" && payload.weekStart) {
+      updatePrefs({ range: "week", anchorDate: payload.weekStart });
+    }
+  }, [updatePrefs]);
 
   // Lightweight signals fetch: who's currently in / active today. Used by
   // the PeopleFilter for "Currently in" + "Active today" quick-picks.
@@ -164,7 +180,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
             }}
           />
         )}
-        {view === "approvals" && <ApprovalsQueue onResolved={bumpDataVersion}/>}
+        {view === "approvals" && <ApprovalsQueue onResolved={handleApprovalResolved}/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
         {view === "settings"  && <TimeSettingsPanel/>}
       </div>

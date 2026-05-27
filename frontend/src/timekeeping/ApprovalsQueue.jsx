@@ -44,11 +44,12 @@ export function ApprovalsQueue({ onResolved }) {
   }, []);
 
   // Notify parent (TimeAdminTab) that something was approved/rejected so the
-  // Team view can refetch. Wraps the local refresh so callers don't have to
-  // remember both.
-  const refreshAndNotify = useCallback(async () => {
+  // Team view can refetch AND navigate to the affected date. Wraps the local
+  // refresh so callers don't have to remember both. Forwards the payload
+  // (kind/date/weekStart) up to the parent.
+  const refreshAndNotify = useCallback(async (payload) => {
     await refresh();
-    onResolved?.();
+    onResolved?.(payload);
   }, [refresh, onResolved]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -127,7 +128,7 @@ export function ApprovalsQueue({ onResolved }) {
           userId={open.userId}
           weekStart={open.weekStart}
           onClose={() => setOpen(null)}
-          onResolved={refreshAndNotify}
+          onResolved={() => refreshAndNotify({ kind: "week", weekStart: open.weekStart })}
         />
       )}
     </div>
@@ -148,7 +149,7 @@ function CorrectionRow({ correction, onResolved }) {
     setBusy(true); setErr(null);
     try {
       await tkResolveCorrection(correction.id, "approved", null);
-      onResolved?.();
+      onResolved?.({ kind: "correction", date: correction.date, decision: "approved" });
     } catch (e) { setErr(e.message || "approve failed"); }
     finally    { setBusy(false); }
   };
@@ -157,7 +158,7 @@ function CorrectionRow({ correction, onResolved }) {
     setBusy(true); setErr(null);
     try {
       await tkResolveCorrection(correction.id, "rejected", reason.trim() || null);
-      onResolved?.();
+      onResolved?.({ kind: "correction", date: correction.date, decision: "rejected" });
     } catch (e) { setErr(e.message || "reject failed"); }
     finally    { setBusy(false); }
   };
