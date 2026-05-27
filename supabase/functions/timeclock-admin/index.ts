@@ -302,7 +302,11 @@ async function unlockWeek(payload: any, admin: { admin_user_id: string }) {
 
 async function resolveCorrection(payload: any, admin: { admin_user_id: string }) {
   const id       = String(payload.correction_id || "");
-  const decision = payload.decision === "approve" ? "approved" : "rejected";
+  // Accept either "approve" or "approved" (and lowercase variants) from the
+  // client. Anything else is treated as a rejection. The client today sends
+  // the past-tense form; this normalization keeps both spellings working.
+  const raw      = String(payload.decision ?? "").toLowerCase();
+  const decision = (raw === "approve" || raw === "approved") ? "approved" : "rejected";
   const note     = payload.note ? String(payload.note) : null;
   if (!id) return bad("correction_id required");
   const sb = svc();
@@ -318,7 +322,7 @@ async function resolveCorrection(payload: any, admin: { admin_user_id: string })
   if (decision === "approved") {
     // Apply payload according to kind.
     try {
-      await applyCorrection(sb, corr);
+      await applyCorrection(sb, corr, admin.admin_user_id);
     } catch (e) {
       return bad(`apply failed: ${(e as Error).message}`, 500);
     }
@@ -340,7 +344,7 @@ async function resolveCorrection(payload: any, admin: { admin_user_id: string })
   return json({ ok: true, message: `correction ${decision}` });
 }
 
-async function applyCorrection(sb: ReturnType<typeof svc>, corr: any) {
+async function applyCorrection(sb: ReturnType<typeof svc>, corr: any, adminUserId: string) {
   const p = corr.payload || {};
   switch (corr.kind) {
     case "add_punch": {
@@ -349,7 +353,7 @@ async function applyCorrection(sb: ReturnType<typeof svc>, corr: any) {
         punched_at: p.punched_at,
         source:     "manual",
         note:       p.note ?? `correction ${corr.id}`,
-        created_by: corr.reviewed_by ?? null,
+        created_by: adminUserId,
       });
       if (error) throw error;
       return;
