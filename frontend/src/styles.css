@@ -8083,6 +8083,23 @@ html, body { overflow-x: clip; }
 }
 .tk-day-seg { z-index: 1; }   /* keep interval cards above the overlay */
 
+/* Label inside the OUT-gap overlay — mirrors the "Working" label on green
+   segments. Centered, single-line, color-coordinated with the gap border. */
+.tk-day-gap-label {
+  position: absolute;
+  inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #5A1D1D;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+  white-space: nowrap;
+  pointer-events: none;
+  overflow: hidden;
+  padding: 0 4px;
+}
+[data-theme="dark"] .tk-day-gap-label { color: #F0C4C4; text-shadow: 0 1px 0 rgba(0,0,0,0.4); }
+
 /* Modal variants used by timekeeping modals. The base .modal sizes itself
    wider than these by default. */
 .modal-narrow { width: min(440px, 92vw); }

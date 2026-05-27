@@ -20,7 +20,7 @@ import {
 } from "../data";
 import { WeekApprovalModal } from "./WeekApprovalModal";
 
-export function ApprovalsQueue() {
+export function ApprovalsQueue({ onResolved }) {
   const [pending,    setPending]    = useState([]);
   const [corrections, setCorrections] = useState([]);
   const [open,       setOpen]       = useState(null);
@@ -42,6 +42,14 @@ export function ApprovalsQueue() {
       setBusy(false);
     }
   }, []);
+
+  // Notify parent (TimeAdminTab) that something was approved/rejected so the
+  // Team view can refetch. Wraps the local refresh so callers don't have to
+  // remember both.
+  const refreshAndNotify = useCallback(async () => {
+    await refresh();
+    onResolved?.();
+  }, [refresh, onResolved]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -74,7 +82,7 @@ export function ApprovalsQueue() {
             <CorrectionRow
               key={c.id}
               correction={c}
-              onResolved={refresh}
+              onResolved={refreshAndNotify}
             />
           ))}
           {corrections.length === 0 && !busy && (
@@ -119,7 +127,7 @@ export function ApprovalsQueue() {
           userId={open.userId}
           weekStart={open.weekStart}
           onClose={() => setOpen(null)}
-          onResolved={refresh}
+          onResolved={refreshAndNotify}
         />
       )}
     </div>

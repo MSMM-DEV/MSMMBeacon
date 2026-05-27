@@ -77,14 +77,36 @@ function totalMinForDay(d) {
   return (d.minutesWork || 0) + (d.minutesMeeting || 0) + (d.minutesTravel || 0);
 }
 
-// Live total = stored day rollup + (open interval's elapsed minutes if any).
-// The DB rollup is computed only on each punch, so between punches the
-// currently-open interval's contribution is stale at 0. This compensates.
+// Stored rollup + live elapsed for the open interval. Used by Week/Month/
+// Custom views, which can't afford to fetch per-day intervals across the
+// whole range. Known to overcount on days where an open interval crossed
+// midnight — the DB rollup credits cross-day spans to the day they started.
 function liveTotalForDay(d, openSinceIso) {
   const stored = totalMinForDay(d);
   if (!openSinceIso) return stored;
   const elapsed = Math.max(0, Math.floor((Date.now() - +new Date(openSinceIso)) / 60_000));
   return stored + elapsed;
+}
+
+// Day-mode total computed directly from today's intervals, clamped to the
+// calendar day. Counts work/meeting/travel categories. Open intervals are
+// credited up to now(). Deliberately bypasses timesheet_days.minutes_work,
+// which inflates today when an interval crossed midnight (e.g. yesterday's
+// IN punch was never paired with an OUT).
+const WORK_LIKE_CATEGORIES = new Set(["work", "meeting", "travel"]);
+function workMinutesFromIntervals(intervals, date) {
+  if (!intervals || intervals.length === 0) return 0;
+  const dayStart = new Date(`${date}T00:00:00`).getTime();
+  const dayEnd   = dayStart + 86_400_000;
+  const now      = Date.now();
+  let mins = 0;
+  for (const iv of intervals) {
+    if (!WORK_LIKE_CATEGORIES.has(iv.category)) continue;
+    const s = Math.max(new Date(iv.startAt).getTime(), dayStart);
+    const e = Math.min(iv.endAt ? new Date(iv.endAt).getTime() : now, dayEnd);
+    if (e > s) mins += Math.floor((e - s) / 60_000);
+  }
+  return mins;
 }
 
 // Most recent open interval's start (Day-mode rows carry intervals[], Range-
@@ -108,7 +130,7 @@ function dayPunchBounds(row) {
 }
 
 // ---------------------------------------------------------------------------
-export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
+export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion = 0 }) {
   const today      = todayInCT();
   const anchorDate = prefs.anchorDate || today;
   const range      = prefs.range || "day";
@@ -165,23 +187,24 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
     } finally {
       setBusy(false);
     }
-  }, [range, anchorDate, window.start, window.endExclusive]);
+    // `dataVersion` is included so the Time Admin tab can force a refetch
+    // after a correction/week is approved on the Approvals tab.
+  }, [range, anchorDate, window.start, window.endExclusive, dataVersion]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Live tick — forces re-render every 30 s so "in since" displays and
-  // currently-in totals advance without a full data refetch. Only ticks when
-  // someone in the current set is actually in.
-  const [, forceTick] = useState(0);
-  const anyoneIn = useMemo(() => {
-    if (range === "day") return dayRows.some(r => r.intervals.some(i => !i.endAt));
-    return rows.some(r => !!r.openSince);
-  }, [range, dayRows, rows]);
+  // Auto-refresh every LIVE_TICK_MS so the Team view never goes stale —
+  // covers correction approvals, new punches from the Pi/web, and advances
+  // "in since" / open-interval totals without a manual reload. Runs always
+  // (not just "when anyone is in") so a punch arriving from anywhere lands
+  // here within one tick. Skipped while a refresh is already in flight to
+  // avoid stacking duplicate requests.
   useEffect(() => {
-    if (!anyoneIn) return undefined;
-    const id = setInterval(() => forceTick(n => n + 1), LIVE_TICK_MS);
+    const id = setInterval(() => {
+      if (!busy) refresh();
+    }, LIVE_TICK_MS);
     return () => clearInterval(id);
-  }, [anyoneIn]);
+  }, [refresh, busy]);
 
   // ---------- Filter visible users (allowlist + search)
   const visibleSet = useMemo(() => {
@@ -228,13 +251,8 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
         if (r.intervals.length > 0) activeUsers++;
         const openSince = openSinceFromDayRow(r);
         if (openSince) inNow++;
-        if (r.day) {
-          totalMin += liveTotalForDay(r.day, openSince);
-          if (r.day.flags?.missing_out || r.day.flags?.untagged_meeting) daysWithFlags++;
-        } else if (openSince) {
-          // Open interval with no day rollup yet — still credit the elapsed time.
-          totalMin += Math.max(0, Math.floor((Date.now() - +new Date(openSince)) / 60_000));
-        }
+        totalMin += workMinutesFromIntervals(r.intervals, anchorDate);
+        if (r.day?.flags?.missing_out || r.day?.flags?.untagged_meeting) daysWithFlags++;
       }
       return { totalMin, activeUsers, inNow, daysWithFlags, peopleShown: list.length };
     }
@@ -255,7 +273,7 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay }) {
       }
     }
     return { totalMin, activeUsers, inNow, daysWithFlags, peopleShown: list.length };
-  }, [range, dayRows, rows, visibleSet, matchesSearch]);
+  }, [range, dayRows, rows, anchorDate, visibleSet, matchesSearch]);
 
   // ---------- Render
   const isCompact = prefs.density === "compact";
@@ -517,8 +535,7 @@ function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
         {rows.map(r => {
           const openSince = openSinceFromDayRow(r);
           const isIn  = !!openSince;
-          const total = r.day ? liveTotalForDay(r.day, openSince)
-                      : (openSince ? Math.max(0, Math.floor((Date.now() - +new Date(openSince)) / 60_000)) : 0);
+          const total = workMinutesFromIntervals(r.intervals, date);
           const flags = r.day?.flags || {};
           const showFlag = flags.missing_out || flags.untagged_meeting;
           const bounds = dayPunchBounds(r);
@@ -565,9 +582,7 @@ function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
 function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
   const openSince = openSinceFromDayRow(row);
   const isIn      = !!openSince;
-  const total     = row.day
-    ? liveTotalForDay(row.day, openSince)
-    : (openSince ? Math.max(0, Math.floor((Date.now() - +new Date(openSince)) / 60_000)) : 0);
+  const total     = workMinutesFromIntervals(row.intervals, date);
   const flags     = row.day?.flags || {};
   const showFlag  = flags.missing_out || flags.untagged_meeting;
 

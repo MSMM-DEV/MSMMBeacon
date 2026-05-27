@@ -103,20 +103,30 @@ export function DayTimeline({
           );
         })()}
 
-        {/* Red OUT-gap overlay — behind interval cards so cards still click */}
+        {/* Red OUT-gap overlay — behind interval cards so cards still click.
+            Labeled with the gap duration when wide enough, mirroring the
+            "Working" label on green segment bars. */}
         {date && computeOutGaps({ intervals, date }).map(([sMin, eMin], i) => {
           const leftFrac  = trackFractionForMin(sMin);
           const rightFrac = trackFractionForMin(eMin);
           const widthFrac = Math.max(0, rightFrac - leftFrac);
           if (widthFrac <= 0) return null;
+          const widthPct = widthFrac * 100;
+          const durMin = eMin - sMin;
           return (
             <div
               key={`gap-${i}`}
               className="tk-day-gap"
-              style={{ left: `${leftFrac * 100}%`, width: `${widthFrac * 100}%` }}
-              title={`Out ${fmtHM(eMin - sMin)}`}
+              style={{ left: `${leftFrac * 100}%`, width: `${widthPct}%` }}
+              title={`Out ${fmtHM(durMin)}`}
               aria-hidden="true"
-            />
+            >
+              {widthPct > 4 && (
+                <span className="tk-day-gap-label">
+                  {widthPct > 8 ? `Out · ${fmtHM(durMin)}` : "Out"}
+                </span>
+              )}
+            </div>
           );
         })}
 

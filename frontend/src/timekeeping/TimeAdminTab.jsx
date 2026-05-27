@@ -45,6 +45,12 @@ export function TimeAdminTab({ onOpenUserDay }) {
   const [prefs, updatePrefs] = useAdminTimePrefs(adminId);
   const [userDay, setUserDay] = useState(null);   // { userId, date } | null
 
+  // Bumped whenever the admin resolves a correction or a week submission.
+  // Passed to TeamRangeView so it refetches after each approval (otherwise
+  // the Team page stays stale until the admin reloads or remounts the tab).
+  const [dataVersion, setDataVersion] = useState(0);
+  const bumpDataVersion = useCallback(() => setDataVersion(v => v + 1), []);
+
   // Lightweight signals fetch: who's currently in / active today. Used by
   // the PeopleFilter for "Currently in" + "Active today" quick-picks.
   // Cheap query (today's snapshot only) so it can run on every tab open.
@@ -65,7 +71,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
       } catch { /* non-critical */ }
     })();
     return () => { cancelled = true; };
-  }, [view, prefs.anchorDate, prefs.range]);
+  }, [view, prefs.anchorDate, prefs.range, dataVersion]);
 
   const [reBusy, setReBusy] = useState(false);
   const [reMsg,  setReMsg]  = useState(null);
@@ -151,13 +157,14 @@ export function TimeAdminTab({ onOpenUserDay }) {
           <TeamRangeView
             prefs={prefs}
             onPrefsChange={updatePrefs}
+            dataVersion={dataVersion}
             onOpenUserDay={(payload) => {
               setUserDay(payload);
               onOpenUserDay?.(payload);   // allow parent to mirror the focus too
             }}
           />
         )}
-        {view === "approvals" && <ApprovalsQueue/>}
+        {view === "approvals" && <ApprovalsQueue onResolved={bumpDataVersion}/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
         {view === "settings"  && <TimeSettingsPanel/>}
       </div>
