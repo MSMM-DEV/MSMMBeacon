@@ -3088,6 +3088,125 @@ export const EventsTable = ({
   );
 };
 
+// ---------- Hot Leads Quick View ----------
+// "What's next" dashboard panel that sits ABOVE the Hot Leads table. Splits
+// upcoming Scheduled leads into two type-coded columns (AI · Engineering)
+// so the team can scan what's coming up at a glance without scrolling
+// through the full table.
+//
+// Filter rules: dateTime >= now AND status === "Scheduled" AND type set.
+// Untyped leads are intentionally skipped (the user has to set a type for
+// them to appear) — the hint below the columns surfaces the count so the
+// backfill prompt is visible. Cap at 5 cards per column; overflow surfaces
+// as "+ N more in the table below" so the user knows where to look.
+//
+// Clicking a card opens the same DetailDrawer the table rows use.
+export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
+  const CAP = 5;
+  const upcoming = useMemo(() => {
+    const now = Date.now();
+    return (rows || [])
+      .filter(r => r.dateTime
+        && +new Date(r.dateTime) >= now
+        && (r.status || "Scheduled") === "Scheduled")
+      .sort((a, b) => +new Date(a.dateTime) - +new Date(b.dateTime));
+  }, [rows]);
+
+  const ai      = upcoming.filter(r => r.type === "AI");
+  const eng     = upcoming.filter(r => r.type === "Engineering");
+  const untyped = upcoming.filter(r => !r.type).length;
+
+  const renderColumn = (label, tone, items) => (
+    <section className="hl-quick-col" aria-label={`${label} upcoming hot leads`}>
+      <header className="hl-quick-col-head">
+        <div className="hl-quick-col-label">
+          <span className={`hl-quick-col-dot tone-${tone}`} aria-hidden/>
+          {label}
+        </div>
+        <span className="hl-quick-col-count">
+          {items.length === 0
+            ? "Nothing upcoming"
+            : `${items.length} upcoming`}
+        </span>
+      </header>
+      {items.length === 0 ? (
+        <div className="hl-quick-empty">
+          <Icon name="trend" size={14}/>
+          <span>No {label.toLowerCase()} leads scheduled.</span>
+        </div>
+      ) : (
+        <ol className="hl-quick-list">
+          {items.slice(0, CAP).map(r => {
+            const company = companyById(r.clientId);
+            return (
+              <li key={r.id}>
+                <button type="button" className="hl-quick-card" data-tone={tone}
+                        onClick={() => onOpenDrawer?.(r)}>
+                  <div className="hl-quick-card-when">
+                    <span className="hl-quick-card-date">{fmtQuickDate(r.dateTime)}</span>
+                    <span className="hl-quick-card-time">{fmtQuickTime(r.dateTime)}</span>
+                  </div>
+                  <div className="hl-quick-card-body">
+                    <div className="hl-quick-card-title">{r.title || "Untitled lead"}</div>
+                    {company && (
+                      <div className="hl-quick-card-client">{company.name}</div>
+                    )}
+                  </div>
+                  {r.stars > 0 && (
+                    <div className="hl-quick-card-stars" aria-label={`${r.stars} of 5 stars`}>
+                      {"★".repeat(r.stars)}
+                    </div>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+          {items.length > CAP && (
+            <li className="hl-quick-more">
+              + {items.length - CAP} more in the table below
+            </li>
+          )}
+        </ol>
+      )}
+    </section>
+  );
+
+  return (
+    <section className="hl-quick-view" aria-label="Upcoming hot leads quick view">
+      <header className="hl-quick-view-head">
+        <h2 className="hl-quick-view-title">Upcoming hot leads</h2>
+        <span className="hl-quick-view-sub">
+          {upcoming.length === 0
+            ? "Nothing scheduled"
+            : `${upcoming.length} scheduled · split by type`}
+        </span>
+      </header>
+      <div className="hl-quick-view-cols">
+        {renderColumn("AI",          "sage", ai)}
+        {renderColumn("Engineering", "blue", eng)}
+      </div>
+      {untyped > 0 && (
+        <p className="hl-quick-untyped-hint">
+          {untyped} upcoming {untyped === 1 ? "lead" : "leads"} {untyped === 1 ? "has" : "have"} no type set · pick one to show {untyped === 1 ? "it" : "them"} here.
+        </p>
+      )}
+    </section>
+  );
+};
+
+function fmtQuickDate(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric",
+  });
+}
+function fmtQuickTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
 // ---------- Hot Leads ----------
 // Lightweight tracker for early-stage opportunities (partner chats, trade
 // shows, pre-RFP conversations) before they become Potential Projects.

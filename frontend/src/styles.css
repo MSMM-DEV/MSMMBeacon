@@ -12276,6 +12276,111 @@ html, body { overflow-x: clip; }
 .tcal-pop-done:hover { opacity: 0.88; }
 
 /* ============================================================
+   TEAM CALENDAR — MANUAL REFRESH BUTTON + FRESHNESS INDICATOR
+   ------------------------------------------------------------
+   The button does double duty: for admins it triggers the
+   outlook-sync Edge Function (slow, pulls fresh delta from
+   Graph); for everyone else it re-queries the DB (fast).
+   The label changes to match the work being done.
+   ============================================================ */
+
+.tcal-refresh-btn {
+  height: 30px;
+  padding: 0 14px 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: border-color .14s, background .14s, transform .14s, box-shadow .14s;
+}
+.tcal-refresh-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+  color: var(--accent-ink);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.tcal-refresh-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(200, 130, 59, 0.22);
+}
+.tcal-refresh-btn:disabled {
+  cursor: wait;
+  color: var(--text-soft);
+}
+.tcal-refresh-btn.is-syncing {
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent-ink);
+}
+.tcal-refresh-btn.is-syncing svg {
+  animation: tcal-spin 0.85s linear infinite;
+}
+@keyframes tcal-spin { to { transform: rotate(360deg); } }
+
+.tcal-refresh-btn svg { flex-shrink: 0; }
+
+/* Freshness indicator — sits inline with the vitals so it doesn't add a row. */
+.tcal-fresh {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color .14s;
+}
+.tcal-fresh.is-syncing { color: var(--accent-ink); }
+.tcal-fresh.is-syncing::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 6px;
+  vertical-align: middle;
+  animation: tcal-pulse 1s ease-in-out infinite;
+}
+@keyframes tcal-pulse {
+  0%, 100% { transform: scale(1);   opacity: 0.85; }
+  50%      { transform: scale(1.4); opacity: 0.45; }
+}
+.tcal-fresh.is-error {
+  color: hsl(0 45% 45%);
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+}
+[data-theme="dark"] .tcal-fresh.is-error { color: hsl(0 55% 70%); }
+
+/* Responsive — on phone the refresh label drops, leaving an icon-only button. */
+@media (max-width: 840px) {
+  .tcal-refresh-btn { padding: 0 12px; }
+}
+@media (max-width: 640px) {
+  .tcal-refresh-btn { padding: 0; width: 30px; justify-content: center; }
+  .tcal-refresh-label { display: none; }
+  .tcal-fresh {
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+}
+
+/* ============================================================
    TEAM CALENDAR — CANCELLED EVENT TREATMENT
    ------------------------------------------------------------
    Outlook shows cancelled events with a "Canceled:" prefix and
@@ -12712,5 +12817,284 @@ html, body { overflow-x: clip; }
     max-height: 88vh;
     overflow-y: auto;
   }
+}
+
+/* ================================================================
+   HOT LEADS — Upcoming Quick View
+   Two-column "what's next" dashboard panel above the data table.
+   Sister-card aesthetic: one outer frame, two tone-coded columns
+   (sage AI / blue Engineering — matches the chips on the table
+   below for instant visual continuity). Each lead is a compact
+   horizontal card with a mono date+time block separated from the
+   title+client by a dotted vertical rule, plus a 3px left stripe
+   in the column's tone so the lane stays anchored when scanning
+   across.
+   ================================================================ */
+.hl-quick-view {
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--surface) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px 16px;
+  margin-bottom: 18px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #FFFFFF 60%, transparent),
+    0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
+}
+[data-theme="dark"] .hl-quick-view {
+  background: linear-gradient(180deg, var(--bg-elev) 0%, var(--surface) 100%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #FFFFFF 6%, transparent);
+}
+.hl-quick-view-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+}
+.hl-quick-view-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.hl-quick-view-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.hl-quick-view-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+/* ── Column shell ── */
+.hl-quick-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hl-quick-col-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 8px;
+  margin-bottom: 6px;
+}
+.hl-quick-col-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text);
+}
+.hl-quick-col-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.hl-quick-col-dot.tone-sage {
+  background: #6E8F62;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #6E8F62 22%, transparent);
+}
+.hl-quick-col-dot.tone-blue {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent);
+}
+.hl-quick-col-count {
+  font-size: 11px;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Lead card list ── */
+.hl-quick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hl-quick-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform .15s ease,
+    box-shadow .2s ease,
+    border-color .15s ease,
+    background .15s ease;
+}
+.hl-quick-card::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 3px;
+}
+.hl-quick-card[data-tone="sage"]::before { background: #6E8F62; }
+.hl-quick-card[data-tone="blue"]::before { background: var(--blue); }
+.hl-quick-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-softer) 18%, var(--surface));
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--accent-ink) 10%, transparent);
+}
+.hl-quick-card:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.hl-quick-card:active {
+  transform: translateY(0);
+}
+
+/* Date + time column on each card */
+.hl-quick-card-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 78px;
+  padding-right: 12px;
+  border-right: 1px dotted color-mix(in srgb, var(--border) 90%, transparent);
+}
+.hl-quick-card-date {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--accent-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.hl-quick-card-time {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hl-quick-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.hl-quick-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.hl-quick-card-client {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.hl-quick-card-stars {
+  font-size: 11.5px;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+  font-family: serif;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Empty + overflow + untyped hint */
+.hl-quick-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px;
+  background: color-mix(in srgb, var(--surface-2) 50%, var(--surface));
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-style: italic;
+}
+.hl-quick-empty :first-child {
+  color: var(--text-soft);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.hl-quick-more {
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 6px 0 0;
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+.hl-quick-untyped-hint {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+}
+
+/* ── Phone (≤720) — stack columns vertically, tighten paddings ── */
+@media (max-width: 720px) {
+  .hl-quick-view {
+    padding: 14px 14px 12px;
+    border-radius: 12px;
+    margin-bottom: 14px;
+  }
+  .hl-quick-view-head {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+  }
+  .hl-quick-view-title { font-size: 14px; }
+  .hl-quick-view-cols {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .hl-quick-card {
+    padding: 10px 11px 10px 13px;
+    gap: 10px;
+  }
+  .hl-quick-card-when {
+    min-width: 72px;
+    padding-right: 10px;
+  }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .hl-quick-card { transition: none; }
+  .hl-quick-card:hover { transform: none; }
 }
 

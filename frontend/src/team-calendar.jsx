@@ -30,6 +30,7 @@ import "react-big-calendar/lib/css/react-big-calendar.css";
 import { Icon } from "./icons.jsx";
 import {
   getUsers, loadTeamCalendarEvents, userColorTokens,
+  runOutlookSyncNow, isAdmin as getIsAdmin,
 } from "./data.js";
 
 const locales = { "en-US": enUS };
@@ -151,6 +152,20 @@ function lsRead(key, fallback) {
     if (raw == null) return fallback;
     return JSON.parse(raw);
   } catch { return fallback; }
+}
+
+// Compact "X ago" formatter for the freshness indicator. nowMs is taken from
+// a periodically-bumped state value so the label re-renders as time passes.
+function timeAgo(date, nowMs) {
+  if (!date) return "";
+  const diff = Math.max(0, Math.floor((nowMs - date.getTime()) / 1000));
+  if (diff < 5)        return "just now";
+  if (diff < 60)       return `${diff}s ago`;
+  const m = Math.floor(diff / 60);
+  if (m < 60)          return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)          return `${h}h ago`;
+  return date.toLocaleDateString();
 }
 
 // ---------------------------------------------------------------------------
@@ -665,10 +680,23 @@ function EventPopover({ event, onClose }) {
 }
 
 // ---------------------------------------------------------------------------
-// Custom toolbar — date nav + view switch + density badge. No "Sync" here
-// because Team Calendar reads what outlook-sync has already mirrored.
+// Custom toolbar — date nav + view switch + manual refresh.
+//
+// The refresh button does two different jobs based on role:
+//   • Admin → kicks the outlook-sync Edge Function (pulls fresh delta from
+//             Microsoft Graph), then re-queries the DB.
+//   • Non-admin → just re-queries the DB to pick up whatever the 15-min cron
+//                 has already mirrored.
+//
+// Either way the freshness label updates to reflect the new fetch time.
 // ---------------------------------------------------------------------------
-function CalToolbar({ label, onNavigate, onView, view, viewsAvailable, eventCount, peopleOn }) {
+function CalToolbar({
+  label, onNavigate, onView, view, viewsAvailable, eventCount, peopleOn,
+  onRefresh, syncing, isAdmin, lastRefreshedAt, nowMs, refreshError,
+}) {
+  const freshness = lastRefreshedAt
+    ? `Updated ${timeAgo(lastRefreshedAt, nowMs)}`
+    : "Not refreshed yet";
   return (
     <div className="cal-toolbar tcal-toolbar">
       <div className="cal-toolbar-l">
@@ -682,6 +710,17 @@ function CalToolbar({ label, onNavigate, onView, view, viewsAvailable, eventCoun
           <span className="tcal-vital">
             <span className="tcal-vital-n">{eventCount}</span>
             <span className="tcal-vital-l">{eventCount === 1 ? "event" : "events"} in range</span>
+          </span>
+          <span className="tcal-vital-sep" aria-hidden>·</span>
+          <span
+            className={"tcal-fresh" + (refreshError ? " is-error" : "") + (syncing ? " is-syncing" : "")}
+            title={lastRefreshedAt ? lastRefreshedAt.toLocaleString() : ""}
+          >
+            {refreshError
+              ? `Refresh failed: ${refreshError}`
+              : syncing
+                ? "Refreshing…"
+                : freshness}
           </span>
         </div>
       </div>
@@ -708,6 +747,19 @@ function CalToolbar({ label, onNavigate, onView, view, viewsAvailable, eventCoun
             ))}
           </div>
         )}
+        <button
+          className={"tcal-refresh-btn" + (syncing ? " is-syncing" : "")}
+          onClick={onRefresh}
+          disabled={syncing}
+          title={isAdmin
+            ? "Pull the latest events from Outlook for every selected person"
+            : "Reload events from the most recent sync"}
+        >
+          <Icon name="refresh" size={13} stroke={2} />
+          <span className="tcal-refresh-label">
+            {syncing ? (isAdmin ? "Syncing…" : "Refreshing…") : "Refresh"}
+          </span>
+        </button>
       </div>
     </div>
   );
@@ -766,6 +818,50 @@ export function TeamCalendarTab() {
   const [loading, setLoading] = useState(false);
   const [popoverEvent, setPopoverEvent] = useState(null);
 
+  // Manual refresh wiring. `refreshKey` increments to force the loader effect
+  // to re-run even when selected/view/date haven't changed. `syncing` is true
+  // while we await the Outlook Edge Function (admin path); `loading` covers
+  // the DB re-query. `lastRefreshedAt` powers the "Updated Xm ago" label.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
+  const [refreshError, setRefreshError] = useState(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const admin = getIsAdmin();
+
+  // Re-render the freshness label every 30 seconds so "X ago" stays current
+  // even when the user is staring at the screen without interacting.
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Refresh handler. For admins, kick the outlook-sync Edge Function first
+  // (pulls fresh delta from Microsoft Graph into beacon_v2.user_calendar_events)
+  // then re-query the DB. For non-admins, just re-query — the cron job runs
+  // every 15 minutes regardless, so a DB reload is enough to pick up anything
+  // the latest tick already mirrored.
+  const handleRefresh = async () => {
+    if (syncing || loading) return;
+    setRefreshError(null);
+    setSyncing(true);
+    try {
+      if (admin) {
+        await runOutlookSyncNow();
+      }
+      // Always bump the refresh key — both paths need the DB re-query.
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      const msg = err?.message || "Refresh failed";
+      setRefreshError(msg);
+      console.error("[TeamCalendar] refresh failed:", err);
+      // Auto-clear the inline error after 6s so it doesn't linger forever.
+      setTimeout(() => setRefreshError(null), 6_000);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // Build a lookup map id → roster entry once per roster change.
   const userById = useMemo(() => {
     const m = new Map();
@@ -773,7 +869,9 @@ export function TeamCalendarTab() {
     return m;
   }, [roster]);
 
-  // Load events whenever the selection / view / date window changes.
+  // Load events whenever the selection / view / date window changes — or when
+  // the manual refresh handler bumps `refreshKey` to force a re-fetch without
+  // changing any of those inputs.
   useEffect(() => {
     let cancelled = false;
     if (selected.size === 0) { setEvents([]); return; }
@@ -783,6 +881,7 @@ export function TeamCalendarTab() {
       .then(rows => {
         if (cancelled) return;
         setEvents(rows);
+        setLastRefreshedAt(new Date());
       })
       .catch(err => {
         if (cancelled) return;
@@ -791,7 +890,7 @@ export function TeamCalendarTab() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [selected, view, date]);
+  }, [selected, view, date, refreshKey]);
 
   // Build the rbc events array. Attach `_user` so renderers can read
   // initials/name without a Map lookup on every paint.
@@ -891,6 +990,12 @@ export function TeamCalendarTab() {
                   viewsAvailable={viewsAvailable}
                   eventCount={rbcEvents.length}
                   peopleOn={selected.size}
+                  onRefresh={handleRefresh}
+                  syncing={syncing || loading}
+                  isAdmin={admin}
+                  lastRefreshedAt={lastRefreshedAt}
+                  nowMs={nowMs}
+                  refreshError={refreshError}
                 />
               ),
               week:   { event: TimeBlock },

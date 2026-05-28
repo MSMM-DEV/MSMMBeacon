@@ -44,6 +44,7 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     thumbsUp:   <><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0V8a3 3 0 0 1 3-3l1 4v2h6a2 2 0 0 1 2 2l-2 7a2 2 0 0 1-2 1H7"/></>,
     thumbsDown: <><path d="M17 13V4h3a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-3Zm0 0v3a3 3 0 0 1-3 3l-1-4v-2H7a2 2 0 0 1-2-2l2-7a2 2 0 0 1 2-1h8"/></>,
     pin:        <><path d="M12 21s7-7.5 7-13a7 7 0 0 0-14 0c0 5.5 7 13 7 13Z"/><circle cx="12" cy="8" r="2.5"/></>,
+    refresh:    <><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></>,
   };
   const d = paths[name];
   return (

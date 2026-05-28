@@ -3,7 +3,7 @@ import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
-  InvoiceTable, EventsTable, HotLeadsTable, DirectoryTable, OpenBidsTable,
+  InvoiceTable, EventsTable, HotLeadsTable, HotLeadsQuickView, DirectoryTable, OpenBidsTable,
 } from "./tables.jsx";
 // Note: SoqTable was removed — SOQ is no longer surfaced in v2.
 // ClientsTable + CompaniesTable were merged into DirectoryTable.
@@ -3606,16 +3606,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </>
         )}
         {tab === "hotleads" && (
-          <HotLeadsTable rows={filtered.hotleads}
-            updateRow={updateHotLeads}
-            onOpenDrawer={r => openDrawer(r, "hotleads")}
-            onAlert={r => setAlertObj({ row: r, tab: "hotleads" })}
-            flashId={flashId}
-            filters={chipsFor("hotleads")}
-            tab="hotleads"
-            yearOptions={availableYears.hotleads}
-            yearValue={yearFilter.hotleads}
-            onYearChange={(y) => setYear("hotleads", y)}/>
+          <>
+            {/* "What's next" dashboard above the data table — splits upcoming
+                Scheduled leads by type so Engineering vs AI work-streams are
+                instantly visible. Uses the filtered rows so the user's year
+                filter / search context still applies. */}
+            <HotLeadsQuickView
+              rows={filtered.hotleads}
+              onOpenDrawer={r => openDrawer(r, "hotleads")}
+            />
+            <HotLeadsTable rows={filtered.hotleads}
+              updateRow={updateHotLeads}
+              onOpenDrawer={r => openDrawer(r, "hotleads")}
+              onAlert={r => setAlertObj({ row: r, tab: "hotleads" })}
+              flashId={flashId}
+              filters={chipsFor("hotleads")}
+              tab="hotleads"
+              yearOptions={availableYears.hotleads}
+              yearValue={yearFilter.hotleads}
+              onYearChange={(y) => setYear("hotleads", y)}/>
+          </>
         )}
         {tab === "directory" && (
           <DirectoryTable rows={filtered.directory}
