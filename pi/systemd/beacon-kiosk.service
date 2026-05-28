@@ -1,0 +1,32 @@
+[Unit]
+Description=MSMM Beacon Timeclock — 7" touchscreen kiosk (PyQt5)
+Documentation=https://github.com/rmehta-msmm/MSMMBeacon/tree/main/pi
+# The kiosk draws to the autologin desktop's X session, so it must start after
+# the graphical session is up. Network may lag — the idle screen still renders
+# and punches simply report "no connection" until it's back.
+After=graphical.target network-online.target
+Wants=graphical.target network-online.target
+
+[Service]
+Type=simple
+# __KIOSK_USER__ is substituted by deploy/provision.sh (default: the autologin
+# desktop user, e.g. "pi"). Must be a real desktop user with an X session, NOT
+# the headless "beacon" system user.
+User=__KIOSK_USER__
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/__KIOSK_USER__/.Xauthority
+Environment=QT_QPA_PLATFORM=xcb
+WorkingDirectory=/opt/beacon-timeclock
+# Keep the 7" panel awake (no blanking / DPMS). Guarded so a missing xset
+# never blocks startup.
+ExecStartPre=/bin/sh -c 'xset -display :0 s off; xset -display :0 -dpms; xset -display :0 s noblank; true'
+ExecStart=/opt/beacon-timeclock/.venv/bin/python /opt/beacon-timeclock/kiosk.py --config /etc/beacon-timeclock/config.ini
+Restart=on-failure
+RestartSec=4
+StartLimitIntervalSec=120
+StartLimitBurst=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

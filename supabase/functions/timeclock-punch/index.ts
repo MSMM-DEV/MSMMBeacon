@@ -74,6 +74,58 @@ interface PunchBody {
   punched_at?: string;             // advisory; server uses now() if drift > 60 s
   geo?:        { lat?: number; lng?: number; accuracy_m?: number };
   note?:       string;
+  // Kiosk category tagging (two-phase: punch first, then tag the opened
+  // interval once the user picks on the 7" screen).
+  action?:      "tag";
+  interval_id?: string;            // interval to tag (returned by the punch as open_interval_id)
+  category?:    string;            // interval_category_enum value
+}
+
+// Categories the kiosk / device may set. Mirrors interval_category_enum minus
+// the auto-only 'meeting_untagged'/'holiday' values.
+const TAGGABLE_CATEGORIES = new Set([
+  "work", "lunch", "break", "meeting", "travel", "eod", "vacation", "off",
+]);
+
+// Only allow tagging an interval that started recently — a shared device must
+// not be able to relabel arbitrary history.
+const TAG_MAX_AGE_MS = 30 * 60 * 1000;
+
+async function handleTag(body: PunchBody): Promise<Response> {
+  const intervalId = (body.interval_id || "").trim();
+  const category   = (body.category || "").trim();
+  if (!intervalId) return err("interval_required", "interval_id required for action=tag");
+  if (!TAGGABLE_CATEGORIES.has(category)) return err("bad_category", `unknown category: ${category}`);
+
+  const sb = svc();
+  const { data: iv, error: ivErr } = await sb
+    .from("time_intervals")
+    .select("id, user_id, start_at")
+    .eq("id", intervalId)
+    .maybeSingle();
+  if (ivErr) return err("interval_lookup_failed", ivErr.message, 500);
+  if (!iv)   return err("interval_unknown", "interval not found", 404);
+  if (Date.now() - +new Date(iv.start_at) > TAG_MAX_AGE_MS) {
+    return err("interval_too_old", "interval is older than 30 minutes", 409);
+  }
+
+  // category_source='user' freezes it so the rule/Outlook classifiers won't
+  // overwrite the person's explicit choice (same as the web punch prompt).
+  const { error: upErr } = await sb
+    .from("time_intervals")
+    .update({
+      category,
+      category_source: "user",
+      notes:           body.note ?? null,
+      computed_at:     new Date().toISOString(),
+    })
+    .eq("id", intervalId);
+  if (upErr) return err("tag_failed", upErr.message, 500);
+
+  const day = new Date(iv.start_at).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+  await sb.rpc("fn_recompute_day", { _user_id: iv.user_id, _date: day });
+
+  return json({ ok: true, tagged: true, interval_id: intervalId, category });
 }
 
 function svc() {
@@ -221,17 +273,21 @@ async function findRecentDupe(
 // of work today.
 // ---------------------------------------------------------------------------
 async function loadState(userId: string): Promise<{
-  state:        "in" | "out";
-  open_since:   string | null;
+  state:            "in" | "out";
+  open_since:       string | null;
+  open_interval_id: string | null;
+  open_is_out:      boolean;
   today_minutes_work: number;
 }> {
   const sb = svc();
   // The open interval's is_out is what decides IN vs OUT: a punch-out now opens
   // an OUT interval (the "currently out" period), so an open interval no longer
   // implies the user is IN — only an open IN (is_out=false) interval does.
+  // The open interval id is what the kiosk tags a category onto (it's the one
+  // this punch just opened, whether IN or OUT).
   const { data: open } = await sb
     .from("time_intervals")
-    .select("start_at, is_out")
+    .select("id, start_at, is_out")
     .eq("user_id", userId)
     .is("end_at", null)
     .order("start_at", { ascending: false })
@@ -252,6 +308,8 @@ async function loadState(userId: string): Promise<{
   return {
     state:              openIn ? "in" : "out",
     open_since:         openIn?.start_at ?? null,
+    open_interval_id:   open?.id ?? null,
+    open_is_out:        !!open?.is_out,
     today_minutes_work: day?.minutes_work ?? 0,
   };
 }
@@ -314,6 +372,13 @@ Deno.serve(async (req) => {
     return err("settings_check_failed", String(resp), 500);
   }
 
+  // Phase 2 of the kiosk flow: tag a category onto the interval the punch just
+  // opened. Auth already validated above (device bearer or session JWT).
+  if (body.action === "tag") {
+    try { return await handleTag(body); }
+    catch (e) { return err("tag_failed", String(e), 500); }
+  }
+
   // Resolve user id from auth + body.
   let userId: string;
   let nfcUid: string | null = null;
@@ -356,6 +421,8 @@ Deno.serve(async (req) => {
       user,
       state:              state.state,
       open_since:         state.open_since,
+      open_interval_id:   state.open_interval_id,
+      open_is_out:        state.open_is_out,
       today_minutes_work: state.today_minutes_work,
       message:            buildMessage(user, state),
     });
@@ -414,6 +481,8 @@ Deno.serve(async (req) => {
     user,
     state:              state.state,
     open_since:         state.open_since,
+    open_interval_id:   state.open_interval_id,
+    open_is_out:        state.open_is_out,
     today_minutes_work: state.today_minutes_work,
     message:            buildMessage(user, state),
   });

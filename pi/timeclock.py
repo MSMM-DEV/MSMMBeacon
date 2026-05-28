@@ -88,6 +88,12 @@ class Config:
         self.display_h     = cp.getint("display", "height", fallback=64)
         self.debounce_sec  = cp.getint("behavior", "debounce_sec", fallback=5)
         self.message_sec   = cp.getint("behavior", "message_sec", fallback=3)
+        # [ui] — drives the touchscreen kiosk (kiosk.py). 'headless' = this
+        # OLED/LED daemon; 'kiosk' = the PyQt5 7" touchscreen app.
+        self.ui_mode             = cp.get("ui", "mode", fallback="headless").lower()
+        self.location_label      = cp.get("ui", "location_label", fallback="").strip()
+        self.category_timeout_sec = cp.getint("ui", "category_timeout_sec", fallback=25)
+        self.confirm_sec         = cp.getint("ui", "confirm_sec", fallback=4)
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +148,13 @@ class Display:
 # HTTP call to timeclock-punch
 # ---------------------------------------------------------------------------
 
+def _headers(cfg: Config) -> dict:
+    return {
+        "Authorization": f"Bearer {cfg.bearer_token}",
+        "Content-Type":  "application/json",
+    }
+
+
 def post_punch(cfg: Config, uid_hex: str) -> dict:
     if requests is None:
         raise RuntimeError("the `requests` package is required")
@@ -151,12 +164,8 @@ def post_punch(cfg: Config, uid_hex: str) -> dict:
         "nfc_uid":    uid_hex,
         "punched_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
     }
-    headers = {
-        "Authorization": f"Bearer {cfg.bearer_token}",
-        "Content-Type":  "application/json",
-    }
     try:
-        r = requests.post(cfg.endpoint_url, headers=headers, data=json.dumps(body), timeout=8)
+        r = requests.post(cfg.endpoint_url, headers=_headers(cfg), data=json.dumps(body), timeout=8)
     except requests.RequestException as e:
         LOG.error("punch HTTP error: %s", e)
         return {"ok": False, "code": "network", "message": "no network"}
@@ -164,6 +173,43 @@ def post_punch(cfg: Config, uid_hex: str) -> dict:
         return r.json()
     except ValueError:
         return {"ok": False, "code": "bad_response", "message": f"HTTP {r.status_code}"}
+
+
+def post_tag(cfg: Config, interval_id: str, category: str, note: Optional[str] = None) -> dict:
+    """Phase 2 of the kiosk flow — set the category on the interval the punch
+    just opened. Device-authenticated; the server validates the interval is
+    recent. Returns the JSON response dict."""
+    if requests is None:
+        raise RuntimeError("the `requests` package is required")
+    body = {
+        "source":      "nfc",
+        "device_id":   cfg.device_id,
+        "action":      "tag",
+        "interval_id": interval_id,
+        "category":    category,
+        "note":        note,
+    }
+    try:
+        r = requests.post(cfg.endpoint_url, headers=_headers(cfg), data=json.dumps(body), timeout=8)
+    except requests.RequestException as e:
+        LOG.error("tag HTTP error: %s", e)
+        return {"ok": False, "code": "network", "message": "no network"}
+    try:
+        return r.json()
+    except ValueError:
+        return {"ok": False, "code": "bad_response", "message": f"HTTP {r.status_code}"}
+
+
+def reader_target(cfg: Config) -> str:
+    """nfcpy reader path resolution. PN532 over I2C is the recommended cheap
+    path; PN532 over UART works on a Pi Zero too. ACR122U is USB."""
+    if cfg.reader_type == "pn532" and cfg.serial_port:
+        return f"tty:{cfg.serial_port.replace('/dev/', '')}:pn532"
+    if cfg.reader_type == "pn532":
+        return f"i2c:{cfg.i2c_bus}:pn532"
+    if cfg.reader_type == "acr122u":
+        return "usb"
+    raise SystemExit(f"unknown reader type: {cfg.reader_type}")
 
 
 # ---------------------------------------------------------------------------
@@ -179,15 +225,7 @@ class TimeclockApp:
         self._running       = True
 
     def _reader_target(self):
-        # nfcpy reader path resolution. PN532 over I2C is the recommended
-        # cheap path; PN532 over UART works on a Pi Zero too. ACR122U is USB.
-        if self.cfg.reader_type == "pn532" and self.cfg.serial_port:
-            return f"tty:{self.cfg.serial_port.replace('/dev/', '')}:pn532"
-        if self.cfg.reader_type == "pn532":
-            return f"i2c:{self.cfg.i2c_bus}:pn532"
-        if self.cfg.reader_type == "acr122u":
-            return "usb"
-        raise SystemExit(f"unknown reader type: {self.cfg.reader_type}")
+        return reader_target(self.cfg)
 
     def stop(self, *_):
         self._running = False
