@@ -965,6 +965,7 @@ const buildOptions = () => {
     eventStatusOptions:  ["Booked", "Happened"],
     eventTypeOptions:    ["Partner", "AI", "Project", "Meetings", "Board Meetings", "Event"],
     hotLeadStatusOptions:["Scheduled", "Happened"],
+    hotLeadTypeOptions:  ["Engineering", "AI"],
     invoiceTypeOptions:  ["ENG", "PM"],
     companyTypeOptions:  ["Prime", "Sub", "Multiple"],
     stageOptions:        ["Multi-Use Contract", "Single Use Contract (Project)", "AE Selected List"],
@@ -3101,6 +3102,7 @@ export const HotLeadsTable = ({
   const cols = [
     { label: "__select", w: "42px", locked: true },
     { label: "Status",      w: "120px", sortKey: "status" },
+    { label: "Type",        w: "130px", sortKey: "type" },
     { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
     { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
@@ -3112,7 +3114,15 @@ export const HotLeadsTable = ({
     { label: "__actions",   w: "80px", locked: true },
   ];
 
-  const { clientOrFirmOpts, hotLeadStatusOptions } = buildOptions();
+  // Chip tone per Type. Engineering uses --blue (matches the Project total
+  // accent + the existing PRIME chip), AI reuses the sage tone the Events
+  // table already gives "AI" so the two tabs feel consistent.
+  const hotLeadTypeColor = t => ({
+    "Engineering": "blue",
+    "AI":          "sage",
+  }[t] || "muted");
+
+  const { clientOrFirmOpts, hotLeadStatusOptions, hotLeadTypeOptions } = buildOptions();
 
   // Group-by-stars (5★ → 1★ → Unrated). Inside each bucket the user's
   // column sort applies — defaults to dateTime desc via buildEffectiveSort.
@@ -3181,6 +3191,15 @@ export const HotLeadsTable = ({
               <EditableCell value={r.status} type="select" options={hotLeadStatusOptions}
                 onChange={v => updateRow(r.id, { status: v })}
                 render={v => <StatusChip status={v}/>}/>
+            </div>
+          ),
+          "Type": (
+            <div className="td">
+              <EditableCell value={r.type} type="select" options={hotLeadTypeOptions}
+                onChange={v => updateRow(r.id, { type: v })}
+                render={v => v
+                  ? <span className={`chip ${hotLeadTypeColor(v)}`}>{v}</span>
+                  : <span className="empty-cell">—</span>}/>
             </div>
           ),
           "Title": (

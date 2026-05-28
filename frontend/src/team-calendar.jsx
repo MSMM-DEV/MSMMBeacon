@@ -73,8 +73,15 @@ function responseChip(response) {
 // When Graph returns null/empty `subject` (private events, app-permission
 // limits, or genuinely untitled meetings), use the rest of the event payload
 // to surface something more useful than "(no subject)".
+//
+// Cancelled events get a "Cancelled: " prefix to match Outlook's display
+// — Outlook itself synthesizes that prefix in its UI from the underlying
+// subject, and users expect to see the same in Beacon.
 function smartTitle(r) {
   const subj = (r.subject || "").trim();
+  if (r.isCancelled) {
+    return subj ? `Cancelled: ${subj}` : "Cancelled meeting";
+  }
   if (subj) return subj;
   if (r.sensitivity === "private")      return "Private appointment";
   if (r.sensitivity === "confidential") return "Confidential meeting";
@@ -315,7 +322,11 @@ function MonthPill({ event }) {
   const n = attendeeCount(r);
   return (
     <div
-      className={"tcal-evt tcal-evt-pill" + (r.isAllDay ? " is-allday" : "")}
+      className={
+        "tcal-evt tcal-evt-pill"
+        + (r.isAllDay     ? " is-allday"   : "")
+        + (r.isCancelled  ? " is-cancelled" : "")
+      }
       style={userStyleFor(r.userId)}
     >
       <span className="tcal-evt-stripe" aria-hidden />
@@ -337,7 +348,10 @@ function TimeBlock({ event }) {
   const n = attendeeCount(r);
   return (
     <div
-      className={`tcal-evt tcal-evt-block density-${density}`}
+      className={
+        `tcal-evt tcal-evt-block density-${density}`
+        + (r.isCancelled ? " is-cancelled" : "")
+      }
       style={userStyleFor(r.userId)}
     >
       <span className="tcal-evt-stripe" aria-hidden />
@@ -369,7 +383,10 @@ function AgendaRow({ event }) {
   const r = event.resource;
   const n = attendeeCount(r);
   return (
-    <div className="tcal-agenda-row" style={userStyleFor(r.userId)}>
+    <div
+      className={"tcal-agenda-row" + (r.isCancelled ? " is-cancelled" : "")}
+      style={userStyleFor(r.userId)}
+    >
       <span className="tcal-agenda-dot" aria-hidden />
       <span className="tcal-agenda-owner">{r._user?.initials}</span>
       <span className="tcal-agenda-name">{r._user?.name}</span>
@@ -518,7 +535,7 @@ function EventPopover({ event, onClose }) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="tcal-pop"
+        className={"tcal-pop" + (r.isCancelled ? " is-cancelled" : "")}
         ref={ref}
         role="dialog"
         aria-modal="true"
@@ -532,11 +549,19 @@ function EventPopover({ event, onClose }) {
       >
         <span className="tcal-pop-stripe" aria-hidden />
         <div className="tcal-pop-head">
-          <span className="tcal-pop-eyebrow">Calendar event · read-only</span>
+          <span className="tcal-pop-eyebrow">
+            {r.isCancelled ? "Cancelled · read-only" : "Calendar event · read-only"}
+          </span>
           <button className="tcal-pop-close" onClick={onClose} aria-label="Close">×</button>
         </div>
         <h2 className="tcal-pop-title">{event.title}</h2>
-        {missingReason && (
+        {r.isCancelled && (
+          <div className="tcal-pop-banner tcal-pop-banner-cancelled">
+            <span className="tcal-pop-banner-dot" aria-hidden />
+            <span>This meeting was cancelled.</span>
+          </div>
+        )}
+        {missingReason && !r.isCancelled && (
           <div className="tcal-pop-subnote">{missingReason}</div>
         )}
 

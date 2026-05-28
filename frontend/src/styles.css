@@ -12276,6 +12276,93 @@ html, body { overflow-x: clip; }
 .tcal-pop-done:hover { opacity: 0.88; }
 
 /* ============================================================
+   TEAM CALENDAR — CANCELLED EVENT TREATMENT
+   ------------------------------------------------------------
+   Outlook shows cancelled events with a "Canceled:" prefix and
+   often a strikethrough — we mirror that so users instantly
+   recognize "this meeting isn't happening".
+   ============================================================ */
+
+.tcal-evt.is-cancelled {
+  opacity: 0.62;
+  background: var(--surface);
+}
+[data-theme="dark"] .tcal-evt.is-cancelled {
+  background: var(--surface);
+}
+.tcal-evt.is-cancelled .tcal-evt-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.tcal-evt.is-cancelled .tcal-evt-stripe {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--u-stripe, var(--text-soft)) 0 4px,
+    transparent 4px 8px
+  );
+  opacity: 0.7;
+}
+.tcal-evt.is-cancelled .tcal-evt-owner,
+.tcal-evt.is-cancelled .tcal-evt-owner-mini {
+  opacity: 0.7;
+}
+.tcal-evt.is-cancelled:hover {
+  /* Hover slightly opens the dim so the user can still read details. */
+  opacity: 0.82;
+}
+
+.tcal-agenda-row.is-cancelled { opacity: 0.6; }
+.tcal-agenda-row.is-cancelled .tcal-agenda-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--text-soft);
+}
+
+/* Popover banner + struck title for cancelled events. */
+.tcal-pop.is-cancelled .tcal-pop-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  color: var(--text-muted);
+}
+.tcal-pop-banner {
+  margin: -2px 22px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  width: fit-content;
+}
+.tcal-pop-banner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.tcal-pop-banner-cancelled {
+  background: hsl(0 55% 95%);
+  color: hsl(0 45% 38%);
+  border: 1px solid hsl(0 55% 82%);
+}
+.tcal-pop-banner-cancelled .tcal-pop-banner-dot { background: hsl(0 60% 52%); }
+[data-theme="dark"] .tcal-pop-banner-cancelled {
+  background: hsl(0 25% 18%);
+  color: hsl(0 55% 78%);
+  border-color: hsl(0 35% 34%);
+}
+@media (max-width: 640px) {
+  .tcal-pop-banner { margin: -2px 18px 12px; }
+}
+
+/* ============================================================
    TEAM CALENDAR — ATTENDEE LIST + RESPONSE CHIPS
    ------------------------------------------------------------
    Shown inside the read-only EventPopover. Grouped by Internal

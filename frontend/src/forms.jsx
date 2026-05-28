@@ -78,7 +78,7 @@ const DB_COLUMNS = {
     "title", "status", "type", "event_datetime", "notes", "stars",
   ],
   hotleads: [
-    "title", "status", "client_id", "date_time", "notes", "stars",
+    "title", "status", "type", "client_id", "date_time", "notes", "stars",
   ],
   clients: [
     "name", "district", "org_type",
@@ -176,6 +176,7 @@ const INITIAL = {
   hotleads: {
     title: "",
     status: "Scheduled",
+    type: "",
     client_id: "",
     date_time: "",
     notes: "",
@@ -934,6 +935,14 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
                     onChange={e => set("status", e.target.value)}>
               <option value="Scheduled">Scheduled</option>
               <option value="Happened">Happened</option>
+            </select>
+          </Field>
+          <Field label="Type">
+            <select className="select" value={form.type || ""}
+                    onChange={e => set("type", e.target.value)}>
+              <option value="">—</option>
+              <option value="Engineering">Engineering</option>
+              <option value="AI">AI</option>
             </select>
           </Field>
           <Field label="Client / Firm">

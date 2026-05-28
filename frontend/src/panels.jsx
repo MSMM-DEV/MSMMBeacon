@@ -310,6 +310,7 @@ export const DetailDrawer = ({
     hotleads: [
       { k: "title",          label: "Title" },
       { k: "status",         label: "Status",                  type: "select", options: ["Scheduled","Happened"] },
+      { k: "type",           label: "Type",                    type: "select", options: ["Engineering","AI"] },
       { k: "stars",          label: "Rating",                  type: "stars" },
       // `company` field type feeds from the Clients list. For Hot Leads we
       // want BOTH clients AND companies available, so this drawer swaps in

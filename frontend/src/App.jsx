@@ -381,6 +381,7 @@ const EXPORT_COLUMNS = {
   ],
   hotleads: [
     { label: "Status",            wMm: 24,  get: r => r._starsHeader ? "" : (r.status || "") },
+    { label: "Type",              wMm: 22,  get: r => r._starsHeader ? "" : (r.type || "") },
     { label: "Title",                       get: r => r._starsHeader
         ? (r._starsHeader === "Unrated" ? `Unrated · ${r._count} ${r._count === 1 ? "lead" : "leads"}`
                                         : `${"★".repeat(r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`)
@@ -500,6 +501,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       id: dbRow.id,
       title: dbRow.title,
       status: dbRow.status || "Scheduled",
+      type: dbRow.type || null,
       dateTime: dbRow.date_time || "",
       clientId: dbRow.client_id || dbRow.prime_company_id || null,
       notes: dbRow.notes || "",
@@ -1015,6 +1017,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const HOT_LEADS_COLS = {
     title: "title",
     status: "status",
+    type: "type",
     dateTime: "date_time",
     notes: "notes",
     stars: "stars",
