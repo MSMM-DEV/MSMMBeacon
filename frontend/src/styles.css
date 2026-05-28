@@ -6516,22 +6516,27 @@ html, body { overflow-x: clip; }
  *   (b) vertical breathing room between the three Invoice page sections
  * ----------------------------------------------------------------------------*/
 .inv-charts-card {
-  /* Holds ENG + PM stacked. ~340px per chart + KPIs + header. */
-  min-height: 780px;
+  /* Holds ENG + PM stacked. ~400px per chart-wrap gives bars ~250-300px of
+     usable plot height — matches what the legacy Quad Sheet's 880px Q1 row
+     allowed, which read as "comfortably tall" without crowding the page. */
+  min-height: 880px;
   margin-bottom: 18px;
 }
 /* When PM is collapsed to a thin toggle, shrink the card so the page isn't
-   wasting vertical real estate. :has() handles the dynamic state.        */
+   wasting vertical real estate — but keep it tall enough that the ENG chart
+   has serious plot height (~230px after chrome). 600px is the empirically
+   tested floor where bars at the 92% fill produced by the new nice-numbers
+   ladder still look substantial. :has() handles the dynamic state.        */
 .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) {
-  min-height: 460px;
+  min-height: 600px;
 }
 @media (max-width: 840px) {
-  .inv-charts-card { min-height: 720px; }
-  .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) { min-height: 420px; }
+  .inv-charts-card { min-height: 820px; }
+  .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) { min-height: 560px; }
 }
 @media (max-width: 640px) {
-  .inv-charts-card { min-height: 640px; margin-bottom: 14px; }
-  .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) { min-height: 380px; }
+  .inv-charts-card { min-height: 760px; margin-bottom: 14px; }
+  .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) { min-height: 520px; }
 }
 /* On the Invoice page, the receivables panel sits directly under the
    InvoiceTable. Without the old .quad grid gap, add explicit top margin. */

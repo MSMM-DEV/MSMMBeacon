@@ -3069,61 +3069,25 @@ export const EventsTable = ({
 
   const { eventTypeOptions } = buildOptions();
 
-  // Group-by-stars: rows are bucketed 5★ → 1★ → Unrated. Mirrors the
-  // probability-grouped pattern on Potential (see PotentialTable above) —
-  // count totals per bucket, user's column sort applies inside each group.
-  const primarySort = [{ key: "stars", dir: "asc" }];
-  const injectStarHeaders = (sortedRows) => {
-    if (!sortedRows || sortedRows.length === 0) return sortedRows;
-    const counts = {};
-    for (const r of sortedRows) {
-      const k = r.stars == null ? "_unrated" : String(r.stars);
-      counts[k] = (counts[k] || 0) + 1;
-    }
-    const out = [];
-    let lastKey;
-    for (const r of sortedRows) {
-      const k = r.stars == null ? "_unrated" : String(r.stars);
-      if (k !== lastKey) {
-        out.push({
-          id: `_starsheader_${k}`,
-          _starsHeader: k === "_unrated" ? "Unrated" : Number(k),
-          _count: counts[k],
-        });
-        lastKey = k;
-      }
-      out.push(r);
-    }
-    return out;
-  };
+  // No primarySort / postProcess: Events used to inject "Unrated · N events"
+  // and "★★★★★ · N events" header rows between star-grouped sections, but
+  // since most events are unrated the Unrated header dominated the top of
+  // the table as visual noise. User asked to remove it; we dropped the
+  // grouping entirely so rows follow whatever sort the user has active
+  // (defaults to date desc — newest events at the top). Hot Leads keeps
+  // its star-grouping pattern; that table is much smaller and the rating
+  // is a primary navigation aid there.
 
   return (
     <TableView
       tab={tab}
       filters={filters}
       columns={cols} rows={rows}
-      primarySort={primarySort}
-      postProcess={injectStarHeaders}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No events logged yet"
       emptyHint="Track partner touchpoints, conferences, and meetings here."
       emptyIcon="calendar"
       renderRow={(r, _i, gridCols, visibleColumns) => {
-        if (r._starsHeader != null) {
-          const isUnrated = r._starsHeader === "Unrated";
-          const label = isUnrated
-            ? `Unrated · ${r._count} ${r._count === 1 ? "event" : "events"}`
-            : `${"★".repeat(r._starsHeader)}${"☆".repeat(5 - r._starsHeader)} · ${r._count} ${r._count === 1 ? "event" : "events"}`;
-          return (
-            <div key={r.id} className="trow stars-header"
-                 data-stars={isUnrated ? "0" : String(r._starsHeader)}
-                 style={{ gridTemplateColumns: gridCols }}>
-              <div className="td" style={{ color: "var(--text)" }}>
-                {label}
-              </div>
-            </div>
-          );
-        }
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>

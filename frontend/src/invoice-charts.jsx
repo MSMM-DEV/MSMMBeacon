@@ -150,10 +150,22 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark }) =>
 // via side-by-side bars (or one averaged bar in "average" mode). Past months
 // are solid; projection months get a softer fill + diagonal hatch.
 // ----------------------------------------------------------------------------
+// Standard "nice numbers" axis ceiling — picks the smallest entry on a
+// tight ladder of nice multiples that's still ≥ peak (plus a small headroom).
+// Why: the previous implementation rounded up to the next power of 10, so
+// peak 1.1M jumped to 2M — bars only filled ~55% of the plot height. The
+// ladder below stays within ~92% fill on the peak bar while keeping the
+// resulting tick values clean (1.2/1.6/2.0/2.4… are all evenly divisible by
+// the four inner tick intervals, so axis labels never land on weird fractions).
+const NICE_LADDER = [1.0, 1.2, 1.4, 1.6, 2.0, 2.4, 2.8, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0];
 const niceChartMax = (peak) => {
   const safePeak = Math.max(Number(peak) || 0, 1);
-  const mag = Math.pow(10, Math.floor(Math.log10(safePeak)));
-  return Math.ceil(safePeak / mag) * mag;
+  // Tiny 4% headroom so the tallest bar doesn't kiss the top axis line.
+  const target = safePeak * 1.04;
+  const mag = Math.pow(10, Math.floor(Math.log10(target)));
+  const ratio = target / mag;
+  const nice = NICE_LADDER.find((x) => x >= ratio) ?? 10.0;
+  return nice * mag;
 };
 
 const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange }) => {
