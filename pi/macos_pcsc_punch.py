@@ -68,19 +68,31 @@ def pick_reader():
     return rs[0]
 
 
-def read_uid(reader):
+def read_uid(reader, debug=False):
     """Return the UID hex string for a present card, or None if no card / error."""
     conn = reader.createConnection()
     try:
         conn.connect()
-    except (NoCardException, CardConnectionException):
+    except NoCardException:
+        return None
+    except CardConnectionException as e:
+        if debug:
+            print(f"  [debug] connect failed: {e}")
+        return None
+    except Exception as e:
+        if debug:
+            print(f"  [debug] connect error ({type(e).__name__}): {e}")
         return None
     try:
         data, sw1, sw2 = conn.transmit(GET_UID_APDU)
         if (sw1, sw2) != (0x90, 0x00):
+            if debug:
+                print(f"  [debug] card present but UID APDU returned SW={sw1:02X}{sw2:02X}")
             return None
         return ":".join(f"{b:02X}" for b in data)
-    except CardConnectionException:
+    except Exception as e:
+        if debug:
+            print(f"  [debug] transmit error ({type(e).__name__}): {e}")
         return None
     finally:
         try:
@@ -126,6 +138,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="./config.ini")
     ap.add_argument("--read-only", action="store_true", help="just print UIDs; no network calls")
+    ap.add_argument("--debug", action="store_true", help="surface reader errors + heartbeat")
     args = ap.parse_args()
 
     cfg = None if args.read_only else read_config(args.config)
@@ -136,8 +149,9 @@ def main():
 
     last_uid, last_t = None, 0.0
     debounce = 5 if args.read_only else cfg["debounce_sec"]
+    ticks = 0
     while True:
-        uid = read_uid(reader)
+        uid = read_uid(reader, debug=args.debug)
         if uid:
             now = time.monotonic()
             if not (uid == last_uid and now - last_t < debounce):
@@ -146,6 +160,10 @@ def main():
                 print(f"[{ts}] TAG {uid}")
                 if not args.read_only:
                     print(describe(post_punch(cfg, uid)))
+        elif args.debug:
+            ticks += 1
+            if ticks % 12 == 0:  # ~ every 3s
+                print("  [debug] polling… (no card present)")
         time.sleep(0.25)
 
 
