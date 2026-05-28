@@ -7,7 +7,8 @@ import {
 } from "./tables.jsx";
 // Note: SoqTable was removed — SOQ is no longer surfaced in v2.
 // ClientsTable + CompaniesTable were merged into DirectoryTable.
-import { QuadSheet } from "./quadsheet.jsx";
+import { InvoiceCharts } from "./invoice-charts.jsx";
+import { SubsReceivablesPanel } from "./quadsheet-receivables.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
 import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
@@ -57,7 +58,6 @@ const countRefs = (id) => {
 // tab sits in its own "head" group separated by a gap so no arrow implies
 // a bogus Invoice → Potential flow.
 const TAB_META = [
-  { key: "quad",      label: "Quad Sheet",       stage: "stage-quad",      group: "head" },
   { key: "openbids",  label: "Open Bids",        stage: "stage-openbids",  group: "pipeline" },
   { key: "awaiting",  label: "Awaiting Verdict", stage: "stage-awaiting",  group: "pipeline" },
   { key: "awarded",   label: "Awarded",          stage: "stage-awarded",   group: "pipeline" },
@@ -79,11 +79,10 @@ const PAGE_META = {
   awaiting:  { title: "Awaiting Verdict", desc: "Entry point for submitted proposals. Add here, then mark as Awarded or Closed Out when the verdict lands." },
   awarded:   { title: "Awarded Projects", desc: "Won contracts. Move to Potential to track as a billing candidate, or directly to Invoice when billing starts." },
   closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements." },
-  invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date." },
+  invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
-  quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and hot leads at a glance." },
   timesheet: { title: "Timesheet", desc: "Your daily punches, this week's hours, and corrections. Punch in or out with the big button or tap your fob on the front-door reader." },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, weekly approvals, NFC enrollment, and timekeeping settings." },
   "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },
@@ -800,12 +799,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const urlTab = new URLSearchParams(window.location.search).get("tab");
       if (!urlTab) return "timesheet";
     }
-    const saved = localStorage.getItem("beacon-tab") || "quad";
+    const saved = localStorage.getItem("beacon-tab") || "invoice";
     // Migrate legacy values: the v2 UI merged clients + companies into
-    // "directory" and dropped soq. Anyone whose last-used tab was one of
-    // those lands on the new combined tab (or quad for soq).
+    // "directory" and dropped soq. The Quad Sheet was retired (2026-05) —
+    // its charts moved to the top of the Invoice tab and the Outstanding
+    // Invoices panel moved to the bottom, so legacy "quad" / "soq" both
+    // remap to "invoice".
     if (saved === "clients" || saved === "companies") return "directory";
-    if (saved === "soq") return "quad";
+    if (saved === "soq" || saved === "quad") return "invoice";
     return saved;
   });
   // Deep-link landing: if the URL carries ?tab=X&rowId=Y (from an alert email),
@@ -3238,7 +3239,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     invoice: invoice.length, events: events.length,
     hotleads: hotLeads.length,
     directory: clients.length + companies.length,
-    quad: null,
     timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
     "time-admin": null,
     "team-cal":   null,
@@ -3530,29 +3530,61 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.closed}
             onYearChange={(y) => setYear("closed", y)}/>
         )}
-        {tab === "invoice" && (
-          <InvoiceTable rows={filtered.invoice}
-            updateInvoice={updateInvoiceCell}
-            updateInvoiceMsmm={updateInvoiceMsmmCell}
-            updateRow={updateInvoice}
-            onOpenDrawer={r => openDrawer(r, "invoice")}
-            onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
-            flashId={flashId}
-            tab="invoice"
-            orangeSourceIds={orangeSourceIds}
-            subInvoices={subInvoices}
-            onUpdateSubAmount={updateSubInvoiceCell}
-            onTogglePaid={setSubInvoicePaidStatus}
-            onOpenFiles={(payload) => setFilesModal(payload)}
-            onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
-            onUpdateSubMeta={updateSubMeta}
-            onRemoveSub={removeSub}
-            onChangeRole={setInvoiceRoleHandler}
-            onNew={() => setCreateTable("invoice")}
-            yearOptions={availableYears.invoice}
-            yearValue={yearFilter.invoice}
-            onYearChange={(y) => setYear("invoice", y)}/>
-        )}
+        {tab === "invoice" && (() => {
+          // Build the project lookup once per render — used by the
+          // Outstanding Invoices panel to resolve project names + numbers
+          // + status from the projectId keys it sees in subInvoices.
+          const projectsById = new Map();
+          for (const p of potential) projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "potential" });
+          for (const p of awaiting)  projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "awaiting"  });
+          for (const p of awarded)   projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "awarded"   });
+          for (const p of closed)    projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "closed"    });
+          return (
+            <>
+              <InvoiceCharts
+                invoice={invoice}
+                orangeSourceIds={orangeSourceIds}
+                monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
+              />
+              <InvoiceTable rows={filtered.invoice}
+                updateInvoice={updateInvoiceCell}
+                updateInvoiceMsmm={updateInvoiceMsmmCell}
+                updateRow={updateInvoice}
+                onOpenDrawer={r => openDrawer(r, "invoice")}
+                onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
+                flashId={flashId}
+                tab="invoice"
+                orangeSourceIds={orangeSourceIds}
+                subInvoices={subInvoices}
+                onUpdateSubAmount={updateSubInvoiceCell}
+                onTogglePaid={setSubInvoicePaidStatus}
+                onOpenFiles={(payload) => setFilesModal(payload)}
+                onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
+                onUpdateSubMeta={updateSubMeta}
+                onRemoveSub={removeSub}
+                onChangeRole={setInvoiceRoleHandler}
+                onNew={() => setCreateTable("invoice")}
+                yearOptions={availableYears.invoice}
+                yearValue={yearFilter.invoice}
+                onYearChange={(y) => setYear("invoice", y)}/>
+              <SubsReceivablesPanel
+                subInvoices={subInvoices}
+                projectsById={projectsById}
+                onOpenProject={(statusKey, projectId) => {
+                  // Mirror the directory-drawer routing: locate the row in
+                  // the right slice, switch to that tab, and open its drawer.
+                  const slice =
+                    statusKey === "potential" ? potential :
+                    statusKey === "awaiting"  ? awaiting  :
+                    statusKey === "awarded"   ? awarded   :
+                    statusKey === "closed"    ? closed    : [];
+                  const target = slice.find(p => p.id === projectId);
+                  if (target) openDrawer(target, statusKey);
+                }}
+              />
+            </>
+          );
+        })()}
         {tab === "events" && (
           <>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -3655,43 +3687,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             filters={chipsFor("directory")}
             tab="directory"/>
         )}
-        {tab === "quad" && (() => {
-          // Build a project lookup so the receivables panel can resolve
-          // project names + numbers + status from the projectId keys it
-          // sees in subInvoices. Built inline (not memoized) — these
-          // arrays only re-create when their slices change, and the panel
-          // memoizes its pivot internally.
-          const projectsById = new Map();
-          for (const p of potential) projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "potential" });
-          for (const p of awaiting)  projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "awaiting"  });
-          for (const p of awarded)   projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "awarded"   });
-          for (const p of closed)    projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "closed"    });
-          return (
-            <QuadSheet
-              invoice={invoice}
-              events={events}
-              awaiting={awaiting}
-              hotLeads={hotLeads}
-              orangeSourceIds={orangeSourceIds}
-              monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
-              subInvoices={subInvoices}
-              projectsById={projectsById}
-              onOpen={(t, r) => openDrawer(r, t)}
-              onOpenProject={(statusKey, projectId) => {
-                // Mirror the directory-drawer routing: locate the row in
-                // the right slice, switch to that tab, and open its drawer.
-                const slice =
-                  statusKey === "potential" ? potential :
-                  statusKey === "awaiting"  ? awaiting  :
-                  statusKey === "awarded"   ? awarded   :
-                  statusKey === "closed"    ? closed    : [];
-                const target = slice.find(p => p.id === projectId);
-                if (target) openDrawer(target, statusKey);
-              }}
-            />
-          );
-        })()}
-
         {tab === "timesheet" && (
           <TimesheetTab focusDate={timesheetFocusDate}/>
         )}

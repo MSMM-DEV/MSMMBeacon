@@ -2923,18 +2923,139 @@ export const InvoiceTable = ({
   );
 };
 
+// ---------- Events: helpers shared by EventsTable ----------
+//
+// The List view used to render only `r.dateTime` and `r.status` verbatim,
+// which meant (a) it never showed multi-day spans the Calendar view
+// already exposes via outlookEndDateTime, (b) all-day events with only
+// `r.date` rendered as "—", and (c) Status stayed "Booked" forever even
+// after the event passed. These helpers bring the List in line with the
+// Calendar so both views show the same picture of what's upcoming vs
+// what's already happened.
+
+// Re-renders the host component every `intervalMs` so derived Status
+// flips Booked → Happened the moment the clock crosses an event's end.
+// 60s is fine for status display — sub-minute precision isn't useful.
+function useNowTick(intervalMs = 60_000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+// Derive Status purely from the event's timing — past = Happened, future
+// (or in-progress mid-multi-day) = Booked. End wins over start so a
+// 3-day conference stays "Booked" through day 2 and flips when day 3
+// ends. Falls back to date-only for all-day events.
+function derivedEventStatus(row, now) {
+  // Outlook cancellations override everything else; the existing UI
+  // already styles cancelled rows with strikethrough, but we still
+  // surface a stable label so sorting/grouping by status is sensible.
+  if (row?.outlookIsCancelled) return "Happened";
+  const refISO = row?.outlookEndDateTime || row?.dateTime || row?.date;
+  if (!refISO) return row?.status || "Booked";
+  const refMs = +new Date(refISO);
+  if (Number.isNaN(refMs)) return row?.status || "Booked";
+  // For all-day events (no time component), treat the calendar day as
+  // ending at 23:59:59 local — otherwise an all-day event on today's
+  // date would already read "Happened" the moment the page loads.
+  let endMs = refMs;
+  if (!row?.dateTime && !row?.outlookEndDateTime && row?.date) {
+    const d = new Date(refISO);
+    d.setHours(23, 59, 59, 999);
+    endMs = +d;
+  }
+  return endMs <= now ? "Happened" : "Booked";
+}
+
+// Structured event range formatter — returns { primary, secondary } so
+// the cell can stack two lines without inline conditionals. Mirrors what
+// the Calendar communicates via the start/end pair on each RBC event.
+function fmtEventRange(row) {
+  const startISO = row?.dateTime || row?.date;
+  if (!startISO) return { primary: "—", secondary: null };
+  const start = new Date(startISO);
+  if (Number.isNaN(start.getTime())) return { primary: "—", secondary: null };
+  const hasStartTime = !!row.dateTime;
+  const endISO = row.outlookEndDateTime;
+  const end = endISO ? new Date(endISO) : null;
+  const hasEnd = end && !Number.isNaN(end.getTime());
+
+  const D = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const T = (d) => d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const startDate = D(start);
+  const startTime = hasStartTime ? T(start) : null;
+
+  // No end recorded — single point in time (or all-day) on the start date.
+  if (!hasEnd) {
+    return hasStartTime
+      ? { primary: `${startDate} · ${startTime}`, secondary: null }
+      : { primary: `${startDate} · All day`,       secondary: null };
+  }
+
+  // We have an end — figure out if it's same-day or multi-day. Compare by
+  // date components (not UTC ms) so a Mar 4 11:30 PM → Mar 4 11:55 PM event
+  // doesn't accidentally read as multi-day after a tz shift.
+  const sameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth()    === end.getMonth() &&
+    start.getDate()     === end.getDate();
+
+  if (sameDay) {
+    if (!hasStartTime) return { primary: `${startDate} · All day`, secondary: null };
+    return { primary: `${startDate} · ${startTime} – ${T(end)}`, secondary: null };
+  }
+
+  // Multi-day. Day count is inclusive (Jun 4 → Jun 6 = 3 days).
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const dayDiff = Math.round(
+    (Date.UTC(end.getFullYear(),   end.getMonth(),   end.getDate()) -
+     Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / msPerDay
+  );
+  const dayLabel = `${dayDiff + 1} days`;
+  if (!hasStartTime) {
+    return {
+      primary:   `${startDate} → ${D(end)}`,
+      secondary: `${dayLabel} · All day`,
+      isMultiDay: true,
+    };
+  }
+  return {
+    primary:   `${startDate} · ${startTime}`,
+    secondary: `→ ${D(end)} · ${T(end)}`,
+    isMultiDay: true,
+  };
+}
+
 // ---------- Events and Other ----------
 export const EventsTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
 }) => {
+  // Tick once a minute so derived Status flips Booked → Happened live as
+  // the clock crosses each event's end. Re-render cost is trivial for an
+  // events-sized table.
+  const now = useNowTick(60_000);
+
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "Status", w: "120px", sortKey: "status" },
+    // Status sorts by the derived value so "Happened" rows cluster together
+    // even though the column is no longer column-editable. Stored r.status
+    // would mis-sort once events age past their datetime without a manual
+    // edit.
+    { label: "Status", w: "120px", sortKey: "status",
+      sortValue: r => derivedEventStatus(r, now) },
     { label: "Type", w: "140px", sortKey: "type",
       sortValue: r => eventTypeRank(r.type) },
     { label: "Title", w: "minmax(260px, 2.5fr)", sortKey: "title" },
-    { label: "Date & Time", w: "160px", sortKey: "dateTime" },
+    // Date sort falls back to r.date so all-day events (no datetime, only
+    // date) sort alongside timed events instead of sinking to "no value".
+    // Multi-day events sort by their start, matching how the Calendar
+    // anchors them in week/month views.
+    { label: "Date & Time", w: "180px", sortKey: "dateTime",
+      sortValue: r => r.dateTime || (r.date ? `${r.date}T00:00:00` : "") },
     { label: "Attendees", w: "minmax(160px, 1.2fr)" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating", w: "150px", sortKey: "stars",
@@ -2946,7 +3067,7 @@ export const EventsTable = ({
     "Board Meetings": "blue", "Event": "rose"
   }[t] || "muted");
 
-  const { eventStatusOptions, eventTypeOptions } = buildOptions();
+  const { eventTypeOptions } = buildOptions();
 
   // Group-by-stars: rows are bucketed 5★ → 1★ → Unrated. Mirrors the
   // probability-grouped pattern on Potential (see PotentialTable above) —
@@ -3009,13 +3130,26 @@ export const EventsTable = ({
               <input type="checkbox"/>
             </div>
           ),
-          "Status": (
-            <div className="td">
-              <EditableCell value={r.status} type="select" options={eventStatusOptions}
-                onChange={v => updateRow(r.id, { status: v })}
-                render={v => <StatusChip status={v}/>}/>
-            </div>
-          ),
+          "Status": (() => {
+            // Pure derived display — no inline edit. Calendar passing the
+            // event's end flips Booked → Happened automatically via the
+            // useNowTick re-render. Tooltip explains the source of truth
+            // so an admin scanning the list isn't surprised that the chip
+            // doesn't match what they may have stored in the DB.
+            const derived = derivedEventStatus(r, now);
+            const stale   = r.status && r.status !== derived;
+            const refISO  = r.outlookEndDateTime || r.dateTime || r.date;
+            const tip = refISO
+              ? `Auto: ${derived} — ${derived === "Happened" ? "event already passed" : "event still upcoming"}` +
+                (r.outlookEndDateTime ? ` (ends ${fmtDateTime(r.outlookEndDateTime)})` : "") +
+                (stale ? ` · stored as "${r.status}"` : "")
+              : `${derived} · no datetime recorded`;
+            return (
+              <div className="td" title={tip}>
+                <StatusChip status={derived}/>
+              </div>
+            );
+          })(),
           "Type": (
             <div className="td">
               <EditableCell value={r.type} type="select" options={eventTypeOptions}
@@ -3044,19 +3178,37 @@ export const EventsTable = ({
                 onChange={v => updateRow(r.id, { stars: v })}/>
             </div>
           ),
-          "Date & Time": (
-            <div className="td mono subtle">
-              {r.source === "outlook" ? (
-                <span className="td-readonly-text">
-                  {r.dateTime ? fmtDateTime(r.dateTime) : (r.date ? fmtDate(r.date) : "—")}
-                </span>
-              ) : (
-                <EditableCell value={r.dateTime} type="datetime-local"
-                  onChange={v => updateRow(r.id, { dateTime: v })}
-                  format={v => v ? fmtDateTime(v) : (r.date ? fmtDate(r.date) : fmtDateTime(v))}/>
-              )}
-            </div>
-          ),
+          "Date & Time": (() => {
+            // Show the full event range (start + end if present), with
+            // multi-day events stacking the end on a second line. Same
+            // formatter the Calendar would have produced if it rendered as
+            // a list — so a 3-day conference reads as "Jun 4 → Jun 6 ·
+            // 3 days" instead of just "Jun 4". Inline edit still applies
+            // to start datetime only; end is Outlook-managed.
+            const range = fmtEventRange(r);
+            const display = (
+              <span className="event-range">
+                <span className="event-range-primary">{range.primary}</span>
+                {range.secondary && (
+                  <span className="event-range-secondary">{range.secondary}</span>
+                )}
+                {range.isMultiDay && (
+                  <span className="event-range-badge" title="Spans multiple days">multi-day</span>
+                )}
+              </span>
+            );
+            return (
+              <div className="td mono subtle">
+                {r.source === "outlook" ? (
+                  <span className="td-readonly-text">{display}</span>
+                ) : (
+                  <EditableCell value={r.dateTime} type="datetime-local"
+                    onChange={v => updateRow(r.id, { dateTime: v })}
+                    format={() => display}/>
+                )}
+              </div>
+            );
+          })(),
           "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,
           "Notes": (
             <div className="td subtle" style={{ fontSize: 12.5 }}>

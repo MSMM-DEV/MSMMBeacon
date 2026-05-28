@@ -6506,6 +6506,40 @@ html, body { overflow-x: clip; }
 }
 .quad-card[data-accent="recv"]::before { background: var(--recv-accent); }
 
+/* ----------------------------------------------------------------------------
+ * Invoice page layout — the cash-flow chart panel + the Outstanding-Invoices
+ * panel both used to live inside the Quad Sheet's .quad grid (which provided
+ * fixed row heights + an 18px gap). When the Quad Sheet was retired the two
+ * panels moved verbatim onto the Invoice tab, where they now sit as bare
+ * siblings of the InvoiceTable — so this block re-establishes:
+ *   (a) explicit min-height for the chart card (otherwise flex collapses it)
+ *   (b) vertical breathing room between the three Invoice page sections
+ * ----------------------------------------------------------------------------*/
+.inv-charts-card {
+  /* Holds ENG + PM stacked. ~340px per chart + KPIs + header. */
+  min-height: 780px;
+  margin-bottom: 18px;
+}
+/* When PM is collapsed to a thin toggle, shrink the card so the page isn't
+   wasting vertical real estate. :has() handles the dynamic state.        */
+.inv-charts-card:has(.invoice-chart-stack.pm-collapsed) {
+  min-height: 460px;
+}
+@media (max-width: 840px) {
+  .inv-charts-card { min-height: 720px; }
+  .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) { min-height: 420px; }
+}
+@media (max-width: 640px) {
+  .inv-charts-card { min-height: 640px; margin-bottom: 14px; }
+  .inv-charts-card:has(.invoice-chart-stack.pm-collapsed) { min-height: 380px; }
+}
+/* On the Invoice page, the receivables panel sits directly under the
+   InvoiceTable. Without the old .quad grid gap, add explicit top margin. */
+.recv-card { margin-top: 18px; }
+@media (max-width: 640px) {
+  .recv-card { margin-top: 14px; }
+}
+
 /* ===== Header ===== */
 .recv-head {
   flex-direction: row;
@@ -12817,6 +12851,57 @@ html, body { overflow-x: clip; }
     max-height: 88vh;
     overflow-y: auto;
   }
+}
+
+/* ================================================================
+   EVENTS — List view Date & Time cell.
+   Two-line range display so multi-day events show their span
+   (Jun 4 · 2:30 PM / → Jun 6 · 4:00 PM) the way the Calendar view
+   already does — same data, same temporal picture, just stacked
+   vertically inside a 180px table cell.
+   ================================================================ */
+.event-range {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  line-height: 1.25;
+  min-width: 0;
+}
+.event-range-primary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.event-range-secondary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.event-range-badge {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, transparent);
+  border-radius: 4px;
+  line-height: 1.2;
 }
 
 /* ================================================================
