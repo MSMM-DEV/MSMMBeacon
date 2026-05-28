@@ -2445,6 +2445,7 @@ export const tkApproveWeek       = (userId, weekStart)         => tkAdmin("appro
 export const tkRejectWeek        = (userId, weekStart, reason) => tkAdmin("reject-week",         { user_id: userId, week_start: weekStart, reason });
 export const tkUnlockWeek        = (userId, weekStart)         => tkAdmin("unlock-week",         { user_id: userId, week_start: weekStart });
 export const tkEnrollTag         = (userId, uid, label)        => tkAdmin("enroll-tag",          { user_id: userId, uid, label });
+export const tkRetireTag         = (uid)                       => tkAdmin("retire-tag",          { uid });
 export const tkStartEnroll       = (userId)                    => tkAdmin("start-enroll",        { user_id: userId });
 export const tkCancelEnroll      = ()                          => tkAdmin("cancel-enroll",       {});
 export const tkResolveCorrection = (id, decision, note)        => tkAdmin("resolve-correction",  { correction_id: id, decision, note });

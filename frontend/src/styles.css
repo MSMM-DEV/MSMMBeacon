@@ -8584,16 +8584,65 @@ html, body { overflow-x: clip; }
 .tk-enroll-list h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-muted); }
 .tk-enroll-list ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 .tk-enroll-row {
-  display: grid;
-  grid-template-columns: 220px minmax(120px, 1fr) 1fr auto;
-  gap: 10px; align-items: center;
-  padding: 6px 10px; background: var(--surface-2); border-radius: 6px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 7px 10px; background: var(--surface-2); border-radius: 6px;
   font-size: 13px;
+  animation: tk-enroll-in 0.3s ease both;
+}
+@keyframes tk-enroll-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
 }
 .tk-enroll-row code { font-family: ui-monospace, monospace; font-size: 12px; }
-.tk-enroll-row-label { color: var(--text-muted); }
-.tk-enroll-row-seen  { color: var(--text-muted); font-size: 11px; }
+.tk-enroll-row-label {
+  color: var(--text-muted); flex: 1 1 80px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-enroll-row-seen  { color: var(--text-muted); font-size: 11px; margin-left: auto; }
 .tk-enroll-empty { padding: 12px; text-align: center; color: var(--text-muted); }
+
+/* per-row actions (reassign / retire) — present but muted, brighten on hover */
+.tk-enroll-row-actions { display: flex; align-items: center; gap: 6px; opacity: 0.62; transition: opacity 0.15s ease; }
+.tk-enroll-row:hover .tk-enroll-row-actions { opacity: 1; }
+.tk-enroll-row-actions .btn { display: inline-flex; align-items: center; gap: 4px; }
+.tk-enroll-confirm { gap: 8px; opacity: 1; }
+.tk-enroll-confirm > span { font-size: 12px; color: var(--text-muted); }
+
+/* inline reassign editor */
+.tk-enroll-reassign { display: flex; align-items: center; gap: 6px; flex: 1 1 220px; min-width: 200px; }
+.tk-enroll-reassign .form-input { flex: 1 1 auto; min-width: 0; }
+.tk-enroll-reassign .btn-sm { flex: 0 0 auto; }
+
+/* capture-mode toggle */
+.tk-enroll-modes { display: inline-flex; gap: 4px; padding: 3px; background: var(--surface-3); border-radius: 9px; align-self: start; }
+.tk-enroll-mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 7px 12px; border-radius: 7px;
+  font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text-muted);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.tk-enroll-mode-btn:hover { color: var(--text); }
+.tk-enroll-mode-btn.is-active {
+  background: var(--surface); color: var(--accent-ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.tk-enroll-hint { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* "binding will reassign" warning on the captured card */
+.tk-enroll-warn {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text);
+  background: rgba(214, 158, 46, 0.14); border: 1px solid rgba(214, 158, 46, 0.4);
+  padding: 7px 9px; border-radius: 7px;
+}
+
+/* verify result card */
+.tk-enroll-result { padding: 12px; border-radius: 9px; display: grid; gap: 8px; border: 1px solid var(--border); }
+.tk-enroll-result.is-found      { background: rgba(110, 143, 98, 0.12); border-color: rgba(110, 143, 98, 0.4); }
+.tk-enroll-result.is-unenrolled { background: var(--surface-2); }
+.tk-enroll-result-body { font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tk-enroll-muted { color: var(--text-muted); }
 
 /* Settings panel */
 .tk-settings { display: grid; gap: 16px; }

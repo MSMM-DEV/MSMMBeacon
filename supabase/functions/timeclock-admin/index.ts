@@ -542,6 +542,19 @@ async function setTravelBuffer(payload: any) {
   return json({ ok: true, message: "travel buffer updated" });
 }
 
+async function retireTag(payload: any, _admin: { admin_user_id: string }) {
+  const uid = String(payload.uid || "").trim();
+  if (!uid) return bad("uid is required");
+  const sb = svc();
+  const { error } = await sb
+    .from("nfc_tags")
+    .update({ active: false, retired_at: new Date().toISOString() })
+    .eq("uid", uid)
+    .eq("active", true);
+  if (error) return bad(`retire tag: ${error.message}`, 500);
+  return json({ ok: true, message: "tag retired" });
+}
+
 async function registerDevice(payload: any, admin: { admin_user_id: string }) {
   const id       = String(payload.id || "");
   const label    = payload.label ? String(payload.label) : null;
@@ -588,6 +601,7 @@ Deno.serve(async (req) => {
       case "resolve-correction":  return await resolveCorrection(payload, admin);
       case "reclassify-interval": return await reclassifyInterval(payload, admin);
       case "set-travel-buffer":   return await setTravelBuffer(payload);
+      case "retire-tag":          return await retireTag(payload, admin);
       case "register-device":     return await registerDevice(payload, admin);
       default:                    return bad(`unknown action: ${action}`);
     }
