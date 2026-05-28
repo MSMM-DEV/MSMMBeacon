@@ -320,16 +320,34 @@ async function resolveCorrection(payload: any, admin: { admin_user_id: string })
   if (corr.status !== "pending") return bad("correction is not pending");
 
   if (decision === "approved") {
-    // Apply payload according to kind.
+    // 1) Apply the payload to the underlying tables. applyCorrection now
+    //    throws when zero rows are matched (silent-no-op guard), so a stale
+    //    punch_id / interval_id surfaces as a 500 the admin can see, not
+    //    a "successful" approval with no actual change.
     try {
       await applyCorrection(sb, corr, admin.admin_user_id);
     } catch (e) {
       return bad(`apply failed: ${(e as Error).message}`, 500);
     }
-    // Re-derive that day.
-    await sb.rpc("fn_rebuild_user_day", { _user_id: corr.user_id, _date: corr.date });
+
+    // 2) Re-derive that day from punches. The previous version swallowed
+    //    rpc errors silently — that left time_punches updated but
+    //    time_intervals + timesheet_days stale, which is the exact bug
+    //    the admin sees as "approve succeeded but my timesheet didn't
+    //    change". We now check the error AND only proceed to step 3 if
+    //    the rebuild lands cleanly.
+    const { error: rpcErr } = await sb.rpc("fn_rebuild_user_day", {
+      _user_id: corr.user_id, _date: corr.date,
+    });
+    if (rpcErr) {
+      return bad(`rebuild failed: ${rpcErr.message}`, 500);
+    }
   }
 
+  // 3) Only mark the correction approved/rejected once the underlying work
+  //    has actually landed. Previously this ran unconditionally, which let
+  //    a silent apply / rebuild failure flip the status to "approved" with
+  //    no real change on disk.
   const { error: upErr } = await sb
     .from("timesheet_corrections")
     .update({
@@ -348,42 +366,78 @@ async function applyCorrection(sb: ReturnType<typeof svc>, corr: any, adminUserI
   const p = corr.payload || {};
   switch (corr.kind) {
     case "add_punch": {
-      const { error } = await sb.from("time_punches").insert({
+      if (!p.punched_at) throw new Error("add_punch: payload missing punched_at");
+      const { data, error } = await sb.from("time_punches").insert({
         user_id:    corr.user_id,
         punched_at: p.punched_at,
         source:     "manual",
         note:       p.note ?? `correction ${corr.id}`,
         created_by: adminUserId,
-      });
+      }).select("id").maybeSingle();
       if (error) throw error;
+      if (!data) throw new Error("add_punch: insert returned no row");
       return;
     }
     case "edit_punch": {
-      const { error } = await sb.from("time_punches")
-        .update({ punched_at: p.punched_at, note: p.note ?? null })
-        .eq("id", p.punch_id);
+      // Hard-required fields. CorrectionModal sends both, but a stale or
+      // hand-crafted payload could be missing either — surface that
+      // explicitly rather than no-op.
+      if (!p.punch_id)   throw new Error("edit_punch: payload missing punch_id");
+      if (!p.punched_at) throw new Error("edit_punch: payload missing punched_at");
+      // Only patch punched_at. The prior version also wrote `note: p.note ?? null`
+      // which silently BLANKED any existing note on the punch, since the
+      // CorrectionModal never sends a note field for edit_punch. Leave note
+      // alone unless the payload explicitly provides one.
+      const patch: Record<string, unknown> = { punched_at: p.punched_at };
+      if (typeof p.note === "string") patch.note = p.note;
+      const { data, error } = await sb.from("time_punches")
+        .update(patch)
+        .eq("id", p.punch_id)
+        .select("id");
       if (error) throw error;
+      // Supabase JS returns {data: [], error: null} when zero rows match.
+      // Without this guard, a stale/wrong punch_id silently no-ops AND the
+      // resolveCorrection still marks the row "approved" — exactly the
+      // "approved but nothing changed" symptom.
+      if (!data || data.length === 0) {
+        throw new Error(`edit_punch: no punch matched id=${p.punch_id} (already deleted?)`);
+      }
       return;
     }
     case "delete_punch": {
-      const { error } = await sb.from("time_punches").delete().eq("id", p.punch_id);
+      if (!p.punch_id) throw new Error("delete_punch: payload missing punch_id");
+      const { data, error } = await sb.from("time_punches")
+        .delete()
+        .eq("id", p.punch_id)
+        .select("id");
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error(`delete_punch: no punch matched id=${p.punch_id}`);
+      }
       return;
     }
     case "reclassify_interval": {
-      const { error } = await sb.from("time_intervals")
+      if (!p.interval_id) throw new Error("reclassify_interval: payload missing interval_id");
+      if (!p.category)    throw new Error("reclassify_interval: payload missing category");
+      const { data, error } = await sb.from("time_intervals")
         .update({
           category:        p.category,
           category_source: "admin",
           notes:           p.notes ?? null,
           outlook_event_id: p.outlook_event_id ?? null,
         })
-        .eq("id", p.interval_id);
+        .eq("id", p.interval_id)
+        .select("id");
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error(`reclassify_interval: no interval matched id=${p.interval_id}`);
+      }
       return;
     }
     case "note": {
       // Pure notation; nothing to apply beyond the corrections row itself.
+      // No row to verify here.
+      void adminUserId;
       return;
     }
     default:
