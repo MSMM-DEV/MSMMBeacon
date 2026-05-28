@@ -6,8 +6,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
 import {
   submitCorrection, loadDayDetail, getCurrentBeaconUser,
-  fmtClock, todayInCT,
+  fmtClock, todayInCT, TK_CATEGORY_LABEL,
 } from "../data";
+
+// Categories a user can attach to an "Away" block. Excludes auto-only labels
+// (work / meeting_untagged / eod / vacation / holiday) — those are assigned by
+// the classifier or the approval flow, not picked when carving a manual gap.
+const AWAY_CATEGORIES = ["lunch", "break", "meeting", "travel", "off"];
 
 export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
   const me = getCurrentBeaconUser();
@@ -23,8 +28,10 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
   const [expandedId, setExpandedId] = useState(null);
   const [draft,      setDraft]      = useState({ start: "", end: "", description: "" });
 
-  // User-added new blocks (not tied to an existing interval).
-  //   each: { id: localKey, start: "HH:MM", end: "HH:MM", description: string }
+  // User-added new blocks (not tied to an existing interval). Each carves a
+  // sub-range of the day as Away (out) or Worked (in) and submits as ONE atomic
+  // add_interval correction.
+  //   each: { id, start: "HH:MM", end: "HH:MM", isOut: bool, category, description }
   const [newBlocks, setNewBlocks] = useState([]);
 
   const [busy,       setBusy]       = useState(false);
@@ -83,7 +90,12 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
   };
 
   const addNewBlock = () => {
-    setNewBlocks(b => [...b, { id: `new-${Date.now()}-${b.length}`, start: "", end: "", description: "" }]);
+    // Default to Away/Lunch — the overwhelmingly common case is "I forgot to
+    // punch out for lunch," which the user fixes by carving an out block.
+    setNewBlocks(b => [...b, {
+      id: `new-${Date.now()}-${b.length}`,
+      start: "", end: "", isOut: true, category: "lunch", description: "",
+    }]);
   };
   const updateNewBlock = (id, patch) => {
     setNewBlocks(b => b.map(x => x.id === id ? { ...x, ...patch } : x));
@@ -98,9 +110,10 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
       if (e.startLocal) n++;
       if (e.endLocal)   n++;
     }
+    // A new block is one atomic correction; it only counts once it has BOTH
+    // ends (a single boundary can't define an interval).
     for (const nb of newBlocks) {
-      if (nb.start) n++;
-      if (nb.end)   n++;
+      if (nb.start && nb.end) n++;
     }
     return n;
   }, [edits, newBlocks]);
@@ -133,25 +146,24 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
         }
       }
       for (const nb of newBlocks) {
-        if (!nb.start && !nb.end) continue;
+        if (!nb.start || !nb.end) continue;
         const desc = (nb.description || "").trim();
         const prefix = desc ? `${desc} — ` : "";
-        if (nb.start) {
-          tasks.push(submitCorrection({
-            date,
-            kind:    "add_punch",
-            payload: { punched_at: localToISO(date, nb.start), note: desc || null },
-            reason:  `${prefix}Add new punch at ${fmtLocalHHMM(nb.start)}`,
-          }));
-        }
-        if (nb.end) {
-          tasks.push(submitCorrection({
-            date,
-            kind:    "add_punch",
-            payload: { punched_at: localToISO(date, nb.end), note: desc || null },
-            reason:  `${prefix}Add new punch at ${fmtLocalHHMM(nb.end)}`,
-          }));
-        }
+        const category = nb.isOut ? nb.category : "work";
+        const kindLabel = nb.isOut ? "away" : "worked";
+        const catLabel = nb.isOut ? ` (${TK_CATEGORY_LABEL[nb.category] || nb.category})` : "";
+        tasks.push(submitCorrection({
+          date,
+          kind:    "add_interval",
+          payload: {
+            start_at: localToISO(date, nb.start),
+            end_at:   localToISO(date, nb.end),
+            is_out:   nb.isOut,
+            category,
+            note:     desc || null,
+          },
+          reason:  `${prefix}Add ${kindLabel} block ${fmtLocalHHMM(nb.start)} – ${fmtLocalHHMM(nb.end)}${catLabel}`,
+        }));
       }
       await Promise.all(tasks);
       onSubmitted?.();
@@ -264,7 +276,12 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
                   <li key={nb.id} className="tk-correction-block is-new">
                     <div className="tk-correction-block-row">
                       <span className="tk-correction-block-time">
-                        <em className="tk-correction-block-open">New time block</em>
+                        <em className="tk-correction-block-open">
+                          {nb.isOut ? "Away" : "Worked"} block
+                          {nb.start && nb.end
+                            ? <> · {fmtLocalHHMM(nb.start)} – {fmtLocalHHMM(nb.end)}</>
+                            : null}
+                        </em>
                       </span>
                       <div className="tk-correction-block-actions">
                         <button className="btn btn-ghost btn-sm" onClick={() => removeNewBlock(nb.id)}>
@@ -273,6 +290,33 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
                       </div>
                     </div>
                     <div className="tk-correction-block-edit">
+                      <div className="tk-correction-block-field tk-correction-block-field-wide">
+                        <span className="form-label">This block was</span>
+                        <div className="tk-presence-toggle" role="group" aria-label="Block type">
+                          <button type="button"
+                            className={`btn btn-sm ${nb.isOut ? "btn-primary" : "btn-ghost"}`}
+                            onClick={() => updateNewBlock(nb.id, { isOut: true })}>
+                            Away
+                          </button>
+                          <button type="button"
+                            className={`btn btn-sm ${!nb.isOut ? "btn-primary" : "btn-ghost"}`}
+                            onClick={() => updateNewBlock(nb.id, { isOut: false })}>
+                            Worked
+                          </button>
+                        </div>
+                      </div>
+                      {nb.isOut && (
+                        <label className="tk-correction-block-field">
+                          <span className="form-label">Reason</span>
+                          <select className="form-input"
+                            value={nb.category}
+                            onChange={evt => updateNewBlock(nb.id, { category: evt.target.value })}>
+                            {AWAY_CATEGORIES.map(c => (
+                              <option key={c} value={c}>{TK_CATEGORY_LABEL[c] || c}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       <label className="tk-correction-block-field">
                         <span className="form-label">Start</span>
                         <input type="time" className="form-input"
@@ -288,7 +332,9 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
                       <label className="tk-correction-block-field tk-correction-block-field-wide">
                         <span className="form-label">Description</span>
                         <textarea className="form-input" rows={2}
-                          placeholder="What were you doing during this block?"
+                          placeholder={nb.isOut
+                            ? "Why were you away during this block?"
+                            : "What were you working on during this block?"}
                           value={nb.description}
                           maxLength={400}
                           onChange={evt => updateNewBlock(nb.id, { description: evt.target.value })}/>

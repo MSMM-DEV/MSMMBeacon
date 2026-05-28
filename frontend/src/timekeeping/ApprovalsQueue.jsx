@@ -249,6 +249,7 @@ function CorrectionRow({ correction, onResolved }) {
 function KindBadge({ kind }) {
   const map = {
     add_punch:           { tone: "accent", label: "Punch" },
+    add_interval:        { tone: "accent", label: "Block" },
     edit_punch:          { tone: "blue",   label: "Edit" },
     delete_punch:        { tone: "rose",   label: "Delete" },
     reclassify_interval: { tone: "sage",   label: "Reclassify" },
@@ -262,6 +263,13 @@ function kindLabel(c) {
   if (c.kind === "add_punch") {
     const when = c.payload?.punched_at ? fmtClock(c.payload.punched_at) : "a missing punch";
     return `Add a punch at ${when}`;
+  }
+  if (c.kind === "add_interval") {
+    const p = c.payload || {};
+    const span = (p.start_at && p.end_at) ? `${fmtClock(p.start_at)} – ${fmtClock(p.end_at)}` : "a time block";
+    return p.is_out
+      ? `Add an away block ${span}`
+      : `Add a worked block ${span}`;
   }
   if (c.kind === "edit_punch")  return "Edit a punch";
   if (c.kind === "delete_punch")return "Delete a punch";

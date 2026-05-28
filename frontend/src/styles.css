@@ -8331,6 +8331,8 @@ html, body { overflow-x: clip; }
 .tk-correction-block-field .form-label { margin: 0; }
 .tk-correction-block-field-wide { grid-column: 1 / -1; }
 .tk-correction-block-field-wide textarea.form-input { resize: vertical; min-height: 44px; }
+.tk-presence-toggle { display: inline-flex; gap: 6px; }
+.tk-presence-toggle .btn { min-width: 84px; }
 .tk-correction-block.is-new {
   border-style: dashed;
   border-color: var(--accent);

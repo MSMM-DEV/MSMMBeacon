@@ -342,6 +342,32 @@ async function resolveCorrection(payload: any, admin: { admin_user_id: string })
     if (rpcErr) {
       return bad(`rebuild failed: ${rpcErr.message}`, 500);
     }
+
+    // 2b) For add_interval, stamp the freshly-carved interval's category with
+    //     source='user' so the user's chosen label (lunch/break/meeting/…)
+    //     survives every later rebuild — the override snapshot in
+    //     fn_rebuild_user_day preserves rows whose category_source is
+    //     user/admin/outlook, keyed on the exact (start_at, end_at) boundary.
+    //     The boundaries match the two punches we just inserted. Presence
+    //     (is_out) comes from punch order, not from us, so we never write it
+    //     here. A 'work' carve needs no stamp (rebuild defaults to work) and
+    //     would not survive as an override anyway, so we skip it.
+    if (corr.kind === "add_interval") {
+      const p = corr.payload || {};
+      const category = String(p.category || (p.is_out ? "break" : "work"));
+      if (category !== "work") {
+        const patch: Record<string, unknown> = {
+          category, category_source: "user", computed_at: new Date().toISOString(),
+        };
+        if (typeof p.note === "string" && p.note.trim()) patch.notes = p.note.trim();
+        const { error: stampErr } = await sb.from("time_intervals")
+          .update(patch)
+          .eq("user_id", corr.user_id)
+          .eq("start_at", p.start_at)
+          .eq("end_at", p.end_at);
+        if (stampErr) return bad(`category stamp failed: ${stampErr.message}`, 500);
+      }
+    }
   }
 
   // 3) Only mark the correction approved/rejected once the underlying work
@@ -376,6 +402,26 @@ async function applyCorrection(sb: ReturnType<typeof svc>, corr: any, adminUserI
       }).select("id").maybeSingle();
       if (error) throw error;
       if (!data) throw new Error("add_punch: insert returned no row");
+      return;
+    }
+    case "add_interval": {
+      // Atomic "away/worked sub-range" carve. Insert BOTH boundary punches in
+      // one shot so the day can never be left half-toggled. fn_rebuild_user_day
+      // (called by resolveCorrection right after this) re-derives the interval
+      // chain from punches; the per-presence color falls out of punch order,
+      // and resolveCorrection then stamps the carved interval's category with
+      // source='user' so the user's chosen label sticks across future rebuilds.
+      if (!p.start_at) throw new Error("add_interval: payload missing start_at");
+      if (!p.end_at)   throw new Error("add_interval: payload missing end_at");
+      if (new Date(p.end_at).getTime() <= new Date(p.start_at).getTime()) {
+        throw new Error("add_interval: end_at must be after start_at");
+      }
+      const note = typeof p.note === "string" && p.note.trim() ? p.note.trim() : `correction ${corr.id}`;
+      const { error } = await sb.from("time_punches").insert([
+        { user_id: corr.user_id, punched_at: p.start_at, source: "manual", note, created_by: adminUserId },
+        { user_id: corr.user_id, punched_at: p.end_at,   source: "manual", note, created_by: adminUserId },
+      ]);
+      if (error) throw error;
       return;
     }
     case "edit_punch": {
