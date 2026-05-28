@@ -27,7 +27,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
 import {
-  TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM,
+  intervalTone, TK_CATEGORY_LABEL, fmtClock, fmtHM,
   computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN, ctMinutesOfIso,
 } from "../data";
 import { useIsMobile } from "../use-mobile";
@@ -254,7 +254,7 @@ export function DayCalendar({
           {/* interval cards */}
           <div className="tk-cal-cards">
             {blocks.map(({ iv, top, height, isOpen }) => {
-              const tone     = TK_CATEGORY_TONE[iv.category] || "muted";
+              const tone     = intervalTone(iv);   // green = at desk, red = out
               const isUntag  = iv.category === "meeting_untagged" && iv.categorySource !== "user" && iv.categorySource !== "admin";
               const compact  = height < 44;
               return (
@@ -436,7 +436,7 @@ function DayList({
 function DayListIntervalCard({ iv, isToday, onClick }) {
   const isOpen     = iv.endAt == null;
   const isUntagged = iv.category === "meeting_untagged" && iv.categorySource !== "user" && iv.categorySource !== "admin";
-  const tone       = TK_CATEGORY_TONE[iv.category] || "muted";
+  const tone       = intervalTone(iv);   // green = at desk, red = out
   const minutes    = iv.durationMinutes != null
     ? iv.durationMinutes
     : Math.max(0, Math.floor((Date.now() - +new Date(iv.startAt)) / 60_000));

@@ -99,7 +99,11 @@ export function TimesheetTab({ focusDate = null }) {
     if (!userId || !response || response.deduped) return;
     try {
       const kind = response.state === "in" ? "in" : "out";
-      const iv   = await loadLatestInterval(userId, kind === "in" ? "open" : "closed");
+      // Every punch now OPENS a fresh interval (punch-in → an IN interval,
+      // punch-out → an OUT interval). The prompt always tags that newly-opened
+      // interval — so a punch-out labels the away period it just started, NOT
+      // the at-desk session it just closed.
+      const iv = await loadLatestInterval(userId, "open");
       if (iv) setPrompt({ kind, interval: iv });
     } catch {
       // Don't block the punch flow on prompt-fetch failure; user can
@@ -111,7 +115,9 @@ export function TimesheetTab({ focusDate = null }) {
     return <div className="page-empty">Sign in to view your timesheet.</div>;
   }
 
-  const punchedIn = state.open != null;
+  // An open interval no longer implies "in" — a punch-out leaves an open OUT
+  // interval ("currently out"). Only an open IN (is_out=false) interval is IN.
+  const punchedIn = state.open != null && !state.open.isOut;
   const todayMinutes = state.today?.minutesWork || 0;
   const locked       = !!week.week?.locked;
   const isToday      = date === todayInCT();

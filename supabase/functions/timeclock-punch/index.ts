@@ -226,14 +226,18 @@ async function loadState(userId: string): Promise<{
   today_minutes_work: number;
 }> {
   const sb = svc();
+  // The open interval's is_out is what decides IN vs OUT: a punch-out now opens
+  // an OUT interval (the "currently out" period), so an open interval no longer
+  // implies the user is IN — only an open IN (is_out=false) interval does.
   const { data: open } = await sb
     .from("time_intervals")
-    .select("start_at")
+    .select("start_at, is_out")
     .eq("user_id", userId)
     .is("end_at", null)
     .order("start_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  const openIn = open && !open.is_out ? open : null;
 
   // Today's date in CT. The DB function uses 'America/Chicago' literally;
   // we replicate via toLocaleDateString.
@@ -246,8 +250,8 @@ async function loadState(userId: string): Promise<{
     .maybeSingle();
 
   return {
-    state:              open ? "in" : "out",
-    open_since:         open?.start_at ?? null,
+    state:              openIn ? "in" : "out",
+    open_since:         openIn?.start_at ?? null,
     today_minutes_work: day?.minutes_work ?? 0,
   };
 }

@@ -13,7 +13,7 @@
 import React from "react";
 import { Icon } from "../icons";
 import {
-  TK_CATEGORY_TONE, TK_CATEGORY_LABEL, fmtClock, fmtHM,
+  intervalTone, TK_CATEGORY_LABEL, fmtClock, fmtHM,
   computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN,
 } from "../data";
 
@@ -133,7 +133,7 @@ export function DayTimeline({
         {segments.map(({ iv, start, end }) => {
           const left  = ((start - TRACK_START_HOUR) / span) * 100;
           const width = ((end   - start)            / span) * 100;
-          const tone  = TK_CATEGORY_TONE[iv.category] || "muted";
+          const tone  = intervalTone(iv);   // green = at desk, red = out
           return (
             <button
               key={iv.id}

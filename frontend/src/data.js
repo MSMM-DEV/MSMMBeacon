@@ -1731,6 +1731,7 @@ export function adaptInterval(r) {
     endPunchId:            r.end_punch_id   || null,
     category:              r.category,
     categorySource:        r.category_source,
+    isOut:                 !!r.is_out,
     outlookEventId:        r.outlook_event_id        || null,
     outlookEventSubject:   r.outlook_event_subject   || null,
     outlookEventLocation:  r.outlook_event_location  || null,
@@ -1761,8 +1762,9 @@ export function adaptTimesheetDay(r) {
     flags:            r.flags || {},
     notes:            r.notes || null,
     updatedAt:        r.updated_at,
-    minutesTotalCounted:
-      (r.minutes_work ?? 0) + (r.minutes_meeting ?? 0) + (r.minutes_travel ?? 0),
+    // Worked time = IN (at-desk) minutes only. Punched-out time (meeting,
+    // travel, lunch, …) is informational and never counts toward the total.
+    minutesTotalCounted: r.minutes_work ?? 0,
   };
 }
 
@@ -1941,6 +1943,11 @@ export function saveAdminTimePrefs(adminUserId, prefs) {
 export function adaptPunchResponseToState(response, prevToday = null) {
   if (!response) return null;
   const isIn = response.state === "in";
+  // Only the IN state synthesizes an "open" interval — that's what drives the
+  // PunchButton's "in since …" display. After a punch-out the user has an open
+  // OUT interval in the DB, but for the button that simply reads as OUT (open
+  // is left null here); the real OUT interval is fetched by the prompt + the
+  // silent refresh right after.
   const open = isIn ? {
     id:                    null,
     userId:                response.user?.id || null,
@@ -1950,6 +1957,7 @@ export function adaptPunchResponseToState(response, prevToday = null) {
     endPunchId:            null,
     category:              "work",
     categorySource:        "auto",
+    isOut:                 false,
     outlookEventId:        null,
     outlookEventSubject:   null,
     outlookEventLocation:  null,
@@ -2042,7 +2050,8 @@ export async function loadTeamRange(startDate, endDateExclusive) {
       .order("date", { ascending: true }),
     supabase.from("time_intervals")
       .select("user_id, start_at")
-      .is("end_at", null),
+      .is("end_at", null)
+      .eq("is_out", false),   // only an open IN interval means "currently in"
   ]);
   if (dayErr) throw new Error(`loadTeamRange (days): ${dayErr.message}`);
   if (ivErr)  throw new Error(`loadTeamRange (open): ${ivErr.message}`);
@@ -2516,6 +2525,15 @@ export const TK_CATEGORY_LABEL = {
   holiday:          "Holiday",
   off:              "Off",
 };
+
+// Timeline color is driven by PRESENCE, not category: at-desk (IN) time is
+// green, punched-out (OUT) time is red — regardless of how the away period is
+// tagged. The category survives only as the text label on the bar. This is the
+// single source of truth for interval coloring across the personal timesheet
+// and every Team view; do not color intervals by TK_CATEGORY_TONE anymore.
+export function intervalTone(iv) {
+  return iv?.isOut ? "rose" : "green";
+}
 
 // ----------------------------------------------------------------------
 // Workday coverage — green-IN / red-OUT timeline overlay

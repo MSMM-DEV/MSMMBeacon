@@ -68,7 +68,9 @@ export function UserDayModal({ userId, initialDate, onClose }) {
   const minutesMeeting = day.day?.minutesMeeting || 0;
   const minutesTravel  = day.day?.minutesTravel  || 0;
   const minutesUntagged = day.day?.minutesUntagged || 0;
-  const total = minutesWork + minutesMeeting + minutesTravel;
+  // Worked time = at-desk (IN) minutes only; punched-out meeting/travel time is
+  // shown as separate informational stats below but never counts in the total.
+  const total = minutesWork;
   const closedCount = (day.intervals || []).filter(i => i.endAt).length;
   const openCount   = (day.intervals || []).filter(i => !i.endAt).length;
 

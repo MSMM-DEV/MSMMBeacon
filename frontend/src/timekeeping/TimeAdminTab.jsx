@@ -81,7 +81,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
         const at = new Set(), ci = new Set();
         for (const r of rows) {
           if (r.intervals.length > 0) at.add(r.user.id);
-          if (r.intervals.some(i => !i.endAt)) ci.add(r.user.id);
+          if (r.intervals.some(i => !i.endAt && !i.isOut)) ci.add(r.user.id);
         }
         setSignals({ activeToday: at, currentlyIn: ci });
       } catch { /* non-critical */ }

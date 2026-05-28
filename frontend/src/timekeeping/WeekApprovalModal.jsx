@@ -54,8 +54,8 @@ export function WeekApprovalModal({ userId, weekStart, onClose, onResolved }) {
     return { date: dateStr, label: DOW[i], day: dayByDate.get(dateStr) };
   });
 
-  const total = slots.reduce((acc, s) =>
-    acc + (s.day?.minutesWork || 0) + (s.day?.minutesMeeting || 0) + (s.day?.minutesTravel || 0), 0);
+  // Worked time = at-desk (IN) minutes only; punched-out time never counts.
+  const total = slots.reduce((acc, s) => acc + (s.day?.minutesWork || 0), 0);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -77,7 +77,7 @@ export function WeekApprovalModal({ userId, weekStart, onClose, onResolved }) {
 
           <ul className="tk-week-review-days">
             {slots.map(s => {
-              const minutes = (s.day?.minutesWork || 0) + (s.day?.minutesMeeting || 0) + (s.day?.minutesTravel || 0);
+              const minutes = s.day?.minutesWork || 0;
               const f = s.day?.flags || {};
               return (
                 <li key={s.date} className="tk-week-review-day">

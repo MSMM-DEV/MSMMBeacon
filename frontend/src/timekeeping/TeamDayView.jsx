@@ -29,7 +29,7 @@ export function TeamDayView({ date, onDate, onUserDay }) {
   });
 
   const totalActive = sorted.filter(r => r.intervals.length > 0).length;
-  const totalIn     = sorted.filter(r => r.intervals.some(i => !i.endAt)).length;
+  const totalIn     = sorted.filter(r => r.intervals.some(i => !i.endAt && !i.isOut)).length;
 
   return (
     <div className="tk-team-day">
@@ -80,10 +80,10 @@ export function TeamDayView({ date, onDate, onUserDay }) {
               />
             </div>
             <div className="tk-team-row-total">
-              {r.day ? fmtHM((r.day.minutesWork||0) + (r.day.minutesMeeting||0) + (r.day.minutesTravel||0)) : "—"}
+              {r.day ? fmtHM(r.day.minutesWork || 0) : "—"}
             </div>
-            <div className={`tk-team-row-state ${r.intervals.some(i => !i.endAt) ? "is-in" : ""}`}>
-              {r.intervals.some(i => !i.endAt) ? "IN" : ""}
+            <div className={`tk-team-row-state ${r.intervals.some(i => !i.endAt && !i.isOut) ? "is-in" : ""}`}>
+              {r.intervals.some(i => !i.endAt && !i.isOut) ? "IN" : ""}
             </div>
           </li>
         ))}

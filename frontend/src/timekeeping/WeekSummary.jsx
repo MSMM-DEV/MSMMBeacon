@@ -26,7 +26,8 @@ export function WeekSummary({
     return { date: dateStr, label: DOW_LABELS[i], day: dayByDate.get(dateStr) };
   });
 
-  const total = slots.reduce((acc, s) => acc + (s.day?.minutesWork || 0) + (s.day?.minutesMeeting || 0) + (s.day?.minutesTravel || 0), 0);
+  // Worked time = at-desk (IN) minutes only; punched-out time never counts.
+  const total = slots.reduce((acc, s) => acc + (s.day?.minutesWork || 0), 0);
   const flags = slots.flatMap(s => {
     const f = s.day?.flags || {};
     const list = [];
@@ -70,7 +71,7 @@ export function WeekSummary({
 
       <ul className="tk-week-days">
         {slots.map(s => {
-          const minutes = (s.day?.minutesWork || 0) + (s.day?.minutesMeeting || 0) + (s.day?.minutesTravel || 0);
+          const minutes = s.day?.minutesWork || 0;
           const f = s.day?.flags || {};
           return (
             <li key={s.date} className="tk-week-day">

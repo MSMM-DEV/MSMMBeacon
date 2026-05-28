@@ -1,9 +1,11 @@
 // PunchPromptModal — opens immediately after a PUNCH IN or PUNCH OUT so the
 // user can attach a category + note while the context is fresh.
 //
-// Variants:
-//   kind="in"  → "What are you starting?"  — applied to the newly-opened interval
-//   kind="out" → "How would you tag this?" — applied to the just-closed interval
+// Both variants tag the NEWLY-OPENED interval (every punch opens one):
+//   kind="in"  → "What are you starting?"  — tags the new IN (at-desk) interval
+//   kind="out" → "Where are you headed?"   — tags the new OUT (away) interval,
+//                so the label describes the away period you just started, never
+//                the at-desk session you just closed.
 //
 // Skip is always allowed; the interval keeps its rule-classified default.
 // Save writes via setIntervalCategory (always sets category_source='user' so
@@ -32,20 +34,32 @@ const CATEGORY_CHOICES = [
   { key: "eod",              label: "Done for the day" },   // stops the red overlay
 ];
 
+const CHOICE_KEYS = new Set(CATEGORY_CHOICES.map(c => c.key));
+
+// Preselect a sensible chip. A freshly-opened OUT interval arrives tagged
+// 'meeting_untagged' (a placeholder, not a real choice) — default it to
+// "Meeting"; a fresh IN interval defaults to "Working". When re-opening an
+// already-tagged interval, keep its real category.
+function defaultCategory(kind, interval) {
+  const c = interval?.category;
+  if (c && CHOICE_KEYS.has(c)) return c;
+  return kind === "in" ? "work" : "meeting";
+}
+
 export function PunchPromptModal({
   kind,             // 'in' | 'out'
   interval,         // adapted interval (the one to update)
   onClose,          // () => void
   onSaved,          // () => void — parent re-fetches after success
 }) {
-  const [category, setCategory] = useState(interval?.category || (kind === "in" ? "work" : "work"));
+  const [category, setCategory] = useState(defaultCategory(kind, interval));
   const [notes,    setNotes]    = useState(interval?.notes || "");
   const [busy,     setBusy]     = useState(false);
   const [err,      setErr]      = useState(null);
 
   // Re-sync when the interval prop changes (e.g. parent re-opens for a new punch).
   useEffect(() => {
-    setCategory(interval?.category || "work");
+    setCategory(defaultCategory(kind, interval));
     setNotes(interval?.notes || "");
     setErr(null);
   }, [interval?.id]);
@@ -61,11 +75,11 @@ export function PunchPromptModal({
 
   const headline = kind === "in"
     ? "What are you starting?"
-    : "How would you tag this session?";
+    : "Where are you headed?";
 
   const eyebrow = kind === "in"
     ? `Punched in at ${fmtClock(interval.startAt)}`
-    : `Session ${fmtClock(interval.startAt)} → ${interval.endAt ? fmtClock(interval.endAt) : "now"}`;
+    : `Punched out at ${fmtClock(interval.startAt)}`;
 
   const save = async () => {
     setBusy(true); setErr(null);

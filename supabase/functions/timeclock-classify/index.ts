@@ -66,6 +66,7 @@ interface Interval {
   outlook_event_id:       string | null;
   start_punch_id:         string | null;
   end_punch_id:           string | null;
+  is_out?:                boolean;
 }
 
 interface CalEvent {
@@ -173,10 +174,14 @@ async function classifyUser(userId: string, lookbackHours: number, settings: Set
     days_recomputed:    0,
   };
 
+  // Only OUT (is_out=true) intervals describe time away from the desk, so only
+  // they are candidates for Outlook-meeting labeling / untagged-meeting alerts.
+  // IN (at-desk) intervals are always 'work' and are never reclassified.
   const { data: ivs, error: ivErr } = await sb
     .from("time_intervals")
-    .select("id, user_id, start_at, end_at, category, category_source, outlook_event_id, start_punch_id, end_punch_id")
+    .select("id, user_id, start_at, end_at, category, category_source, outlook_event_id, start_punch_id, end_punch_id, is_out")
     .eq("user_id", userId)
+    .eq("is_out", true)
     .gte("start_at", since)
     .not("end_at", "is", null)
     .order("start_at", { ascending: true });

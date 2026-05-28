@@ -16,7 +16,7 @@ import { Icon } from "../icons";
 import {
   todayInCT, weekStartCT, fmtHM, fmtClock,
   loadTeamDay, loadTeamRange, getUsers,
-  TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
+  TK_CATEGORY_LABEL, intervalTone,
 } from "../data";
 import { DayTimeline } from "./DayTimeline";
 import { useIsMobile } from "../use-mobile";
@@ -74,7 +74,8 @@ function endOfMonthExclusive(isoDate) {
 }
 function totalMinForDay(d) {
   if (!d) return 0;
-  return (d.minutesWork || 0) + (d.minutesMeeting || 0) + (d.minutesTravel || 0);
+  // Worked time = at-desk (IN) minutes only; punched-out time never counts.
+  return d.minutesWork || 0;
 }
 
 // Stored rollup + live elapsed for the open interval. Used by Week/Month/
@@ -93,7 +94,6 @@ function liveTotalForDay(d, openSinceIso) {
 // credited up to now(). Deliberately bypasses timesheet_days.minutes_work,
 // which inflates today when an interval crossed midnight (e.g. yesterday's
 // IN punch was never paired with an OUT).
-const WORK_LIKE_CATEGORIES = new Set(["work", "meeting", "travel"]);
 function workMinutesFromIntervals(intervals, date) {
   if (!intervals || intervals.length === 0) return 0;
   const dayStart = new Date(`${date}T00:00:00`).getTime();
@@ -101,7 +101,7 @@ function workMinutesFromIntervals(intervals, date) {
   const now      = Date.now();
   let mins = 0;
   for (const iv of intervals) {
-    if (!WORK_LIKE_CATEGORIES.has(iv.category)) continue;
+    if (iv.isOut) continue;   // worked time = at-desk (IN) only; OUT never counts
     const s = Math.max(new Date(iv.startAt).getTime(), dayStart);
     const e = Math.min(iv.endAt ? new Date(iv.endAt).getTime() : now, dayEnd);
     if (e > s) mins += Math.floor((e - s) / 60_000);
@@ -112,7 +112,9 @@ function workMinutesFromIntervals(intervals, date) {
 // Most recent open interval's start (Day-mode rows carry intervals[], Range-
 // mode rows carry an `openSince` string).
 function openSinceFromDayRow(row) {
-  const open = (row.intervals || []).find(i => !i.endAt);
+  // Only an open IN interval means "currently working since"; an open OUT
+  // interval is "currently out" and must not read as in-since / add to time.
+  const open = (row.intervals || []).find(i => !i.endAt && !i.isOut);
   return open ? open.startAt : null;
 }
 
@@ -224,10 +226,10 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
   const sortRows = useCallback((arr, kind) => {
     return arr.slice().sort((a, b) => {
       const aIn = kind === "day"
-        ? a.intervals.some(i => !i.endAt)
+        ? a.intervals.some(i => !i.endAt && !i.isOut)
         : !!a.openSince;
       const bIn = kind === "day"
-        ? b.intervals.some(i => !i.endAt)
+        ? b.intervals.some(i => !i.endAt && !i.isOut)
         : !!b.openSince;
       if (aIn !== bIn) return aIn ? -1 : 1;
       const aTot = kind === "day"
@@ -611,7 +613,7 @@ function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
       statusBody = (
         <>
           <span className="tk-day-matrix-mob-status-tag">Last</span>
-          <span className={`tk-day-matrix-mob-cat-chip tone-${TK_CATEGORY_TONE[lastClosed.category] || "muted"}`}>
+          <span className={`tk-day-matrix-mob-cat-chip tone-${intervalTone(lastClosed)}`}>
             {catLabel}
           </span>
           <span className="tk-day-matrix-mob-status-sep">·</span>
