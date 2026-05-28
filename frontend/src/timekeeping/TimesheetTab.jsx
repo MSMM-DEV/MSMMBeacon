@@ -200,7 +200,7 @@ export function TimesheetTab({ focusDate = null }) {
               {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
             </span>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowCorrect(true)} disabled={locked}>
+          <button className="tk-correction-cta" onClick={() => setShowCorrect(true)} disabled={locked}>
             <Icon name="edit" size={13}/> Request correction
           </button>
         </header>

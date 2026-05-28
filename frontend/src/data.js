@@ -89,7 +89,7 @@ export async function changeOwnPassword(email, currentPassword, newPassword) {
 export async function listAllUsersFull() {
   const { data, error } = await supabase
     .from("users")
-    .select("id, email, first_name, last_name, display_name, short_name, login_name, role, is_enabled, auth_user_id, created_at, updated_at")
+    .select("id, email, first_name, last_name, display_name, short_name, login_name, role, is_enabled, auth_user_id, department, location, employee_type, created_at, updated_at")
     .order("display_name");
   if (error) throw error;
   // Rebuild module cache so getUsers()/userById() reflect the new roster.
@@ -2135,33 +2135,124 @@ export async function loadTeamCalendarEvents(userIds, startIso, endIso) {
   return (data || []).map(adaptUserCalEvent);
 }
 
-// Deterministic per-user hue + CSS color tuple for the Team Calendar.
-// Uses the user's sorted index in the active roster and the golden-angle
-// (≈137.508°) so consecutive hues land maximally far apart — the result is
-// stable per-roster and visually well-spread even with 30+ people. The base
-// hue is also offset by a small constant so the very first user doesn't land
-// on pure red (which clashes with the app accent in light mode).
-const GOLDEN_ANGLE = 137.508;
-const HUE_OFFSET   = 24;
+// =============================================================================
+// Calendar palette — hand-curated for perceptual distinctness on Team Calendar.
+// Each [h, s, l] entry is in a notably different hue family AND varies in
+// saturation/lightness so colleagues never end up as "different shades of
+// green" or "two near-identical blues". Designed to render legibly on both
+// light and dark themes.
+//
+// Color tokens are derived from the base [h, s, l] with consistent formulas
+// (see userColorTokens below) so light/dark/wash/ink all stay coordinated.
+//
+// Capacity: 24 distinct entries. Engineering has 20 active people today, so
+// every engineer gets a unique color; PM gets its own offset slice so PM-#1
+// is NOT the same color as Eng-#1 even though they share the same palette.
+// =============================================================================
+// Design principle: when two entries share a color family (e.g., both green),
+// they MUST differ noticeably in *lightness* AND/OR *saturation* — not just
+// hue — so users can't perceive them as "two different greens". Each family
+// gets at most one vivid representative; subsequent same-family entries are
+// shifted dark/muted or light/pastel so they read as distinct categories.
+//
+// Hue families and intentional spread within engineering subset (idx 0–19):
+//   • Blues  (idx 0, 8, 12, 16): royal bright → periwinkle light → petrol
+//                                 dark-muted → steel gray-muted
+//   • Reds   (idx 1, 9, 15, 17): vermillion bright → crimson saturated
+//                                → peach light-pastel → burgundy dark-muted
+//   • Greens (idx 2, 7, 13, 18): emerald dark-vivid → olive deep-muted
+//                                → grass mid-bright → sage light-muted
+//   • Purpls (idx 3, 11, 19):    amethyst vivid → plum dark
+//                                → orchid light-pastel
+//   • Golds  (idx 4, 14):        amber bright → mustard dark-olive
+//   • Teals  (idx 5, 10):        deep teal vivid → sky teal mid-muted
+//   • Magent (idx 6):            singleton (different L+S from any pink-red)
+const CALENDAR_PALETTE = [
+  [218, 72, 48],   // 1.  Royal blue        (Eng #1)
+  [12,  82, 52],   // 2.  Vermillion        (Eng #2)
+  [148, 70, 32],   // 3.  Deep emerald      (Eng #3)  — dark vivid green
+  [282, 60, 52],   // 4.  Amethyst purple   (Eng #4)
+  [42,  88, 50],   // 5.  Amber gold        (Eng #5)
+  [180, 72, 34],   // 6.  Deep teal         (Eng #6)
+  [325, 65, 52],   // 7.  Magenta           (Eng #7)
+  [78,  45, 30],   // 8.  Dark olive        (Eng #8)  — deep desaturated green (vs Emerald)
+  [248, 75, 70],   // 9.  Light periwinkle  (Eng #9)  — light bright blue (vs Royal)
+  [358, 68, 48],   // 10. Crimson           (Eng #10) — vivid red (vs Vermillion: less orange)
+  [194, 38, 52],   // 11. Sky teal          (Eng #11) — desaturated mid-teal (vs Deep teal)
+  [272, 35, 38],   // 12. Deep plum         (Eng #12) — dark muted purple (vs Amethyst)
+  [212, 30, 38],   // 13. Slate navy        (Eng #13) — dark muted blue (vs Royal & Periwinkle)
+  [105, 50, 58],   // 14. Light grass green (Eng #14) — bright light green (vs Emerald & Olive)
+  [50,  45, 32],   // 15. Dark mustard      (Eng #15) — dark olive-gold (vs Amber)
+  [18,  62, 70],   // 16. Peach             (Eng #16) — pale warm pink (vs Vermillion & Crimson)
+  [228, 22, 58],   // 17. Steel blue gray   (Eng #17) — gray-blue (vs all other blues)
+  [348, 38, 30],   // 18. Burgundy          (Eng #18) — dark muted wine (vs all other reds)
+  [128, 22, 62],   // 19. Pale sage         (Eng #19) — desaturated light green (vs all other greens)
+  [298, 50, 72],   // 20. Light orchid      (Eng #20) — pale purple (vs Amethyst & Plum)
+  // Indices 20–29 — PM offset starts here, so no engineering ↔ PM color
+  // collisions even when the whole company is selected at once.
+  [340, 62, 42],   // 21. Dark wine         (PM #1)
+  [80,  55, 58],   // 22. Lime green        (PM #2)
+  [255, 58, 38],   // 23. Indigo            (PM #3)
+  [186, 58, 62],   // 24. Light cyan        (PM #4)
+  [26,  82, 58],   // 25. Tangerine         (PM #5)
+  [306, 58, 38],   // 26. Dark violet       (PM #6)
+  [168, 38, 48],   // 27. Sea green         (PM #7)
+  [355, 78, 70],   // 28. Coral pink        (PM #8)
+  [232, 42, 60],   // 29. Cornflower        (PM #9)
+  [60,  35, 38],   // 30. Dark olive gold   (PM #10)
+];
+
+// Per-department starting offset into the palette. Each department starts at
+// a different index so attendees from different departments don't collide on
+// the same color in mixed-team meetings. Hash-based fallback keeps unfamiliar
+// department names deterministic.
+const DEPT_PALETTE_OFFSET = {
+  "Engineering":         0,
+  "Project Management":  20,
+};
+
+function hashString(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// Deterministic per-user color tokens for the Team Calendar.
+//
+// Rotation is *scoped to the user's department* (sorted alphabetically among
+// peers) rather than across the entire roster — so subsetting the calendar to
+// "Engineering only" still gives every engineer a uniquely-distinguishable
+// color, not 3 different greens.
 export function userColorTokens(userId) {
   const users = _users || [];
-  const sorted = [...users].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  const idx = Math.max(0, sorted.findIndex(u => u.id === userId));
-  const hue = (HUE_OFFSET + idx * GOLDEN_ANGLE) % 360;
-  // Saturation + lightness tuned for legibility on both light and dark themes.
-  // The "ink" pair is what the calendar event tile uses for text + stripe;
-  // the "wash" pair is the soft tile background that lets many simultaneous
-  // events coexist without becoming a wall of color.
-  return {
-    hue,
-    ink:        `hsl(${hue} 62% 38%)`,
-    inkDark:    `hsl(${hue} 70% 72%)`,
-    stripe:     `hsl(${hue} 70% 48%)`,
-    wash:       `hsl(${hue} 78% 96%)`,
-    washDark:   `hsl(${hue} 38% 18%)`,
-    chipBorder: `hsl(${hue} 55% 60%)`,
-    chipFill:   `hsl(${hue} 65% 50%)`,
-  };
+  const u = users.find(x => x.id === userId);
+
+  let paletteIdx;
+  if (u) {
+    const dept = u.department || "Other";
+    const peers = users
+      .filter(x => (x.department || "Other") === dept)
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    const peerIdx = Math.max(0, peers.findIndex(x => x.id === userId));
+    const offset = DEPT_PALETTE_OFFSET[dept] ?? (hashString(dept) % CALENDAR_PALETTE.length);
+    paletteIdx = (offset + peerIdx) % CALENDAR_PALETTE.length;
+  } else {
+    // Unknown user: stable hash-based fallback.
+    paletteIdx = hashString(userId || "anon") % CALENDAR_PALETTE.length;
+  }
+
+  const [h, s, l] = CALENDAR_PALETTE[paletteIdx];
+  // Derived tokens — same formulas every time so the relationship between
+  // stripe/ink/wash stays consistent across the whole palette.
+  const stripe     = `hsl(${h} ${s}% ${l}%)`;
+  const ink        = `hsl(${h} ${Math.min(s,    72)}% ${Math.max(l - 14, 22)}%)`;
+  const inkDark    = `hsl(${h} ${Math.min(s+8,  85)}% ${Math.min(l + 22, 78)}%)`;
+  const wash       = `hsl(${h} ${Math.min(s+15, 82)}% 96%)`;
+  const washDark   = `hsl(${h} ${Math.max(s-18, 20)}% 18%)`;
+  const chipFill   = stripe;
+  const chipBorder = `hsl(${h} ${s}% ${Math.min(l + 10, 70)}%)`;
+
+  return { hue: h, ink, inkDark, stripe, wash, washDark, chipFill, chipBorder };
 }
 
 // All NFC tag rows (admin only).

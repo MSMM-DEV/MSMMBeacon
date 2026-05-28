@@ -43,10 +43,58 @@ const VIEW_LABEL = { month: "Month", week: "Week", day: "Day", agenda: "Agenda" 
 const DESKTOP_VIEWS = ["month", "week", "day", "agenda"];
 
 // LocalStorage keys — namespaced so they don't collide with other tabs.
-const LS_SELECTED   = "beacon.teamCalendar.selectedUserIds";
+// .v2 suffix on the selection key forces a fresh "Engineering by default"
+// roll-out for users who'd previously saved the all-internal default.
+const LS_SELECTED   = "beacon.teamCalendar.selectedUserIds.v2";
 const LS_VIEW       = "beacon.teamCalendar.view";
 
+// Department name used to anchor the default selection. Stored verbatim in
+// beacon_v2.users.department; case-insensitive match below.
+const DEFAULT_DEPARTMENT = "Engineering";
+
 const INTERNAL_EMAIL_RE = /@msmmeng\.com$/i;
+
+// ----- Outlook attendee response → display chip mapping -------------------
+// Graph values: 'none' | 'organizer' | 'tentativelyAccepted' | 'accepted'
+//             | 'declined' | 'notResponded'
+const RESPONSE_CHIPS = {
+  accepted:            { label: "Accepted",  cls: "is-accepted",  sort: 1 },
+  organizer:           { label: "Organizer", cls: "is-organizer", sort: 0 },
+  tentativelyAccepted: { label: "Tentative", cls: "is-tentative", sort: 2 },
+  notResponded:        { label: "Awaiting",  cls: "is-noresp",    sort: 3 },
+  none:                { label: "Awaiting",  cls: "is-noresp",    sort: 3 },
+  declined:            { label: "Declined",  cls: "is-declined",  sort: 4 },
+};
+function responseChip(response) {
+  return RESPONSE_CHIPS[response] || RESPONSE_CHIPS.none;
+}
+
+// ----- Smart subject fallback ---------------------------------------------
+// When Graph returns null/empty `subject` (private events, app-permission
+// limits, or genuinely untitled meetings), use the rest of the event payload
+// to surface something more useful than "(no subject)".
+function smartTitle(r) {
+  const subj = (r.subject || "").trim();
+  if (subj) return subj;
+  if (r.sensitivity === "private")      return "Private appointment";
+  if (r.sensitivity === "confidential") return "Confidential meeting";
+  if (r.showAs === "oof")                return "Out of office";
+  if (r.isAllDay)                        return "All-day block";
+  const ownerEmail = (r._user?.email || "").toLowerCase();
+  const others = (r.attendees || []).filter(a => {
+    const e = (a?.email || "").toLowerCase();
+    return e && e !== ownerEmail;
+  });
+  if (others.length === 1) {
+    const a = others[0];
+    return `Meeting with ${a.name || a.email.split("@")[0]}`;
+  }
+  if (others.length > 1) {
+    return `Meeting · ${others.length + 1} people`;
+  }
+  if (r.location) return r.location;
+  return "Untitled event";
+}
 
 function useIsMobile(breakpoint = 640) {
   const [m, setM] = useState(
@@ -256,8 +304,15 @@ function userStyleFor(userId) {
   };
 }
 
+// Total attendees on an event (resource shape). The Pass-B mirror stores
+// every attendee — internal + external — in a single jsonb array.
+function attendeeCount(r) {
+  return (r.attendees || []).filter(a => a?.email).length;
+}
+
 function MonthPill({ event }) {
   const r = event.resource;
+  const n = attendeeCount(r);
   return (
     <div
       className={"tcal-evt tcal-evt-pill" + (r.isAllDay ? " is-allday" : "")}
@@ -267,6 +322,7 @@ function MonthPill({ event }) {
       <span className="tcal-evt-pill-body">
         <span className="tcal-evt-owner-mini" aria-hidden>{r._user?.initials || "··"}</span>
         <span className="tcal-evt-title">{event.title}</span>
+        {n > 1 && <span className="tcal-evt-att" title={`${n} attendees`}>+{n}</span>}
       </span>
     </div>
   );
@@ -276,8 +332,9 @@ function TimeBlock({ event }) {
   const r = event.resource;
   const minutes = Math.max(0, differenceInMinutes(event.end, event.start));
   // Density tiers control how much chrome we render inside the block.
-  // <30 min: title + owner only. 30–59: + time. ≥60: + location.
+  // <30 min: title + owner only. 30–59: + time. ≥60: + location + attendees.
   const density = minutes < 30 ? "xs" : minutes < 60 ? "sm" : "lg";
+  const n = attendeeCount(r);
   return (
     <div
       className={`tcal-evt tcal-evt-block density-${density}`}
@@ -288,6 +345,9 @@ function TimeBlock({ event }) {
         <span className="tcal-evt-block-head">
           <span className="tcal-evt-owner" aria-hidden>{r._user?.initials || "··"}</span>
           <span className="tcal-evt-title">{event.title}</span>
+          {density !== "xs" && n > 1 && (
+            <span className="tcal-evt-att" title={`${n} attendees`}>+{n}</span>
+          )}
         </span>
         {density !== "xs" && (
           <span className="tcal-evt-time">
@@ -307,6 +367,7 @@ function TimeBlock({ event }) {
 
 function AgendaRow({ event }) {
   const r = event.resource;
+  const n = attendeeCount(r);
   return (
     <div className="tcal-agenda-row" style={userStyleFor(r.userId)}>
       <span className="tcal-agenda-dot" aria-hidden />
@@ -320,6 +381,69 @@ function AgendaRow({ event }) {
           <span>{r.location}</span>
         </span>
       )}
+      {n > 1 && (
+        <span className="tcal-agenda-att" title={`${n} attendees`}>
+          <Icon name="users" size={11} stroke={1.8} />
+          <span>{n}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Attendee row sub-components — internal attendees get their per-user color
+// avatar (resolved via roster email lookup); external attendees fall back to
+// initials from name/email. Both rows show response status as a chip.
+// ---------------------------------------------------------------------------
+function initialsFrom(text) {
+  if (!text) return "··";
+  const parts = text.replace(/[^A-Za-z\s]/g, "").trim().split(/\s+/);
+  const a = parts[0]?.[0] || "";
+  const b = parts[1]?.[0] || "";
+  return (a + b).toUpperCase() || (text[0] || "·").toUpperCase();
+}
+
+function InternalAttendeeRow({ attendee, rosterUser }) {
+  const chip = responseChip(attendee.response);
+  const initials = rosterUser?.initials || initialsFrom(attendee.name || attendee.email);
+  const tokens = rosterUser ? userColorTokens(rosterUser.id) : null;
+  const style = tokens
+    ? { "--a-stripe": tokens.stripe, "--a-ink": tokens.ink, "--a-ink-dk": tokens.inkDark, "--a-wash": tokens.wash, "--a-wash-dk": tokens.washDark }
+    : { "--a-stripe": "var(--text-soft)" };
+  return (
+    <div className="tcal-att-row tcal-att-internal" style={style}>
+      <span className="tcal-att-avatar" aria-hidden>{initials}</span>
+      <span className="tcal-att-name">
+        {rosterUser?.name || attendee.name || attendee.email.split("@")[0]}
+      </span>
+      {rosterUser?.department && (
+        <span className="tcal-att-dim">{rosterUser.department}</span>
+      )}
+      <span className={`tcal-att-chip ${chip.cls}`}>
+        <span className="tcal-att-chip-dot" aria-hidden />
+        <span>{chip.label}</span>
+      </span>
+    </div>
+  );
+}
+
+function ExternalAttendeeRow({ attendee }) {
+  const chip = responseChip(attendee.response);
+  const initials = initialsFrom(attendee.name || attendee.email);
+  const name  = attendee.name || attendee.email.split("@")[0];
+  const email = attendee.email;
+  return (
+    <div className="tcal-att-row tcal-att-external">
+      <span className="tcal-att-avatar tcal-att-avatar-ext" aria-hidden>{initials}</span>
+      <span className="tcal-att-stack">
+        <span className="tcal-att-name">{name}</span>
+        {email && <span className="tcal-att-email">{email}</span>}
+      </span>
+      <span className={`tcal-att-chip ${chip.cls}`}>
+        <span className="tcal-att-chip-dot" aria-hidden />
+        <span>{chip.label}</span>
+      </span>
     </div>
   );
 }
@@ -330,6 +454,16 @@ function AgendaRow({ event }) {
 // ---------------------------------------------------------------------------
 function EventPopover({ event, onClose }) {
   const ref = useRef(null);
+
+  // Roster lookup by lowercased email so internal attendees pick up the same
+  // color they have everywhere else in the Team Calendar.
+  const usersByEmail = useMemo(() => {
+    const m = new Map();
+    for (const u of getUsers()) {
+      if (u.email) m.set(u.email.toLowerCase(), u);
+    }
+    return m;
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -352,8 +486,31 @@ function EventPopover({ event, onClose }) {
     minutes >= 60
       ? `${(minutes / 60).toFixed(minutes % 60 === 0 ? 0 : 1)} hr`
       : `${minutes} min`;
-  const extCount = (r.attendees || []).filter(a => a?.email && !INTERNAL_EMAIL_RE.test(a.email)).length;
-  const intCount = (r.attendees || []).filter(a => a?.email &&  INTERNAL_EMAIL_RE.test(a.email)).length;
+
+  // Partition + sort attendees. Internal first (resolved against roster so we
+  // get colors + departments), external second. Within each group, organizer
+  // → accepted → tentative → no response → declined.
+  const allAttendees = (r.attendees || []).filter(a => a?.email);
+  const sortByResp = (a, b) =>
+    (responseChip(a.response).sort - responseChip(b.response).sort) ||
+    (a.name || a.email).localeCompare(b.name || b.email);
+  const internal = allAttendees
+    .filter(a => INTERNAL_EMAIL_RE.test(a.email))
+    .sort(sortByResp)
+    .map(a => ({ ...a, _rosterUser: usersByEmail.get(a.email.toLowerCase()) }));
+  const external = allAttendees
+    .filter(a => !INTERNAL_EMAIL_RE.test(a.email))
+    .sort(sortByResp);
+  const totalAttendees = internal.length + external.length;
+
+  // Subject-missing reason hint — surfaced inline in the title area so the
+  // user knows WHY the title is generic and isn't a sync glitch.
+  const subjectMissing = !(r.subject || "").trim();
+  const missingReason =
+    r.sensitivity === "private"      ? "Owner marked this private."
+  : r.sensitivity === "confidential" ? "Owner marked this confidential."
+  : subjectMissing                    ? "No title set in Outlook."
+  : null;
 
   return (
     <div
@@ -378,7 +535,10 @@ function EventPopover({ event, onClose }) {
           <span className="tcal-pop-eyebrow">Calendar event · read-only</span>
           <button className="tcal-pop-close" onClick={onClose} aria-label="Close">×</button>
         </div>
-        <h2 className="tcal-pop-title">{event.title || "(no subject)"}</h2>
+        <h2 className="tcal-pop-title">{event.title}</h2>
+        {missingReason && (
+          <div className="tcal-pop-subnote">{missingReason}</div>
+        )}
 
         <div className="tcal-pop-meta">
           <div className="tcal-pop-row">
@@ -411,24 +571,6 @@ function EventPopover({ event, onClose }) {
             </span>
           </div>
 
-          {(intCount > 0 || extCount > 0) && (
-            <div className="tcal-pop-row">
-              <span className="tcal-pop-label">Attendees</span>
-              <span className="tcal-pop-val">
-                {intCount > 0 && (
-                  <span className="tcal-pop-tag">
-                    {intCount} internal
-                  </span>
-                )}
-                {extCount > 0 && (
-                  <span className="tcal-pop-tag tag-ext">
-                    {extCount} external
-                  </span>
-                )}
-              </span>
-            </div>
-          )}
-
           {r.organizer?.email && r.organizer.email.toLowerCase() !== (r._user?._email || "").toLowerCase() && (
             <div className="tcal-pop-row">
               <span className="tcal-pop-label">Organizer</span>
@@ -438,6 +580,43 @@ function EventPopover({ event, onClose }) {
             </div>
           )}
         </div>
+
+        {totalAttendees > 0 && (
+          <div className="tcal-pop-attendees-section">
+            <div className="tcal-pop-attendees-head">
+              <span className="tcal-pop-label">Attendees</span>
+              <span className="tcal-pop-attendees-count">{totalAttendees}</span>
+            </div>
+            <div className="tcal-att-list">
+              {internal.length > 0 && (
+                <div className="tcal-att-group">
+                  <div className="tcal-att-subhead">
+                    <span>From MSMM</span>
+                    <span className="tcal-att-subhead-count">{internal.length}</span>
+                  </div>
+                  {internal.map((a, i) => (
+                    <InternalAttendeeRow
+                      key={`int:${a.email}:${i}`}
+                      attendee={a}
+                      rosterUser={a._rosterUser}
+                    />
+                  ))}
+                </div>
+              )}
+              {external.length > 0 && (
+                <div className="tcal-att-group">
+                  <div className="tcal-att-subhead">
+                    <span>External</span>
+                    <span className="tcal-att-subhead-count">{external.length}</span>
+                  </div>
+                  {external.map((a, i) => (
+                    <ExternalAttendeeRow key={`ext:${a.email}:${i}`} attendee={a} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="tcal-pop-foot">
           {r.outlookWebLink && (
@@ -530,13 +709,16 @@ export function TeamCalendarTab() {
       }));
   }, [rosterAll]);
 
-  // Default selection: everyone whose calendar can sync (internal email).
-  // Filtered to is_enabled when that flag is present on the roster shape.
+  // Default selection: just the Engineering department. Falls back to all
+  // internal users if Engineering happens to be empty (e.g., dev seed data),
+  // and finally to the entire roster. The Team Calendar's people picker can
+  // always widen the view from here — this only seeds the initial state.
   const defaultIds = useMemo(() => {
-    const ids = roster
-      .filter(u => !u._email || INTERNAL_EMAIL_RE.test(u._email))
-      .map(u => u.id);
-    return ids.length ? ids : roster.map(u => u.id);
+    const dept = DEFAULT_DEPARTMENT.toLowerCase();
+    const eng = roster.filter(u => (u._department || "").toLowerCase() === dept);
+    if (eng.length > 0) return eng.map(u => u.id);
+    const internal = roster.filter(u => !u._email || INTERNAL_EMAIL_RE.test(u._email));
+    return (internal.length > 0 ? internal : roster).map(u => u.id);
   }, [roster]);
 
   const [selected, setSelected] = useState(() => {
@@ -594,12 +776,13 @@ export function TeamCalendarTab() {
       const end   = new Date(r.endAt);
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
       const u = userById.get(r.userId);
+      const enriched = { ...r, _user: u };
       return {
         id: `${r.userId}:${r.outlookEventId}`,
-        title: r.subject || "(no subject)",
+        title: smartTitle(enriched),
         start, end,
         allDay: r.isAllDay,
-        resource: { ...r, _user: u },
+        resource: enriched,
       };
     }).filter(Boolean);
   }, [events, userById]);
