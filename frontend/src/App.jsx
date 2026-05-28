@@ -2776,6 +2776,170 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // "Print for Mark - Subs" — Invoice-only. Same columns/format as Export PDF
+  // but each project row is followed by indented breakdown lines: one row per
+  // sub firm (companyName + contractAmount + their monthly billings) and one
+  // MSMM row (MSMM contract portion + MSMM monthly = total − Σ subs, honoring
+  // any per-month overrides). Helpers mirror tables.jsx exactly so the PDF
+  // numbers match what the InvoiceTable shows on screen.
+  const handleExportInvoiceSubs = async () => {
+    if (tab !== "invoice") return;
+    const meta = PAGE_META.invoice || {};
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `msmm-beacon-invoice-subs-${date}.pdf`;
+    const defs = EXPORT_COLUMNS.invoice || [];
+
+    // Same snapshot-vs-fallback strategy as handleExport so the export honors
+    // the user's current year filter / search / sort.
+    const snap = getCurrentTableSnapshot();
+    const projectRows = (snap && snap.tab === "invoice" && snap.processedRows)
+      ? snap.processedRows
+      : currentRows;
+
+    // Helpers — mirror tables.jsx (subListFor / msmmAtMonth / msmmContractShown).
+    const subListFor = (r) =>
+      (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
+    const msmmAtMonth = (r, i) => {
+      const override = r.msmmValues?.[i];
+      if (override != null) return Number(override);
+      const total = Number(r.values?.[i] || 0);
+      const subSum = subListFor(r).reduce(
+        (a, s) => a + Number((s.amounts && s.amounts[i]) || 0), 0);
+      return total - subSum;
+    };
+    const msmmContractAuto = (r) => {
+      const total = Number(r.amount || 0);
+      const subSum = subListFor(r).reduce(
+        (a, s) => a + Number(s.contractAmount || 0), 0);
+      return total - subSum;
+    };
+    const msmmContractShown = (r) =>
+      r.msmmAmount != null ? Number(r.msmmAmount) : msmmContractAuto(r);
+
+    // Expand each project into [project, ...subs, msmm]. Synthetic rows reuse
+    // the existing column accessors (`r.values[i]`, `r.amount`, `r.remainingStart`),
+    // so populating those fields is all that's needed for the breakdown lines.
+    // For sub/MSMM rows, `remainingStart` is set to that line's contract amount
+    // so the Rollforward column (= remainingStart − YTD) shows "what's left to bill"
+    // for that firm; sub-contracts don't carry a Jan-1 baseline of their own.
+    const expandedRows = [];
+    for (const r of projectRows) {
+      expandedRows.push({ ...r, _kind: "project" });
+      const subs = subListFor(r);
+      for (const sub of subs) {
+        const amounts = sub.amounts || Array(12).fill(0);
+        expandedRows.push({
+          _kind: "sub",
+          _parentId: r.id,
+          id: `${r.id}::sub::${sub.companyId}`,
+          name: `    ↳ ${sub.companyName || "Sub"}${sub.discipline ? ` · ${sub.discipline}` : ""}`,
+          type: "Sub",
+          pmIds: [],
+          amount: Number(sub.contractAmount) || 0,
+          remainingStart: Number(sub.contractAmount) || 0,
+          values: amounts,
+          msmmValues: null,
+          ytdActualOverride: null,
+          rollforwardOverride: null,
+          sourceId: null,
+        });
+      }
+      const msmmContract = msmmContractShown(r);
+      const msmmVals = Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i));
+      expandedRows.push({
+        _kind: "msmm",
+        _parentId: r.id,
+        id: `${r.id}::msmm`,
+        name: `    ↳ MSMM`,
+        type: "",
+        pmIds: r.pmIds || [],
+        amount: msmmContract,
+        remainingStart: msmmContract,
+        values: msmmVals,
+        msmmValues: null,
+        ytdActualOverride: null,
+        rollforwardOverride: null,
+        sourceId: null,
+      });
+    }
+
+    // Per-cell colors. Project rows keep the existing Invoice palette (amber
+    // actual / cream projection / orange tint). Sub rows render in a muted
+    // gray band so the breakdown reads as supporting detail; MSMM rows render
+    // bold on a slightly darker band so they stand out as the "MSMM portion"
+    // line. Total/YTD/Rollforward columns stay on the neutral total bg.
+    const SUB_PALETTE = {
+      SUB_ACTUAL:   [240, 240, 235],
+      SUB_PROJ:     [248, 247, 244],
+      SUB_BG:       [243, 242, 238],
+      SUB_INK:      [80, 75, 65],
+      SUB_DIM_INK:  [120, 115, 100],
+      MSMM_ACTUAL:  [232, 230, 220],
+      MSMM_PROJ:    [240, 238, 230],
+      MSMM_BG:      [235, 233, 224],
+      MSMM_INK:     [60, 55, 40],
+      MSMM_DIM_INK: [100, 95, 80],
+    };
+    const PROJ_PALETTE = {
+      ORANGE_TINT:  [249, 234, 220],
+      AMBER_ACTUAL: [248, 236, 214],
+      CREAM_PROJ:   [250, 247, 240],
+      TOTAL_BG:     [251, 248, 242],
+      ACCENT_INK:   [107, 63, 16],
+      PROJ_INK:     [110, 102, 89],
+    };
+    const cellStyle = (row, _colIndex, col) => {
+      const label = col?.label;
+      const monthIdx = MONTHS.indexOf(label);
+      const isActualMonth = monthIdx >= 0 && monthIdx <= TODAY_MONTH;
+      const isProjMonth   = monthIdx >= 0 && monthIdx >  TODAY_MONTH;
+      const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
+      if (row?._kind === "sub") {
+        if (isActualMonth) return { fillColor: SUB_PALETTE.SUB_ACTUAL, textColor: SUB_PALETTE.SUB_INK };
+        if (isProjMonth)   return { fillColor: SUB_PALETTE.SUB_PROJ,   textColor: SUB_PALETTE.SUB_DIM_INK };
+        if (isTotalCol)    return { fillColor: SUB_PALETTE.SUB_BG,     textColor: SUB_PALETTE.SUB_INK };
+        return { fillColor: SUB_PALETTE.SUB_BG, textColor: SUB_PALETTE.SUB_INK };
+      }
+      if (row?._kind === "msmm") {
+        if (isActualMonth) return { fillColor: SUB_PALETTE.MSMM_ACTUAL, textColor: SUB_PALETTE.MSMM_INK, fontStyle: "bold" };
+        if (isProjMonth)   return { fillColor: SUB_PALETTE.MSMM_PROJ,   textColor: SUB_PALETTE.MSMM_DIM_INK, fontStyle: "bold" };
+        if (isTotalCol)    return { fillColor: SUB_PALETTE.MSMM_BG,     textColor: SUB_PALETTE.MSMM_INK, fontStyle: "bold" };
+        return { fillColor: SUB_PALETTE.MSMM_BG, textColor: SUB_PALETTE.MSMM_INK, fontStyle: "bold" };
+      }
+      // Project row — same palette as the regular Invoice export.
+      const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
+      if (isActualMonth) return { fillColor: PROJ_PALETTE.AMBER_ACTUAL, textColor: PROJ_PALETTE.ACCENT_INK };
+      if (isProjMonth)   return { fillColor: PROJ_PALETTE.CREAM_PROJ,   textColor: PROJ_PALETTE.PROJ_INK };
+      if (isTotalCol)    return { fillColor: PROJ_PALETTE.TOTAL_BG,     fontStyle: "bold" };
+      if (isOrangeRow)   return { fillColor: PROJ_PALETTE.ORANGE_TINT };
+      return null;
+    };
+
+    const annotations = [];
+    if (yearFilter.invoice != null) annotations.push(`Year: ${yearFilter.invoice}`);
+    if (filterKey.invoice && filterKey.invoice !== "all") annotations.push(`Filter: ${filterKey.invoice}`);
+    if (snap?.search) annotations.push(`Search: "${snap.search}"`);
+    const subtitle = [
+      meta.desc,
+      annotations.join(" · "),
+      `${projectRows.length} ${projectRows.length === 1 ? "project" : "projects"} · ${expandedRows.length} lines`,
+    ].filter(Boolean).join(" — ");
+
+    try {
+      showToast("Preparing PDF…", "export");
+      await exportPDF(defs, expandedRows, filename, {
+        title: `MSMM Beacon — Invoice (with Subs) — Print for Mark`,
+        subtitle,
+        cellStyle,
+        format: "a3",
+        alternateRows: false,
+      });
+      showToast(`Exported ${projectRows.length} projects`, "export");
+    } catch (err) {
+      showToast(`Export failed: ${err.message || err}`, "x");
+    }
+  };
+
   // PotentialTable owns its own primary sort: [probability asc, role asc],
   // so App-level pre-sort is no longer needed. Totals are injected inside
   // PotentialTable's postProcess and published via the snapshot, so Export
@@ -3038,9 +3202,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             <p className="page-desc">{currentMeta.desc}</p>
           </div>
           <div className="page-actions">
-            <button className="btn sm" onClick={handleExport}>
-              <Icon name="export" size={13}/>Export PDF
-            </button>
+            {tab === "invoice" ? (
+              <>
+                <button className="btn sm" onClick={handleExport}>
+                  <Icon name="export" size={13}/>Print for Mark
+                </button>
+                <button className="btn sm" onClick={handleExportInvoiceSubs}>
+                  <Icon name="export" size={13}/>Print for Mark - Subs
+                </button>
+              </>
+            ) : (
+              <button className="btn sm" onClick={handleExport}>
+                <Icon name="export" size={13}/>Export PDF
+              </button>
+            )}
             {tab === "directory" ? (
               <>
                 <button className="btn primary" onClick={() => setCreateTable("clients")}>
