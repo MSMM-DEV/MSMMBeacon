@@ -397,6 +397,13 @@ function adaptUser(u, i) {
     shortName: short,
     initials,
     color: PM_COLORS[i % PM_COLORS.length],
+    // Additional roster metadata — surfaced for the Team Calendar people
+    // selector and the read-only event popover. Other callers can ignore.
+    department: u.department || "",
+    location:   u.location   || "",
+    email:      u.email      || "",
+    role:       u.role       || "User",
+    isEnabled:  u.is_enabled !== false,
   };
 }
 
@@ -2108,6 +2115,53 @@ export async function loadUserCalendarEvents(userId, startIso, endIso) {
     .order("start_at", { ascending: true });
   if (error) throw error;
   return (data || []).map(adaptUserCalEvent);
+}
+
+// Calendar events for MANY users in a window — drives the Team Calendar tab.
+// Falls back to an empty array if no user ids are passed so the caller doesn't
+// have to short-circuit. Relies on the tk_calevents_team_select RLS policy
+// (migration 20260528120000) for cross-user visibility; private + cancelled
+// rows are filtered server-side.
+export async function loadTeamCalendarEvents(userIds, startIso, endIso) {
+  if (!userIds || userIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("user_calendar_events")
+    .select("*")
+    .in("user_id", userIds)
+    .gte("end_at", startIso)
+    .lte("start_at", endIso)
+    .order("start_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(adaptUserCalEvent);
+}
+
+// Deterministic per-user hue + CSS color tuple for the Team Calendar.
+// Uses the user's sorted index in the active roster and the golden-angle
+// (≈137.508°) so consecutive hues land maximally far apart — the result is
+// stable per-roster and visually well-spread even with 30+ people. The base
+// hue is also offset by a small constant so the very first user doesn't land
+// on pure red (which clashes with the app accent in light mode).
+const GOLDEN_ANGLE = 137.508;
+const HUE_OFFSET   = 24;
+export function userColorTokens(userId) {
+  const users = _users || [];
+  const sorted = [...users].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const idx = Math.max(0, sorted.findIndex(u => u.id === userId));
+  const hue = (HUE_OFFSET + idx * GOLDEN_ANGLE) % 360;
+  // Saturation + lightness tuned for legibility on both light and dark themes.
+  // The "ink" pair is what the calendar event tile uses for text + stripe;
+  // the "wash" pair is the soft tile background that lets many simultaneous
+  // events coexist without becoming a wall of color.
+  return {
+    hue,
+    ink:        `hsl(${hue} 62% 38%)`,
+    inkDark:    `hsl(${hue} 70% 72%)`,
+    stripe:     `hsl(${hue} 70% 48%)`,
+    wash:       `hsl(${hue} 78% 96%)`,
+    washDark:   `hsl(${hue} 38% 18%)`,
+    chipBorder: `hsl(${hue} 55% 60%)`,
+    chipFill:   `hsl(${hue} 65% 50%)`,
+  };
 }
 
 // All NFC tag rows (admin only).

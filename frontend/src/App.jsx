@@ -16,6 +16,7 @@ import { LoginPage } from "./login.jsx";
 import { AdminPanel } from "./admin.jsx";
 import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
 import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
+import { TeamCalendarTab } from "./team-calendar.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
@@ -69,6 +70,7 @@ const TAB_META = [
   { key: "directory", label: "Directory",        stage: "stage-clients",   group: "side" },
   { key: "timesheet", label: "Timesheet",        stage: "stage-events",    group: "side" },
   { key: "time-admin",label: "Time Admin",       stage: "stage-events",    group: "side", adminOnly: true },
+  { key: "team-cal",  label: "Team Calendar",    stage: "stage-events",    group: "side" },
 ];
 
 const PAGE_META = {
@@ -84,6 +86,7 @@ const PAGE_META = {
   quad:      { title: "Quad Sheet", desc: "Executive snapshot for board members. Invoices, events, awaiting verdicts, and hot leads at a glance." },
   timesheet: { title: "Timesheet", desc: "Your daily punches, this week's hours, and corrections. Punch in or out with the big button or tap your fob on the front-door reader." },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, weekly approvals, NFC enrollment, and timekeeping settings." },
+  "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },
 };
 
 const DEFAULT_TWEAKS = {
@@ -2884,14 +2887,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return c;
     });
 
-    // Expand each project into [project-MSMM, ...subs, ...primes, project-total].
+    // Expand each project into [project-MSMM, ...subs, ...primes, project-total, spacer].
     // Synthetic breakdown rows fill `values`, `amount`, `remainingStart` to
     // match the column accessors above. For sub/prime rows, `remainingStart`
     // = contractAmount so the Rollforward column shows "what's left to bill"
     // for that firm. The Project Total row carries r.values verbatim so the
     // monthly columns show the reconciled project totals (Σ subs + MSMM).
+    // A blank `spacer` row between projects creates a visual gap; the blue
+    // bounding-box stroke is drawn separately in onDidDrawCell.
+    const emptyValues = Array(12).fill(null);
+    const mkSpacer = (i) => ({
+      _kind: "spacer",
+      id: `spacer::${i}`,
+      name: "",
+      type: "",
+      pmIds: [],
+      amount: null,
+      remainingStart: null,
+      values: emptyValues,
+      msmmValues: null,
+      ytdActualOverride: null,
+      rollforwardOverride: null,
+      sourceId: null,
+    });
     const expandedRows = [];
-    for (const r of projectRows) {
+    projectRows.forEach((r, idx) => {
       // Parent row = MSMM view
       expandedRows.push({ ...r, _kind: "project" });
 
@@ -2949,7 +2969,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         rollforwardOverride: null,
         sourceId: null,
       });
-    }
+
+      // Blank spacer between projects (skipped after the last project)
+      if (idx < projectRows.length - 1) expandedRows.push(mkSpacer(idx));
+    });
 
     // Palette — exact RGB equivalents of the UI's color-mix() output on the
     // light theme, derived from CSS variables:
@@ -2998,6 +3021,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
       const kind = row?._kind || "project";
 
+      // Spacer between projects — paint white, suppress the cell border so
+      // it reads as pure breathing room (autotable's default 0.1mm border
+      // would otherwise leave a hairline strip across the gap).
+      if (kind === "spacer") {
+        return {
+          fillColor: [255, 255, 255],
+          textColor: [255, 255, 255],
+          lineWidth: 0,
+          lineColor: [255, 255, 255],
+        };
+      }
+
       if (kind === "sub") {
         if (isActualMonth) return { fillColor: PAL.SUB_ACTUAL, textColor: PAL.SUB_INK };
         if (isProjMonth)   return { fillColor: PAL.SUB_PROJ,   textColor: PAL.SUB_DIM };
@@ -3036,12 +3071,38 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       `${projectRows.length} ${projectRows.length === 1 ? "project" : "projects"} · ${expandedRows.length} lines`,
     ].filter(Boolean).join(" — ");
 
+    // Bounding-box stroke around each project block. Draws four sides one
+    // cell at a time as autotable renders the table — page breaks are
+    // handled naturally because each cell's coords are page-local.
+    //   • top    → on every cell of `_kind: project` (parent row)
+    //   • bottom → on every cell of `_kind: total`   (footer row)
+    //   • left   → on the first column of every group row
+    //   • right  → on the last column of every group row
+    // A 0.35 mm stroke in --blue matches the existing "Project total"
+    // row accent so the box reads as part of the same blue motif.
+    const STROKE_MM = 0.35;
+    const STROKE_RGB = PAL.TOTAL_BORDER;
+    const lastColIdx = defs.length - 1;
+    const onDidDrawCell = (data, row) => {
+      const kind = row?._kind;
+      if (!kind || kind === "spacer") return;
+      const { x, y, width, height } = data.cell;
+      const { doc } = data;
+      doc.setDrawColor(STROKE_RGB[0], STROKE_RGB[1], STROKE_RGB[2]);
+      doc.setLineWidth(STROKE_MM);
+      if (kind === "project") doc.line(x, y, x + width, y);              // top
+      if (kind === "total")   doc.line(x, y + height, x + width, y + height); // bottom
+      if (data.column.index === 0)            doc.line(x, y, x, y + height);            // left
+      if (data.column.index === lastColIdx)   doc.line(x + width, y, x + width, y + height); // right
+    };
+
     try {
       showToast("Preparing PDF…", "export");
       await exportPDF(defs, expandedRows, filename, {
         title: `MSMM Beacon — Invoice with Sub Breakdown — Print for Mark`,
         subtitle,
         cellStyle,
+        onDidDrawCell,
         format: "a3",
         alternateRows: false,
       });
@@ -3177,6 +3238,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     quad: null,
     timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
     "time-admin": null,
+    "team-cal":   null,
   };
 
   const currentMeta = PAGE_META[tab];
@@ -3628,6 +3690,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             // future deep links) can still seed the focus date if useful.
             onOpenUserDay={({ date }) => setTimesheetFocusDate(date)}
           />
+        )}
+
+        {tab === "team-cal" && (
+          <TeamCalendarTab />
         )}
       </div>
 

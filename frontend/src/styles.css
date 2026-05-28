@@ -11376,3 +11376,837 @@ html, body { overflow-x: clip; }
   .bid-pdf-name      { max-width: 80px; }
 }
 
+/* ============================================================
+   TEAM CALENDAR
+   ------------------------------------------------------------
+   Read-only consolidated view of every colleague's Outlook
+   calendar. Uses the existing .cal-shell skeleton for the grid;
+   adds a People Bar above and a per-user color system based on
+   CSS custom properties set on each event tile and roster chip.
+
+   Color tokens (defined per-element in JS via userColorTokens):
+     --u-stripe   saturated, used for left rail + selected chip border
+     --u-wash     very soft tile background (light theme)
+     --u-wash-dk  matching tile background (dark theme)
+     --u-ink      readable foreground on the wash (light theme)
+     --u-ink-dk   readable foreground on the wash (dark theme)
+     --u-chip     fill color for the avatar initials circle
+     --u-border   border for selected roster chip
+   ============================================================ */
+
+.team-cal {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ----- People Bar ----- */
+.tcal-people {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.tcal-people-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.tcal-people-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.tcal-people-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.tcal-people-count {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  font-feature-settings: "ss01", "cv11";
+}
+.tcal-people-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.tcal-people-action {
+  font-size: 12px;
+  color: var(--accent-ink);
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: background .12s;
+}
+.tcal-people-action:hover { background: var(--surface-hover); }
+.tcal-people-action:disabled {
+  color: var(--text-soft);
+  cursor: not-allowed;
+  background: transparent;
+}
+.tcal-people-dot { color: var(--text-soft); font-size: 11px; }
+
+/* ----- People filters row ----- */
+.tcal-people-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border);
+}
+.tcal-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.tcal-filter-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.tcal-filter select {
+  height: 28px;
+  padding: 0 24px 0 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 48%, var(--text-soft) 48% 52%, transparent 52%),
+    linear-gradient(-45deg, transparent 48%, var(--text-soft) 48% 52%, transparent 52%);
+  background-size: 5px 5px, 5px 5px;
+  background-position: right 10px center, right 6px center;
+  background-repeat: no-repeat;
+  transition: border-color .12s, background-color .12s;
+}
+.tcal-filter select:hover { border-color: var(--border-strong); }
+.tcal-filter select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(200, 130, 59, 0.18);
+}
+
+.tcal-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 999px;
+  color: var(--text-soft);
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+  transition: border-color .12s;
+}
+.tcal-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(200, 130, 59, 0.16);
+}
+.tcal-search input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text);
+  min-width: 0;
+}
+.tcal-search input::placeholder { color: var(--text-soft); }
+.tcal-search-clear {
+  background: transparent;
+  border: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.tcal-search-clear:hover { color: var(--text); background: var(--surface-hover); }
+
+/* ----- The roster chip grid ----- */
+.tcal-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.tcal-empty-chip {
+  grid-column: 1 / -1;
+  padding: 18px 8px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-soft);
+}
+
+.tcal-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color .14s, background .14s, transform .14s, box-shadow .14s;
+  min-width: 0;
+  text-align: left;
+  font-family: var(--font-body);
+}
+.tcal-chip:hover {
+  border-color: var(--u-border, var(--border-strong));
+  transform: translateY(-1px);
+}
+.tcal-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(200, 130, 59, 0.22);
+}
+.tcal-chip-avatar {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--u-chip, var(--text-soft));
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.tcal-chip-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.tcal-chip.is-on {
+  background: var(--u-wash, var(--surface-hover));
+  border-color: var(--u-border, var(--accent));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--u-stripe, var(--accent)) 18%, transparent),
+    var(--shadow-sm);
+}
+.tcal-chip.is-on .tcal-chip-name {
+  color: var(--u-ink, var(--text));
+  font-weight: 600;
+}
+[data-theme="dark"] .tcal-chip.is-on {
+  background: var(--u-wash-dk, var(--surface-hover));
+}
+[data-theme="dark"] .tcal-chip.is-on .tcal-chip-name {
+  color: var(--u-ink-dk, var(--text));
+}
+
+.tcal-chip-tick {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--u-stripe, var(--accent));
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15), 0 0 0 2px var(--surface);
+}
+
+/* ----- Calendar shell overrides ----- */
+.team-cal-shell { position: relative; }
+.team-cal.is-loading .team-cal-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, transparent, rgba(200, 130, 59, 0.08), transparent);
+  background-size: 200% 100%;
+  animation: tcal-shimmer 1.4s linear infinite;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: var(--radius);
+}
+@keyframes tcal-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Toolbar vitals — small numbered eyebrow under the masthead label. */
+.tcal-toolbar .cal-toolbar-l {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tcal-toolbar-vitals {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tcal-vital { display: inline-flex; align-items: baseline; gap: 5px; }
+.tcal-vital-n {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  font-feature-settings: "ss01", "cv11";
+  font-variant-numeric: tabular-nums;
+}
+.tcal-vital-l { font-weight: 500; }
+.tcal-vital-sep { font-size: 11px; opacity: 0.6; }
+
+/* ----- Event tiles (per-user color via CSS vars) ----- */
+.tcal-evt-wrap {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+
+.tcal-evt {
+  position: relative;
+  display: flex;
+  font-size: 11.5px;
+  line-height: 1.3;
+  border-radius: var(--radius-sm);
+  background: var(--u-wash, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--u-stripe, var(--border)) 30%, var(--border));
+  overflow: hidden;
+  cursor: pointer;
+  color: var(--u-ink, var(--text));
+}
+[data-theme="dark"] .tcal-evt {
+  background: var(--u-wash-dk, var(--surface));
+  color: var(--u-ink-dk, var(--text));
+  border-color: color-mix(in srgb, var(--u-stripe, var(--border)) 40%, var(--border));
+}
+
+.tcal-evt-stripe {
+  width: 3px;
+  flex-shrink: 0;
+  background: var(--u-stripe, var(--text-soft));
+}
+
+.tcal-evt-pill {
+  align-items: stretch;
+  min-height: 22px;
+  transition: transform .14s, box-shadow .14s;
+}
+.tcal-evt-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.tcal-evt-pill-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  min-width: 0;
+}
+
+.tcal-evt-block {
+  align-items: stretch;
+  height: 100%;
+  width: calc(100% - 4px);
+  margin: 0 2px;
+  transition: box-shadow .14s ease, filter .14s ease, transform .14s ease;
+}
+.tcal-evt-block:hover {
+  box-shadow:
+    0 6px 18px -10px color-mix(in srgb, var(--u-stripe, currentColor) 40%, transparent),
+    0 1px 3px rgba(0, 0, 0, 0.08);
+  z-index: 3;
+}
+
+.tcal-evt-block-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 5px 8px 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.tcal-evt-block-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+}
+.tcal-evt-block.density-xs .tcal-evt-block-body { padding: 2px 6px; }
+.tcal-evt-block.density-xs .tcal-evt-title { font-size: 11px; }
+.tcal-evt-block.density-sm .tcal-evt-block-body { padding: 4px 8px; }
+
+.tcal-evt-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.tcal-evt-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, currentColor 70%, transparent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tcal-evt-block.density-sm .tcal-evt-time { font-size: 9.5px; }
+
+.tcal-evt-loc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: color-mix(in srgb, currentColor 65%, transparent);
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  margin-top: auto;
+  padding-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.tcal-evt-loc span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tcal-evt-owner {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--u-stripe);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.tcal-evt-owner-mini {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--u-stripe);
+  text-transform: uppercase;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--u-stripe) 16%, transparent);
+}
+
+/* ----- Agenda rows ----- */
+.tcal-agenda-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.tcal-agenda-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--u-stripe);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--u-stripe) 20%, transparent);
+}
+.tcal-agenda-owner {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--u-stripe);
+  font-weight: 700;
+}
+.tcal-agenda-name {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.tcal-agenda-sep { color: var(--text-soft); font-size: 11px; }
+.tcal-agenda-title {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tcal-agenda-loc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  max-width: 220px;
+}
+.tcal-agenda-loc span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----- Empty state (no users selected) ----- */
+.tcal-empty-cal {
+  padding: 64px 24px 72px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+.tcal-empty-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  margin-bottom: 8px;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.tcal-empty-cal h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.015em;
+  margin: 0;
+  color: var(--text);
+}
+.tcal-empty-cal p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 340px;
+}
+.tcal-empty-cta {
+  margin-top: 14px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 0;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: filter .14s, transform .14s;
+}
+.tcal-empty-cta:hover { filter: brightness(1.05); transform: translateY(-1px); }
+
+/* ============================================================
+   READ-ONLY EVENT POPOVER
+   ============================================================ */
+.tcal-pop-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 12, 10, 0.32);
+  backdrop-filter: blur(3px);
+  animation: tcal-pop-fade .14s ease-out;
+}
+@keyframes tcal-pop-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.tcal-pop {
+  position: relative;
+  width: min(480px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 32px 80px -28px rgba(20, 16, 8, 0.45),
+    0 12px 24px -12px rgba(20, 16, 8, 0.25);
+  overflow: hidden;
+  animation: tcal-pop-slide .18s ease-out;
+}
+@keyframes tcal-pop-slide {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+.tcal-pop-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  bottom: 0;
+  background: var(--u-stripe);
+}
+
+.tcal-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 0 22px;
+}
+.tcal-pop-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  font-weight: 500;
+}
+.tcal-pop-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-soft);
+  border: 0;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.tcal-pop-close:hover { background: var(--surface-hover); color: var(--text); }
+
+.tcal-pop-title {
+  margin: 6px 22px 14px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  color: var(--text);
+  line-height: 1.25;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.tcal-pop-meta {
+  padding: 0 22px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tcal-pop-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+.tcal-pop-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  font-weight: 500;
+  padding-top: 2px;
+}
+.tcal-pop-val {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+.tcal-pop-mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.tcal-pop-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--u-stripe) 16%, transparent);
+  color: var(--u-ink);
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--u-stripe) 30%, transparent);
+}
+[data-theme="dark"] .tcal-pop-pill { color: var(--u-ink-dk); }
+
+.tcal-pop-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--u-stripe);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.tcal-pop-owner-name { font-weight: 600; }
+.tcal-pop-dim { color: var(--text-soft); font-size: 12px; }
+
+.tcal-pop-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.tcal-pop-tag.tag-ext {
+  background: var(--rose-soft, rgba(184, 107, 102, 0.15));
+  color: var(--rose, #b86b66);
+}
+
+.tcal-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px 18px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.tcal-pop-foot-spacer { flex: 1; }
+.tcal-pop-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--accent-ink);
+  font-weight: 500;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  transition: background .12s;
+}
+.tcal-pop-link:hover { background: var(--surface-hover); }
+.tcal-pop-done {
+  height: 32px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 0;
+  cursor: pointer;
+  transition: opacity .12s;
+}
+.tcal-pop-done:hover { opacity: 0.88; }
+
+/* ============================================================
+   TEAM CALENDAR — RESPONSIVE
+   ============================================================ */
+@media (max-width: 1024px) {
+  .tcal-people { padding: 14px 16px 12px; }
+  .tcal-chip-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+}
+@media (max-width: 840px) {
+  .tcal-people-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .tcal-people-actions { align-self: flex-start; }
+  .tcal-toolbar .cal-toolbar-l { gap: 4px; }
+  .tcal-toolbar-vitals { font-size: 10px; }
+}
+@media (max-width: 640px) {
+  .team-cal { gap: 14px; }
+  .tcal-people { padding: 12px 14px 10px; }
+  .tcal-chip-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+  .tcal-chip { padding: 5px 10px 5px 5px; }
+  .tcal-chip-name { font-size: 12px; }
+  .tcal-people-filters { gap: 8px; }
+  .tcal-search { min-width: 0; flex-basis: 100%; max-width: none; }
+  .tcal-pop-row { grid-template-columns: 60px 1fr; gap: 8px; }
+  .tcal-pop-title { font-size: 17px; margin: 4px 18px 12px; }
+  .tcal-pop-head, .tcal-pop-meta { padding-left: 18px; padding-right: 18px; }
+  .tcal-pop-foot { padding: 14px 18px 16px; }
+}
+
+/* Bottom-sheet treatment on portrait phones — matches AlertModal pattern. */
+@media (max-width: 640px) and (orientation: portrait) {
+  .tcal-pop-backdrop { align-items: flex-end; }
+  .tcal-pop {
+    width: 100vw;
+    border-radius: var(--radius) var(--radius) 0 0;
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+}
+

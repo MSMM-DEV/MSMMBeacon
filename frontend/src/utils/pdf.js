@@ -87,7 +87,7 @@ export async function exportPDF(columns, rows, filename, options = {}) {
     title,
     subtitle,
     rowColor,             // (row) => [r,g,b] | null — row-level default fill
-    cellStyle,            // (row, colIndex, col) => {fillColor?, textColor?, fontStyle?, halign?} | null
+    cellStyle,            // (row, colIndex, col) => {fillColor?, textColor?, fontStyle?, halign?, lineWidth?, lineColor?} | null
     columnWidths,         // array of mm widths, or undefined to auto-plan
     format = "a4",        // "a4" | "a3" | "letter" | "tabloid" etc. Invoice uses a3
                           // so 12 month columns + totals can fit without
@@ -95,6 +95,12 @@ export async function exportPDF(columns, rows, filename, options = {}) {
     alternateRows = true, // Zebra striping; disabled for tables with rich
                           // per-cell coloring (like Invoice) so the striping
                           // doesn't fight the fill palette.
+    onDidDrawCell,        // (data, row, col) => void — optional hook called
+                          // after each body cell is drawn. Use to draw custom
+                          // decorations (e.g. group bounding boxes) on top of
+                          // the table. Receives autotable's `data` (which
+                          // exposes `data.cell.{x,y,width,height}` and
+                          // `data.doc`) plus the originating row+column.
   } = options;
 
   const { jsPDF, autoTable } = await loadPdfDeps();
@@ -200,18 +206,30 @@ export async function exportPDF(columns, rows, filename, options = {}) {
       // Invoice export can paint actual-month cells amber even on an
       // orange row — matching the Invoice UI's class precedence where
       // .month-actual / .month-proj / .total-cell override row-level
-      // orange tinting.
+      // orange tinting. lineWidth/lineColor are honored too so callers
+      // can suppress the default cell border (e.g. on spacer rows used
+      // for group separation).
       if (cellStyle) {
         const col = columns[data.column.index];
         const s = cellStyle(row, data.column.index, col);
         if (s) {
-          if (s.fillColor)  data.cell.styles.fillColor  = s.fillColor;
-          if (s.textColor)  data.cell.styles.textColor  = s.textColor;
-          if (s.fontStyle)  data.cell.styles.fontStyle  = s.fontStyle;
-          if (s.halign)     data.cell.styles.halign     = s.halign;
+          if (s.fillColor)         data.cell.styles.fillColor  = s.fillColor;
+          if (s.textColor)         data.cell.styles.textColor  = s.textColor;
+          if (s.fontStyle)         data.cell.styles.fontStyle  = s.fontStyle;
+          if (s.halign)            data.cell.styles.halign     = s.halign;
+          if (s.lineWidth != null) data.cell.styles.lineWidth  = s.lineWidth;
+          if (s.lineColor)         data.cell.styles.lineColor  = s.lineColor;
         }
       }
     },
+    didDrawCell: onDidDrawCell
+      ? (data) => {
+          if (data.section !== "body") return;
+          const row = rows[data.row.index];
+          const col = columns[data.column.index];
+          onDidDrawCell(data, row, col);
+        }
+      : undefined,
     didDrawPage: (data) => {
       const pageNum = doc.getCurrentPageInfo().pageNumber;
       doc.setFont("helvetica", "normal");
