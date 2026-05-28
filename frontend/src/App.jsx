@@ -2776,18 +2776,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
-  // "Print for Mark - Subs" — Invoice-only. Same columns/format as Export PDF
-  // but each project row is followed by indented breakdown lines: one row per
-  // sub firm (companyName + contractAmount + their monthly billings) and one
-  // MSMM row (MSMM contract portion + MSMM monthly = total − Σ subs, honoring
-  // any per-month overrides). Helpers mirror tables.jsx exactly so the PDF
-  // numbers match what the InvoiceTable shows on screen.
+  // "Print for Mark - Subs" — Invoice-only. Mirrors the UI's expanded-row
+  // structure for each project: the parent row carries MSMM's portion
+  // (matching what users see in InvoiceTable's parent), then per-sub rows,
+  // then per-prime rows (only present on Sub-role projects), then a
+  // "Project total" footer row carrying Total CV + monthly totals. Row
+  // colors mirror the UI palette exactly so the print reads like a
+  // screenshot of the in-app expand view.
+  //
+  // Glyph note: jsPDF's stock Helvetica uses WinAnsi/Latin-1 encoding which
+  // doesn't contain ↳ (U+21B3) or ▲ (U+25B2) — those glyphs render as
+  // garbled "¹³" / "¹²" substitutions. We rely on the colored band + bold
+  // text + plain ASCII labels ("Sub · ", "Prime · ", "MSMM portion",
+  // "Project total") to communicate row identity instead.
   const handleExportInvoiceSubs = async () => {
     if (tab !== "invoice") return;
     const meta = PAGE_META.invoice || {};
     const date = new Date().toISOString().slice(0, 10);
     const filename = `msmm-beacon-invoice-subs-${date}.pdf`;
-    const defs = EXPORT_COLUMNS.invoice || [];
 
     // Same snapshot-vs-fallback strategy as handleExport so the export honors
     // the user's current year filter / search / sort.
@@ -2796,9 +2802,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       ? snap.processedRows
       : currentRows;
 
-    // Helpers — mirror tables.jsx (subListFor / msmmAtMonth / msmmContractShown).
-    const subListFor = (r) =>
-      (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
+    // Helpers — mirror tables.jsx (subListFor / primeListFor /
+    // msmmAtMonth / msmmContractShown) so PDF numbers match the UI.
+    const allEntriesFor = (r) => subInvoices?.get(r.sourceId) || [];
+    const subListFor    = (r) => allEntriesFor(r).filter(s => (s.kind || "sub") === "sub");
+    const primeListFor  = (r) => allEntriesFor(r).filter(s => s.kind === "prime");
     const msmmAtMonth = (r, i) => {
       const override = r.msmmValues?.[i];
       if (override != null) return Number(override);
@@ -2816,23 +2824,85 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const msmmContractShown = (r) =>
       r.msmmAmount != null ? Number(r.msmmAmount) : msmmContractAuto(r);
 
-    // Expand each project into [project, ...subs, msmm]. Synthetic rows reuse
-    // the existing column accessors (`r.values[i]`, `r.amount`, `r.remainingStart`),
-    // so populating those fields is all that's needed for the breakdown lines.
-    // For sub/MSMM rows, `remainingStart` is set to that line's contract amount
-    // so the Rollforward column (= remainingStart − YTD) shows "what's left to bill"
-    // for that firm; sub-contracts don't carry a Jan-1 baseline of their own.
+    // Build the column list. Reuse regular-export columns BUT replace the
+    // parent row's monthly accessor — for `_kind === "project"` we render
+    // MSMM monthly (mirrors UI parent); breakdown rows already carry their
+    // own per-row monthly arrays in `values`.
+    const baseDefs = EXPORT_COLUMNS.invoice || [];
+    const defs = baseDefs.map((c) => {
+      const monthIdx = MONTHS.indexOf(c.label);
+      if (monthIdx >= 0) {
+        return {
+          ...c,
+          get: (r) => {
+            const v = r._kind === "project"
+              ? msmmAtMonth(r, monthIdx)
+              : (r.values?.[monthIdx] ?? 0);
+            return v ? fmtMoney(v) : "";
+          },
+        };
+      }
+      if (c.label === "Contract") {
+        return {
+          ...c,
+          get: (r) => {
+            const v = r._kind === "project" ? msmmContractShown(r) : (r.amount ?? 0);
+            return v != null ? fmtMoney(v) : "";
+          },
+        };
+      }
+      if (c.label === "YTD Actual") {
+        return {
+          ...c,
+          get: (r) => {
+            if (r._kind === "project") {
+              if (r.ytdActualOverride != null) return fmtMoney(r.ytdActualOverride);
+              const ytd = Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i))
+                .reduce((a, b) => a + b, 0);
+              return fmtMoney(ytd);
+            }
+            const sum = (r.values || []).reduce((a, b) => a + (b || 0), 0);
+            return fmtMoney(sum);
+          },
+        };
+      }
+      if (c.label === "Rollforward") {
+        return {
+          ...c,
+          get: (r) => {
+            if (r._kind === "project") {
+              if (r.rollforwardOverride != null) return fmtMoney(r.rollforwardOverride);
+              const ytd = Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i))
+                .reduce((a, b) => a + b, 0);
+              return fmtMoney((Number(r.remainingStart) || 0) - ytd);
+            }
+            const sum = (r.values || []).reduce((a, b) => a + (b || 0), 0);
+            return fmtMoney((Number(r.remainingStart) || 0) - sum);
+          },
+        };
+      }
+      return c;
+    });
+
+    // Expand each project into [project-MSMM, ...subs, ...primes, project-total].
+    // Synthetic breakdown rows fill `values`, `amount`, `remainingStart` to
+    // match the column accessors above. For sub/prime rows, `remainingStart`
+    // = contractAmount so the Rollforward column shows "what's left to bill"
+    // for that firm. The Project Total row carries r.values verbatim so the
+    // monthly columns show the reconciled project totals (Σ subs + MSMM).
     const expandedRows = [];
     for (const r of projectRows) {
+      // Parent row = MSMM view
       expandedRows.push({ ...r, _kind: "project" });
-      const subs = subListFor(r);
-      for (const sub of subs) {
+
+      // Sub rows
+      for (const sub of subListFor(r)) {
         const amounts = sub.amounts || Array(12).fill(0);
+        const discipline = sub.discipline ? ` (${sub.discipline})` : "";
         expandedRows.push({
           _kind: "sub",
-          _parentId: r.id,
           id: `${r.id}::sub::${sub.companyId}`,
-          name: `    ↳ ${sub.companyName || "Sub"}${sub.discipline ? ` · ${sub.discipline}` : ""}`,
+          name: `    Sub · ${sub.companyName || "Sub"}${discipline}`,
           type: "Sub",
           pmIds: [],
           amount: Number(sub.contractAmount) || 0,
@@ -2844,18 +2914,36 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           sourceId: null,
         });
       }
-      const msmmContract = msmmContractShown(r);
-      const msmmVals = Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i));
+
+      // Prime rows (Sub-role projects only)
+      for (const prime of primeListFor(r)) {
+        const amounts = prime.amounts || Array(12).fill(0);
+        expandedRows.push({
+          _kind: "prime",
+          id: `${r.id}::prime::${prime.companyId}`,
+          name: `    Prime · ${prime.companyName || "Prime"}`,
+          type: "Prime",
+          pmIds: [],
+          amount: Number(prime.contractAmount) || 0,
+          remainingStart: Number(prime.contractAmount) || 0,
+          values: amounts,
+          msmmValues: null,
+          ytdActualOverride: null,
+          rollforwardOverride: null,
+          sourceId: null,
+        });
+      }
+
+      // Project total footer row — Total CV + monthly totals (= MSMM + subs)
       expandedRows.push({
-        _kind: "msmm",
-        _parentId: r.id,
-        id: `${r.id}::msmm`,
-        name: `    ↳ MSMM`,
-        type: "",
-        pmIds: r.pmIds || [],
-        amount: msmmContract,
-        remainingStart: msmmContract,
-        values: msmmVals,
+        _kind: "total",
+        id: `${r.id}::total`,
+        name: `    Project total`,
+        type: "Total",
+        pmIds: [],
+        amount: Number(r.amount) || 0,
+        remainingStart: Number(r.remainingStart) || 0,
+        values: r.values || Array(12).fill(0),
         msmmValues: null,
         ytdActualOverride: null,
         rollforwardOverride: null,
@@ -2863,55 +2951,77 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       });
     }
 
-    // Per-cell colors. Project rows keep the existing Invoice palette (amber
-    // actual / cream projection / orange tint). Sub rows render in a muted
-    // gray band so the breakdown reads as supporting detail; MSMM rows render
-    // bold on a slightly darker band so they stand out as the "MSMM portion"
-    // line. Total/YTD/Rollforward columns stay on the neutral total bg.
-    const SUB_PALETTE = {
-      SUB_ACTUAL:   [240, 240, 235],
-      SUB_PROJ:     [248, 247, 244],
-      SUB_BG:       [243, 242, 238],
-      SUB_INK:      [80, 75, 65],
-      SUB_DIM_INK:  [120, 115, 100],
-      MSMM_ACTUAL:  [232, 230, 220],
-      MSMM_PROJ:    [240, 238, 230],
-      MSMM_BG:      [235, 233, 224],
-      MSMM_INK:     [60, 55, 40],
-      MSMM_DIM_INK: [100, 95, 80],
+    // Palette — exact RGB equivalents of the UI's color-mix() output on the
+    // light theme, derived from CSS variables:
+    //   --surface-2 #F3EEE5, --accent-softer #F8ECD6, --bg-elev #FBF8F2,
+    //   --blue #6A86A6, --accent-ink #6B3F10, --text #22201C
+    // Light theme is what 99% of users will print from; dark theme prints
+    // poorly regardless. Sub/Prime/Total tints match the styles.css formulas
+    // line-by-line so a printed page reads like a screenshot.
+    const PAL = {
+      // Parent project (white-ish — same palette as regular Export PDF)
+      PROJ_ROW:      [255, 255, 255],
+      PROJ_ACTUAL:   [248, 236, 214], // --accent-softer
+      PROJ_PROJ:     [250, 247, 240], // existing CREAM_PROJ
+      PROJ_TOTAL:    [251, 248, 242], // --bg-elev
+      PROJ_INK:      [ 34,  32,  28], // --text
+      PROJ_ACCENT:   [107,  63,  16], // --accent-ink (actual-month text)
+      PROJ_DIM:      [110, 102,  89], // --text-muted (projection text)
+      ORANGE_TINT:   [249, 234, 220],
+
+      // Sub row (warm cream — UI: color-mix(--surface-2 70%, --accent-softer))
+      SUB_ROW:       [245, 237, 225],
+      SUB_ACTUAL:    [246, 237, 219], // color-mix(--accent-softer 65%, --surface-2)
+      SUB_PROJ:      [245, 241, 234], // color-mix(--surface-2 80%, --surface)
+      SUB_INK:       [ 34,  32,  28], // company name kept readable
+      SUB_DIM:       [147, 137, 116], // --text-soft (caret/details)
+
+      // Prime row (cool gray — UI: color-mix(--blue 14%, --surface-2))
+      PRIME_ROW:     [224, 223, 220],
+      PRIME_ACTUAL:  [231, 224, 208], // color-mix(--blue 12%, --accent-softer)
+      PRIME_PROJ:    [232, 230, 224], // color-mix(--blue 8%, --surface-2)
+      PRIME_INK:     [106, 134, 166], // --blue (matches "PRIME" tag color)
+
+      // Project total footer (strong blue — UI: color-mix(--blue 20%, --bg-elev))
+      TOTAL_ROW:     [222, 225, 227],
+      TOTAL_ACTUAL:  [216, 221, 224], // color-mix(--blue 24%, --bg-elev)
+      TOTAL_PROJ:    [231, 232, 231], // color-mix(--blue 14%, --bg-elev)
+      TOTAL_INK:     [ 34,  32,  28], // --text (bold)
+      TOTAL_BORDER:  [106, 134, 166], // --blue accent for top border
     };
-    const PROJ_PALETTE = {
-      ORANGE_TINT:  [249, 234, 220],
-      AMBER_ACTUAL: [248, 236, 214],
-      CREAM_PROJ:   [250, 247, 240],
-      TOTAL_BG:     [251, 248, 242],
-      ACCENT_INK:   [107, 63, 16],
-      PROJ_INK:     [110, 102, 89],
-    };
+
     const cellStyle = (row, _colIndex, col) => {
       const label = col?.label;
       const monthIdx = MONTHS.indexOf(label);
       const isActualMonth = monthIdx >= 0 && monthIdx <= TODAY_MONTH;
       const isProjMonth   = monthIdx >= 0 && monthIdx >  TODAY_MONTH;
       const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
-      if (row?._kind === "sub") {
-        if (isActualMonth) return { fillColor: SUB_PALETTE.SUB_ACTUAL, textColor: SUB_PALETTE.SUB_INK };
-        if (isProjMonth)   return { fillColor: SUB_PALETTE.SUB_PROJ,   textColor: SUB_PALETTE.SUB_DIM_INK };
-        if (isTotalCol)    return { fillColor: SUB_PALETTE.SUB_BG,     textColor: SUB_PALETTE.SUB_INK };
-        return { fillColor: SUB_PALETTE.SUB_BG, textColor: SUB_PALETTE.SUB_INK };
+      const kind = row?._kind || "project";
+
+      if (kind === "sub") {
+        if (isActualMonth) return { fillColor: PAL.SUB_ACTUAL, textColor: PAL.SUB_INK };
+        if (isProjMonth)   return { fillColor: PAL.SUB_PROJ,   textColor: PAL.SUB_DIM };
+        if (isTotalCol)    return { fillColor: PAL.SUB_ROW,    textColor: PAL.SUB_INK };
+        return { fillColor: PAL.SUB_ROW, textColor: PAL.SUB_INK };
       }
-      if (row?._kind === "msmm") {
-        if (isActualMonth) return { fillColor: SUB_PALETTE.MSMM_ACTUAL, textColor: SUB_PALETTE.MSMM_INK, fontStyle: "bold" };
-        if (isProjMonth)   return { fillColor: SUB_PALETTE.MSMM_PROJ,   textColor: SUB_PALETTE.MSMM_DIM_INK, fontStyle: "bold" };
-        if (isTotalCol)    return { fillColor: SUB_PALETTE.MSMM_BG,     textColor: SUB_PALETTE.MSMM_INK, fontStyle: "bold" };
-        return { fillColor: SUB_PALETTE.MSMM_BG, textColor: SUB_PALETTE.MSMM_INK, fontStyle: "bold" };
+      if (kind === "prime") {
+        if (isActualMonth) return { fillColor: PAL.PRIME_ACTUAL, textColor: PAL.PRIME_INK };
+        if (isProjMonth)   return { fillColor: PAL.PRIME_PROJ,   textColor: PAL.PRIME_INK };
+        if (isTotalCol)    return { fillColor: PAL.PRIME_ROW,    textColor: PAL.PRIME_INK };
+        return { fillColor: PAL.PRIME_ROW, textColor: PAL.PRIME_INK };
       }
-      // Project row — same palette as the regular Invoice export.
+      if (kind === "total") {
+        if (isActualMonth) return { fillColor: PAL.TOTAL_ACTUAL, textColor: PAL.TOTAL_INK, fontStyle: "bold" };
+        if (isProjMonth)   return { fillColor: PAL.TOTAL_PROJ,   textColor: PAL.TOTAL_INK, fontStyle: "bold" };
+        if (isTotalCol)    return { fillColor: PAL.TOTAL_ROW,    textColor: PAL.TOTAL_INK, fontStyle: "bold" };
+        return { fillColor: PAL.TOTAL_ROW, textColor: PAL.TOTAL_INK, fontStyle: "bold" };
+      }
+      // Parent project row — same palette as regular Invoice export.
       const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
-      if (isActualMonth) return { fillColor: PROJ_PALETTE.AMBER_ACTUAL, textColor: PROJ_PALETTE.ACCENT_INK };
-      if (isProjMonth)   return { fillColor: PROJ_PALETTE.CREAM_PROJ,   textColor: PROJ_PALETTE.PROJ_INK };
-      if (isTotalCol)    return { fillColor: PROJ_PALETTE.TOTAL_BG,     fontStyle: "bold" };
-      if (isOrangeRow)   return { fillColor: PROJ_PALETTE.ORANGE_TINT };
+      if (isActualMonth) return { fillColor: PAL.PROJ_ACTUAL, textColor: PAL.PROJ_ACCENT };
+      if (isProjMonth)   return { fillColor: PAL.PROJ_PROJ,   textColor: PAL.PROJ_DIM };
+      if (isTotalCol)    return { fillColor: PAL.PROJ_TOTAL,  fontStyle: "bold" };
+      if (isOrangeRow)   return { fillColor: PAL.ORANGE_TINT };
       return null;
     };
 
@@ -2919,6 +3029,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (yearFilter.invoice != null) annotations.push(`Year: ${yearFilter.invoice}`);
     if (filterKey.invoice && filterKey.invoice !== "all") annotations.push(`Filter: ${filterKey.invoice}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
+    annotations.push(`Parent rows show MSMM portion · Total row reconciles each project`);
     const subtitle = [
       meta.desc,
       annotations.join(" · "),
@@ -2928,7 +3039,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try {
       showToast("Preparing PDF…", "export");
       await exportPDF(defs, expandedRows, filename, {
-        title: `MSMM Beacon — Invoice (with Subs) — Print for Mark`,
+        title: `MSMM Beacon — Invoice with Sub Breakdown — Print for Mark`,
         subtitle,
         cellStyle,
         format: "a3",
