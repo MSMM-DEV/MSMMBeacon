@@ -258,7 +258,7 @@ begin
       (user_id, start_at, start_punch_id, is_out, category, category_source)
     values
       (new.user_id, new.punched_at, new.id, not _open.is_out,
-       case when _open.is_out then 'work' else 'meeting_untagged' end,
+       (case when _open.is_out then 'work' else 'meeting_untagged' end)::beacon_v2.interval_category_enum,
        'auto');
   else
     -- No open interval → the user is arriving. Open an IN interval.
@@ -346,7 +346,7 @@ begin
       values
         (_user_id, _prev_punch.punched_at, _punches.punched_at,
          _prev_punch.id, _punches.id, _is_out,
-         case when _is_out then 'meeting_untagged' else 'work' end, 'auto')
+         (case when _is_out then 'meeting_untagged' else 'work' end)::beacon_v2.interval_category_enum, 'auto')
       returning id into _new_id;
       perform beacon_v2.fn_classify_interval(_new_id);
     end if;
@@ -368,7 +368,7 @@ begin
       (user_id, start_at, start_punch_id, is_out, category, category_source)
     values
       (_user_id, _prev_punch.punched_at, _prev_punch.id, _is_out,
-       case when _is_out then 'meeting_untagged' else 'work' end, 'auto');
+       (case when _is_out then 'meeting_untagged' else 'work' end)::beacon_v2.interval_category_enum, 'auto');
   end if;
 
   -- Re-apply overrides by exact (start_at, end_at) match
