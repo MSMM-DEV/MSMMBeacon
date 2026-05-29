@@ -244,6 +244,32 @@ async function resolveUserFromNfc(uid: string, deviceId: string): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// Admin capture mode (enroll / verify). If an admin has an open capture
+// session (nfc_enroll_sessions row with captured_uid still null and not yet
+// expired), ANY tap — enrolled or not — is diverted INTO that session instead
+// of becoming a punch. This is what lets the in-app "Verify a fob" and
+// re-enroll-by-tapping flows see an already-enrolled fob (resolveUserFromNfc
+// only ever stashed *unenrolled* UIDs, so enrolled fobs used to silently punch
+// the user in/out and never reach the website).
+//
+// Trade-off (acceptable for the single-reader prototype): while a capture
+// session is open, a normal employee tap on the same reader is captured rather
+// than punched. The window is bounded by the session's 90 s TTL.
+// ---------------------------------------------------------------------------
+async function captureIfSessionOpen(uid: string): Promise<boolean> {
+  const sb = svc();
+  const nowIso = new Date().toISOString();
+  const { data, error } = await sb
+    .from("nfc_enroll_sessions")
+    .update({ captured_uid: uid, captured_at: nowIso })
+    .is("captured_uid", null)
+    .gt("expires_at", nowIso)
+    .select("admin_user_id");
+  if (error) return false;
+  return !!(data && data.length);
+}
+
+// ---------------------------------------------------------------------------
 // De-dupe: a punch within 30 s for the same (user, nfc_uid) collapses.
 // Returns the existing punch_id if a dupe is found.
 // ---------------------------------------------------------------------------
@@ -386,6 +412,13 @@ Deno.serve(async (req) => {
     if (body.source === "nfc") {
       const rawUid = (body.nfc_uid || "").trim();
       if (!rawUid) return err("nfc_uid_required", "nfc_uid required for source=nfc");
+      // Admin enroll/verify capture takes priority over punching — and works
+      // for enrolled fobs too (see captureIfSessionOpen).
+      try {
+        if (await captureIfSessionOpen(rawUid)) {
+          return json({ ok: true, captured: true, uid: rawUid, message: "captured for enrollment/verify" });
+        }
+      } catch (_e) { /* fall through to normal punch */ }
       try {
         const r = await resolveUserFromNfc(rawUid, auth.device_id);
         userId = r.user_id;

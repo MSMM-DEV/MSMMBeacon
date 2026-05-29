@@ -162,6 +162,8 @@ def describe_punch(resp):
         if code == "unenrolled":
             return "  ↳ UNENROLLED — UID captured (bind it in Time Admin → NFC, or with --rewrite)."
         return f"  ↳ ERROR [{code}]: {resp.get('message')}"
+    if resp.get("captured"):
+        return "  ↳ CAPTURED — an admin enroll/verify session grabbed this tap (no punch created)."
     user = resp.get("user") or {}
     name = user.get("first_name") or user.get("display_name") or "?"
     return f"  ↳ OK — {name} is now {str(resp.get('state','?')).upper()}. {resp.get('message','')}"
