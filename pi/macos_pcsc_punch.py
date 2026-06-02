@@ -232,7 +232,7 @@ def rest(method, base, key, path, body=None):
 def lookup_binding(base, key, uid):
     """Return the user dict bound to this UID (active only), or None."""
     q = (f"nfc_tags?uid=eq.{urllib.parse.quote(uid)}&active=eq.true"
-         f"&select=uid,label,active,last_seen_at,user:users(id,email,display_name,first_name,role,is_enabled)")
+         f"&select=uid,label,active,last_seen_at,user:users!nfc_tags_user_id_fkey(id,email,display_name,first_name,role,is_enabled)")
     rows = rest("GET", base, key, q)
     return rows[0] if rows else None
 
