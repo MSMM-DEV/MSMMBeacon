@@ -13340,7 +13340,10 @@ html, body { overflow-x: clip; }
 
 /* ---------------------------------------------------------------- Day editor shell */
 .modal.tk-de {
-  position: relative;
+  /* Keep the base .modal's `position: fixed` + translate(-50%,-50%) centering —
+     it already establishes a containing block for the absolute toast, so DO NOT
+     set position: relative here (that re-anchors the inherited top/left:50% and
+     throws the modal off-screen). */
   width: min(1080px, 96vw);
   max-width: none;
   max-height: 92vh;
