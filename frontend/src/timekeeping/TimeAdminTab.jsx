@@ -19,6 +19,7 @@ import { useAdminTimePrefs } from "./useAdminTimePrefs";
 import { TeamRangeView }     from "./TeamRangeView";
 import { PeopleFilter }      from "./PeopleFilter";
 import { ApprovalsQueue }    from "./ApprovalsQueue";
+import { ReviewRail }        from "./ReviewRail";
 import { NfcEnrollPanel }    from "./NfcEnrollPanel";
 import { TimeSettingsPanel } from "./TimeSettingsPanel";
 import { UserDayModal }      from "./UserDayModal";
@@ -66,6 +67,16 @@ export function TimeAdminTab({ onOpenUserDay }) {
       updatePrefs({ range: "week", anchorDate: payload.weekStart });
     }
   }, [updatePrefs]);
+
+  // Stable open-user-day handler shared by the Team canvas + the ReviewRail.
+  const openUserDay = useCallback((payload) => {
+    setUserDay(payload);
+    onOpenUserDay?.(payload);   // allow parent to mirror the focus too
+  }, [onOpenUserDay]);
+
+  // Bumped by the Day editor after any direct edit, so the ReviewRail, Team
+  // canvas, and people signals all refetch on close/change.
+  const bumpData = useCallback(() => setDataVersion(v => v + 1), []);
 
   // Lightweight signals fetch: who's currently in / active today. Used by
   // the PeopleFilter for "Currently in" + "Active today" quick-picks.
@@ -170,15 +181,19 @@ export function TimeAdminTab({ onOpenUserDay }) {
       {/* Body */}
       <div className="tk-admin-body">
         {view === "team" && (
-          <TeamRangeView
-            prefs={prefs}
-            onPrefsChange={updatePrefs}
-            dataVersion={dataVersion}
-            onOpenUserDay={(payload) => {
-              setUserDay(payload);
-              onOpenUserDay?.(payload);   // allow parent to mirror the focus too
-            }}
-          />
+          <>
+            <ReviewRail
+              dataVersion={dataVersion}
+              onResolved={handleApprovalResolved}
+              onOpenUserDay={openUserDay}
+            />
+            <TeamRangeView
+              prefs={prefs}
+              onPrefsChange={updatePrefs}
+              dataVersion={dataVersion}
+              onOpenUserDay={openUserDay}
+            />
+          </>
         )}
         {view === "approvals" && <ApprovalsQueue onResolved={handleApprovalResolved}/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
@@ -190,6 +205,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
           userId={userDay.userId}
           initialDate={userDay.date}
           onClose={() => setUserDay(null)}
+          onDirty={bumpData}
         />
       )}
     </div>

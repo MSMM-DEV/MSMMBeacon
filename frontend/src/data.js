@@ -2455,6 +2455,146 @@ export const tkRegisterDevice    = (id, label, location)       => tkAdmin("regis
 export const tkRunClassifier     = (userId = null)             => supabase.functions.invoke("timeclock-classify", { body: userId ? { user_id: userId } : {} });
 
 // ----------------------------------------------------------------------
+// Admin DIRECT day editing — the Time Admin "Day editor" canvas.
+//
+// These run client-side with the admin's own session (no Edge Function
+// round-trip): the `tk_punches_admin_write` / `tk_intervals_admin_write` RLS
+// policies authorize the writes, and the week-lock guard trigger passes for
+// `is_current_user_admin()`. After any punch mutation we re-derive the day via
+// fn_rebuild_user_day (INSERTs also fire fn_punch_reconcile, which the
+// back-dated-punch guard migration routes through the same rebuild). Edits
+// apply IMMEDIATELY to the user's timesheet — this is the admin authority path,
+// distinct from the user-submitted correction queue.
+// ----------------------------------------------------------------------
+
+// CT calendar date (YYYY-MM-DD) + minutes-since-CT-midnight → UTC ISO instant,
+// DST-correct. Inverse of ctMinutesOfIso(). Used when a drag/add on the canvas
+// resolves a wall-clock minute into a real punch timestamp.
+export function ctWallMinToISO(dateYMD, minOfDay) {
+  const clamped = Math.max(0, Math.min(24 * 60 - 1, Math.round(minOfDay)));
+  const [Y, Mo, D] = dateYMD.split("-").map(Number);
+  const h = Math.floor(clamped / 60), mi = clamped % 60;
+  // The target wall time, read as if it were UTC.
+  const targetWallUTC = Date.UTC(Y, Mo - 1, D, h, mi);
+  // CT offset (CT − UTC, ms) at a given real instant.
+  const ctOffsetAt = (instant) => {
+    const p = new Intl.DateTimeFormat("en-US", {
+      timeZone: CT_TZ, hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).formatToParts(new Date(instant)).reduce((a, x) => (a[x.type] = x.value, a), {});
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - instant;
+  };
+  // Two-step refine so the offset is evaluated AT the target instant (DST-safe).
+  const off1 = ctOffsetAt(targetWallUTC);
+  let utc = targetWallUTC - off1;
+  const off2 = ctOffsetAt(utc);
+  if (off2 !== off1) utc = targetWallUTC - off2;
+  return new Date(utc).toISOString();
+}
+
+async function rebuildUserDay(userId, date) {
+  const { error } = await supabase.rpc("fn_rebuild_user_day", { _user_id: userId, _date: date });
+  if (error) throw new Error(rebuildHint(error.message));
+}
+
+// The week-lock guard trigger raises check_violation when a non-admin (or a
+// service-role caller without the GUC) writes into a locked week. Surface a
+// human hint when that bubbles up through a direct admin write somehow.
+function rebuildHint(msg) {
+  if (/locked/i.test(msg)) return "This week is locked — unlock it before editing.";
+  return msg;
+}
+
+// Move one or more existing punches to new instants, then rebuild the day once.
+//   edits: [{ id, punchedAt }]  (punchedAt = ISO string)
+export async function adminEditPunches(edits, userId, date) {
+  let firstErr = null;
+  await Promise.all((edits || []).map(async (e) => {
+    if (!e?.id || !e?.punchedAt) return;
+    const { error } = await supabase
+      .from("time_punches").update({ punched_at: e.punchedAt }).eq("id", e.id);
+    if (error && !firstErr) firstErr = error;
+  }));
+  // Always re-derive from the actual punches so intervals never go stale, even
+  // if one of a multi-punch move failed (the day then reflects the punches that
+  // did land — consistent, and the error still surfaces below).
+  await rebuildUserDay(userId, date);
+  if (firstErr) throw new Error(rebuildHint(`edit punch: ${firstErr.message}`));
+}
+
+// Carve a new block by inserting BOTH boundary punches in one shot. The
+// back-dated guard trigger rebuilds the day; we then stamp the carved
+// interval's category (matched by exact boundary) so the admin's label sticks.
+export async function adminAddInterval({ userId, date, startISO, endISO, isOut, category, note }) {
+  if (!startISO || !endISO) throw new Error("start and end are required");
+  if (+new Date(endISO) <= +new Date(startISO)) throw new Error("end must be after start");
+  const adminId = getCurrentBeaconUser()?.id || null;
+  const trimmed = (note || "").trim();
+  const punchNote = trimmed || "admin: added block";
+  const { error: insErr } = await supabase.from("time_punches").insert([
+    { user_id: userId, punched_at: startISO, source: "manual", note: punchNote, created_by: adminId },
+    { user_id: userId, punched_at: endISO,   source: "manual", note: punchNote, created_by: adminId },
+  ]);
+  if (insErr) throw new Error(rebuildHint(`add block: ${insErr.message}`));
+  await rebuildUserDay(userId, date);
+  // Stamp the carved interval. Presence (is_out) falls out of punch order — we
+  // only set the label + source so the rule/Outlook classifiers won't reclaim it.
+  const cat = isOut ? (category || "break") : "work";
+  const patch = { category: cat, category_source: "admin", computed_at: new Date().toISOString() };
+  if (trimmed) patch.notes = trimmed;
+  const { error: upErr } = await supabase.from("time_intervals")
+    .update(patch).eq("user_id", userId).eq("start_at", startISO).eq("end_at", endISO);
+  if (upErr) throw new Error(`label block: ${upErr.message}`);
+}
+
+// Delete a block by removing its boundary punches, then rebuild. Same-presence
+// neighbors merge — the natural "remove this block" semantic.
+export async function adminDeleteInterval(interval, userId, date) {
+  const ids = [interval?.startPunchId, interval?.endPunchId].filter(Boolean);
+  if (ids.length === 0) throw new Error("this block has no editable punches to remove");
+  const { error } = await supabase.from("time_punches").delete().in("id", ids);
+  if (error) throw new Error(rebuildHint(`delete block: ${error.message}`));
+  await rebuildUserDay(userId, date);
+}
+
+// Admin retag + comment on one interval (category_source='admin' so it survives
+// future rebuilds + the classifier). Lighter than a full rebuild — just
+// re-aggregates the day's category buckets.
+export async function adminReclassifyInterval(intervalId, { category, notes = null, outlookEventId = null }, userId, date) {
+  const { error } = await supabase.from("time_intervals").update({
+    category,
+    category_source:  "admin",
+    notes:            notes || null,
+    outlook_event_id: outlookEventId || null,
+    computed_at:      new Date().toISOString(),
+  }).eq("id", intervalId);
+  if (error) throw new Error(`reclassify: ${error.message}`);
+  const { error: rErr } = await supabase.rpc("fn_recompute_day", { _user_id: userId, _date: date });
+  if (rErr) throw new Error(`recompute: ${rErr.message}`);
+}
+
+// Load the week-lock row for the week containing a date (admin editor banner).
+export async function loadWeekLock(userId, date) {
+  const wk = weekStartCT(date);
+  const { data } = await supabase
+    .from("timesheet_weeks")
+    .select("*").eq("user_id", userId).eq("week_start", wk).maybeSingle();
+  return data ? adaptTimesheetWeek(data) : { userId, weekStart: wk, approvalStatus: "open", locked: false };
+}
+
+// Pending corrections for one (user, date) — surfaced as an inline banner in
+// the Day editor so an admin can approve/reject without leaving the canvas.
+export async function loadCorrectionsForDay(userId, date) {
+  const { data, error } = await supabase
+    .from("timesheet_corrections")
+    .select("*").eq("user_id", userId).eq("date", date).eq("status", "pending")
+    .order("submitted_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(adaptCorrection);
+}
+
+// ----------------------------------------------------------------------
 // Settings
 // ----------------------------------------------------------------------
 export async function loadTimekeepingSettings() {
