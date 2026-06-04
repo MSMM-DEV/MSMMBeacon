@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { TweaksPanel } from "./tweaks.jsx";
 import { AlertsAdmin } from "./admin-alerts.jsx";
-import { listAllUsersFull, adminAction, getUsers, updateMonthlyBenchmark, fmtMoney } from "./data.js";
+import { listAllUsersFull, adminAction, getUsers, updateMonthlyBenchmark,
+         updateInvoiceActualCutoverDay, actualThruMonth, MONTHS, fmtMoney } from "./data.js";
 
 // ============================================================================
 // AdminPanel — gear-icon entry point for Admin users only.
@@ -181,9 +182,9 @@ export const AdminPanel = ({
           {tab === "targets" && (
             <TargetsPanel
               appSettings={appSettings}
-              onSaved={(next) => {
+              onSaved={(next, msg) => {
                 onAppSettingsChange?.(next);
-                flash("Benchmark updated");
+                flash(msg || "Targets updated");
               }}
               onError={(msg) => flash(msg, "x")}
             />
@@ -597,7 +598,7 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
     setPending(true);
     try {
       const next = await updateMonthlyBenchmark(draftNum);
-      onSaved?.(next);
+      onSaved?.(next, "Benchmark updated");
     } catch (err) {
       onError?.(String(err.message || err));
     } finally {
@@ -611,7 +612,7 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
     try {
       const next = await updateMonthlyBenchmark(null);
       setDraft("");
-      onSaved?.(next);
+      onSaved?.(next, "Benchmark cleared");
     } catch (err) {
       onError?.(String(err.message || err));
     } finally {
@@ -625,6 +626,7 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
 
   return (
     <div className="targets-panel">
+      <CutoverCard appSettings={appSettings} onSaved={onSaved} onError={onError} />
       <form className="target-card" onSubmit={onSubmit}>
         <div className="target-card-head">
           <div className="target-card-eyebrow">Quad Sheet · Cash Flow</div>
@@ -708,8 +710,111 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
 };
 
 // ----------------------------------------------------------------------------
+// CutoverCard — the day-of-month the Invoice tab flips the current month from
+// Projection to Actual. Day 1 = the classic "flips on the 1st" behavior; a
+// later day keeps the current month editable as a projection until billing
+// closes. Same card chrome as the benchmark card; saves through
+// updateInvoiceActualCutoverDay and reports back via the shared onSaved.
+// ----------------------------------------------------------------------------
+const CutoverCard = ({ appSettings, onSaved, onError }) => {
+  const saved = appSettings?.invoiceActualCutoverDay ?? 1;
+  const [draft, setDraft] = useState(String(saved));
+  const [pending, setPending] = useState(false);
+  useEffect(() => { setDraft(String(saved)); /* eslint-disable-next-line */ }, [saved]);
+
+  const draftNum = parseInt(draft, 10);
+  const draftValid = Number.isFinite(draftNum) && draftNum >= 1 && draftNum <= 31;
+  const dirty = draftValid && draftNum !== saved;
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    if (!draftValid || !dirty || pending) return;
+    setPending(true);
+    try {
+      const next = await updateInvoiceActualCutoverDay(draftNum);
+      onSaved?.(next, `Actuals now flip on the ${ordinal(draftNum)}`);
+    } catch (err) {
+      onError?.(String(err.message || err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const previewThru = draftValid ? actualThruMonth(draftNum) : actualThruMonth(saved);
+  const previewText = previewThru >= 0 ? `Jan–${MONTHS[previewThru]} Actual` : "All Projection";
+
+  return (
+    <form className="target-card" onSubmit={onSubmit}>
+      <div className="target-card-head">
+        <div className="target-card-eyebrow">Invoice · Actual vs Projection</div>
+        <h4 className="target-card-title">Move to Actual on</h4>
+        <p className="target-card-desc">
+          Each year's month columns switch from <strong>Projection</strong> to{" "}
+          <strong>Actual</strong> as the year progresses. The current month holds
+          as a Projection until this day, then flips to Actual. <strong>Day 1</strong>{" "}
+          keeps the classic "flips on the 1st" behavior — pick a later day to leave
+          the current month editable until your monthly billing closes.
+        </p>
+      </div>
+
+      <div className="target-input-row">
+        <div className="target-input-wrap">
+          <span className="target-currency">Day</span>
+          <input
+            type="number"
+            min="1"
+            max="31"
+            step="1"
+            inputMode="numeric"
+            className="target-input"
+            value={draft}
+            onChange={e => setDraft(e.target.value.replace(/[^\d]/g, ""))}
+            placeholder="1"
+          />
+          <span className="target-suffix">of the month</span>
+        </div>
+        <div className="target-actions">
+          <button
+            type="submit"
+            className="btn primary sm"
+            disabled={!draftValid || !dirty || pending}
+          >
+            <Icon name="check" size={13}/>
+            {pending ? "Saving…" : "Save day"}
+          </button>
+        </div>
+      </div>
+
+      <div className="target-readout">
+        <div className="target-readout-cell">
+          <div className="target-readout-label">Flips on</div>
+          <div className="target-readout-val">{ordinal(saved)} of each month</div>
+        </div>
+        <div className="target-readout-divider"/>
+        <div className="target-readout-cell">
+          <div className="target-readout-label">{dirty ? "Would show today" : "Showing today"}</div>
+          <div className="target-readout-val">{previewText}</div>
+        </div>
+      </div>
+
+      {!draftValid && (
+        <div className="target-error">
+          Enter a day from 1 to 31.
+        </div>
+      )}
+    </form>
+  );
+};
+
+// ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
+// 1 → "1st", 5 → "5th", 22 → "22nd".
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
 function displayName(row) {
   return (
     row?.display_name

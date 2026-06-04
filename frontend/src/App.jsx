@@ -25,7 +25,7 @@ import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
-  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS,
+  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, actualThruMonth,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
@@ -877,8 +877,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // the Quad Sheet's bar coloring (green when month total ≥ benchmark, red
   // when below). Updated locally + persisted by AdminPanel → Targets tab.
   const [appSettings, setAppSettings] = useState(
-    initial.appSettings || { monthlyInvoiceBenchmark: null, updatedAt: null }
+    initial.appSettings || { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, updatedAt: null }
   );
+  // Invoice Actual/Projection boundary — the last month index considered
+  // "Actual". Driven by the configurable cutover day (the current month stays
+  // Projection until that day, then flips). Recomputed each render from the
+  // live setting; passed to InvoiceTable + InvoiceCharts and used in the
+  // export/styling closures + the YTD stat below. The "today column" highlight
+  // still keys off the real calendar month (TODAY_MONTH), not this boundary.
+  const actualThru = actualThruMonth(appSettings.invoiceActualCutoverDay);
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
@@ -2915,8 +2922,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
           const label = col?.label;
           const monthIdx = MONTHS.indexOf(label);
-          const isActualMonth = monthIdx >= 0 && monthIdx <= TODAY_MONTH;
-          const isProjMonth   = monthIdx >= 0 && monthIdx > TODAY_MONTH;
+          const isActualMonth = monthIdx >= 0 && monthIdx <= actualThru;
+          const isProjMonth   = monthIdx >= 0 && monthIdx > actualThru;
           const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
           if (isActualMonth) return { fillColor: INVOICE_PALETTE.AMBER_ACTUAL, textColor: INVOICE_PALETTE.ACCENT_INK };
           if (isProjMonth)   return { fillColor: INVOICE_PALETTE.CREAM_PROJ,   textColor: INVOICE_PALETTE.PROJ_INK };
@@ -3193,8 +3200,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const cellStyle = (row, _colIndex, col) => {
       const label = col?.label;
       const monthIdx = MONTHS.indexOf(label);
-      const isActualMonth = monthIdx >= 0 && monthIdx <= TODAY_MONTH;
-      const isProjMonth   = monthIdx >= 0 && monthIdx >  TODAY_MONTH;
+      const isActualMonth = monthIdx >= 0 && monthIdx <= actualThru;
+      const isProjMonth   = monthIdx >= 0 && monthIdx >  actualThru;
       const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
       const kind = row?._kind || "project";
 
@@ -3471,14 +3478,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const pot = potential.reduce((a,r) => a + (r.msmm || 0), 0);
     const awa = awaiting.reduce((a,r) => a + (r.msmm || 0), 0);
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
-    const ytd = invoice.reduce((a,r) => a + r.values.slice(0, TODAY_MONTH + 1).reduce((x,y) => x + (y||0), 0), 0);
+    const ytd = invoice.reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
       { label: "Pipeline MSMM",       val: pot, sub: `${potential.length} potential`, spark: [3,4,3,5,4,6,7,8,7,9] },
       { label: "Awaiting verdict",    val: awa, sub: `${awaiting.length} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
       { label: "Active backlog",      val: awd, sub: `${awarded.length} awarded`,     spark: [5,5,6,7,6,7,8,9,10,11] },
-      { label: "YTD billed (actual)", val: ytd, sub: `Jan–${MONTHS[TODAY_MONTH]} ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
+      { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
-  }, [potential, awaiting, awarded, invoice]);
+  }, [potential, awaiting, awarded, invoice, actualThru]);
 
   const tabCounts = {
     openbids: openBids.length,
@@ -3796,8 +3803,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 invoice={invoice}
                 orangeSourceIds={orangeSourceIds}
                 monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
+                actualThru={actualThru}
               />
               <InvoiceTable rows={filtered.invoice}
+                actualThru={actualThru}
+                cutoverDay={appSettings.invoiceActualCutoverDay}
                 updateInvoice={updateInvoiceCell}
                 updateInvoiceMsmm={updateInvoiceMsmmCell}
                 updateRow={updateInvoice}
@@ -4272,6 +4282,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               : undefined}
             canUntickPaid={isAdmin}
             onRequestUntick={requestPaidUntick}
+            canAttach={isActualInvoiceMonth(liveProjectRow.year || THIS_YEAR, monthIdx)}
             onClose={() => setFilesModal(null)}
             onChanged={refreshInvoiceArtifacts}
           />

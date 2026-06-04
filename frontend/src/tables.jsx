@@ -10,12 +10,19 @@ import {
   buildClientOrCompanyOptions,
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
-  MONTHS, TODAY_MONTH, THIS_YEAR,
+  MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth,
   linkedProjectsFor,
   BID_SERVICE_OPTIONS,
 } from "./data.js";
 import { LinkedProjectsSection } from "./panels.jsx";
 import { setCurrentTableSnapshot } from "./table-state.js";
+
+// 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
+// Actual/Projection legend to phrase the configurable cutover day.
+const ordinal = (n) => {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+};
 
 // ---------- Shared empty state ----------
 export const EmptyState = ({ title, hint, iconName }) => (
@@ -1909,6 +1916,8 @@ export const InvoiceTable = ({
   tab, rows, updateInvoice, updateInvoiceMsmm, updateRow = _noopUpdate,
   onOpenDrawer, onAlert, flashId,
   yearOptions, yearValue, onYearChange,
+  actualThru = TODAY_MONTH,   // last month index shown as "Actual" (cutover-aware)
+  cutoverDay = 1,             // day-of-month the current month flips Proj→Actual (for legend copy)
   orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
   // Sub-invoices feature: per-project list of {companyId, companyName,
   // contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12],
@@ -2325,7 +2334,11 @@ export const InvoiceTable = ({
         </button>
         <div className="tool-sep"/>
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[TODAY_MONTH]} as Actual</strong> · {MONTHS[TODAY_MONTH+1] || "Jan"}–Dec as Projection · switches on the 1st
+          {actualThru >= 0 ? (
+            <>Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[actualThru]} as Actual</strong> · {MONTHS[actualThru+1] || "Jan"}–Dec as Projection</>
+          ) : (
+            <>Showing <strong style={{ color: "var(--accent-ink)" }}>all months as Projection</strong> · Actuals begin after the {ordinal(cutoverDay)}</>
+          )} · current month flips on the {ordinal(cutoverDay)}
         </span>
         <div className="ml-auto" style={{ display: "flex", gap: 8 }}>
           <button
@@ -2461,10 +2474,10 @@ export const InvoiceTable = ({
                   <th style={{ minWidth: 110 }}>Contract</th>
                   <th style={{ minWidth: 96 }}>Remaining<br/>Jan&nbsp;1</th>
                   {MONTHS.map((m, i) => (
-                    <th key={i} className={i <= TODAY_MONTH ? "month-actual" : "month-proj"}>
+                    <th key={i} className={i <= actualThru ? "month-actual" : "month-proj"}>
                       {m}
                       <div style={{ fontSize: 9, marginTop: 2, opacity: .7 }}>
-                        {i <= TODAY_MONTH ? "actual" : "proj"}
+                        {i <= actualThru ? "actual" : "proj"}
                       </div>
                     </th>
                   ))}
@@ -2631,9 +2644,17 @@ export const InvoiceTable = ({
                       const isOverride = override != null;
                       const auto       = msmmAtMonth(r, i);
                       const shown      = isOverride ? Number(override) : auto;
+                      // Read-only mirror of the Project total row's status for
+                      // this month. The total (bottom of the expand) carries the
+                      // real attach/paid; surfacing them on the prominent MSMM/
+                      // top row gives an at-a-glance read without scrolling down.
+                      // Echoes the total row's layout: paid top-left (like its
+                      // toggle), attachment top-right (like its clip).
+                      const totalPaid  = !!(r.primePaid && r.primePaid[i]);
+                      const totalFiles = (r.primeFiles && r.primeFiles[i]) || [];
                       return (
                       <td key={i}
-                          className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
+                          className={(i <= actualThru ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
                           title={isOverride
                             ? `Override · auto would be ${fmtMoney(auto, false)}`
                             : "MSMM monthly · auto-calc. Click to override."}>
@@ -2642,6 +2663,20 @@ export const InvoiceTable = ({
                             (nv == null || nv === "") ? null : Number(nv))}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                         />
+                        {totalPaid && (
+                          <span className="msmm-mirror paid"
+                                title="Project total is marked paid"
+                                onClick={(e) => e.stopPropagation()}>
+                            <Icon name="check" size={9} stroke={2.6}/>
+                          </span>
+                        )}
+                        {totalFiles.length > 0 && (
+                          <span className="msmm-mirror clip"
+                                title={`Project total · ${totalFiles.length} file${totalFiles.length === 1 ? "" : "s"} attached`}
+                                onClick={(e) => e.stopPropagation()}>
+                            <Icon name="link" size={9} stroke={2.2}/>
+                          </span>
+                        )}
                       </td>
                       );
                     })}
@@ -2818,7 +2853,7 @@ export const InvoiceTable = ({
                         const showPaidToggle = hasAmount || isPaid;
                         return (
                         <td key={i}
-                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
                             onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv, entryKind)}
@@ -2847,21 +2882,35 @@ export const InvoiceTable = ({
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
-                            title={hasFiles
-                              ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
-                              : (isPrimeEntry
-                                  ? `Attach invoice to ${s.companyName}`
-                                  : `Attach invoice from ${s.companyName}`)}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: i, sub: s });
-                            }}>
-                            <Icon name="link" size={11}/>
-                            {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
-                          </button>
+                          {(() => {
+                            // Attachments are only allowed on actual (already-
+                            // happened) months. A projected month with no files
+                            // shows a locked, non-opening clip; if files already
+                            // exist (e.g. the row's year was edited forward) the
+                            // clip still opens so they stay viewable, but the
+                            // modal blocks new uploads (canAttach).
+                            const attachLocked = !isActualInvoiceMonth(r.year, i) && !hasFiles;
+                            return (
+                            <button
+                              type="button"
+                              className={"invoice-cell-clip" + (hasFiles ? " has-files" : "") + (attachLocked ? " locked" : "")}
+                              title={attachLocked
+                                ? "Attachments can only be added to actual months"
+                                : hasFiles
+                                  ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                                  : (isPrimeEntry
+                                      ? `Attach invoice to ${s.companyName}`
+                                      : `Attach invoice from ${s.companyName}`)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (attachLocked) return;
+                                onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: i, sub: s });
+                              }}>
+                              <Icon name="link" size={11}/>
+                              {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                            </button>
+                            );
+                          })()}
                         </td>
                         );
                       })}
@@ -2969,7 +3018,7 @@ export const InvoiceTable = ({
                         const invNum = (r.invoiceNumbers && r.invoiceNumbers[i]) || null;
                         return (
                         <td key={i}
-                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={v} type="number"
                             onChange={nv => updateInvoice(r.id, i, nv)}
@@ -2991,19 +3040,28 @@ export const InvoiceTable = ({
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}
-                            title={hasFiles
-                              ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
-                              : "Attach prime invoice file"}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
-                            }}>
-                            <Icon name="link" size={11}/>
-                            {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
-                          </button>
+                          {(() => {
+                            // Same actual-months-only rule as the sub clip above.
+                            const attachLocked = !isActualInvoiceMonth(r.year, i) && !hasFiles;
+                            return (
+                            <button
+                              type="button"
+                              className={"invoice-cell-clip" + (hasFiles ? " has-files" : "") + (attachLocked ? " locked" : "")}
+                              title={attachLocked
+                                ? "Attachments can only be added to actual months"
+                                : hasFiles
+                                  ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                                  : "Attach prime invoice file"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (attachLocked) return;
+                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                              }}>
+                              <Icon name="link" size={11}/>
+                              {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                            </button>
+                            );
+                          })()}
                           {invNum && (
                             <button
                               type="button"
@@ -3068,7 +3126,7 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.remainingStart || 0))}</td>
                       {MONTHS.map((_, i) => (
-                        <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
+                        <td key={i} className={(i <= actualThru ? "month-actual" : "month-proj") + " total-cell"}>
                           {fmtMoney(sumBy(searchedNonOrange, r => msmmAtMonth(r, i)))}
                         </td>
                       ))}
@@ -3093,7 +3151,7 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.remainingStart || 0))}</td>
                       {MONTHS.map((_, i) => (
-                        <td key={i} className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + " total-cell"}>
+                        <td key={i} className={(i <= actualThru ? "month-actual" : "month-proj") + " total-cell"}>
                           {fmtMoney(sumBy(searchedRows, r => msmmAtMonth(r, i)))}
                         </td>
                       ))}
@@ -3116,7 +3174,8 @@ export const InvoiceTable = ({
             <span><span className="legend-sw proj"/>Projection (editable)</span>
             <span><span className="legend-today"/>Today column</span>
             <span className="ml-auto" style={{ marginLeft: "auto", color: "var(--text-soft)" }}>
-              Cells automatically switch from Projection to Actual on the 1st of each new month.
+              Cells automatically switch from Projection to Actual on the {ordinal(cutoverDay)} of each month
+              {cutoverDay !== 1 ? " (set in Settings → Targets)." : "."}
             </span>
           </div>
         </>

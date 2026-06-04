@@ -1294,6 +1294,9 @@ export const InvoiceFilesModal = ({
   // current user an Admin; onRequestUntick opens the App-level confirm dialog.
   canUntickPaid = true,
   onRequestUntick,
+  // Attachments are only allowed on actual months — false for a projected
+  // month, which hides the upload UI (existing files stay viewable).
+  canAttach = true,
   onClose, onChanged,
 }) => {
   const isParty = !!partyKind;
@@ -1666,6 +1669,15 @@ export const InvoiceFilesModal = ({
             )}
           </div>
 
+          {!canAttach ? (
+            <div className="invoice-attach-locked">
+              <Icon name="clock" size={14}/>
+              <div>
+                <strong>Attachments locked for this month</strong>
+                <span>This month is still a projection — attachments can be added once it becomes an actual month.</span>
+              </div>
+            </div>
+          ) : (
           <div>
             <div className="section-title">
               <Icon name="plus" size={12}/>
@@ -1741,6 +1753,7 @@ export const InvoiceFilesModal = ({
               </div>
             </div>
           </div>
+          )}
 
           {error && (
             <div style={{ color: "var(--rose)", fontSize: 12 }}>
@@ -1755,6 +1768,7 @@ export const InvoiceFilesModal = ({
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn sm" onClick={onClose} disabled={busy}>Close</button>
+            {canAttach && (
             <button className="btn primary sm"
                     onClick={handleUpload}
                     disabled={busy || picked.length === 0}>
@@ -1763,6 +1777,7 @@ export const InvoiceFilesModal = ({
                 ? (picked.length > 1 ? `Uploading ${picked.length}…` : "Uploading…")
                 : (picked.length > 1 ? `Upload ${picked.length} files` : "Upload")}
             </button>
+            )}
           </div>
         </div>
       </div>

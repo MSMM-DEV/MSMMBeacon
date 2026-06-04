@@ -21,7 +21,7 @@ import { fmtMoney, MONTHS, TODAY_MONTH, THIS_YEAR } from "./data.js";
 //   • Same SVG geometry, KPIs, hover tooltip, benchmark chip, legend.
 // ============================================================================
 
-export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark }) => {
+export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actualThru = TODAY_MONTH }) => {
   // PM chart visibility — persisted across sessions. ENG is always visible;
   // PM is the optional one because most exec views focus on engineering
   // revenue, with PM treated as a supplementary cut.
@@ -267,12 +267,13 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
     return v >= Number(monthlyBenchmark) ? "above" : "below";
   };
 
-  const ytdActualAll  = totalsAll.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
-  const ytdActualBase = totalsBase.slice(0, TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
-  const projRemAll    = totalsAll.slice(TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
-  const projRemBase   = totalsBase.slice(TODAY_MONTH + 1).reduce((a, b) => a + b, 0);
+  const actualCount   = Math.max(0, actualThru + 1);   // # of months counted as Actual
+  const ytdActualAll  = totalsAll.slice(0, actualCount).reduce((a, b) => a + b, 0);
+  const ytdActualBase = totalsBase.slice(0, actualCount).reduce((a, b) => a + b, 0);
+  const projRemAll    = totalsAll.slice(actualCount).reduce((a, b) => a + b, 0);
+  const projRemBase   = totalsBase.slice(actualCount).reduce((a, b) => a + b, 0);
   const ytdAboveCount = hasBenchmark
-    ? totalsAll.slice(0, TODAY_MONTH + 1).filter(v => v >= Number(monthlyBenchmark)).length
+    ? totalsAll.slice(0, actualCount).filter(v => v >= Number(monthlyBenchmark)).length
     : 0;
 
   const showViewToggle = !!onViewChange && hasOrange;
@@ -333,7 +334,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           {hasBenchmark ? (
             <>
               <div className="kpi-val mono-xl">
-                {ytdAboveCount}<span className="kpi-frac">/{TODAY_MONTH + 1}</span>
+                {ytdAboveCount}<span className="kpi-frac">/{actualCount}</span>
               </div>
               <div className="kpi-sub">benchmark · {fmtMoney(monthlyBenchmark, false)}/mo</div>
             </>
@@ -389,8 +390,10 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           </text>
         ))}
 
+        {/* Actual/Projection divider — sits at the cutover boundary, which
+            equals the real-month boundary when the cutover day is 1. */}
         <line
-          x1={padL + slot * (TODAY_MONTH + 1)} x2={padL + slot * (TODAY_MONTH + 1)}
+          x1={padL + slot * actualCount} x2={padL + slot * actualCount}
           y1={padT} y2={padT + plotH}
           className="chart-today"/>
 
@@ -405,7 +408,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
         {totalsAll.map((vAll, i) => {
           const vBase = totalsBase[i];
           const vAvg  = totalsAvg[i];
-          const isProj = i > TODAY_MONTH;
+          const isProj = i > actualThru;
           const verdictAll  = verdictFor(i);
           const verdictBase = !hasBenchmark
             ? "neutral"
@@ -555,7 +558,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           const vAvg  = totalsAvg[hoverIdx];
           const v = isAvgView ? vAvg : vAll;
           const verdict = verdictFor(hoverIdx);
-          const isProj = hoverIdx > TODAY_MONTH;
+          const isProj = hoverIdx > actualThru;
           const x = slotCx(hoverIdx);
           const yTop = yFor(v);
           const lines = [];

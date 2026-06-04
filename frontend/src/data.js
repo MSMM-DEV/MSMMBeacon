@@ -163,7 +163,7 @@ let _companies = [];
 // on every loadBeacon and on every successful updateMonthlyBenchmark write so
 // the in-memory copy never drifts from the DB. Defaults shape used when the
 // table is empty / migration not yet applied:
-let _appSettings = { monthlyInvoiceBenchmark: null, updatedAt: null };
+let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, updatedAt: null };
 
 export const getUsers     = () => _users;
 export const getAppSettings = () => _appSettings;
@@ -217,6 +217,33 @@ export const companyById  = (id) => _companies.find(c => c.id === id);
 export const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 export const TODAY_MONTH = new Date().getMonth();
 export const THIS_YEAR   = new Date().getFullYear();
+
+// The "actual through" month index (0–11) for the Invoice tab's Actual vs
+// Projection split. The CURRENT month renders as Projection until the
+// configurable cutover day (app_settings.invoice_actual_cutover_day), then
+// flips to Actual. cutoverDay=1 reproduces the legacy "flips on the 1st"
+// behavior (>= 1 is always true). Returns -1 when no month this year has
+// closed yet (early January before the cutover) → every month is Projection.
+// The cutover is clamped to the current month's length so a value like 31 acts
+// as "last day of month" in short months.
+export function actualThruMonth(cutoverDay = 1, date = new Date()) {
+  const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const eff = Math.min(Math.max(1, Math.round(Number(cutoverDay)) || 1), daysInMonth);
+  return date.getDate() >= eff ? date.getMonth() : date.getMonth() - 1;
+}
+
+// Is an invoice month "actual" (already happened) vs a future "projection"?
+// Year-aware so historical rows behave correctly: a whole past year is actual,
+// a whole future year is projection, and the current year splits at the
+// configurable cutover (see actualThruMonth — reads the live cutover day from
+// the in-memory app_settings cache). Drives the rule that invoice attachments
+// can only be added to actual months.
+export function isActualInvoiceMonth(year, monthIdx) {
+  const y = Number(year) || THIS_YEAR;
+  if (y < THIS_YEAR) return true;
+  if (y > THIS_YEAR) return false;
+  return monthIdx <= actualThruMonth(_appSettings?.invoiceActualCutoverDay);
+}
 
 // Open Bids → Service Description dropdown options. Mirrors the
 // beacon_v2.bid_service_enum values defined in 20260527120000_open_bids.sql.
@@ -686,10 +713,13 @@ function adaptOpenBid(r) {
 // app_settings is a singleton row. Null benchmark = "no target set" (chart
 // renders bars in a neutral color and hides the benchmark line).
 function adaptAppSettings(row) {
-  if (!row) return { monthlyInvoiceBenchmark: null, updatedAt: null };
+  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, updatedAt: null };
   const v = row.monthly_invoice_benchmark;
+  const dayRaw = row.invoice_actual_cutover_day;
+  const day = dayRaw == null ? 1 : Math.min(31, Math.max(1, Math.round(Number(dayRaw)) || 1));
   return {
     monthlyInvoiceBenchmark: v == null || v === "" ? null : Number(v),
+    invoiceActualCutoverDay: day,
     updatedAt: row.updated_at || null,
   };
 }
@@ -708,6 +738,30 @@ export async function updateMonthlyBenchmark(value) {
     .from("app_settings")
     .update({
       monthly_invoice_benchmark: numeric,
+      updated_at: new Date().toISOString(),
+      updated_by: me?.id || null,
+    })
+    .eq("singleton", true)
+    .select()
+    .single();
+  if (error) throw error;
+  _appSettings = adaptAppSettings(data);
+  return _appSettings;
+}
+
+// Admin-only writer for the Invoice Actual/Projection cutover day (1–31).
+// Mirrors updateMonthlyBenchmark: updates the singleton, refreshes the
+// in-memory _appSettings cache, returns the full adapted settings object.
+export async function updateInvoiceActualCutoverDay(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < 1 || n > 31) {
+    throw new Error("Cutover day must be between 1 and 31");
+  }
+  const me = getCurrentBeaconUser();
+  const { data, error } = await supabase
+    .from("app_settings")
+    .update({
+      invoice_actual_cutover_day: n,
       updated_at: new Date().toISOString(),
       updated_by: me?.id || null,
     })

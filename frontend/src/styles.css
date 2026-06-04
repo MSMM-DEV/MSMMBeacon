@@ -14232,3 +14232,63 @@ html, body { overflow-x: clip; }
   color: var(--text-soft);
 }
 .confirm-message strong { color: var(--text); }
+
+/* ============================================================
+   Invoice attachments — actual-months-only gate
+   ============================================================ */
+
+/* A projected month with no files shows a non-interactive, faded clip with a
+   "locked" tooltip — it never opens the upload modal. */
+.invoice-cell-clip.locked { cursor: not-allowed; }
+.invoice-table td.invoice-cell:hover .invoice-cell-clip.locked { opacity: 0.3; }
+.invoice-cell-clip.locked:hover {
+  opacity: 0.3;
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Notice shown inside InvoiceFilesModal in place of the upload UI when the
+   month is a projection (existing files stay listed + viewable above it). */
+.invoice-attach-locked {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+.invoice-attach-locked svg { flex: none; margin-top: 1px; color: var(--accent); }
+.invoice-attach-locked strong { display: block; color: var(--text); font-size: 13px; margin-bottom: 2px; }
+.invoice-attach-locked span { font-size: 12px; line-height: 1.5; }
+
+/* ============================================================
+   MSMM-row mirror indicators (read-only echo of the Project total
+   row's attach / paid state, shown on the parent/MSMM month cells)
+   ============================================================ */
+.msmm-mirror {
+  position: absolute;
+  top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  cursor: default;            /* read-only — the real controls live on the total row */
+  pointer-events: auto;       /* still hoverable so the tooltip shows */
+}
+.msmm-mirror.paid {
+  left: 2px;
+  color: var(--sage);
+  background: color-mix(in srgb, var(--sage) 16%, transparent);
+}
+.msmm-mirror.clip {
+  right: 2px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+[data-theme="dark"] .msmm-mirror.paid { background: color-mix(in srgb, var(--sage) 22%, transparent); }
+[data-theme="dark"] .msmm-mirror.clip { background: color-mix(in srgb, var(--accent) 22%, transparent); }
