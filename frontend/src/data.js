@@ -253,6 +253,15 @@ export function isActualInvoiceMonth(year, monthIdx) {
   );
 }
 
+// Feature flag: when true, invoice attachments (the per-cell paperclip + the
+// files modal's upload UI) are restricted to ACTUAL months only — projected
+// months can't take new uploads. When false (current policy, set by the
+// client), attachments are allowed on EVERY month, projected or actual.
+// The actual/projection coloring + cutover are unaffected by this flag; it
+// only gates uploads. Flip to true (and `isActualInvoiceMonth` does the rest)
+// to bring the lock back without touching the call sites.
+export const ATTACH_ONLY_ON_ACTUAL = false;
+
 // Open Bids → Service Description dropdown options. Mirrors the
 // beacon_v2.bid_service_enum values defined in 20260527120000_open_bids.sql.
 // Keep these two in sync — adding a new service requires both an ALTER TYPE

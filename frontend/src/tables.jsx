@@ -10,7 +10,7 @@ import {
   buildClientOrCompanyOptions,
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
-  MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth,
+  MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL,
   linkedProjectsFor,
   BID_SERVICE_OPTIONS,
 } from "./data.js";
@@ -2899,13 +2899,13 @@ export const InvoiceTable = ({
                             </button>
                           )}
                           {(() => {
-                            // Attachments are only allowed on actual (already-
-                            // happened) months. A projected month with no files
-                            // shows a locked, non-opening clip; if files already
-                            // exist (e.g. the row's year was edited forward) the
-                            // clip still opens so they stay viewable, but the
-                            // modal blocks new uploads (canAttach).
-                            const attachLocked = !isActualInvoiceMonth(r.year, i) && !hasFiles;
+                            // Attachment gating is controlled by the
+                            // ATTACH_ONLY_ON_ACTUAL flag (currently OFF, so
+                            // uploads are allowed on every month). When ON, a
+                            // projected month with no files shows a locked,
+                            // non-opening clip; rows that already have files
+                            // always open so they stay viewable.
+                            const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(r.year, i) && !hasFiles;
                             return (
                             <button
                               type="button"
@@ -3064,8 +3064,9 @@ export const InvoiceTable = ({
                             </button>
                           )}
                           {(() => {
-                            // Same actual-months-only rule as the sub clip above.
-                            const attachLocked = !isActualInvoiceMonth(r.year, i) && !hasFiles;
+                            // Same ATTACH_ONLY_ON_ACTUAL gate as the sub clip
+                            // above (currently OFF → always attachable).
+                            const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(r.year, i) && !hasFiles;
                             return (
                             <button
                               type="button"

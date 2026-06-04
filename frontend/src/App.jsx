@@ -25,7 +25,7 @@ import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
-  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, actualThruMonth,
+  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
@@ -4292,7 +4292,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               : undefined}
             canUntickPaid={isAdmin}
             onRequestUntick={requestPaidUntick}
-            canAttach={isActualInvoiceMonth(liveProjectRow.year || THIS_YEAR, monthIdx)}
+            canAttach={!ATTACH_ONLY_ON_ACTUAL || isActualInvoiceMonth(liveProjectRow.year || THIS_YEAR, monthIdx)}
             onClose={() => setFilesModal(null)}
             onChanged={refreshInvoiceArtifacts}
           />
