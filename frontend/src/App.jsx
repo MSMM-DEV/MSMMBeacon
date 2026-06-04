@@ -1455,6 +1455,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "may_paid","jun_paid","jul_paid","aug_paid",
     "sep_paid","oct_paid","nov_paid","dec_paid",
   ];
+  const INVOICE_INVNUM_MONTH_COLS = [
+    "jan_invoice_number","feb_invoice_number","mar_invoice_number","apr_invoice_number",
+    "may_invoice_number","jun_invoice_number","jul_invoice_number","aug_invoice_number",
+    "sep_invoice_number","oct_invoice_number","nov_invoice_number","dec_invoice_number",
+  ];
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
     setInvoice(rows => rows.map(r => {
@@ -1510,6 +1515,38 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             return { ...r, primePaid: next };
           }));
           showToast(`Mark ${paid ? "paid" : "pending"} failed: ${error.message}`, "x");
+        }
+      });
+  };
+
+  // Per-month invoice number on the prime/total row. One number per
+  // (project, month) — the invoice the month's project total was billed
+  // under. Mirrors updateInvoicePrimePaid: optimistic local patch of
+  // invoiceNumbers[monthIdx] then a scoped column update; rollback on error.
+  // Empty string normalizes to NULL so clearing the field clears the chip.
+  const updateInvoiceMonthInvoiceNumber = (id, monthIdx, value) => {
+    const col = INVOICE_INVNUM_MONTH_COLS[monthIdx];
+    if (!col) return;
+    const clean = (value == null || String(value).trim() === "") ? null : String(value).trim();
+    const existing = invoice.find(r => r.id === id);
+    const prevVal = existing?.invoiceNumbers?.[monthIdx] ?? null;
+    if (prevVal === clean) return;
+    setInvoice(rows => rows.map(r => {
+      if (r.id !== id) return r;
+      const next = [...(r.invoiceNumbers || Array(12).fill(null))];
+      next[monthIdx] = clean;
+      return { ...r, invoiceNumbers: next };
+    }));
+    supabase.from("anticipated_invoice").update({ [col]: clean }).eq("id", id)
+      .then(({ error }) => {
+        if (error) {
+          setInvoice(rows => rows.map(r => {
+            if (r.id !== id) return r;
+            const next = [...(r.invoiceNumbers || Array(12).fill(null))];
+            next[monthIdx] = prevVal;
+            return { ...r, invoiceNumbers: next };
+          }));
+          showToast(`Save invoice # failed: ${error.message}`, "x");
         }
       });
   };
@@ -1693,6 +1730,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           if (patch.discipline !== undefined) {
             out.discipline = patch.discipline || "";
           }
+          if (patch.sub_agreement !== undefined) out.subAgreement = !!patch.sub_agreement;
+          if (patch.w9 !== undefined) out.w9 = !!patch.w9;
+          if (patch.coi !== undefined) out.coi = !!patch.coi;
           return out;
         }));
         return next;
@@ -1714,6 +1754,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             if (patch.discipline !== undefined) {
               out.desc = patch.discipline || "";
             }
+            if (patch.sub_agreement !== undefined) out.subAgreement = !!patch.sub_agreement;
+            if (patch.w9 !== undefined) out.w9 = !!patch.w9;
+            if (patch.coi !== undefined) out.coi = !!patch.coi;
             return out;
           }),
         };
@@ -4110,6 +4153,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             subInvoiceId={isSub ? liveSub?.subInvoiceIds?.[monthIdx] : undefined}
             companyId={isSub ? liveSub?.companyId : undefined}
             companyName={isSub ? liveSub?.companyName : undefined}
+            invoiceNumber={!isSub ? (liveProjectRow?.invoiceNumbers?.[monthIdx] || "") : undefined}
+            onSaveInvoiceNumber={!isSub
+              ? (val) => updateInvoiceMonthInvoiceNumber(liveProjectRow.id, monthIdx, val)
+              : undefined}
             onClose={() => setFilesModal(null)}
             onChanged={refreshInvoiceArtifacts}
           />

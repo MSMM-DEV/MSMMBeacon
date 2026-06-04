@@ -448,6 +448,11 @@ const adaptSubsCosted = (arr) =>
       desc: s.discipline || "",
       amt: s.amount || 0,
       kind: s.kind || "sub",
+      // Per-sub compliance docs — carried through so they survive the
+      // adapted-slice → reloadInvoiceArtifacts rebuild (not just first load).
+      subAgreement: !!s.sub_agreement,
+      w9: !!s.w9,
+      coi: !!s.coi,
     }));
 
 // Multi-PM — every join table can carry any number of PMs per project. Preserve
@@ -596,6 +601,15 @@ function adaptInvoice(r) {
       r.may_paid, r.jun_paid, r.jul_paid, r.aug_paid,
       r.sep_paid, r.oct_paid, r.nov_paid, r.dec_paid,
     ].map(v => !!v),
+    // Per-month invoice numbers for the prime/total "Project total" row.
+    // One number per (project, month) — the invoice the month's total was
+    // billed under (jan_invoice_number..dec_invoice_number). NULL = none yet.
+    // Surfaced as a chip on each total cell; edited from the prime files modal.
+    invoiceNumbers: [
+      r.jan_invoice_number, r.feb_invoice_number, r.mar_invoice_number, r.apr_invoice_number,
+      r.may_invoice_number, r.jun_invoice_number, r.jul_invoice_number, r.aug_invoice_number,
+      r.sep_invoice_number, r.oct_invoice_number, r.nov_invoice_number, r.dec_invoice_number,
+    ].map(v => (v == null || v === "") ? null : String(v)),
     year: r.year,
     // NULL = use auto-calc; numeric = user has frozen the value.
     ytdActualOverride:   r.ytd_actual_override   ?? null,
@@ -773,7 +787,7 @@ export async function loadBeacon() {
     pget(supabase.from("companies").select("*").order("name"), "companies"),
     pget(
       supabase.from("projects")
-        .select("*, subs:project_subs(ord,company_id,discipline,amount,kind), pms:project_pms(user_id), stage:stage_id(name)")
+        .select("*, subs:project_subs(*), pms:project_pms(user_id), stage:stage_id(name)")
         .order("year", { ascending: false })
         .order("project_name"),
       "projects"
@@ -1026,6 +1040,9 @@ export async function loadBeacon() {
         companyName: company?.name || "Unknown company",
         contractAmount: s.amount || 0,
         discipline: s.discipline || "",
+        subAgreement: !!s.sub_agreement,
+        w9: !!s.w9,
+        coi: !!s.coi,
         amounts: arrays.amounts,
         files: arrays.files,
         subInvoiceIds: arrays.subInvoiceIds,
@@ -1340,7 +1357,7 @@ export async function addProjectSub({ projectId, companyId, discipline, amount, 
 // metadata fields users can edit inline — amount and discipline. Other
 // columns (project_id / company_id / kind / ord) are immutable; to swap the
 // linked company on a row, remove + re-add.
-export async function updateProjectSub({ projectId, companyId, kind = "sub", amount, discipline }) {
+export async function updateProjectSub({ projectId, companyId, kind = "sub", amount, discipline, sub_agreement, w9, coi }) {
   const patch = {};
   if (amount !== undefined) {
     patch.amount = (amount === "" || amount == null) ? null : Number(amount);
@@ -1348,6 +1365,10 @@ export async function updateProjectSub({ projectId, companyId, kind = "sub", amo
   if (discipline !== undefined) {
     patch.discipline = (discipline === "" || discipline == null) ? null : String(discipline);
   }
+  // Per-sub compliance-document flags (sub_agreement / w9 / coi).
+  if (sub_agreement !== undefined) patch.sub_agreement = !!sub_agreement;
+  if (w9 !== undefined) patch.w9 = !!w9;
+  if (coi !== undefined) patch.coi = !!coi;
   if (Object.keys(patch).length === 0) return null;
   const { error } = await supabase
     .from("project_subs")
@@ -1654,6 +1675,9 @@ export async function reloadInvoiceArtifacts(projects, companies) {
         companyName: company?.name || "Unknown company",
         contractAmount: s.amt || s.amount || 0,
         discipline: s.desc || s.discipline || "",
+        subAgreement: !!(s.subAgreement ?? s.sub_agreement),
+        w9: !!s.w9,
+        coi: !!s.coi,
         amounts, files, subInvoiceIds, paid, paidAt,
       };
     });

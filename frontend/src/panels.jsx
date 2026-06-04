@@ -1282,6 +1282,11 @@ export const InvoiceFilesModal = ({
   partyKind,
   partyCompanyId,
   partyInvoiceId,
+  // Prime/total month mode only: the invoice number this month's project
+  // total is billed under, plus its persist callback. One number per
+  // (project, month) — see updateInvoiceMonthInvoiceNumber in App.jsx.
+  invoiceNumber = "",
+  onSaveInvoiceNumber,
   onClose, onChanged,
 }) => {
   const isParty = !!partyKind;
@@ -1301,6 +1306,21 @@ export const InvoiceFilesModal = ({
   // happens. Synced back to the parent via onChanged after the DB write.
   const [paid, setPaid] = useState(!!initialPaid);
   const [paidAt, setPaidAt] = useState(initialPaidAt);
+  // Invoice number (prime/total month mode only). Local draft; persisted on
+  // blur and again right before an upload so typing-then-uploading never
+  // drops the number. Compares against the latest prop so re-saves are no-ops.
+  const showInvNum = !isParty && kind === "prime";
+  const [invNum, setInvNum] = useState(invoiceNumber || "");
+  const flushInvNum = async () => {
+    if (!showInvNum || !onSaveInvoiceNumber) return;
+    const clean = invNum.trim();
+    if (clean === (invoiceNumber || "").trim()) return;
+    try {
+      await onSaveInvoiceNumber(clean);
+    } catch (e) {
+      setError(e?.message || "Couldn't save invoice number");
+    }
+  };
 
   // Append picked files to the staged list, deduping by (name, size,
   // lastModified) so re-picking the same file is a no-op. FileList → Array
@@ -1448,6 +1468,9 @@ export const InvoiceFilesModal = ({
     if (busy) return;
     if (picked.length === 0) { setError("Choose at least one file first"); return; }
     setBusy(true); setError("");
+    // Persist the invoice number first so attaching a PDF without blurring the
+    // field still captures the number the user just typed.
+    await flushInvNum();
     // Resolve a parent sub_invoice row once (month mode only). Created on
     // demand so the user doesn't have to type an amount before attaching a PDF.
     let parentSubInvoiceId = subInvoiceId;
@@ -1535,6 +1558,28 @@ export const InvoiceFilesModal = ({
         </div>
 
         <div className="modal-body" style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+          {showInvNum && (
+            <div className={"invoice-invnum-field" + (invNum.trim() ? " has-value" : "")}>
+              <label className="invoice-invnum-label" htmlFor="prime-invnum">
+                <Icon name="hash" size={12}/>
+                Invoice number
+              </label>
+              <input
+                id="prime-invnum"
+                className="input invoice-invnum-input mono"
+                value={invNum}
+                onChange={(e) => setInvNum(e.target.value)}
+                onBlur={flushInvNum}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
+                disabled={busy}
+                placeholder="e.g. INV-2026-014"
+                autoComplete="off"
+              />
+              <div className="invoice-invnum-hint">
+                The number this {monthLabel} project total is billed under — shown as a chip on the total cell.
+              </div>
+            </div>
+          )}
           {!isParty && kind === "sub" && (
             <label className={"invoice-paid-toggle-row" + (paid ? " paid" : "")}>
               <input

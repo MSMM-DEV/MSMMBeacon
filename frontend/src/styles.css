@@ -632,6 +632,85 @@ html, body { overflow-x: clip; }
   border-radius: 3px;
 }
 
+/* Per-sub compliance-document chips — Sub-Agreement / W-9 / COI toggles under
+   each sub's name in the Invoice expand view. Designed as little "compliance
+   stamps": a dashed pending slot when unreceived, an accent-filled stamp with
+   a revealed tick when received. The warm accent family keeps them clearly
+   distinct from the sage paid-toggle and the blue PRIME tag, so the three
+   signals on a sub row never blur together. */
+.sub-docs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+.sub-doc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.45;
+  white-space: nowrap;
+  color: var(--text-soft);
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--text-soft) 50%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease,
+              box-shadow 150ms ease, transform 90ms ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.sub-doc-chip:hover {
+  color: var(--accent-ink);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-softer) 45%, transparent);
+}
+.sub-doc-chip:active { transform: scale(0.93); }
+.sub-doc-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+/* Tick is collapsed when the doc is missing and unrolls when received —
+   a small "stamped" reveal that also nudges the label right. */
+.sub-doc-tick {
+  display: inline-flex;
+  align-items: center;
+  width: 0;
+  margin-right: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: width 150ms ease, opacity 150ms ease, transform 150ms ease,
+              margin 150ms ease;
+}
+.sub-doc-chip.on {
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+              0 1px 1px color-mix(in srgb, var(--accent-ink) 12%, transparent);
+}
+.sub-doc-chip.on .sub-doc-tick {
+  width: 11px;
+  margin-right: 3px;
+  opacity: 1;
+  transform: scale(1);
+  color: var(--accent-ink);
+}
+.sub-doc-chip.on:hover {
+  background: color-mix(in srgb, var(--accent-softer) 86%, var(--accent));
+}
+[data-theme="dark"] .sub-doc-chip {
+  border-color: color-mix(in srgb, var(--text-soft) 62%, transparent);
+}
+
 /* "Project total" row sits at the bottom of an expanded Invoice row,
    below the MSMM line + each sub-row + the Add-sub action. Tinted in
    blue (rather than the accent-orange used elsewhere) so it reads
@@ -1725,6 +1804,38 @@ html, body { overflow-x: clip; }
   /* Prevent scroll from bleeding into the page once the user reaches the
      top/bottom of the invoice — keeps momentum scrolls predictable. */
   overscroll-behavior: contain;
+}
+
+/* Full-screen invoice table — a themed fixed overlay covering the viewport.
+   z-index 40 sits ABOVE all app chrome (sticky topbar 20; the tab rail is
+   non-positioned normal flow) but BELOW every overlay layer — modal scrim
+   (50), modal/drawer (60–80), the toolbar's portaled filter popovers
+   (.menu, 70), and toasts (90–100). That ordering is deliberate: clicking
+   "New invoice row" / a filter chip while maximized must surface its modal /
+   popover ON TOP of the maximized table, not behind it. No ancestor sets
+   transform/filter/contain, so `fixed` anchors to the viewport. The inner
+   .invoice-wrap flexes to fill the remaining height. */
+.tablewrap.is-maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.tablewrap.is-maximized .toolbar { flex: 0 0 auto; }
+.tablewrap.is-maximized .invoice-top-scroll { flex: 0 0 auto; }
+.tablewrap.is-maximized .invoice-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .invoice-top-scroll,
 .table-top-scroll {
@@ -5837,6 +5948,84 @@ html, body { overflow-x: clip; }
 }
 .invoice-cell-clip-count {
   letter-spacing: 0;
+}
+
+/* Per-month invoice number chip — flows below the value on the Project total
+   row, centered. Persistent (always shown when a number exists), neutral by
+   default so it reads as INFO distinct from the sage paid-tick and the accent
+   paperclip ACTIONS; warms to accent on hover to signal "click to edit". */
+.invoice-cell-invnum {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  width: max-content;
+  max-width: calc(100% - 4px);
+  margin: 3px auto 1px;
+  padding: 0 5px;
+  height: 15px;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-soft);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.invoice-cell-invnum-hash {
+  opacity: 0.5;
+  flex: none;
+}
+.invoice-cell-invnum-val {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invoice-cell-invnum:hover {
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Invoice-number field in the prime files modal — a soft labeled card that
+   warms to accent once a number is captured. */
+.invoice-invnum-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.invoice-invnum-field.has-value {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--accent-softer);
+}
+.invoice-invnum-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.invoice-invnum-input {
+  width: 100%;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+.invoice-invnum-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-soft);
 }
 
 /* Firm-name paperclip — sits inline next to the project name (parent row,

@@ -45,6 +45,9 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     thumbsDown: <><path d="M17 13V4h3a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-3Zm0 0v3a3 3 0 0 1-3 3l-1-4v-2H7a2 2 0 0 1-2-2l2-7a2 2 0 0 1 2-1h8"/></>,
     pin:        <><path d="M12 21s7-7.5 7-13a7 7 0 0 0-14 0c0 5.5 7 13 7 13Z"/><circle cx="12" cy="8" r="2.5"/></>,
     refresh:    <><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></>,
+    maximize:   <><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></>,
+    minimize:   <><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></>,
+    hash:       <><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></>,
   };
   const d = paths[name];
   return (

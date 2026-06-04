@@ -1896,6 +1896,15 @@ export const ClosedTable = ({
 // columns, month-by-month cells, and a totals row. Column reorder / resize /
 // snapshot are intentionally skipped here. We still wire the Year chip so
 // users can filter this spreadsheet by year in the same UX pattern.
+// Per-sub compliance documents, rendered as toggle chips on each sub row in
+// the Invoice expand view. `key` is the matrix-entry boolean the chip reads;
+// `dbKey` is the project_subs column the toggle patches through onUpdateSubMeta.
+const SUB_DOCS = [
+  { key: "subAgreement", dbKey: "sub_agreement", label: "Sub-Agreement", full: "Subcontractor Agreement" },
+  { key: "w9",           dbKey: "w9",            label: "W-9",           full: "W-9 Tax Form" },
+  { key: "coi",          dbKey: "coi",           label: "COI",           full: "Certificate of Insurance" },
+];
+
 export const InvoiceTable = ({
   tab, rows, updateInvoice, updateInvoiceMsmm, updateRow = _noopUpdate,
   onOpenDrawer, onAlert, flashId,
@@ -2116,6 +2125,29 @@ export const InvoiceTable = ({
     return next;
   });
 
+  // "Expand w/ subs" — opens only the projects whose expanded panel would
+  // actually show a firm breakdown, and collapses the rest of the visible
+  // rows so the result is exactly "the ones with subs/primes are open".
+  // rowSubList mirrors the subList logic in the row renderer: a Prime-role
+  // row shows its sub firms; a Sub-role row shows the upstream prime plus any
+  // further subs — so its breakdown is the whole entry list.
+  const rowSubList = (r) => {
+    const allEntries = subInvoices?.get(r.sourceId) || [];
+    return (r.role || "Prime") === "Prime"
+      ? allEntries.filter(s => (s.kind || "sub") === "sub")
+      : allEntries;
+  };
+  const idsWithSubs    = searchedRows.filter(r => rowSubList(r).length > 0).map(r => r.id);
+  const hasAnySubs     = idsWithSubs.length > 0;
+  const expandWithSubs = () => setExpandedIds(prev => {
+    const withSubs = new Set(idsWithSubs);
+    const next = new Set(prev);
+    for (const id of visibleIds) {
+      if (withSubs.has(id)) next.add(id); else next.delete(id);
+    }
+    return next;
+  });
+
   // Tiny header helper — wraps a sortable <th>'s content with the column's
   // active sort state. Used for the 5 sortable columns; non-sortable
   // columns (Type, Remaining Jan 1, months, totals) keep their plain
@@ -2148,6 +2180,22 @@ export const InvoiceTable = ({
   const invoiceTableRef = useRef(null);
   const [invoiceScrollWidth, setInvoiceScrollWidth] = useState(1280);
 
+  // Full-screen toggle: a CSS fixed-overlay (NOT the native Fullscreen API,
+  // which doesn't work on non-video elements in iOS Safari). While open we
+  // lock body scroll and let Escape close it.
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e) => { if (e.key === "Escape") setMaximized(false); };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [maximized]);
+
   useEffect(() => {
     const wrap = invoiceWrapRef.current;
     const top = invoiceTopScrollRef.current;
@@ -2174,7 +2222,7 @@ export const InvoiceTable = ({
       ro?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [searchedRows.length, expandedIds.size]);
+  }, [searchedRows.length, expandedIds.size, maximized]);
 
   const syncInvoiceScroll = (source) => {
     const wrap = invoiceWrapRef.current;
@@ -2190,7 +2238,7 @@ export const InvoiceTable = ({
   const onInvoiceBodyScroll = () => syncInvoiceScroll("body");
 
   return (
-    <div className="tablewrap">
+    <div className={"tablewrap" + (maximized ? " is-maximized" : "")}>
       <div className="toolbar">
         <div className={"chrome-search" + (hasSearch ? " active" : "")}>
           <Icon name="search" size={13}/>
@@ -2255,6 +2303,16 @@ export const InvoiceTable = ({
         <button
           type="button"
           className="tool-chip"
+          onClick={expandWithSubs}
+          disabled={!hasAnySubs}
+          title="Expand only the projects that have a sub / prime breakdown"
+        >
+          <Icon name="link" size={13}/>
+          Expand w/ subs
+        </button>
+        <button
+          type="button"
+          className="tool-chip"
           onClick={collapseAll}
           disabled={noneExpanded}
           title="Collapse every project's sub / firm breakdown"
@@ -2267,6 +2325,15 @@ export const InvoiceTable = ({
           Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[TODAY_MONTH]} as Actual</strong> · {MONTHS[TODAY_MONTH+1] || "Jan"}–Dec as Projection · switches on the 1st
         </span>
         <div className="ml-auto" style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className={"btn sm" + (maximized ? " primary" : "")}
+            onClick={() => setMaximized(m => !m)}
+            title={maximized ? "Exit full screen (Esc)" : "Expand the invoice table to full screen"}
+          >
+            <Icon name={maximized ? "minimize" : "maximize"} size={13}/>
+            {maximized ? "Exit" : "Fullscreen"}
+          </button>
           <button className="btn sm"><Icon name="export" size={13}/>Export</button>
           <button
             type="button"
@@ -2666,6 +2733,38 @@ export const InvoiceTable = ({
                               ? <span>{v}</span>
                               : <span className="invoice-sub-discipline-empty">+ discipline</span>}/>
                         </span>
+                        {entryKind === "sub" && (
+                          <span className="sub-docs" role="group"
+                                aria-label={`Compliance documents for ${s.companyName}`}>
+                            {SUB_DOCS.map(doc => {
+                              const on = !!s[doc.key];
+                              return (
+                                <button
+                                  key={doc.key}
+                                  type="button"
+                                  className={"sub-doc-chip" + (on ? " on" : "")}
+                                  aria-pressed={on}
+                                  title={`${doc.full} — ${on
+                                    ? "received (click to clear)"
+                                    : "not received (click to mark received)"}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateSubMeta?.({
+                                      projectId: r.sourceId,
+                                      companyId: s.companyId,
+                                      kind: entryKind,
+                                      patch: { [doc.dbKey]: !on },
+                                    });
+                                  }}>
+                                  <span className="sub-doc-tick" aria-hidden="true">
+                                    <Icon name="check" size={9}/>
+                                  </span>
+                                  {doc.label}
+                                </button>
+                              );
+                            })}
+                          </span>
+                        )}
                       </td>
                       {/* Role column — empty on sub-rows */}
                       <td className="subtle"><span className="empty-cell">—</span></td>
@@ -2835,6 +2934,8 @@ export const InvoiceTable = ({
                         const isPaid   = !!(r.primePaid && r.primePaid[i]);
                         const hasAmount = v != null && v !== 0;
                         const showPaidToggle = hasAmount || isPaid;
+                        // Per-month invoice number for this project total cell.
+                        const invNum = (r.invoiceNumbers && r.invoiceNumbers[i]) || null;
                         return (
                         <td key={i}
                             className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
@@ -2870,6 +2971,19 @@ export const InvoiceTable = ({
                             <Icon name="link" size={11}/>
                             {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
                           </button>
+                          {invNum && (
+                            <button
+                              type="button"
+                              className="invoice-cell-invnum"
+                              title={`Invoice #${invNum} · click to edit`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                              }}>
+                              <span className="invoice-cell-invnum-hash">#</span>
+                              <span className="invoice-cell-invnum-val">{invNum}</span>
+                            </button>
+                          )}
                         </td>
                         );
                       })}
