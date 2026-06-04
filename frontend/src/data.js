@@ -483,11 +483,13 @@ const adaptSubsCosted = (arr) =>
       desc: s.discipline || "",
       amt: s.amount || 0,
       kind: s.kind || "sub",
-      // Per-sub compliance docs — carried through so they survive the
-      // adapted-slice → reloadInvoiceArtifacts rebuild (not just first load).
+      // Per-sub compliance docs + Remaining-Jan-1 override — carried through so
+      // they survive the adapted-slice → reloadInvoiceArtifacts rebuild (not
+      // just first load).
       subAgreement: !!s.sub_agreement,
       w9: !!s.w9,
       coi: !!s.coi,
+      remaining: s.remaining_to_bill_year_start ?? null,
     }));
 
 // Multi-PM — every join table can carry any number of PMs per project. Preserve
@@ -622,6 +624,8 @@ function adaptInvoice(r) {
     ].map(v => v ?? null),
     type: r.type || "ENG",
     remainingStart: r.msmm_remaining_to_bill_year_start || 0,
+    // Project-total "Remaining Jan 1" override (NULL = fall back to Total CV).
+    totalRemainingStart: r.total_remaining_to_bill_year_start ?? null,
     values: [
       r.jan_amount, r.feb_amount, r.mar_amount, r.apr_amount,
       r.may_amount, r.jun_amount, r.jul_amount, r.aug_amount,
@@ -1111,6 +1115,8 @@ export async function loadBeacon() {
         companyId: s.company_id,
         companyName: company?.name || "Unknown company",
         contractAmount: s.amount || 0,
+        // Per-sub "Remaining Jan 1" override (NULL = fall back to contract).
+        remainingStart: s.remaining_to_bill_year_start ?? null,
         discipline: s.discipline || "",
         subAgreement: !!s.sub_agreement,
         w9: !!s.w9,
@@ -1142,6 +1148,7 @@ export async function loadBeacon() {
           companyId: p.prime_company_id,
           companyName: primeCompany?.name || "Unknown prime",
           contractAmount: 0, // unknown — no project_subs row to read amount from
+          remainingStart: null,
           discipline: "",
           amounts: arrays.amounts,
           files: arrays.files,
@@ -1516,7 +1523,7 @@ export async function addCompany({ name, contact, email, phone, address, notes }
 // metadata fields users can edit inline — amount and discipline. Other
 // columns (project_id / company_id / kind / ord) are immutable; to swap the
 // linked company on a row, remove + re-add.
-export async function updateProjectSub({ projectId, companyId, kind = "sub", amount, discipline, sub_agreement, w9, coi }) {
+export async function updateProjectSub({ projectId, companyId, kind = "sub", amount, discipline, sub_agreement, w9, coi, remaining_to_bill_year_start }) {
   const patch = {};
   if (amount !== undefined) {
     patch.amount = (amount === "" || amount == null) ? null : Number(amount);
@@ -1528,6 +1535,12 @@ export async function updateProjectSub({ projectId, companyId, kind = "sub", amo
   if (sub_agreement !== undefined) patch.sub_agreement = !!sub_agreement;
   if (w9 !== undefined) patch.w9 = !!w9;
   if (coi !== undefined) patch.coi = !!coi;
+  // Per-sub "Remaining to bill at year start" (Invoice expand · Remaining Jan 1).
+  if (remaining_to_bill_year_start !== undefined) {
+    patch.remaining_to_bill_year_start =
+      (remaining_to_bill_year_start === "" || remaining_to_bill_year_start == null)
+        ? null : Number(remaining_to_bill_year_start);
+  }
   if (Object.keys(patch).length === 0) return null;
   const { error } = await supabase
     .from("project_subs")
@@ -1835,6 +1848,7 @@ export async function reloadInvoiceArtifacts(projects, companies) {
         companyId: cId,
         companyName: company?.name || "Unknown company",
         contractAmount: s.amt || s.amount || 0,
+        remainingStart: s.remaining ?? s.remaining_to_bill_year_start ?? null,
         discipline: s.desc || s.discipline || "",
         subAgreement: !!(s.subAgreement ?? s.sub_agreement),
         w9: !!s.w9,

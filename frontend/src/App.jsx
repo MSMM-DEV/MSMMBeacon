@@ -1637,6 +1637,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     msmmAmount:          "msmm_amount",
     type:                "type",
     remainingStart:      "msmm_remaining_to_bill_year_start",
+    totalRemainingStart: "total_remaining_to_bill_year_start",
     year:                "year",
     notes:               "notes",
     description:         "description",
@@ -1820,6 +1821,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           if (patch.sub_agreement !== undefined) out.subAgreement = !!patch.sub_agreement;
           if (patch.w9 !== undefined) out.w9 = !!patch.w9;
           if (patch.coi !== undefined) out.coi = !!patch.coi;
+          if (patch.remaining_to_bill_year_start !== undefined) {
+            out.remainingStart = (patch.remaining_to_bill_year_start === "" || patch.remaining_to_bill_year_start == null)
+              ? null : Number(patch.remaining_to_bill_year_start);
+          }
           return out;
         }));
         return next;
@@ -1844,6 +1849,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             if (patch.sub_agreement !== undefined) out.subAgreement = !!patch.sub_agreement;
             if (patch.w9 !== undefined) out.w9 = !!patch.w9;
             if (patch.coi !== undefined) out.coi = !!patch.coi;
+            if (patch.remaining_to_bill_year_start !== undefined) {
+              out.remaining = (patch.remaining_to_bill_year_start === "" || patch.remaining_to_bill_year_start == null)
+                ? null : Number(patch.remaining_to_bill_year_start);
+            }
             return out;
           }),
         };

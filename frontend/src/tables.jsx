@@ -1987,12 +1987,15 @@ export const InvoiceTable = ({
   const isYtdOverride    = (r) => r.ytdActualOverride   != null;
   const isRfOverride     = (r) => r.rollforwardOverride != null;
   // Sub / prime / project-total YTD + RF — same semantics scoped to each
-  // line's own monthly amounts. "Remaining" baseline = the row's contract
-  // amount (subs/primes don't carry a separate remainingStart).
+  // line's own monthly amounts. "Remaining Jan 1" baseline = the row's own
+  // editable remainingStart override when set, else falls back to its contract
+  // amount (subs) / Total CV (project total) — matching the prior behavior.
   const subYtdAuto       = (s) => (s.amounts || []).reduce((a,b) => a + (b || 0), 0);
-  const subRollforward   = (s) => (Number(s.contractAmount) || 0) - subYtdAuto(s);
+  const subRemaining     = (s) => s.remainingStart != null ? Number(s.remainingStart) : (Number(s.contractAmount) || 0);
+  const subRollforward   = (s) => subRemaining(s) - subYtdAuto(s);
   const projectYtdAuto   = (r) => (r.values || []).reduce((a,b) => a + (b || 0), 0);
-  const projectRollforward = (r) => (Number(r.amount) || 0) - projectYtdAuto(r);
+  const projectRemaining = (r) => r.totalRemainingStart != null ? Number(r.totalRemainingStart) : (Number(r.amount) || 0);
+  const projectRollforward = (r) => projectRemaining(r) - projectYtdAuto(r);
   // v2 collapsed source_awarded_id + source_potential_id into a single
   // source_project_id (exposed as r.sourceId). orangeSourceIds is a Set of
   // Potential project ids tagged probability='Orange'; only those match.
@@ -2845,7 +2848,19 @@ export const InvoiceTable = ({
                           })}
                           format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
-                      <td className="subtle"><span className="empty-cell">—</span></td>
+                      {/* Remaining Jan 1 (sub) — editable starting balance;
+                          NULL falls back to the sub's contract amount. */}
+                      <td className="mono"
+                          title="Remaining to bill at Jan 1 for this sub. Defaults to the contract amount; edit if some was billed in a prior year. Clear to reset.">
+                        <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
+                          onChange={v => onUpdateSubMeta?.({
+                            projectId: r.sourceId,
+                            companyId: s.companyId,
+                            kind: entryKind,
+                            patch: { remaining_to_bill_year_start: v },
+                          })}
+                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                      </td>
                       {s.amounts.map((amt, i) => {
                         const filesForCell = s.files[i] || [];
                         const hasFiles = filesForCell.length > 0;
@@ -3008,7 +3023,14 @@ export const InvoiceTable = ({
                           onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
-                      <td/>
+                      {/* Remaining Jan 1 (project total) — editable starting
+                          balance; NULL falls back to Total Contract Value. */}
+                      <td className="mono"
+                          title="Remaining to bill at Jan 1 for the whole project. Defaults to Total Contract Value; edit if some was billed in a prior year. Clear to reset.">
+                        <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"
+                          onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
+                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                      </td>
                       {r.values.map((v, i) => {
                         const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
                         const hasFiles = filesForCell.length > 0;
