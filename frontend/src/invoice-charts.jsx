@@ -73,6 +73,7 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
             monthlyBenchmark={monthlyBenchmark}
             view={chartView}
             onViewChange={setChartView}
+            actualThru={actualThru}
           />
 
           {pmCollapsed ? (
@@ -118,6 +119,7 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
                   invoice={invoicePm}
                   orangeSourceIds={orangeSourceIds}
                   view={chartView}
+                  actualThru={actualThru}
                   /* No onViewChange — PM doesn't render the toggle UI. PM
                      rows have no Orange anyway (Orange is an ENG-side
                      billing concept), so view choice is a no-op for PM
@@ -168,7 +170,7 @@ const niceChartMax = (peak) => {
   return nice * mag;
 };
 
-const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange }) => {
+const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange, actualThru = TODAY_MONTH }) => {
   // Two parallel 12-month totals:
   //   totalsBase — sum of invoices NOT sourced from an Orange potential row
   //                (formally awarded work — the "secured" baseline)
