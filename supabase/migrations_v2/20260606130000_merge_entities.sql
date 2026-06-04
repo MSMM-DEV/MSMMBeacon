@@ -161,10 +161,16 @@ begin
      where prime_company_id = v_loser;
     get diagnostics n = row_count; c_projects := c_projects + n;
 
-    update beacon_v2.invoice_party_files
-       set party_company_id = p_survivor
-     where party_company_id = v_loser;
-    get diagnostics n = row_count; c_party := c_party + n;
+    -- invoice_party_files (20260514120000) may not be applied on every DB.
+    -- Guard with to_regclass + dynamic SQL so this function still CREATEs and
+    -- runs where the table is absent (CREATE FUNCTION validates static table
+    -- refs but not strings passed to EXECUTE). Once the table exists, the
+    -- repoint runs normally.
+    if to_regclass('beacon_v2.invoice_party_files') is not null then
+      execute 'update beacon_v2.invoice_party_files set party_company_id = $1 where party_company_id = $2'
+        using p_survivor, v_loser;
+      get diagnostics n = row_count; c_party := c_party + n;
+    end if;
 
     update beacon_v2.leads
        set prime_company_id = p_survivor

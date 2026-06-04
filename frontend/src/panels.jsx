@@ -2142,7 +2142,6 @@ export const MergeModal = ({
             {entities.map(e => {
               const isSurv = e.id === survivorId;
               const s = summaries.get(e.id);
-              const lockedRow = survivorLocked && e.isMsmm;
               const disabled = busy || (survivorLocked && !e.isMsmm);
               return (
                 <button
