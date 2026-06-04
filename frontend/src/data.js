@@ -614,6 +614,11 @@ function adaptInvoice(r) {
     // NULL = use auto-calc; numeric = user has frozen the value.
     ytdActualOverride:   r.ytd_actual_override   ?? null,
     rollforwardOverride: r.rollforward_override  ?? null,
+    // Free-text billing context, surfaced as the two chips under the project
+    // name in InvoiceTable. "" = empty (chip renders ghost). Persisted via the
+    // INVOICE_COL_MAP whitelist in App.jsx's updateInvoice.
+    notes:       r.notes || "",
+    description: r.description || "",
   };
 }
 

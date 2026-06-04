@@ -10,7 +10,7 @@ import {
 import { InvoiceCharts } from "./invoice-charts.jsx";
 import { SubsReceivablesPanel } from "./quadsheet-receivables.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
-import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal, MergeModal } from "./panels.jsx";
+import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal, MergeModal, ConfirmDialog } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
@@ -908,6 +908,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // after a successful merge so DirectoryTable drops its (now stale) selection.
   const [mergeModal, setMergeModal] = useState(null);
   const [mergeResetKey, setMergeResetKey] = useState(0);
+  // Generic confirm prompt — { title, message, confirmLabel, tone, icon, onConfirm } or null.
+  // Currently drives the "unmark a paid invoice" gate; reusable for other guards.
+  const [confirmState, setConfirmState] = useState(null);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -1530,27 +1533,57 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // (jan_paid..dec_paid) on anticipated_invoice — the prime analogue of the
   // sub paid toggle. Optimistic local flip so the Project total cell turns
   // green immediately; reverts the row on a write failure.
+  // A paid invoice locks: marking paid (paid=true) is always allowed; unmarking
+  // (paid=false) is admin-only and requires a confirmation prompt. Non-admins
+  // get a "locked" toast instead. See requestPaidUntick.
   const updateInvoicePrimePaid = (id, monthIdx, paid) => {
     const col = INVOICE_PAID_MONTH_COLS[monthIdx];
     if (!col) return;
-    setInvoice(rows => rows.map(r => {
-      if (r.id !== id) return r;
-      const next = [...(r.primePaid || Array(12).fill(false))];
-      next[monthIdx] = paid;
-      return { ...r, primePaid: next };
-    }));
-    supabase.from("anticipated_invoice").update({ [col]: paid }).eq("id", id)
-      .then(({ error }) => {
-        if (error) {
-          setInvoice(rows => rows.map(r => {
-            if (r.id !== id) return r;
-            const next = [...(r.primePaid || Array(12).fill(false))];
-            next[monthIdx] = !paid;
-            return { ...r, primePaid: next };
-          }));
-          showToast(`Mark ${paid ? "paid" : "pending"} failed: ${error.message}`, "x");
-        }
-      });
+    const apply = () => {
+      setInvoice(rows => rows.map(r => {
+        if (r.id !== id) return r;
+        const next = [...(r.primePaid || Array(12).fill(false))];
+        next[monthIdx] = paid;
+        return { ...r, primePaid: next };
+      }));
+      supabase.from("anticipated_invoice").update({ [col]: paid }).eq("id", id)
+        .then(({ error }) => {
+          if (error) {
+            setInvoice(rows => rows.map(r => {
+              if (r.id !== id) return r;
+              const next = [...(r.primePaid || Array(12).fill(false))];
+              next[monthIdx] = !paid;
+              return { ...r, primePaid: next };
+            }));
+            showToast(`Mark ${paid ? "paid" : "pending"} failed: ${error.message}`, "x");
+          }
+        });
+    };
+    if (!paid) {
+      const row = invoice.find(r => r.id === id);
+      requestPaidUntick({ label: `${row?.name || "Project total"} · ${MONTHS[monthIdx]}`, onConfirm: apply });
+      return;
+    }
+    apply();
+  };
+
+  // Shared gate for un-ticking a paid invoice (prime total, sub line, or the
+  // files modal). Locked for non-admins; admins confirm before it applies.
+  const requestPaidUntick = ({ label, onConfirm }) => {
+    if (!isAdmin) {
+      showToast("This invoice is marked paid and locked — only an administrator can unmark it.", "lock");
+      return;
+    }
+    setConfirmState({
+      title: "Unmark this invoice as paid?",
+      message: label
+        ? `“${label}” is marked paid and locked. Are you sure you want to untick it?`
+        : "Are you sure you want to untick this?",
+      confirmLabel: "Untick",
+      tone: "danger",
+      icon: "lock",
+      onConfirm,
+    });
   };
 
   // Per-month invoice number on the prime/total row. One number per
@@ -1598,6 +1631,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     type:                "type",
     remainingStart:      "msmm_remaining_to_bill_year_start",
     year:                "year",
+    notes:               "notes",
+    description:         "description",
   };
   const updateInvoice = (id, patch) => {
     const existing = invoice.find(r => r.id === id);
@@ -1693,7 +1728,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // sub_invoice row exists first (so users can mark a cell paid even before
   // typing an amount), then patches the matrix locally so the cell flips
   // green immediately without a full reload.
-  const setSubInvoicePaidStatus = async ({ projectId, companyId, monthIdx, paid, kind = "sub" }) => {
+  // Same lock as the prime row: un-ticking a paid sub line is admin-only +
+  // confirmed; marking paid is open. Routes through requestPaidUntick on untick.
+  const setSubInvoicePaidStatus = async (args) => {
+    if (!args.paid) {
+      const label = `${companyById(args.companyId)?.name || "Sub"} · ${MONTHS[args.monthIdx]}`;
+      requestPaidUntick({ label, onConfirm: () => doSetSubInvoicePaid(args) });
+      return;
+    }
+    await doSetSubInvoicePaid(args);
+  };
+
+  const doSetSubInvoicePaid = async ({ projectId, companyId, monthIdx, paid, kind = "sub" }) => {
     try {
       const row = await ensureSubInvoiceRow({
         projectId, companyId,
@@ -3764,6 +3810,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 onUpdateSubAmount={updateSubInvoiceCell}
                 onTogglePaid={setSubInvoicePaidStatus}
                 onTogglePrimePaid={updateInvoicePrimePaid}
+                canUntickPaid={isAdmin}
                 onOpenFiles={(payload) => setFilesModal(payload)}
                 onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
                 onUpdateSubMeta={updateSubMeta}
@@ -4223,11 +4270,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onSaveInvoiceNumber={!isSub
               ? (val) => updateInvoiceMonthInvoiceNumber(liveProjectRow.id, monthIdx, val)
               : undefined}
+            canUntickPaid={isAdmin}
+            onRequestUntick={requestPaidUntick}
             onClose={() => setFilesModal(null)}
             onChanged={refreshInvoiceArtifacts}
           />
         );
       })()}
+
+      {confirmState && (
+        <ConfirmDialog
+          {...confirmState}
+          onConfirm={confirmState.onConfirm}
+          onClose={() => setConfirmState(null)}
+        />
+      )}
 
       {toast && (
         <div className="toast">

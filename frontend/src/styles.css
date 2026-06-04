@@ -6150,6 +6150,105 @@ html, body { overflow-x: clip; }
   font-size: 10px;
 }
 
+/* ── Notes / Description chips under the project name (InvoiceTable) ──
+   Ghost (dashed) when empty, solid colored pill when content exists.
+   Notes = amber accent · Description = blue. The chip never shows the body
+   text — clicking opens InvoiceNoteModal; hover title gives a quick peek. */
+.inv-meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+.inv-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-soft);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .8;
+  transition: color 120ms ease, background 120ms ease,
+              border-color 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+.inv-meta-chip .icon { opacity: .85; flex-shrink: 0; }
+.inv-meta-chip:hover  { opacity: 1; border-style: solid; transform: translateY(-0.5px); }
+.inv-meta-chip:active { transform: translateY(0); }
+.inv-meta-chip.accent:hover { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-softer); }
+.inv-meta-chip.blue:hover   { color: #334B66; border-color: #7E97B5; background: var(--blue-soft); }
+.inv-meta-chip.has-content { border-style: solid; opacity: 1; }
+.inv-meta-chip.accent.has-content { background: var(--accent-softer); border-color: var(--accent-soft); color: var(--accent-ink); }
+.inv-meta-chip.blue.has-content   { background: var(--blue-soft); border-color: #BDCBDE; color: #334B66; }
+[data-theme="dark"] .inv-meta-chip.blue.has-content { color: #C6D4E3; border-color: #40505E; }
+[data-theme="dark"] .inv-meta-chip.blue:hover       { color: #C6D4E3; border-color: #40505E; }
+
+/* ── Note / Description editor modal ── */
+.note-modal-name {
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-modal-badge {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-right: 10px;
+}
+.note-modal-badge.accent { background: var(--accent-softer); color: var(--accent); }
+.note-modal-badge.blue   { background: var(--blue-soft); color: #41618A; }
+[data-theme="dark"] .note-modal-badge.blue { color: #9FB8D6; }
+.note-textarea {
+  width: 100%;
+  height: auto;
+  min-height: 200px;
+  max-height: 56vh;
+  resize: vertical;
+  line-height: 1.55;
+  padding: 11px 13px;
+  font-family: var(--font-body);
+}
+.note-modal-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.note-modal-hint {
+  font-size: 11px;
+  color: var(--text-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.note-modal-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+}
+.note-modal-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.note-modal-foothint {
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
 /* InvoiceFilesModal · staged files list (multi-file upload).
    Shows below the dropzone with one row per File picked/dropped, plus a
    "Clear all" row at the bottom when more than one is staged. */
@@ -14105,3 +14204,31 @@ html, body { overflow-x: clip; }
   border-radius: var(--radius-sm);
 }
 .merge-warn svg { flex: none; margin-top: 1px; color: var(--rose); }
+
+/* ============================================================
+   Paid-invoice lock + confirm dialog
+   ============================================================ */
+
+/* A paid tick is locked for non-admins: it shows a lock glyph, stays visible,
+   and isn't interactive (clicking surfaces a "locked" toast). */
+.invoice-cell-paid-toggle.locked {
+  opacity: 1;
+  cursor: not-allowed;
+  color: var(--sage);
+}
+.invoice-cell-paid-toggle.locked:hover {
+  /* Don't adopt the interactive hover — locked ticks can't be toggled here. */
+  background: color-mix(in srgb, var(--sage) 20%, transparent);
+  color: var(--sage);
+}
+
+/* ConfirmDialog stacks above any other open modal (overlay 50 / modal 60). */
+.overlay.confirm-overlay { z-index: 200; }
+.modal.confirm-modal     { z-index: 201; }
+.confirm-message {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-soft);
+}
+.confirm-message strong { color: var(--text); }

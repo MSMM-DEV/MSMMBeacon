@@ -1919,6 +1919,7 @@ export const InvoiceTable = ({
   onAddSub,          // (projectRow, kind) => void  — opens the AddSubModal
   onTogglePaid,      // ({projectId, companyId, monthIdx, paid, kind}) => void
   onTogglePrimePaid, // (invoiceId, monthIdx, paid) => void  — prime/total per-month paid
+  canUntickPaid = true, // Admin? Paid ticks lock for non-admins (can't untick).
   onChangeRole,      // (projectRow, role) => void  — toggles Prime/Sub on the project
   onUpdateSubMeta,   // ({projectId, companyId, kind, patch}) => void  — inline edit (amount/discipline)
   onRemoveSub,       // ({projectId, companyId, kind, companyName}) => void  — × button on sub row
@@ -1993,6 +1994,8 @@ export const InvoiceTable = ({
 
   // Set of invoice-row ids whose sub list is currently expanded inline.
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  // Open note/description editor: { id, field, label, accent, name, value } | null
+  const [noteModal, setNoteModal] = useState(null);
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2538,6 +2541,32 @@ export const InvoiceTable = ({
                             </button>
                           );
                         })()}
+                        <div className="inv-meta-chips" onDoubleClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className={"inv-meta-chip accent" + (r.notes ? " has-content" : "")}
+                            title={r.notes || "Add notes for this project"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNoteModal({ id: r.id, field: "notes", label: "Notes",
+                                accent: "accent", name: r.name, value: r.notes || "" });
+                            }}>
+                            <Icon name="note" size={10}/>
+                            <span>Notes</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={"inv-meta-chip blue" + (r.description ? " has-content" : "")}
+                            title={r.description || "Add a description for this project"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNoteModal({ id: r.id, field: "description", label: "Description",
+                                accent: "blue", name: r.name, value: r.description || "" });
+                            }}>
+                            <Icon name="alignLeft" size={10}/>
+                            <span>Description</span>
+                          </button>
+                        </div>
                       </div>
                     </td>
                     <td>
@@ -2799,9 +2828,11 @@ export const InvoiceTable = ({
                           {showPaidToggle && (
                             <button
                               type="button"
-                              className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "")}
+                              className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
                               title={isPaid
-                                ? `Paid${s.paidAt?.[i] ? ` · ${fmtDate(s.paidAt[i])}` : ""} — click to mark pending`
+                                ? (canUntickPaid
+                                    ? `Paid${s.paidAt?.[i] ? ` · ${fmtDate(s.paidAt[i])}` : ""} — click to unmark (confirmation required)`
+                                    : `Paid${s.paidAt?.[i] ? ` · ${fmtDate(s.paidAt[i])}` : ""} · locked — only an administrator can unmark`)
                                 : "Mark as paid"}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2813,7 +2844,7 @@ export const InvoiceTable = ({
                                   kind: entryKind,
                                 });
                               }}>
-                              <Icon name="check" size={11}/>
+                              <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
                           <button
@@ -2947,15 +2978,17 @@ export const InvoiceTable = ({
                           {showPaidToggle && (
                             <button
                               type="button"
-                              className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "")}
+                              className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
                               title={isPaid
-                                ? "Paid — click to mark pending"
+                                ? (canUntickPaid
+                                    ? "Paid — click to unmark (confirmation required)"
+                                    : "Paid · locked — only an administrator can unmark")
                                 : "Mark prime invoice as paid"}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onTogglePrimePaid?.(r.id, i, !isPaid);
                               }}>
-                              <Icon name="check" size={11}/>
+                              <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
                           <button
@@ -3088,9 +3121,90 @@ export const InvoiceTable = ({
           </div>
         </>
       )}
+      {noteModal && (
+        <InvoiceNoteModal
+          meta={noteModal}
+          onClose={() => setNoteModal(null)}
+          onSave={(id, field, text) => updateRow(id, { [field]: text.trim() ? text : null })}
+        />
+      )}
     </div>
   );
 };
+
+// InvoiceNoteModal — lightweight editor for a project's Notes / Description
+// (the two chips under the project name in InvoiceTable). Centered modal,
+// portaled to <body> so it escapes the scrolling/sticky invoice table.
+// Closing via overlay / X / Save / ⌘↵ commits; Cancel / Esc discards.
+function InvoiceNoteModal({ meta, onClose, onSave }) {
+  const [text, setText] = useState(meta.value || "");
+  const taRef = useRef();
+  const dirty = text !== (meta.value || "");
+
+  useEffect(() => {
+    const el = taRef.current;
+    if (el) { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); }
+  }, []);
+
+  const commit = () => { if (dirty) onSave(meta.id, meta.field, text); onClose(); };
+  const cancel = () => onClose();
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
+  return createPortal(
+    <>
+      <div className="overlay" onClick={commit}/>
+      <div className={"modal note-modal note-modal-" + meta.accent} style={{ width: 480 }}>
+        <div className="modal-head">
+          <div className={"note-modal-badge " + meta.accent}>
+            <Icon name={meta.field === "notes" ? "note" : "alignLeft"} size={15}/>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>{meta.label}</div>
+            <h3 className="drawer-title note-modal-name" title={meta.name}>
+              {meta.name || "Project"}
+            </h3>
+          </div>
+          <button className="drawer-close" onClick={commit} title="Save & close">
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+        <div className="modal-body">
+          <textarea
+            ref={taRef}
+            className="input note-textarea"
+            placeholder={`Write ${meta.label.toLowerCase()} for this project…`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="note-modal-meta">
+            <span className="note-modal-hint">
+              <kbd>⌘</kbd><kbd>↵</kbd> save · <kbd>Esc</kbd> cancel
+            </span>
+            <span className="note-modal-count">{text.length} chars</span>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <div className="note-modal-foothint">Also shown in the row's detail drawer</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={cancel}>Cancel</button>
+            <button className="btn primary sm" onClick={commit} disabled={!dirty}>
+              <Icon name="check" size={13}/> Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
 
 // ---------- Events: helpers shared by EventsTable ----------
 //

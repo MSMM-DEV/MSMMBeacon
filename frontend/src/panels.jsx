@@ -298,6 +298,8 @@ export const DetailDrawer = ({
       { k: "amount",         label: "Total Contract Value",    type: "money" },
       { k: "msmmAmount",     label: "MSMM Portion",            type: "money" },
       { k: "remainingStart", label: "Remaining to Bill (Jan 1)", type: "money" },
+      { k: "description",    label: "Description",             type: "textarea", placeholder: "Project scope / description…" },
+      { k: "notes",          label: "Notes",                   type: "textarea", placeholder: "Billing notes, reminders…" },
     ],
     events: [
       { k: "title",          label: "Title",                                           readOnlyIf: (r) => r.source === "outlook" },
@@ -406,7 +408,7 @@ export const DetailDrawer = ({
       }
       return <div className="field-readonly">{val || <span className="muted">—</span>}</div>;
     }
-    if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
+    if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} placeholder={f.placeholder} onBlur={e => set(e.target.value)}/>;
     if (f.type === "stars") return (
       <StarRating value={val == null ? null : Number(val)} onChange={v => set(v)}/>
     );
@@ -1288,6 +1290,10 @@ export const InvoiceFilesModal = ({
   // (project, month) — see updateInvoiceMonthInvoiceNumber in App.jsx.
   invoiceNumber = "",
   onSaveInvoiceNumber,
+  // Paid-lock gate (shared with the table cells). canUntickPaid = is the
+  // current user an Admin; onRequestUntick opens the App-level confirm dialog.
+  canUntickPaid = true,
+  onRequestUntick,
   onClose, onChanged,
 }) => {
   const isParty = !!partyKind;
@@ -1411,8 +1417,7 @@ export const InvoiceFilesModal = ({
       ? `Sub: ${companyName || "—"}${amount != null ? ` · ${fmtMoney(amount)}` : ""}`
       : amount != null ? fmtMoney(amount) : "—";
 
-  const handleTogglePaid = async (next) => {
-    if (busy) return;
+  const applyPaid = async (next) => {
     if (kind !== "sub") return;
     if (!subInvoiceId) {
       // Need a sub_invoice row to attach paid status to. Create one first.
@@ -1437,6 +1442,25 @@ export const InvoiceFilesModal = ({
     setPaid(next);
     setPaidAt(next ? new Date().toISOString() : null);
     await onChanged?.();
+  };
+
+  const handleTogglePaid = (next) => {
+    if (busy) return;
+    if (kind !== "sub") return;
+    // A paid invoice is locked: marking paid is open, un-ticking is admin-only
+    // and confirmed (same gate as the table cells, via the App-level dialog).
+    if (!next) {
+      if (!canUntickPaid) {
+        setError("This invoice is marked paid and locked — only an administrator can unmark it.");
+        return;
+      }
+      onRequestUntick?.({
+        label: `${companyName || "Sub"} · ${MONTHS[monthIdx]}`,
+        onConfirm: () => applyPaid(false),
+      });
+      return;
+    }
+    applyPaid(true);
   };
 
   const handleOpen = async (filePath) => {
@@ -2207,6 +2231,61 @@ export const MergeModal = ({
               {busy ? "Merging…" : `Merge ${losers.length} → 1`}
             </button>
           </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ---------- ConfirmDialog ----------
+// Small reusable confirmation prompt. Renders above other modals (elevated
+// z-index via .confirm-overlay/.confirm-modal) so it stacks correctly whether
+// it's triggered from a table cell or from inside another open modal. `onConfirm`
+// may be async; the dialog shows a working state and closes when it resolves.
+export const ConfirmDialog = ({
+  title = "Are you sure?",
+  message,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  tone = "default",        // "default" | "danger"
+  icon = "warn",
+  onConfirm, onClose,
+}) => {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await onConfirm?.(); }
+    catch { /* the underlying action surfaces its own toast on failure */ }
+    onClose?.();
+  };
+  return (
+    <>
+      <div className="overlay confirm-overlay" onClick={busy ? undefined : onClose}/>
+      <div className="modal confirm-modal" style={{ width: 420 }} role="alertdialog" aria-modal="true">
+        <div className="modal-head">
+          <div className={"icon-badge" + (tone === "danger" ? " danger" : "")}>
+            <Icon name={icon} size={16}/>
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>{title}</h3>
+          </div>
+          <button className="drawer-close" onClick={onClose} disabled={busy}>
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+        {message && (
+          <div className="modal-body">
+            <p className="confirm-message">{message}</p>
+          </div>
+        )}
+        <div className="modal-foot" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn sm" onClick={onClose} disabled={busy}>{cancelLabel}</button>
+          <button className={"btn sm " + (tone === "danger" ? "danger" : "primary")}
+                  onClick={run} disabled={busy}>
+            {!busy && tone === "danger" && <Icon name={icon} size={13}/>}
+            {busy ? "Working…" : confirmLabel}
+          </button>
         </div>
       </div>
     </>
