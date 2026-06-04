@@ -587,6 +587,15 @@ function adaptInvoice(r) {
       r.may_amount, r.jun_amount, r.jul_amount, r.aug_amount,
       r.sep_amount, r.oct_amount, r.nov_amount, r.dec_amount,
     ].map(v => v || 0),
+    // Per-month PAID flags for the prime/total invoice (MSMM as Prime).
+    // Mirrors sub_invoices.paid but lives as 12 columns on this row since
+    // the prime invoice has no per-month child table. Drives the green
+    // "paid" tick on the Project total row (jan_paid..dec_paid).
+    primePaid: [
+      r.jan_paid, r.feb_paid, r.mar_paid, r.apr_paid,
+      r.may_paid, r.jun_paid, r.jul_paid, r.aug_paid,
+      r.sep_paid, r.oct_paid, r.nov_paid, r.dec_paid,
+    ].map(v => !!v),
     year: r.year,
     // NULL = use auto-calc; numeric = user has frozen the value.
     ytdActualOverride:   r.ytd_actual_override   ?? null,

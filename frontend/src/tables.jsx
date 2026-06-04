@@ -1909,6 +1909,7 @@ export const InvoiceTable = ({
   onOpenFiles,       // ({kind, projectRow, monthIdx, sub?}) => void
   onAddSub,          // (projectRow, kind) => void  — opens the AddSubModal
   onTogglePaid,      // ({projectId, companyId, monthIdx, paid, kind}) => void
+  onTogglePrimePaid, // (invoiceId, monthIdx, paid) => void  — prime/total per-month paid
   onChangeRole,      // (projectRow, role) => void  — toggles Prime/Sub on the project
   onUpdateSubMeta,   // ({projectId, companyId, kind, patch}) => void  — inline edit (amount/discipline)
   onRemoveSub,       // ({projectId, companyId, kind, companyName}) => void  — × button on sub row
@@ -2795,13 +2796,31 @@ export const InvoiceTable = ({
                       {r.values.map((v, i) => {
                         const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
                         const hasFiles = filesForCell.length > 0;
+                        const isPaid   = !!(r.primePaid && r.primePaid[i]);
+                        const hasAmount = v != null && v !== 0;
+                        const showPaidToggle = hasAmount || isPaid;
                         return (
                         <td key={i}
-                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell"}>
+                            className={(i <= TODAY_MONTH ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={v} type="number"
                             onChange={nv => updateInvoice(r.id, i, nv)}
                             format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                           />
+                          {showPaidToggle && (
+                            <button
+                              type="button"
+                              className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "")}
+                              title={isPaid
+                                ? "Paid — click to mark pending"
+                                : "Mark prime invoice as paid"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTogglePrimePaid?.(r.id, i, !isPaid);
+                              }}>
+                              <Icon name="check" size={11}/>
+                            </button>
+                          )}
                           <button
                             type="button"
                             className={"invoice-cell-clip" + (hasFiles ? " has-files" : "")}

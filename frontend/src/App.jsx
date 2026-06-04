@@ -1446,6 +1446,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "msmm_may_amount","msmm_jun_amount","msmm_jul_amount","msmm_aug_amount",
     "msmm_sep_amount","msmm_oct_amount","msmm_nov_amount","msmm_dec_amount",
   ];
+  // Parallel monthly PAID flags for the prime/total invoice (MSMM as Prime).
+  // Boolean per month on anticipated_invoice — drives the green tick on the
+  // Project total row, the prime analogue of sub_invoices.paid.
+  const INVOICE_PAID_MONTH_COLS = [
+    "jan_paid","feb_paid","mar_paid","apr_paid",
+    "may_paid","jun_paid","jul_paid","aug_paid",
+    "sep_paid","oct_paid","nov_paid","dec_paid",
+  ];
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
     setInvoice(rows => rows.map(r => {
@@ -1476,6 +1484,32 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     supabase.from("anticipated_invoice").update({ [col]: nv }).eq("id", id)
       .then(({ error }) => {
         if (error) showToast(`Save failed: ${error.message}`, "x");
+      });
+  };
+  // Prime/total invoice per-month paid toggle. Flips one boolean column
+  // (jan_paid..dec_paid) on anticipated_invoice — the prime analogue of the
+  // sub paid toggle. Optimistic local flip so the Project total cell turns
+  // green immediately; reverts the row on a write failure.
+  const updateInvoicePrimePaid = (id, monthIdx, paid) => {
+    const col = INVOICE_PAID_MONTH_COLS[monthIdx];
+    if (!col) return;
+    setInvoice(rows => rows.map(r => {
+      if (r.id !== id) return r;
+      const next = [...(r.primePaid || Array(12).fill(false))];
+      next[monthIdx] = paid;
+      return { ...r, primePaid: next };
+    }));
+    supabase.from("anticipated_invoice").update({ [col]: paid }).eq("id", id)
+      .then(({ error }) => {
+        if (error) {
+          setInvoice(rows => rows.map(r => {
+            if (r.id !== id) return r;
+            const next = [...(r.primePaid || Array(12).fill(false))];
+            next[monthIdx] = !paid;
+            return { ...r, primePaid: next };
+          }));
+          showToast(`Mark ${paid ? "paid" : "pending"} failed: ${error.message}`, "x");
+        }
       });
   };
 
@@ -3558,6 +3592,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 subInvoices={subInvoices}
                 onUpdateSubAmount={updateSubInvoiceCell}
                 onTogglePaid={setSubInvoicePaidStatus}
+                onTogglePrimePaid={updateInvoicePrimePaid}
                 onOpenFiles={(payload) => setFilesModal(payload)}
                 onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
                 onUpdateSubMeta={updateSubMeta}
