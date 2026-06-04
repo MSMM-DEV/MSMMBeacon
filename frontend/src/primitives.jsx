@@ -542,6 +542,11 @@ export const EditableCell = ({
 //   allowClear  : show a "Clear selection" row when a value is selected
 //   placeholder : shown when no value is selected
 //   inputClassName : override "input" for styling inside a table cell
+//   onCreate(q) : optional — when provided, the menu shows a "+ Create …"
+//                 action row (passing the current query) so callers can offer
+//                 inline creation of a missing option. Purely additive: with no
+//                 onCreate prop the combobox behaves exactly as before.
+//   createLabel : label for the create row when the query is empty
 // ----------------------------------------------------------------------
 export const SearchableSelect = ({
   value,
@@ -552,6 +557,8 @@ export const SearchableSelect = ({
   allowClear = true,
   placeholder = "Search…",
   inputClassName = "input",
+  onCreate = null,
+  createLabel = "Create new",
 }) => {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -671,7 +678,7 @@ export const SearchableSelect = ({
           <Icon name="x" size={11}/><span>Clear selection</span>
         </button>
       )}
-      {filtered.length === 0 ? (
+      {filtered.length === 0 && !onCreate ? (
         <div className="searchable-empty">No matches</div>
       ) : (
         filtered.slice(0, 200).map((o, i) => {
@@ -694,6 +701,23 @@ export const SearchableSelect = ({
             </button>
           );
         })
+      )}
+      {onCreate && (
+        <button
+          type="button"
+          className={"searchable-item searchable-create" + (filtered.length ? " has-divider" : "")}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const term = q.trim();
+            setQ(""); setOpen(false);
+            onCreate(term);
+          }}
+        >
+          <Icon name="plus" size={11}/>
+          <span className="searchable-label">
+            {q.trim() ? `Create “${q.trim()}”` : createLabel}
+          </span>
+        </button>
       )}
     </div>,
     document.body

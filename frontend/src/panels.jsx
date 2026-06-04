@@ -6,7 +6,7 @@ import {
   getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
   uploadInvoicePartyFile, deleteInvoicePartyFile,
-  ensureSubInvoiceRow, monthFolder, addProjectSub,
+  ensureSubInvoiceRow, monthFolder, addProjectSub, addCompany,
   linkInvoiceToProject, findOrCreateProjectForInvoice,
   setSubInvoicePaid, setProjectPrimeCompany,
 } from "./data.js";
@@ -1772,6 +1772,7 @@ export const AddSubModal = ({
   invoiceRow,
   kind = "sub",                 // 'sub' (default) | 'prime'
   onClose, onAdded,
+  onCompanyCreated,             // (uiCompanyRow) => mirror into App's companies state
 }) => {
   const isPrime = kind === "prime";
   const [companyId, setCompanyId] = useState("");
@@ -1780,15 +1781,70 @@ export const AddSubModal = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // Inline "create a firm that isn't in the Directory yet" sub-flow. Firms
+  // created here are stashed locally too (not just pushed up to App) so the
+  // picker resolves the new selection immediately, independent of when the
+  // parent's companies state flushes back down as a prop.
+  const [creating, setCreating] = useState(false);
+  const [localCompanies, setLocalCompanies] = useState([]);
+  const [nf, setNf] = useState({ name: "", contact: "", email: "", phone: "" });
+  const [nfBusy, setNfBusy] = useState(false);
+  const [nfError, setNfError] = useState("");
+
   const needsProjectLink = !projectId;
 
   // Subs are external firms (Companies, not Clients). Filter the merged
   // _companies list to non-Client entries — same behavior as SubsEditor.
-  const subOptions = (companies || [])
+  // Locally-created firms are merged in (deduped by id) so a just-added firm
+  // is selectable before the parent prop catches up.
+  const seenIds = new Set((companies || []).map(c => c.id));
+  const mergedCompanies = [
+    ...(companies || []),
+    ...localCompanies.filter(c => !seenIds.has(c.id)),
+  ];
+  const subOptions = mergedCompanies
     .filter(c => c.type !== "Client")
     .map(c => ({ value: c.id, label: c.name }));
 
-  const canSubmit = !!companyId && !busy
+  const beginCreate = (seedName = "") => {
+    setNf({ name: seedName, contact: "", email: "", phone: "" });
+    setNfError("");
+    setCreating(true);
+  };
+  const cancelCreate = () => { setCreating(false); setNfError(""); };
+
+  const saveNewFirm = async () => {
+    const clean = nf.name.trim();
+    if (!clean) { setNfError("Enter a firm name."); return; }
+    // If the firm is actually already in the Directory (case-insensitive),
+    // just select it instead of creating a near-duplicate.
+    const dup = mergedCompanies.find(
+      c => c.type !== "Client" && (c.name || "").trim().toLowerCase() === clean.toLowerCase()
+    );
+    if (dup) {
+      setCompanyId(dup.id);
+      setCreating(false);
+      setError("");
+      return;
+    }
+    setNfBusy(true); setNfError("");
+    try {
+      const uiRow = await addCompany({
+        name: clean, contact: nf.contact, email: nf.email, phone: nf.phone,
+      });
+      setLocalCompanies(prev => [uiRow, ...prev]);
+      onCompanyCreated?.(uiRow);   // mirror into App-wide companies state
+      setCompanyId(uiRow.id);      // select the new firm in the picker
+      setCreating(false);
+      setError("");
+    } catch (e) {
+      setNfError(e?.message || "Could not add firm");
+    } finally {
+      setNfBusy(false);
+    }
+  };
+
+  const canSubmit = !!companyId && !busy && !creating
     && (!needsProjectLink || !!invoiceId);
 
   const handleSubmit = async () => {
@@ -1876,12 +1932,62 @@ export const AddSubModal = ({
           <div className="field">
             <div className="field-label">{isPrime ? "Prime firm *" : "Company *"}</div>
             <div className="field-value">
-              <SearchableSelect
-                value={companyId}
-                options={subOptions}
-                placeholder={isPrime ? "Search prime firms…" : "Search firms…"}
-                onChange={(v) => setCompanyId(v || "")}
-              />
+              {creating ? (
+                <div className="newfirm-card">
+                  <div className="newfirm-head">
+                    <Icon name="briefcase" size={12}/>
+                    <span className="newfirm-title">New firm</span>
+                    <span className="newfirm-note">adds to the Directory</span>
+                    <button type="button" className="newfirm-x" onClick={cancelCreate}
+                            disabled={nfBusy} title="Cancel">
+                      <Icon name="x" size={12}/>
+                    </button>
+                  </div>
+                  <input className="input" autoFocus
+                         placeholder="Firm name *"
+                         value={nf.name}
+                         disabled={nfBusy}
+                         onChange={(e) => setNf(p => ({ ...p, name: e.target.value }))}
+                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveNewFirm(); } }}/>
+                  <div className="newfirm-grid">
+                    <input className="input"
+                           placeholder="Contact"
+                           value={nf.contact}
+                           disabled={nfBusy}
+                           onChange={(e) => setNf(p => ({ ...p, contact: e.target.value }))}/>
+                    <input className="input"
+                           placeholder="Email"
+                           value={nf.email}
+                           disabled={nfBusy}
+                           onChange={(e) => setNf(p => ({ ...p, email: e.target.value }))}/>
+                  </div>
+                  <input className="input"
+                         placeholder="Phone"
+                         value={nf.phone}
+                         disabled={nfBusy}
+                         onChange={(e) => setNf(p => ({ ...p, phone: e.target.value }))}/>
+                  {nfError && <div className="newfirm-error">{nfError}</div>}
+                  <div className="newfirm-actions">
+                    <button type="button" className="btn sm" onClick={cancelCreate} disabled={nfBusy}>
+                      Cancel
+                    </button>
+                    <button type="button" className="btn primary sm"
+                            onClick={saveNewFirm} disabled={nfBusy || !nf.name.trim()}>
+                      <Icon name="check" size={12}/>
+                      {nfBusy ? "Adding…" : "Add & select"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <SearchableSelect
+                  value={companyId}
+                  options={subOptions}
+                  placeholder={isPrime ? "Search prime firms…" : "Search firms…"}
+                  onChange={(v) => setCompanyId(v || "")}
+                  onCreate={(term) => beginCreate(term)}
+                  createLabel={isPrime ? "Add a new prime firm…" : "Add a new firm…"}
+                />
+              )}
             </div>
           </div>
           <div className="field">
@@ -1915,7 +2021,7 @@ export const AddSubModal = ({
 
         <div className="modal-foot">
           <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
-            Need a firm not listed? Add it via the Directory tab.
+            Firm not listed? Type its name and choose <strong>Create</strong> — it's added to the Directory.
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>

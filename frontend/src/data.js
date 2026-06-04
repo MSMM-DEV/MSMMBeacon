@@ -1408,6 +1408,39 @@ export async function addProjectSub({ projectId, companyId, discipline, amount, 
   return { row: data, existed: false };
 }
 
+// Create a brand-new company (firm) in the Directory and return it in the
+// adapted UI shape. Backs the inline "create firm" affordance in AddSubModal:
+// when a sub firm isn't in the Directory yet, the user can add it without
+// leaving the modal. The row lands in beacon_v2.companies, so it immediately
+// surfaces on the Directory tab and in every company picker app-wide once the
+// caller mirrors the returned row into App state.
+export async function addCompany({ name, contact, email, phone, address, notes } = {}) {
+  const clean = (name || "").trim();
+  if (!clean) throw new Error("Company name is required");
+  const payload = {
+    name: clean,
+    contact_person: (contact || "").trim() || null,
+    email: (email || "").trim() || null,
+    phone: (phone || "").trim() || null,
+    address: (address || "").trim() || null,
+    notes: (notes || "").trim() || null,
+  };
+  const { data, error } = await supabase
+    .from("companies").insert(payload).select("*").single();
+  if (error) {
+    // 23505 = unique_violation on companies.name — surface a friendly message
+    // rather than the raw constraint error.
+    if (error.code === "23505") {
+      throw new Error(`A firm named "${clean}" already exists in the Directory`);
+    }
+    throw new Error(`add company: ${error.message}`);
+  }
+  // A fresh company has no observed project usage yet, so adaptCompany's
+  // empty-typeMap fallback ("Prime", i.e. non-Client) is exactly right — it
+  // passes the sub-picker's `type !== "Client"` filter immediately.
+  return adaptCompany(data, new Map());
+}
+
 // Update an existing project_subs row. Identifies the row by the natural
 // composite key (project_id, company_id, kind). Patch is whitelisted to the
 // metadata fields users can edit inline — amount and discipline. Other

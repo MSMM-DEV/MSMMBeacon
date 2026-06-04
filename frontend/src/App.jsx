@@ -4110,6 +4110,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             kind={modalKind}
             onClose={() => setAddSubModal(null)}
             onAdded={applyInsertedSub}
+            onCompanyCreated={(uiRow) =>
+              setCompanies(rs => rs.some(c => c.id === uiRow.id) ? rs : [uiRow, ...rs])}
           />
         );
       })()}
