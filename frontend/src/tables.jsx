@@ -2658,7 +2658,7 @@ export const InvoiceTable = ({
                       const totalFiles = (r.primeFiles && r.primeFiles[i]) || [];
                       return (
                       <td key={i}
-                          className={(i <= actualThru ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
+                          className={(i <= actualThru ? "month-actual" : "month-proj") + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
                           title={isOverride
                             ? `Override · auto would be ${fmtMoney(auto, false)}`
                             : "MSMM monthly · auto-calc. Click to override."}>
@@ -2869,7 +2869,7 @@ export const InvoiceTable = ({
                         const showPaidToggle = hasAmount || isPaid;
                         return (
                         <td key={i}
-                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
                             onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv, entryKind)}
@@ -3041,7 +3041,7 @@ export const InvoiceTable = ({
                         const invNum = (r.invoiceNumbers && r.invoiceNumbers[i]) || null;
                         return (
                         <td key={i}
-                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === TODAY_MONTH ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={v} type="number"
                             onChange={nv => updateInvoice(r.id, i, nv)}
@@ -3195,7 +3195,7 @@ export const InvoiceTable = ({
           <div className="invoice-legend">
             <span><span className="legend-sw actual"/>Actual (editable)</span>
             <span><span className="legend-sw proj"/>Projection (editable)</span>
-            <span><span className="legend-today"/>Today column</span>
+            <span><span className="legend-today"/>Actual ▸ Projection boundary</span>
             <span className="ml-auto" style={{ marginLeft: "auto", color: "var(--text-soft)" }}>
               {cutoverNextMonth
                 ? <>Each month switches from Projection to Actual on the {ordinal(cutoverDay)} of the following month</>
