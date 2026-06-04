@@ -1918,6 +1918,7 @@ export const InvoiceTable = ({
   yearOptions, yearValue, onYearChange,
   actualThru = TODAY_MONTH,   // last month index shown as "Actual" (cutover-aware)
   cutoverDay = 1,             // day-of-month the current month flips Proj→Actual (for legend copy)
+  cutoverNextMonth = false,   // whether that flip lands in the next month (for legend copy)
   orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
   // Sub-invoices feature: per-project list of {companyId, companyName,
   // contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12],
@@ -2337,8 +2338,8 @@ export const InvoiceTable = ({
           {actualThru >= 0 ? (
             <>Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[actualThru]} as Actual</strong> · {MONTHS[actualThru+1] || "Jan"}–Dec as Projection</>
           ) : (
-            <>Showing <strong style={{ color: "var(--accent-ink)" }}>all months as Projection</strong> · Actuals begin after the {ordinal(cutoverDay)}</>
-          )} · current month flips on the {ordinal(cutoverDay)}
+            <>Showing <strong style={{ color: "var(--accent-ink)" }}>all months as Projection</strong></>
+          )} · a month flips to Actual on the {ordinal(cutoverDay)}{cutoverNextMonth ? " of the following month" : ""}
         </span>
         <div className="ml-auto" style={{ display: "flex", gap: 8 }}>
           <button
@@ -3174,8 +3175,10 @@ export const InvoiceTable = ({
             <span><span className="legend-sw proj"/>Projection (editable)</span>
             <span><span className="legend-today"/>Today column</span>
             <span className="ml-auto" style={{ marginLeft: "auto", color: "var(--text-soft)" }}>
-              Cells automatically switch from Projection to Actual on the {ordinal(cutoverDay)} of each month
-              {cutoverDay !== 1 ? " (set in Settings → Targets)." : "."}
+              {cutoverNextMonth
+                ? <>Each month switches from Projection to Actual on the {ordinal(cutoverDay)} of the following month</>
+                : <>Cells automatically switch from Projection to Actual on the {ordinal(cutoverDay)} of each month</>}
+              {(cutoverDay !== 1 || cutoverNextMonth) ? " (set in Settings → Targets)." : "."}
             </span>
           </div>
         </>

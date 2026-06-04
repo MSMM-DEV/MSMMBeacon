@@ -3,7 +3,7 @@ import { Icon } from "./icons.jsx";
 import { TweaksPanel } from "./tweaks.jsx";
 import { AlertsAdmin } from "./admin-alerts.jsx";
 import { listAllUsersFull, adminAction, getUsers, updateMonthlyBenchmark,
-         updateInvoiceActualCutoverDay, actualThruMonth, MONTHS, fmtMoney } from "./data.js";
+         updateInvoiceActualCutover, actualThruMonth, MONTHS, fmtMoney } from "./data.js";
 
 // ============================================================================
 // AdminPanel — gear-icon entry point for Admin users only.
@@ -710,29 +710,34 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
 };
 
 // ----------------------------------------------------------------------------
-// CutoverCard — the day-of-month the Invoice tab flips the current month from
-// Projection to Actual. Day 1 = the classic "flips on the 1st" behavior; a
-// later day keeps the current month editable as a projection until billing
-// closes. Same card chrome as the benchmark card; saves through
-// updateInvoiceActualCutoverDay and reports back via the shared onSaved.
+// CutoverCard — when the Invoice tab flips a month from Projection to Actual:
+// a day-of-month (1–31) landing in the SAME month (Day 1 = the classic "flips
+// on the 1st") or the NEXT month (e.g. June → Actual on July 1, holding each
+// month as a Projection until it ends). Same card chrome as the benchmark
+// card; saves through updateInvoiceActualCutover and reports via shared onSaved.
 // ----------------------------------------------------------------------------
 const CutoverCard = ({ appSettings, onSaved, onError }) => {
-  const saved = appSettings?.invoiceActualCutoverDay ?? 1;
-  const [draft, setDraft] = useState(String(saved));
+  const savedDay  = appSettings?.invoiceActualCutoverDay ?? 1;
+  const savedNext = !!appSettings?.invoiceActualCutoverNextMonth;
+  const [draft, setDraft] = useState(String(savedDay));
+  const [nextMonth, setNextMonth] = useState(savedNext);
   const [pending, setPending] = useState(false);
-  useEffect(() => { setDraft(String(saved)); /* eslint-disable-next-line */ }, [saved]);
+  // Re-sync from the parent if another admin saves while this is open.
+  useEffect(() => { setDraft(String(savedDay)); setNextMonth(savedNext); /* eslint-disable-next-line */ }, [savedDay, savedNext]);
 
   const draftNum = parseInt(draft, 10);
   const draftValid = Number.isFinite(draftNum) && draftNum >= 1 && draftNum <= 31;
-  const dirty = draftValid && draftNum !== saved;
+  const dirty = draftValid && (draftNum !== savedDay || nextMonth !== savedNext);
+
+  const whenPhrase = (d, nm) => `the ${ordinal(d)}${nm ? " of the following month" : ""}`;
 
   const onSubmit = async (e) => {
     e.preventDefault();
     if (!draftValid || !dirty || pending) return;
     setPending(true);
     try {
-      const next = await updateInvoiceActualCutoverDay(draftNum);
-      onSaved?.(next, `Actuals now flip on the ${ordinal(draftNum)}`);
+      const next = await updateInvoiceActualCutover(draftNum, nextMonth);
+      onSaved?.(next, `Actuals now flip on ${whenPhrase(draftNum, nextMonth)}`);
     } catch (err) {
       onError?.(String(err.message || err));
     } finally {
@@ -740,8 +745,13 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
     }
   };
 
-  const previewThru = draftValid ? actualThruMonth(draftNum) : actualThruMonth(saved);
+  // Live preview of the resulting split for "today".
+  const previewThru = actualThruMonth(draftValid ? draftNum : savedDay, nextMonth);
   const previewText = previewThru >= 0 ? `Jan–${MONTHS[previewThru]} Actual` : "All Projection";
+  // A concrete example so the next-month meaning is unambiguous: month N closes
+  // on `day` of month N+1.
+  const exMonth = MONTHS[new Date().getMonth()];
+  const exNext  = MONTHS[(new Date().getMonth() + 1) % 12];
 
   return (
     <form className="target-card" onSubmit={onSubmit}>
@@ -750,15 +760,16 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
         <h4 className="target-card-title">Move to Actual on</h4>
         <p className="target-card-desc">
           Each year's month columns switch from <strong>Projection</strong> to{" "}
-          <strong>Actual</strong> as the year progresses. The current month holds
-          as a Projection until this day, then flips to Actual. <strong>Day 1</strong>{" "}
-          keeps the classic "flips on the 1st" behavior — pick a later day to leave
-          the current month editable until your monthly billing closes.
+          <strong>Actual</strong> as the year progresses. Choose <strong>this month</strong>{" "}
+          to flip the current month on a given day (Day 1 = the classic "flips on
+          the 1st"), or <strong>next month</strong> to hold each month as a Projection
+          until it ends — e.g. <strong>{exMonth}</strong> becomes Actual on the{" "}
+          {ordinal(draftValid ? draftNum : savedDay)} of <strong>{exNext}</strong>.
         </p>
       </div>
 
       <div className="target-input-row">
-        <div className="target-input-wrap">
+        <div className="target-input-wrap cutover-wrap">
           <span className="target-currency">Day</span>
           <input
             type="number"
@@ -771,7 +782,23 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
             onChange={e => setDraft(e.target.value.replace(/[^\d]/g, ""))}
             placeholder="1"
           />
-          <span className="target-suffix">of the month</span>
+          <span className="target-suffix">of</span>
+          <div className="cutover-seg" role="group" aria-label="Which month">
+            <button
+              type="button"
+              className={"cutover-seg-btn" + (!nextMonth ? " on" : "")}
+              onClick={() => setNextMonth(false)}
+            >
+              this month
+            </button>
+            <button
+              type="button"
+              className={"cutover-seg-btn" + (nextMonth ? " on" : "")}
+              onClick={() => setNextMonth(true)}
+            >
+              next month
+            </button>
+          </div>
         </div>
         <div className="target-actions">
           <button
@@ -780,7 +807,7 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
             disabled={!draftValid || !dirty || pending}
           >
             <Icon name="check" size={13}/>
-            {pending ? "Saving…" : "Save day"}
+            {pending ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
@@ -788,7 +815,7 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
       <div className="target-readout">
         <div className="target-readout-cell">
           <div className="target-readout-label">Flips on</div>
-          <div className="target-readout-val">{ordinal(saved)} of each month</div>
+          <div className="target-readout-val">{whenPhrase(savedDay, savedNext)}</div>
         </div>
         <div className="target-readout-divider"/>
         <div className="target-readout-cell">

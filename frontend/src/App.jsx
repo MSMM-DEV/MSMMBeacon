@@ -877,7 +877,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // the Quad Sheet's bar coloring (green when month total ≥ benchmark, red
   // when below). Updated locally + persisted by AdminPanel → Targets tab.
   const [appSettings, setAppSettings] = useState(
-    initial.appSettings || { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, updatedAt: null }
+    initial.appSettings || { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null }
   );
   // Invoice Actual/Projection boundary — the last month index considered
   // "Actual". Driven by the configurable cutover day (the current month stays
@@ -885,7 +885,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // live setting; passed to InvoiceTable + InvoiceCharts and used in the
   // export/styling closures + the YTD stat below. The "today column" highlight
   // still keys off the real calendar month (TODAY_MONTH), not this boundary.
-  const actualThru = actualThruMonth(appSettings.invoiceActualCutoverDay);
+  const actualThru = actualThruMonth(appSettings.invoiceActualCutoverDay, appSettings.invoiceActualCutoverNextMonth);
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({
@@ -3808,6 +3808,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               <InvoiceTable rows={filtered.invoice}
                 actualThru={actualThru}
                 cutoverDay={appSettings.invoiceActualCutoverDay}
+                cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
                 updateInvoice={updateInvoiceCell}
                 updateInvoiceMsmm={updateInvoiceMsmmCell}
                 updateRow={updateInvoice}
