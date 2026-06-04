@@ -2009,10 +2009,11 @@ export const InvoiceTable = ({
 
   // Type filter — multi-select over the invoice_type_enum (ENG / PM). Local
   // state since this is a view-only filter that doesn't affect what's
-  // fetched. Default = all types selected (chip reads "Type: All"). Empty
-  // selection is treated as "All" too so a stray double-uncheck doesn't
-  // suddenly hide every row.
-  const [typeFilter, setTypeFilter] = useState(() => new Set(invoiceTypeOptions));
+  // fetched. Default = ENG only (chip reads "Type: ENG") — the Engineering
+  // book is the day-to-day view; PM is toggled on explicitly via the chip's
+  // popover. Empty selection is still treated as "All" so a stray
+  // double-uncheck doesn't suddenly hide every row.
+  const [typeFilter, setTypeFilter] = useState(() => new Set(["ENG"]));
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const typeBtnRef = useRef(null);
   const typeFilterActive =
@@ -2100,6 +2101,20 @@ export const InvoiceTable = ({
   const searchedNonOrange = sortGroup(nonOrangeRows.filter(passes));
   const searchedOrange    = sortGroup(orangeRows.filter(passes));
   const searchedRows      = [...searchedNonOrange, ...searchedOrange];
+
+  // Expand-/collapse-all, scoped to the currently visible (filtered) rows so
+  // it never toggles a project hidden by the type/year/search filter. Union
+  // on expand and set-difference on collapse leave any off-screen row's own
+  // expansion state untouched, so flipping the filter back is non-destructive.
+  const visibleIds   = searchedRows.map(r => r.id);
+  const allExpanded  = visibleIds.length > 0 && visibleIds.every(id => expandedIds.has(id));
+  const noneExpanded = visibleIds.every(id => !expandedIds.has(id));
+  const expandAll    = () => setExpandedIds(prev => new Set([...prev, ...visibleIds]));
+  const collapseAll  = () => setExpandedIds(prev => {
+    const next = new Set(prev);
+    for (const id of visibleIds) next.delete(id);
+    return next;
+  });
 
   // Tiny header helper — wraps a sortable <th>'s content with the column's
   // active sort state. Used for the 5 sortable columns; non-sortable
@@ -2226,6 +2241,27 @@ export const InvoiceTable = ({
           {typeChipLabel}
         </button>
         <button className="tool-chip"><Icon name="user" size={13}/>PM: All</button>
+        <div className="tool-sep"/>
+        <button
+          type="button"
+          className="tool-chip"
+          onClick={expandAll}
+          disabled={!visibleIds.length || allExpanded}
+          title="Expand every project to show its sub / firm breakdown"
+        >
+          <Icon name="chevronDown" size={13}/>
+          Expand all
+        </button>
+        <button
+          type="button"
+          className="tool-chip"
+          onClick={collapseAll}
+          disabled={noneExpanded}
+          title="Collapse every project's sub / firm breakdown"
+        >
+          <Icon name="chevronRight" size={13}/>
+          Collapse all
+        </button>
         <div className="tool-sep"/>
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
           Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[TODAY_MONTH]} as Actual</strong> · {MONTHS[TODAY_MONTH+1] || "Jan"}–Dec as Projection · switches on the 1st

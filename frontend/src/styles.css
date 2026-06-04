@@ -464,6 +464,8 @@ html, body { overflow-x: clip; }
 }
 .tool-chip:hover { background: var(--surface); color: var(--text); border-color: var(--text-soft); border-style: solid; }
 .tool-chip.on { background: var(--accent-softer); border-color: var(--accent-soft); color: var(--accent-ink); border-style: solid; }
+.tool-chip:disabled { opacity: .4; cursor: default; }
+.tool-chip:disabled:hover { background: transparent; color: var(--text-muted); border-color: var(--border-strong); border-style: dashed; }
 .tool-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 
 /* Chrome search input — inline pill on the left of the toolbar.

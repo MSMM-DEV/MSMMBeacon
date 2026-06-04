@@ -3214,7 +3214,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           };
         }),
       }));
-      return { projectNumber: r.projectNumber, subNames, months };
+      return { projectNumber: r.projectNumber, name: r.name, subNames, months };
     });
 
     try {
