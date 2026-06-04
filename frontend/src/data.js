@@ -1027,9 +1027,11 @@ export async function loadBeacon() {
 
   const subInvoicesMatrix = new Map();   // project_id → [{ companyId, companyName, contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12] }]
   for (const p of projects) {
-    const subs = (p.subs || [])
-      .slice()
-      .sort((a, b) => (a.ord || 0) - (b.ord || 0));
+    const subs = dedupeSubsByCompanyKind(
+      (p.subs || [])
+        .slice()
+        .sort((a, b) => (a.ord || 0) - (b.ord || 0))
+    );
     const entries = subs.map(s => {
       const company = companies.find(c => c.id === s.company_id);
       const kind = s.kind || "sub";
@@ -1334,6 +1336,31 @@ export async function linkInvoiceToProject(invoiceId, projectId) {
 // so the Invoice tab provides an inline "+ Add sub" affordance that calls
 // this. The `kind` discriminator lets the same table also hold the upstream
 // prime firm on a Sub-role project ('prime', max one per project).
+// Collapse duplicate subs down to one per (company, kind). Handles both
+// DB-shape ({company_id, kind}) and UI-shape ({cId, kind}) sub objects.
+// Null-company drafts are kept as-is. Keeps the FIRST occurrence (callers
+// sort by `ord` first). Display-side defense so a DB that still has dupes
+// (before migration 20260606120600 is applied) renders one row per sub.
+export function dedupeSubsByCompanyKind(subs) {
+  const seen = new Set();
+  const out = [];
+  for (const s of (subs || [])) {
+    const cId = s.company_id ?? s.cId ?? null;
+    if (cId == null) { out.push(s); continue; }
+    const key = `${cId}:${s.kind || "sub"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+// Returns { row, existed }: `existed` is true when the company was already a
+// sub/prime on this project (no new row created) so the caller can avoid
+// appending a duplicate and tell the user instead. Idempotent + race-safe:
+// (project_id, company_id, kind) is the natural key (enforced by the unique
+// index from 20260606120600), so a re-add — or a double-submit that slips the
+// busy guard — returns the existing row rather than spawning a duplicate.
 export async function addProjectSub({ projectId, companyId, discipline, amount, ord, kind = "sub" }) {
   const payload = {
     project_id: projectId,
@@ -1343,13 +1370,42 @@ export async function addProjectSub({ projectId, companyId, discipline, amount, 
     ord: ord ?? null,
     kind,
   };
+  // Pre-check: if this company is already on the project under this kind,
+  // don't insert again — return the existing row.
+  if (companyId) {
+    const { data: existing } = await supabase
+      .from("project_subs")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("company_id", companyId)
+      .eq("kind", kind)
+      .limit(1)
+      .maybeSingle();
+    if (existing) return { row: existing, existed: true };
+  }
   const { data, error } = await supabase
     .from("project_subs")
     .insert(payload)
     .select("*")
     .single();
-  if (error) throw new Error(`add ${kind}: ${error.message}`);
-  return data;
+  if (error) {
+    // 23505 = unique_violation: a concurrent add won the race after our
+    // pre-check. Fetch and return the row that landed so this resolves to a
+    // no-op duplicate rather than an error.
+    if (error.code === "23505" && companyId) {
+      const { data: raced } = await supabase
+        .from("project_subs")
+        .select("*")
+        .eq("project_id", projectId)
+        .eq("company_id", companyId)
+        .eq("kind", kind)
+        .limit(1)
+        .maybeSingle();
+      if (raced) return { row: raced, existed: true };
+    }
+    throw new Error(`add ${kind}: ${error.message}`);
+  }
+  return { row: data, existed: false };
 }
 
 // Update an existing project_subs row. Identifies the row by the natural
@@ -1648,7 +1704,9 @@ export async function reloadInvoiceArtifacts(projects, companies) {
   }
   const subInvoicesMatrix = new Map();
   for (const p of projects) {
-    const subs = (p.subs || []).slice().sort((a,b) => (a.ord||0)-(b.ord||0));
+    const subs = dedupeSubsByCompanyKind(
+      (p.subs || []).slice().sort((a,b) => (a.ord||0)-(b.ord||0))
+    );
     if (subs.length === 0) continue;
     const entries = subs.map(s => {
       const company = companies.find(c => c.id === s.cId || c.id === s.company_id);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Icon } from "./icons.jsx";
-import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf } from "./data.js";
+import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf, dedupeSubsByCompanyKind } from "./data.js";
 import { SearchableSelect, StarRating } from "./primitives.jsx";
 
 // ============ CREATE MODAL ============
@@ -459,7 +459,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           if (e1) throw e1;
           extras.pmIds = pmIds;
         }
-        const subs = (form.subs || []).filter(s => s.cId || s.desc || s.amt);
+        const subs = dedupeSubsByCompanyKind(
+          (form.subs || []).filter(s => s.cId || s.desc || s.amt));
         if (subs.length > 0) {
           const subsPayload = subs.map((s, i) => ({
             project_id: row.id,
@@ -505,7 +506,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           if (eAP) throw eAP;
           extras.pmIds = pmIds;
         }
-        const subs = (form.subs || []).filter(s => s.cId);
+        const subs = dedupeSubsByCompanyKind((form.subs || []).filter(s => s.cId));
         if (subs.length > 0) {
           const { error: eAS } = await supabase
             .from("project_subs")
@@ -526,7 +527,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           if (eAwP) throw eAwP;
           extras.pmIds = pmIds;
         }
-        const subs = (form.subs || []).filter(s => s.cId || s.desc || s.amt);
+        const subs = dedupeSubsByCompanyKind(
+          (form.subs || []).filter(s => s.cId || s.desc || s.amt));
         if (subs.length > 0) {
           const subsPayload = subs.map((s, i) => ({
             project_id: row.id,

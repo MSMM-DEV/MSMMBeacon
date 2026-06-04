@@ -1912,7 +1912,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // `kind` is 'sub' (default) or 'prime'. For prime entries, the modal also
   // updated projects.prime_company_id; we mirror that locally so role/prime
   // logic in the rest of the UI stays consistent without a reload.
-  const applyInsertedSub = ({ inserted, linkedProjectId, invoiceId, autoLinkedProject, kind }) => {
+  const applyInsertedSub = ({ inserted, existed, linkedProjectId, invoiceId, autoLinkedProject, kind }) => {
     if (linkedProjectId && invoiceId) {
       setInvoice(rows => rows.map(inv =>
         inv.id === invoiceId ? { ...inv, sourceId: linkedProjectId } : inv
@@ -1964,7 +1964,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       // For a prime entry we also update prime_company_id on the project
       // (the DB UPDATE was already done by the modal). This keeps the
       // role/derivation logic consistent across the UI.
-      const updated = { ...r, subs: [...(r.subs || []), newUiSub] };
+      // Guard against duplicating an existing sub on the project's subs array
+      // (e.g. re-adding a company that's already there).
+      const subsArr = r.subs || [];
+      const dup = subsArr.some(s =>
+        (s.cId ?? s.company_id) === companyId && (s.kind || "sub") === entryKind);
+      const updated = dup ? { ...r } : { ...r, subs: [...subsArr, newUiSub] };
       if (entryKind === "prime") updated.prime_company_id = companyId;
       return updated;
     });
@@ -1979,6 +1984,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setSubInvoices(prev => {
       const next = new Map(prev);
       const existing = next.get(projectId) || [];
+      // Don't append a second matrix entry for a company that's already there
+      // — the existing row already carries its billing data.
+      if (existing.some(e => e.companyId === companyId && (e.kind || "sub") === entryKind)) {
+        return prev;
+      }
       next.set(projectId, [...existing, {
         kind: entryKind,
         companyId,
@@ -1995,6 +2005,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     });
     setAddSubModal(null);
     const noun = entryKind === "prime" ? "Prime" : "Sub";
+    // The company was already on the project — nothing new was created.
+    if (existed) {
+      showToast(`${company?.name || noun} is already a ${noun.toLowerCase()} on this project`, "flag");
+      return;
+    }
     if (autoLinkedProject?.matchType === "matched") {
       showToast(`${noun} added · linked to ${autoLinkedProject.projectName}`);
     } else if (autoLinkedProject?.matchType === "created") {

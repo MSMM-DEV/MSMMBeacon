@@ -1811,7 +1811,7 @@ export const AddSubModal = ({
         // Wire the invoice to whichever project we resolved.
         await linkInvoiceToProject(invoiceId, effectiveProjectId);
       }
-      const inserted = await addProjectSub({
+      const { row: inserted, existed } = await addProjectSub({
         projectId: effectiveProjectId,
         companyId,
         discipline: discipline.trim() || null,
@@ -1825,7 +1825,7 @@ export const AddSubModal = ({
       if (isPrime) {
         await setProjectPrimeCompany(effectiveProjectId, companyId);
       }
-      onAdded?.({ inserted, linkedProjectId, invoiceId, autoLinkedProject, kind });
+      onAdded?.({ inserted, existed, linkedProjectId, invoiceId, autoLinkedProject, kind });
     } catch (e) {
       setError(e?.message || "Add sub failed");
     } finally {
