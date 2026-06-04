@@ -9,6 +9,7 @@ import {
   ensureSubInvoiceRow, monthFolder, addProjectSub, addCompany,
   linkInvoiceToProject, findOrCreateProjectForInvoice,
   setSubInvoicePaid, setProjectPrimeCompany,
+  mergeRefSummary,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -2028,6 +2029,183 @@ export const AddSubModal = ({
             <button className="btn primary sm" onClick={handleSubmit} disabled={!canSubmit}>
               <Icon name="check" size={13}/>
               {busy ? "Saving…" : (isPrime ? "Add prime" : "Add sub")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ---------- MergeModal ----------
+// Consolidate 2+ duplicate Directory rows into one. The user picks which record
+// to KEEP (the survivor); every reference on the others is repointed to it and
+// the duplicates are deleted (server-side, transactional — see mergeEntities /
+// 20260606130000_merge_entities.sql). All selected rows are the same kind (the
+// table only lets you select one kind at a time). The MSMM company can never be
+// deleted, so if it's in the set it's force-kept.
+export const MergeModal = ({
+  entities = [],
+  kind = "Company",                 // "Client" | "Company"
+  projectsByType, invoice, hotLeads = [], openBids = [],
+  onClose, onConfirm,
+}) => {
+  const isClient = kind === "Client";
+  // Per-entity reference blast radius, memoized off the in-memory slices.
+  const summaries = React.useMemo(() => {
+    const m = new Map();
+    for (const e of entities) {
+      m.set(e.id, mergeRefSummary(e, { projectsByType, invoice, hotLeads, openBids }));
+    }
+    return m;
+  }, [entities, projectsByType, invoice, hotLeads, openBids]);
+
+  // MSMM (company singleton) can't be deleted → it must be the survivor.
+  const msmm = entities.find(e => e.isMsmm);
+  // Default survivor: MSMM if present, else the richest (most-referenced) row —
+  // keeping the one with the most history minimizes downstream surprise.
+  const defaultSurvivor =
+    msmm?.id ||
+    entities.slice().sort(
+      (a, b) => (summaries.get(b.id)?.total || 0) - (summaries.get(a.id)?.total || 0)
+    )[0]?.id ||
+    entities[0]?.id;
+
+  const [survivorId, setSurvivorId] = useState(defaultSurvivor);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const survivorLocked = !!msmm; // MSMM forces the survivor
+
+  const survivor = entities.find(e => e.id === survivorId);
+  const losers   = entities.filter(e => e.id !== survivorId);
+  const totalRefs = losers.reduce((a, e) => a + (summaries.get(e.id)?.total || 0), 0);
+
+  const nameOf = (e) => isClient ? (e.baseName || e.name) : e.name;
+  const subOf  = (e) =>
+    isClient ? (e.district || "") : (e.type && e.type !== "Multiple" ? e.type : "");
+
+  const summaryLine = (s) => {
+    if (!s || !s.total) return "No references";
+    const bits = [];
+    if (s.projects.length) bits.push(`${s.projects.length} project${s.projects.length > 1 ? "s" : ""}`);
+    if (s.leadCount) bits.push(`${s.leadCount} lead${s.leadCount > 1 ? "s" : ""}`);
+    if (s.bidCount)  bits.push(`${s.bidCount} bid${s.bidCount > 1 ? "s" : ""}`);
+    return bits.join(" · ");
+  };
+
+  const handleSubmit = async () => {
+    if (busy || !survivorId || losers.length === 0) return;
+    setBusy(true); setError("");
+    try {
+      await onConfirm(survivorId, losers.map(e => e.id));
+    } catch (e) {
+      setError(e?.message || "Merge failed");
+      setBusy(false);
+    }
+    // On success the parent closes the modal + reloads, so no setBusy(false) here.
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={busy ? undefined : onClose}/>
+      <div className="modal merge-modal" style={{ width: 540 }}>
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="merge" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>
+              Directory · Merge
+            </div>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>
+              Merge {entities.length} {isClient ? "clients" : "companies"} into one
+            </h3>
+            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+              Pick the record to <strong>keep</strong>. Every reference on the others —
+              across Open Bids, Awaiting, Awarded, Closed Out, Potential, Invoice
+              {isClient ? "" : ", sub-invoices"} and Hot Leads — moves to it, then the
+              duplicates are deleted.
+            </div>
+          </div>
+          <button className="drawer-close" onClick={onClose} disabled={busy}>
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {survivorLocked && (
+            <div className="merge-note">
+              <Icon name="lock" size={12}/>
+              <span><strong>MSMM</strong> can't be deleted, so it's kept as the surviving record.</span>
+            </div>
+          )}
+
+          <div className="merge-cards">
+            {entities.map(e => {
+              const isSurv = e.id === survivorId;
+              const s = summaries.get(e.id);
+              const lockedRow = survivorLocked && e.isMsmm;
+              const disabled = busy || (survivorLocked && !e.isMsmm);
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  className={"merge-card" + (isSurv ? " survivor" : " loser") + (disabled && !isSurv ? " is-disabled" : "")}
+                  onClick={() => { if (!disabled && !survivorLocked) setSurvivorId(e.id); }}
+                  disabled={disabled && !isSurv}
+                  aria-pressed={isSurv}>
+                  <span className={"merge-radio" + (isSurv ? " on" : "")}>
+                    {isSurv && <Icon name="check" size={11}/>}
+                  </span>
+                  <span className="merge-card-main">
+                    <span className="merge-card-name">
+                      {nameOf(e)}
+                      {e.isMsmm && <span className="merge-msmm-tag">MSMM</span>}
+                    </span>
+                    <span className="merge-card-sub">
+                      {subOf(e) && <span className="merge-card-kindchip">{subOf(e)}</span>}
+                      <span className="merge-card-refs">{summaryLine(s)}</span>
+                    </span>
+                  </span>
+                  <span className={"merge-badge " + (isSurv ? "keep" : "drop")}>
+                    {isSurv ? "Keep" : "Merge & delete"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="merge-summary">
+            <Icon name="forward" size={13}/>
+            <span>
+              {totalRefs > 0 ? (
+                <><strong>{totalRefs}</strong> reference{totalRefs > 1 ? "s" : ""} will be repointed to{" "}
+                <strong>{survivor ? nameOf(survivor) : "—"}</strong>.</>
+              ) : (
+                <>No references to repoint — the duplicate{losers.length > 1 ? "s" : ""} will just be removed.</>
+              )}{" "}
+              {losers.length} record{losers.length > 1 ? "s" : ""} deleted.
+            </span>
+          </div>
+
+          <div className="merge-warn">
+            <Icon name="warn" size={13}/>
+            <span>This can't be undone. Storage attachments stay in place and remain visible on the kept record.</span>
+          </div>
+
+          {error && (
+            <div style={{ color: "var(--rose)", fontSize: 12 }}>{error}</div>
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
+            Profile fields (contact, email…) aren't merged — only references move.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
+            <button className="btn primary sm" onClick={handleSubmit}
+                    disabled={busy || !survivorId || losers.length === 0}>
+              <Icon name="merge" size={13}/>
+              {busy ? "Merging…" : `Merge ${losers.length} → 1`}
             </button>
           </div>
         </div>

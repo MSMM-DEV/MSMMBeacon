@@ -10,7 +10,7 @@ import {
 import { InvoiceCharts } from "./invoice-charts.jsx";
 import { SubsReceivablesPanel } from "./quadsheet-receivables.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
-import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal } from "./panels.jsx";
+import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal, MergeModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
@@ -26,7 +26,7 @@ import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS,
-  getClientsOnly, getCompaniesOnly, getUsers, companyById, userById,
+  getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
@@ -904,6 +904,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [filesModal, setFilesModal] = useState(null);
   // "Add sub" modal — { projectRow } or null. Triggered from the Invoice expand.
   const [addSubModal, setAddSubModal] = useState(null);
+  // Directory "Merge" modal — { entities, kind } or null. mergeResetKey bumps
+  // after a successful merge so DirectoryTable drops its (now stale) selection.
+  const [mergeModal, setMergeModal] = useState(null);
+  const [mergeResetKey, setMergeResetKey] = useState(0);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -1426,6 +1430,36 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // time — not a beacon.companies column. Only scalars in COMPANIES_COLS
     // persist; everything else is local state only.
     patchTable("companies", id, buildDbPatch(patch, COMPANIES_COLS));
+  };
+
+  // Directory merge — consolidate the selected duplicates into `survivorId`,
+  // repointing every reference (server-side, transactional). Because the merge
+  // touches projects across all stages plus invoices / sub-invoices / leads /
+  // bids, we re-pull those slices from loadBeacon (which also refreshes the
+  // clients/companies module caches) rather than surgically patching state.
+  const handleMergeConfirm = async (survivorId, loserIds) => {
+    const kind = mergeModal?.kind || "Company";
+    const survivorName =
+      (mergeModal?.entities || []).find(e => e.id === survivorId)?.name || "the kept record";
+    const res = await mergeEntities({ kind, survivorId, loserIds });
+    const d = await loadBeacon();
+    setPotential(d.potential); setAwaiting(d.awaiting);
+    setAwarded(d.awarded);     setClosed(d.closed);
+    setInvoice(d.invoices);    setHotLeads(d.hotLeads || []);
+    setOpenBids(d.openBids || []);
+    setSubInvoices(d.subInvoices || new Map());
+    setClients(getClientsOnly());
+    setCompanies(getCompaniesOnly());
+    setMergeModal(null);
+    setMergeResetKey(k => k + 1);
+    const moved =
+      (res?.projects || 0) + (res?.project_subs || 0) + (res?.sub_invoices || 0) +
+      (res?.leads || 0) + (res?.prime || 0) + (res?.open_bids || 0);
+    const n = res?.merged ?? loserIds.length;
+    showToast(
+      `Merged ${n} duplicate${n > 1 ? "s" : ""} into ${survivorName} · ${moved} reference${moved === 1 ? "" : "s"} repointed`,
+      "merge"
+    );
   };
 
   // Monthly value edits (Jan–Dec cells in the Invoice table) write through
@@ -3857,6 +3891,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             }}
             flashId={flashId}
             filters={chipsFor("directory")}
+            onMerge={(entities, kind) => setMergeModal({ entities, kind })}
+            mergeResetKey={mergeResetKey}
             tab="directory"/>
         )}
         {tab === "timesheet" && (
@@ -4115,6 +4151,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           />
         );
       })()}
+
+      {mergeModal && (
+        <MergeModal
+          entities={mergeModal.entities}
+          kind={mergeModal.kind}
+          projectsByType={{ potential, awaiting, awarded, closed }}
+          invoice={invoice}
+          hotLeads={hotLeads}
+          openBids={openBids}
+          onClose={() => setMergeModal(null)}
+          onConfirm={handleMergeConfirm}
+        />
+      )}
 
       {filesModal && (() => {
         const { kind, projectRow, monthIdx, sub, companyId, companyName } = filesModal;

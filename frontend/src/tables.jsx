@@ -3932,7 +3932,7 @@ export const OpenBidsTable = ({
 // still reachable via double-click (existing behavior preserved).
 export const DirectoryTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, invoice, flashId, filters,
-  onOpenProject,
+  onOpenProject, onMerge, mergeResetKey,
 }) => {
   // Set of entity ids currently expanded. Set so multiple can be open.
   const [expandedIds, setExpandedIds] = useState(() => new Set());
@@ -3944,6 +3944,49 @@ export const DirectoryTable = ({
       return next;
     });
   };
+
+  // Multi-select for merge. You can only select one KIND at a time (clients and
+  // companies have different reference sets), so the first pick locks the kind
+  // and the other kind's checkboxes disable until the selection is cleared.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const byId = React.useMemo(() => {
+    const m = new Map();
+    for (const r of (rows || [])) if (!r._kindHeader) m.set(r.id, r);
+    return m;
+  }, [rows]);
+  const selectedRows = [...selectedIds].map(id => byId.get(id)).filter(Boolean);
+  const selectedKind = selectedRows.length
+    ? (selectedRows[0].type === "Client" ? "Client" : "Company")
+    : null;
+  const kindOf = (r) => (r.type === "Client" ? "Client" : "Company");
+  const toggleSelect = (r) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(r.id)) next.delete(r.id);
+      else next.add(r.id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+  // Parent bumps mergeResetKey after a successful merge → drop the (now stale)
+  // selection so the deleted rows don't linger as checked.
+  React.useEffect(() => { setSelectedIds(new Set()); }, [mergeResetKey]);
+
+  const startMerge = () => {
+    if (selectedRows.length < 2 || !onMerge) return;
+    onMerge(selectedRows, selectedKind);
+  };
+
+  const mergeBar = selectedRows.length > 0 ? (
+    <div className="merge-actionbar">
+      <span className="merge-actionbar-count">{selectedRows.length} selected</span>
+      <button className="tool-chip" onClick={clearSelection}>Clear</button>
+      <button className="btn primary sm" onClick={startMerge} disabled={selectedRows.length < 2}>
+        <Icon name="merge" size={13}/>
+        Merge {selectedKind === "Client" ? "clients" : "companies"}
+      </button>
+    </div>
+  ) : null;
 
   const cols = [
     { label: "__expand", w: "30px", locked: true },
@@ -3973,6 +4016,7 @@ export const DirectoryTable = ({
     <TableView
       tab={tab}
       filters={filters}
+      right={mergeBar}
       columns={cols} rows={rows}
       postProcess={injectKindHeaders}
       emptyTitle="No directory entries yet"
@@ -4007,11 +4051,21 @@ export const DirectoryTable = ({
               </button>
             </div>
           ),
-          "__select": (
-            <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
-            </div>
-          ),
+          "__select": (() => {
+            const otherKindLocked = selectedKind && kindOf(r) !== selectedKind;
+            return (
+              <div className="td row-check" onClick={e => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(r.id)}
+                  disabled={otherKindLocked}
+                  title={otherKindLocked
+                    ? `Finish or clear the ${selectedKind.toLowerCase()} selection first — clients and companies can't be merged together.`
+                    : "Select to merge"}
+                  onChange={() => toggleSelect(r)}/>
+              </div>
+            );
+          })(),
           "Name": isClient ? (
             <div className="td" style={{ fontWeight: 500 }}>
               <EditableCell value={r.baseName || r.name}
@@ -4109,7 +4163,7 @@ export const DirectoryTable = ({
           : null;
         return (
           <React.Fragment key={r.id}>
-            <div className={"trow" + (flashId === r.id ? " flash" : "") + (isExpanded ? " expanded" : "")}
+            <div className={"trow" + (flashId === r.id ? " flash" : "") + (isExpanded ? " expanded" : "") + (selectedIds.has(r.id) ? " row-selected" : "")}
                  data-kind={isClient ? "client" : "company"}
                  style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                  onDoubleClick={() => onOpenDrawer(r)}>

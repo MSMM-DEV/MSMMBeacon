@@ -13972,3 +13972,136 @@ html, body { overflow-x: clip; }
   .tk-de-toast { animation: none; }
 }
 
+
+/* ============================================================
+   Directory — multi-select + Merge
+   ============================================================ */
+
+/* Selected directory row (during a merge selection). */
+.trow.row-selected {
+  background: var(--accent-softer);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+[data-theme="dark"] .trow.row-selected { background: var(--accent-soft); }
+
+/* Bulk action bar that rides in the toolbar's right slot once rows are picked. */
+.merge-actionbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 4px 3px 12px;
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-softer);
+  border-radius: 999px;
+}
+.merge-actionbar-count {
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: .04em;
+  color: var(--accent); font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---- Merge modal ---- */
+.merge-modal .merge-note {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  font-size: 11.5px; line-height: 1.4; color: var(--text-soft);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.merge-modal .merge-note strong { color: var(--text); }
+
+.merge-cards { display: flex; flex-direction: column; gap: 8px; }
+
+.merge-card {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; text-align: left;
+  padding: 11px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color .14s ease, box-shadow .14s ease, background .14s ease, opacity .14s ease;
+}
+.merge-card:hover:not(.is-disabled):not(.survivor) { border-color: var(--text-soft); }
+
+.merge-card.survivor {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+  cursor: default;
+}
+.merge-card.loser { background: var(--surface); }
+.merge-card.is-disabled { opacity: .5; cursor: not-allowed; }
+
+/* Radio dot. */
+.merge-radio {
+  flex: none;
+  width: 20px; height: 20px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  color: #fff; background: transparent;
+  transition: background .14s ease, border-color .14s ease;
+}
+.merge-radio.on { background: var(--accent); border-color: var(--accent); }
+
+.merge-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.merge-card-name {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  display: flex; align-items: center; gap: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.merge-card.loser .merge-card-name { color: var(--text-soft); }
+.merge-msmm-tag {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--blue); color: #fff;
+}
+.merge-card-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.merge-card-kindchip {
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-soft);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.merge-card-refs {
+  font-family: var(--font-mono);
+  font-size: 11px; color: var(--text-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.merge-badge {
+  flex: none;
+  font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px;
+  white-space: nowrap;
+}
+.merge-badge.keep { background: var(--accent); color: #fff; }
+.merge-badge.drop {
+  background: transparent; color: var(--rose);
+  border: 1px solid color-mix(in srgb, var(--rose) 45%, transparent);
+}
+
+/* Repoint summary + irreversibility note. */
+.merge-summary {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 13px;
+  font-size: 12.5px; line-height: 1.45; color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.merge-summary svg { flex: none; margin-top: 1px; color: var(--accent); }
+.merge-summary strong { color: var(--text); }
+
+.merge-warn {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 13px;
+  font-size: 11.5px; line-height: 1.45;
+  color: color-mix(in srgb, var(--rose) 80%, var(--text));
+  background: color-mix(in srgb, var(--rose) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rose) 28%, transparent);
+  border-radius: var(--radius-sm);
+}
+.merge-warn svg { flex: none; margin-top: 1px; color: var(--rose); }

@@ -3040,3 +3040,48 @@ export async function getOpenBidPdfSignedUrl(filePath, expiresInSeconds = 60) {
   return data?.signedUrl;
 }
 
+// ----------------------------------------------------------------------
+// Directory — merge duplicate companies / clients.
+//
+// Repoints EVERY reference (across Open Bids, Awaiting, Awarded, Closed Out,
+// Potential, Invoice, sub-invoices, Hot Leads) from the loser rows onto one
+// survivor, then deletes the losers — all inside a single Postgres transaction
+// (the merge_companies / merge_clients RPCs in 20260606130000_merge_entities.sql).
+// Server-side so the restrict-FK + unique-index handling stays atomic; a missed
+// reference rolls the whole thing back rather than half-merging. Returns the
+// RPC's jsonb summary of how many references were repointed per table.
+// ----------------------------------------------------------------------
+export async function mergeEntities({ kind, survivorId, loserIds }) {
+  const losers = (loserIds || []).filter(id => id && id !== survivorId);
+  if (!survivorId) throw new Error("Pick a record to keep before merging.");
+  if (!losers.length) throw new Error("Select at least one other record to merge in.");
+  const fn = kind === "Client" ? "merge_clients" : "merge_companies";
+  const { data, error } = await supabase.rpc(fn, {
+    p_survivor: survivorId,
+    p_losers: losers,
+  });
+  if (error) throw new Error(error.message);
+  return data; // { kind, survivor, merged, projects, project_subs, sub_invoices, ... }
+}
+
+// Read-only preview of everything that points at `entity`, computed from the
+// already-loaded in-memory slices (no round-trip). Drives the MergeModal's
+// "what will be repointed" breakdown so the user sees the blast radius before
+// committing. Projects reuse linkedProjectsFor (Client / Prime / Sub roles);
+// leads + open bids are scanned by their adapted `clientId` (which folds in the
+// prime_company_id fallback for leads).
+export function mergeRefSummary(entity, { projectsByType, invoice, hotLeads = [], openBids = [] } = {}) {
+  if (!entity) return { projects: [], leadCount: 0, bidCount: 0, total: 0 };
+  const projects = linkedProjectsFor(entity, projectsByType, invoice);
+  const leadCount = hotLeads.filter(l => l.clientId === entity.id).length;
+  const bidCount  = (entity.type === "Client")
+    ? openBids.filter(b => b.clientId === entity.id).length
+    : 0; // open bids only reference clients
+  return {
+    projects,
+    leadCount,
+    bidCount,
+    total: projects.length + leadCount + bidCount,
+  };
+}
+
