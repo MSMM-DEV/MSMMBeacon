@@ -19,6 +19,7 @@ import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
 import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { exportPDF } from "./utils/pdf.js";
+import { exportManishWorkbook } from "./utils/manish-xlsx.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
@@ -3150,6 +3151,81 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // "Print for Manish" — Invoice-only. One .xlsx sheet per month (JAN–DEC),
+  // each listing every Prime-role project that has at least one sub. Row =
+  // Project No. | Invoice No. (blank) | Total Invoice (=SUM) | MSMM | Sub N
+  // Name/Amount pairs. Per-cell color mirrors the in-app paid/attachment
+  // signal: paid tick → green · PDF attached → yellow · amount only → red
+  // (MSMM + Total follow the prime invoice status; each sub follows its own).
+  // Sub columns extend past 3 when a project carries more subs.
+  const handleExportManish = async () => {
+    if (tab !== "invoice") return;
+    const date = new Date().toISOString().slice(0, 10);
+    const exportYear = yearFilter.invoice ?? THIS_YEAR;
+    const filename = `msmm-invoice-manish-${exportYear}-${date}.xlsx`;
+
+    // Honor the current view (year filter / search / sort) like the other
+    // two invoice prints, then keep only Prime-role projects that have subs,
+    // scoped to one year so a project can't appear twice.
+    const snap = getCurrentTableSnapshot();
+    const baseRows = (snap && snap.tab === "invoice" && snap.processedRows)
+      ? snap.processedRows
+      : currentRows;
+
+    const allEntriesFor = (r) => subInvoices?.get(r.sourceId) || [];
+    const subListFor = (r) => allEntriesFor(r).filter(s => (s.kind || "sub") === "sub");
+    const msmmAtMonth = (r, i) => {
+      const override = r.msmmValues?.[i];
+      if (override != null) return Number(override);
+      const total = Number(r.values?.[i] || 0);
+      const subSum = subListFor(r).reduce(
+        (a, s) => a + Number((s.amounts && s.amounts[i]) || 0), 0);
+      return total - subSum;
+    };
+
+    const included = baseRows.filter(r =>
+      r.role === "Prime" &&
+      r.year === exportYear &&
+      subListFor(r).length > 0);
+
+    if (included.length === 0) {
+      showToast(`No Prime projects with subs for ${exportYear}`, "x");
+      return;
+    }
+
+    // Same column count on every sheet (subs are project-level, not monthly);
+    // never fewer than the template's 3 slots.
+    const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
+
+    const rows = included.map(r => {
+      const subs = subListFor(r);
+      const subNames = Array.from({ length: maxSubs }, (_, j) => subs[j]?.companyName || "");
+      const months = Array.from({ length: 12 }, (_, i) => ({
+        msmmAmount: msmmAtMonth(r, i),
+        primePaid: !!(r.primePaid && r.primePaid[i]),
+        primeHasFile: ((r.primeFiles && r.primeFiles[i]) || []).length > 0,
+        subs: Array.from({ length: maxSubs }, (_, j) => {
+          const s = subs[j];
+          if (!s) return { amount: null, paid: false, hasFile: false };
+          return {
+            amount: (s.amounts && s.amounts[i]) ?? null,
+            paid: !!(s.paid && s.paid[i]),
+            hasFile: ((s.files && s.files[i]) || []).length > 0,
+          };
+        }),
+      }));
+      return { projectNumber: r.projectNumber, subNames, months };
+    });
+
+    try {
+      showToast("Preparing Excel…", "export");
+      await exportManishWorkbook({ year: exportYear, maxSubs, rows }, filename);
+      showToast(`Exported ${included.length} project${included.length === 1 ? "" : "s"} → Excel`, "export");
+    } catch (err) {
+      showToast(`Export failed: ${err.message || err}`, "x");
+    }
+  };
+
   // PotentialTable owns its own primary sort: [probability asc, role asc],
   // so App-level pre-sort is no longer needed. Totals are injected inside
   // PotentialTable's postProcess and published via the snapshot, so Export
@@ -3419,6 +3495,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 </button>
                 <button className="btn sm" onClick={handleExportInvoiceSubs}>
                   <Icon name="export" size={13}/>Print for Mark - Subs
+                </button>
+                <button className="btn sm" onClick={handleExportManish}>
+                  <Icon name="export" size={13}/>Print for Manish
                 </button>
               </>
             ) : (
