@@ -2931,8 +2931,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
           const label = col?.label;
           const monthIdx = MONTHS.indexOf(label);
-          const isActualMonth = monthIdx >= 0 && monthIdx <= actualThru;
-          const isProjMonth   = monthIdx >= 0 && monthIdx > actualThru;
+          // A projected month with a bill attached is promoted to Actual (same
+          // rule as the on-screen cells), so the print matches the UI.
+          const billedAhead = monthIdx >= 0 && monthIdx > actualThru
+            && !!(row?.primeFiles && row.primeFiles[monthIdx] && row.primeFiles[monthIdx].length);
+          const isActualMonth = monthIdx >= 0 && (monthIdx <= actualThru || billedAhead);
+          const isProjMonth   = monthIdx >= 0 && !isActualMonth;
           const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
           if (isActualMonth) return { fillColor: INVOICE_PALETTE.AMBER_ACTUAL, textColor: INVOICE_PALETTE.ACCENT_INK };
           if (isProjMonth)   return { fillColor: INVOICE_PALETTE.CREAM_PROJ,   textColor: INVOICE_PALETTE.PROJ_INK };

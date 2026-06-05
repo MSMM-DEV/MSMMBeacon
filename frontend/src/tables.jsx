@@ -1938,6 +1938,26 @@ export const InvoiceTable = ({
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
   const pmOptions = USERS.map(u => ({ value: u.id, label: u.name }));
+  // A project month counts as "Actual" when the date-driven cutover has reached
+  // it OR a bill has been attached to that month on the project's total/prime
+  // row — attaching a bill promotes that month from Projection to Actual for
+  // the project, even ahead of the cutover. Derived live from r.primeFiles
+  // (re-annotated by refreshInvoiceArtifacts after every upload), so the cell
+  // flips the instant a bill lands. Applies to the project's MSMM, sub, and
+  // total rows; the column header + cross-project grand totals stay on the
+  // global cutover.
+  const hasPrimeBill = (row, i) => !!(row?.primeFiles && row.primeFiles[i] && row.primeFiles[i].length);
+  // month-state class for a project's month cell. `cue` adds the subtle
+  // "billed ahead" underline — used only on the total/prime row (where the
+  // bill lives) so the promoted column doesn't stack underlines on every row:
+  //   • date-driven actual            → "month-actual"
+  //   • promoted by a bill (ahead of  → "month-actual" (+ " month-promoted"
+  //     the cutover)                     when cue) — amber, billed
+  //   • still a projection            → "month-proj"
+  const monthCellState = (row, i, cue = false) =>
+    i <= actualThru ? "month-actual"
+    : hasPrimeBill(row, i) ? ("month-actual" + (cue ? " month-promoted" : ""))
+    : "month-proj";
   // The parent row IS the MSMM view of each project — every dollar value
   // shown there reflects MSMM's portion (auto-calculated as Total minus
   // every sub's portion, or the user-saved override when set). The expand
@@ -2658,7 +2678,7 @@ export const InvoiceTable = ({
                       const totalFiles = (r.primeFiles && r.primeFiles[i]) || [];
                       return (
                       <td key={i}
-                          className={(i <= actualThru ? "month-actual" : "month-proj") + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
+                          className={monthCellState(r, i) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
                           title={isOverride
                             ? `Override · auto would be ${fmtMoney(auto, false)}`
                             : "MSMM monthly · auto-calc. Click to override."}>
@@ -2869,7 +2889,7 @@ export const InvoiceTable = ({
                         const showPaidToggle = hasAmount || isPaid;
                         return (
                         <td key={i}
-                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            className={monthCellState(r, i) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
                             onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv, entryKind)}
@@ -3041,7 +3061,7 @@ export const InvoiceTable = ({
                         const invNum = (r.invoiceNumbers && r.invoiceNumbers[i]) || null;
                         return (
                         <td key={i}
-                            className={(i <= actualThru ? "month-actual" : "month-proj") + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                            className={monthCellState(r, i, true) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={v} type="number"
                             onChange={nv => updateInvoice(r.id, i, nv)}
@@ -3196,12 +3216,13 @@ export const InvoiceTable = ({
           <div className="invoice-legend">
             <span><span className="legend-sw actual"/>Actual (editable)</span>
             <span><span className="legend-sw proj"/>Projection (editable)</span>
+            <span><span className="legend-sw promoted"/>Billed ahead → Actual</span>
             <span><span className="legend-today"/>Actual ▸ Projection boundary</span>
             <span className="ml-auto" style={{ marginLeft: "auto", color: "var(--text-soft)" }}>
               {cutoverNextMonth
                 ? <>Each month switches from Projection to Actual on the {ordinal(cutoverDay)} of the following month</>
                 : <>Cells automatically switch from Projection to Actual on the {ordinal(cutoverDay)} of each month</>}
-              {(cutoverDay !== 1 || cutoverNextMonth) ? " (set in Settings → Targets)." : "."}
+              {" "}— or attach a bill to a projected month to mark it Actual now.
             </span>
           </div>
         </>

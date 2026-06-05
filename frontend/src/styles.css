@@ -2186,6 +2186,7 @@ html, body { overflow-x: clip; }
 }
 .legend-sw.actual { background: var(--accent-softer); border-color: var(--accent-soft); }
 .legend-sw.proj { background: repeating-linear-gradient(135deg, var(--surface) 0 4px, var(--surface-2) 4px 5px); }
+.legend-sw.promoted { background: var(--accent-softer); border-color: var(--accent-soft); box-shadow: inset 0 -3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
 .legend-today { display: inline-block; width: 2px; height: 14px; background: var(--accent); vertical-align: -3px; margin-right: 5px; }
 
 /* ========== Tweaks Panel ========== */
@@ -5989,6 +5990,20 @@ html, body { overflow-x: clip; }
    files attached, fully revealed on cell hover, brightens on its own hover. */
 .invoice-table td.invoice-cell {
   position: relative;
+  /* Smooth the Projection→Actual flip when a bill is attached (a month gets
+     promoted to Actual). Transitions only fire on change, not first paint, so
+     there's no load-time flashing. */
+  transition: background 360ms cubic-bezier(.2,.8,.2,1),
+              color 360ms ease,
+              box-shadow 360ms ease;
+}
+/* A month promoted to Actual by an attached bill AHEAD of the date cutover.
+   Reads as a normal Actual cell (amber) plus a subtle inset accent underline
+   so you can scan a row and see which projected months are already billed
+   (the visible paperclip+count is the bill itself; this just marks "ahead of
+   the cutover"). */
+.invoice-table td.invoice-cell.month-promoted {
+  box-shadow: inset 0 -2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
 }
 .invoice-cell-clip {
   position: absolute;
