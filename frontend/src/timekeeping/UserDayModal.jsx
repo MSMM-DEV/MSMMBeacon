@@ -47,7 +47,7 @@ const findByBounds = (list, startISO, endISO) => {
     (endISO == null ? iv.endAt == null : (iv.endAt && Math.abs(+new Date(iv.endAt) - +new Date(endISO)) < 60000)));
 };
 
-export function UserDayModal({ userId, initialDate, onClose, onDirty }) {
+export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode = false }) {
   const [date, setDate] = useState(initialDate || todayInCT());
   const [day, setDay] = useState({ date, intervals: [], punches: [], day: null });
   const [weekLock, setWeekLock] = useState(null);
@@ -220,8 +220,8 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty }) {
           <div className="tk-de-id">
             {user && <span className={`avatar sm ${user.color}`}>{user.initials}</span>}
             <div>
-              <div className="tk-de-eyebrow">Time Admin · Day editor</div>
-              <h2 id="tk-de-title" className="tk-de-title">{user?.name || "User"}</h2>
+              <div className="tk-de-eyebrow">{selfMode ? "My timesheet · Day editor" : "Time Admin · Day editor"}</div>
+              <h2 id="tk-de-title" className="tk-de-title">{selfMode ? "My day" : (user?.name || "User")}</h2>
             </div>
           </div>
 
@@ -340,7 +340,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty }) {
 
         <footer className="tk-de-foot">
           <span className="tk-de-foot-note">
-            <Icon name="bolt" size={12} /> Edits apply immediately to {user?.name?.split(" ")[0] || "this user"}’s timesheet.
+            <Icon name="bolt" size={12} /> Edits apply immediately to {selfMode ? "your" : `${user?.name?.split(" ")[0] || "this user"}’s`} timesheet.
           </span>
           <button type="button" className="btn btn-primary" onClick={onClose}>Done</button>
         </footer>

@@ -16,7 +16,7 @@ import {
 import { PunchButton } from "./PunchButton";
 import { DayCalendar } from "./DayCalendar";
 import { WeekSummary } from "./WeekSummary";
-import { CorrectionModal } from "./CorrectionModal";
+import { UserDayModal } from "./UserDayModal";
 import { PunchPromptModal } from "./PunchPromptModal";
 import { IntervalReclassifyPopover } from "./IntervalReclassifyPopover";
 
@@ -36,7 +36,7 @@ export function TimesheetTab({ focusDate = null }) {
 
   const [day,           setDay]           = useState({ date, intervals: [], punches: [], day: null });
   const [week,          setWeek]          = useState({ days: [], week: null });
-  const [showCorrect,   setShowCorrect]   = useState(false);
+  const [editDay,       setEditDay]       = useState(false);
   const [focusInterval, setFocusInterval] = useState(null);
   const [prompt,        setPrompt]        = useState(null);   // { kind, interval } | null
 
@@ -206,8 +206,8 @@ export function TimesheetTab({ focusDate = null }) {
               {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
             </span>
           </div>
-          <button className="tk-correction-cta" onClick={() => setShowCorrect(true)} disabled={locked}>
-            <Icon name="edit" size={13}/> Request correction
+          <button className="tk-correction-cta" onClick={() => setEditDay(true)}>
+            <Icon name="edit" size={13}/> Edit day
           </button>
         </header>
         {/*
@@ -239,11 +239,13 @@ export function TimesheetTab({ focusDate = null }) {
       />
 
       {/* Modals */}
-      {showCorrect && (
-        <CorrectionModal
-          date={date}
-          onClose={() => setShowCorrect(false)}
-          onSubmitted={refresh}
+      {editDay && (
+        <UserDayModal
+          userId={userId}
+          initialDate={date}
+          selfMode
+          onClose={() => { setEditDay(false); refresh(); }}
+          onDirty={() => refresh({ silent: true })}
         />
       )}
       {focusInterval && (

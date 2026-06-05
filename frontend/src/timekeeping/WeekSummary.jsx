@@ -1,23 +1,18 @@
-// WeekSummary — 7-day card for the current user. Submits the week for
-// approval; re-submits after a rejection. Pre-flight warns about unresolved
-// flags (missing_out, untagged_meeting).
+// WeekSummary — read-only 7-day hours card for the current user. Approval was
+// retired (everyone edits their own time directly), so this no longer submits
+// or shows approval state — just the week's worked hours per day + any
+// attention flags (missing_out, untagged_meeting).
 
-import React, { useState } from "react";
+import React from "react";
 import { Icon } from "../icons";
-import { fmtHM, submitWeek } from "../data";
+import { fmtHM } from "../data";
 
 const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function WeekSummary({
-  userId,
   weekStart,
   days,            // adapted timesheet_days for this week (length 0..7)
-  week,            // adapted timesheet_weeks row (or default open)
-  onChanged,
 }) {
-  const [busy, setBusy] = useState(false);
-  const [err,  setErr]  = useState(null);
-
   const dayByDate = new Map((days || []).map(d => [d.date, d]));
   const slots = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(`${weekStart}T00:00:00`);
@@ -36,21 +31,6 @@ export function WeekSummary({
     return list;
   });
 
-  const status     = week?.approvalStatus || "open";
-  const locked     = !!week?.locked;
-  const submitted  = status === "submitted";
-  const approved   = status === "approved" || locked;
-  const rejected   = status === "rejected";
-
-  const submit = async () => {
-    setBusy(true); setErr(null);
-    try {
-      await submitWeek(userId, weekStart);
-      onChanged?.();
-    } catch (e) { setErr(e.message || "submission failed"); }
-    finally { setBusy(false); }
-  };
-
   return (
     <section className="tk-week-card">
       <header className="tk-week-head">
@@ -60,12 +40,6 @@ export function WeekSummary({
         </div>
         <div className="tk-week-meta">
           <div className="tk-week-total">{fmtHM(total)}</div>
-          <div className={`tk-week-chip status-${status}`}>
-            {approved   ? "Approved · locked" :
-             submitted  ? "Awaiting approval" :
-             rejected   ? "Returned for review" :
-             "Open"}
-          </div>
         </div>
       </header>
 
@@ -91,32 +65,13 @@ export function WeekSummary({
         })}
       </ul>
 
-      {rejected && week?.rejectReason && (
-        <div className="tk-week-reject-note">
-          <strong>Returned:</strong> {week.rejectReason}
-        </div>
-      )}
-
-      {flags.length > 0 && !approved && (
+      {flags.length > 0 && (
         <ul className="tk-week-flags">
           {flags.map((f, i) => (
             <li key={i}><Icon name="bell" size={11}/> {f.kind} on {f.date}</li>
           ))}
         </ul>
       )}
-
-      <footer className="tk-week-foot">
-        {approved ? (
-          <span className="tk-week-locked-note">
-            <Icon name="lock" size={12}/> Approved. Submit a correction request to make changes.
-          </span>
-        ) : (
-          <button className="btn btn-primary" disabled={busy} onClick={submit}>
-            {busy ? "Submitting…" : submitted ? "Re-submit for approval" : "Submit week for approval"}
-          </button>
-        )}
-        {err && <div className="form-error">{err}</div>}
-      </footer>
     </section>
   );
 }

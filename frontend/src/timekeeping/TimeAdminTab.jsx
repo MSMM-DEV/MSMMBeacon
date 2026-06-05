@@ -18,15 +18,14 @@ import {
 import { useAdminTimePrefs } from "./useAdminTimePrefs";
 import { TeamRangeView }     from "./TeamRangeView";
 import { PeopleFilter }      from "./PeopleFilter";
-import { ApprovalsQueue }    from "./ApprovalsQueue";
-import { ReviewRail }        from "./ReviewRail";
 import { NfcEnrollPanel }    from "./NfcEnrollPanel";
 import { TimeSettingsPanel } from "./TimeSettingsPanel";
 import { UserDayModal }      from "./UserDayModal";
 
+// Approval was retired (everyone edits their own time directly), so there's no
+// Approvals view anymore. Admins can still open & edit anyone's day from Team.
 const VIEWS = [
   { key: "team",      label: "Team",            icon: "users" },
-  { key: "approvals", label: "Approvals",       icon: "check" },
   { key: "nfc",       label: "NFC enrollment",  icon: "link" },
   { key: "settings",  label: "Settings",        icon: "settings" },
 ];
@@ -46,36 +45,18 @@ export function TimeAdminTab({ onOpenUserDay }) {
   const [prefs, updatePrefs] = useAdminTimePrefs(adminId);
   const [userDay, setUserDay] = useState(null);   // { userId, date } | null
 
-  // Bumped whenever the admin resolves a correction or a week submission.
-  // Passed to TeamRangeView so it refetches after each approval (otherwise
-  // the Team page stays stale until the admin reloads or remounts the tab).
-  //
-  // The payload also carries the affected date (correction.date) or week
-  // (week_start) so we can navigate the Team view's anchor to where the
-  // change landed. Otherwise approving a correction for May 26 while the
-  // Team view is anchored to May 27 (today) looks like nothing happened.
+  // Bumped by the Day editor after a direct admin edit so the Team canvas +
+  // people signals refetch on change/close.
   const [dataVersion, setDataVersion] = useState(0);
-  const handleApprovalResolved = useCallback((payload) => {
-    setDataVersion(v => v + 1);
-    if (!payload) return;
-    // Only navigate on approvals — rejections leave the data unchanged, so
-    // jumping the Team view's anchor would be surprising and unhelpful.
-    if (payload.decision === "rejected") return;
-    if (payload.kind === "correction" && payload.date) {
-      updatePrefs({ range: "day", anchorDate: payload.date });
-    } else if (payload.kind === "week" && payload.weekStart) {
-      updatePrefs({ range: "week", anchorDate: payload.weekStart });
-    }
-  }, [updatePrefs]);
 
-  // Stable open-user-day handler shared by the Team canvas + the ReviewRail.
+  // Stable open-user-day handler used by the Team canvas.
   const openUserDay = useCallback((payload) => {
     setUserDay(payload);
     onOpenUserDay?.(payload);   // allow parent to mirror the focus too
   }, [onOpenUserDay]);
 
-  // Bumped by the Day editor after any direct edit, so the ReviewRail, Team
-  // canvas, and people signals all refetch on close/change.
+  // Bumped by the Day editor after any direct edit, so the Team canvas and
+  // people signals all refetch on close/change.
   const bumpData = useCallback(() => setDataVersion(v => v + 1), []);
 
   // Lightweight signals fetch: who's currently in / active today. Used by
@@ -181,21 +162,13 @@ export function TimeAdminTab({ onOpenUserDay }) {
       {/* Body */}
       <div className="tk-admin-body">
         {view === "team" && (
-          <>
-            <ReviewRail
-              dataVersion={dataVersion}
-              onResolved={handleApprovalResolved}
-              onOpenUserDay={openUserDay}
-            />
-            <TeamRangeView
-              prefs={prefs}
-              onPrefsChange={updatePrefs}
-              dataVersion={dataVersion}
-              onOpenUserDay={openUserDay}
-            />
-          </>
+          <TeamRangeView
+            prefs={prefs}
+            onPrefsChange={updatePrefs}
+            dataVersion={dataVersion}
+            onOpenUserDay={openUserDay}
+          />
         )}
-        {view === "approvals" && <ApprovalsQueue onResolved={handleApprovalResolved}/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
         {view === "settings"  && <TimeSettingsPanel/>}
       </div>
