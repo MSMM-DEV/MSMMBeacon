@@ -1567,12 +1567,26 @@ export async function updateProjectSub({ projectId, companyId, kind = "sub", amo
 // history. If you re-add the same company afterwards, the existing billing
 // data resurfaces automatically (the matrix builder keys on company_id).
 export async function removeProjectSub({ projectId, companyId, kind = "sub" }) {
-  const { error } = await supabase
+  if (!projectId) {
+    throw new Error(`remove ${kind}: this invoice isn't linked to a project yet`);
+  }
+  let del = supabase
     .from("project_subs")
     .delete()
     .eq("project_id", projectId)
-    .eq("company_id", companyId)
     .eq("kind", kind);
+  // A draft sub (added before a company was picked) has a NULL company_id.
+  // supabase-js .eq("company_id", null) serializes to `company_id=eq.null`,
+  // which Postgres reads as the literal text "null" and fails to cast to uuid
+  // ("invalid input syntax for type uuid: \"null\""). Match NULLs with .is()
+  // instead. (Removes any company-less draft row(s) of this kind — they carry
+  // no sub_invoices, which key on company_id, so nothing is orphaned.)
+  if (companyId == null || companyId === "" || companyId === "null") {
+    del = del.is("company_id", null);
+  } else {
+    del = del.eq("company_id", companyId);
+  }
+  const { error } = await del;
   if (error) throw new Error(`remove ${kind}: ${error.message}`);
   if (kind === "prime") {
     const { error: e2 } = await supabase
