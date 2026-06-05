@@ -2016,6 +2016,11 @@ export const InvoiceTable = ({
   const projectYtdAuto   = (r) => (r.values || []).reduce((a,b) => a + (b || 0), 0);
   const projectRemaining = (r) => r.totalRemainingStart != null ? Number(r.totalRemainingStart) : (Number(r.amount) || 0);
   const projectRollforward = (r) => projectRemaining(r) - projectYtdAuto(r);
+
+  // Temporarily hide the YTD Actual + Rollforward columns. They're annual
+  // (Jan–Dec) concepts that don't fit the rolling-window rework; flip to true
+  // to bring them back.
+  const SHOW_YTD_RF = false;
   // v2 collapsed source_awarded_id + source_potential_id into a single
   // source_project_id (exposed as r.sourceId). orangeSourceIds is a Set of
   // Potential project ids tagged probability='Orange'; only those match.
@@ -2499,14 +2504,14 @@ export const InvoiceTable = ({
                   <th style={{ minWidth: 96 }}>Remaining<br/>Jan&nbsp;1</th>
                   {MONTHS.map((m, i) => (
                     <th key={i} className={i <= actualThru ? "month-actual" : "month-proj"}>
-                      {m}
+                      {m} {THIS_YEAR}
                       <div style={{ fontSize: 9, marginTop: 2, opacity: .7 }}>
                         {i <= actualThru ? "actual" : "proj"}
                       </div>
                     </th>
                   ))}
-                  <th className="total-cell" style={{ minWidth: 96 }}>YTD Actual</th>
-                  <th className="total-cell" style={{ minWidth: 104 }}>Rollforward</th>
+                  {SHOW_YTD_RF && <th className="total-cell" style={{ minWidth: 96 }}>YTD Actual</th>}
+                  {SHOW_YTD_RF && <th className="total-cell" style={{ minWidth: 104 }}>Rollforward</th>}
                   <th style={{ minWidth: 60 }}></th>
                 </tr>
               </thead>
@@ -2704,6 +2709,7 @@ export const InvoiceTable = ({
                       </td>
                       );
                     })}
+                    {SHOW_YTD_RF && (
                     <td className={"total-cell" + (isYtdOverride(r) ? " inv-override" : "")}
                         title={isYtdOverride(r)
                           ? "Manually overridden — clear the cell to reset to auto-calc (sum of MSMM Jan–Dec)"
@@ -2712,6 +2718,8 @@ export const InvoiceTable = ({
                         onChange={v => updateRow(r.id, { ytdActualOverride: v == null ? null : Number(v) })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
+                    )}
+                    {SHOW_YTD_RF && (
                     <td className={"total-cell" + (isRfOverride(r) ? " inv-override" : "")}
                         style={{ color: rollforwardShown(r) < 0 ? "var(--rose)" : "var(--accent-ink)" }}
                         title={isRfOverride(r)
@@ -2721,6 +2729,7 @@ export const InvoiceTable = ({
                         onChange={v => updateRow(r.id, { rollforwardOverride: v == null ? null : Number(v) })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
+                    )}
                     <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
                       <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                         <Icon name="bell" size={14}/>
@@ -2955,6 +2964,7 @@ export const InvoiceTable = ({
                           minus YTD; negative means the sub has billed past
                           their contract amount (surfaced in rose so it reads
                           as a warning, not a quiet zero). */}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell mono"
                           title="Auto-calculated · sum of Jan–Dec billings on this sub">
                         {(() => {
@@ -2962,6 +2972,8 @@ export const InvoiceTable = ({
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
+                      )}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell mono"
                           title="Auto-calculated · contract amount − YTD actual">
                         {(() => {
@@ -2977,6 +2989,7 @@ export const InvoiceTable = ({
                           );
                         })()}
                       </td>
+                      )}
                       <td/>
                     </tr>
                     );
@@ -3125,6 +3138,7 @@ export const InvoiceTable = ({
                       {/* YTD Actual (project) — sum of all 12 monthly project
                           totals. Rollforward (project) — Total CV − YTD,
                           negative in rose to flag a contract overrun. */}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell mono"
                           title="Auto-calculated · sum of Jan–Dec project totals">
                         {(() => {
@@ -3132,6 +3146,8 @@ export const InvoiceTable = ({
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
+                      )}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell mono"
                           title="Auto-calculated · Total Contract Value − YTD actual">
                         {(() => {
@@ -3147,6 +3163,7 @@ export const InvoiceTable = ({
                           );
                         })()}
                       </td>
+                      )}
                       <td/>
                     </tr>
                   )}
@@ -3174,12 +3191,16 @@ export const InvoiceTable = ({
                           {fmtMoney(sumBy(searchedNonOrange, r => msmmAtMonth(r, i)))}
                         </td>
                       ))}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
                         {fmtMoney(sumBy(searchedNonOrange, ytdActualShown))}
                       </td>
+                      )}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
                         {fmtMoney(sumBy(searchedNonOrange, rollforwardShown))}
                       </td>
+                      )}
                       <td className="total-cell"></td>
                     </tr>
                     {/* Total including orange (everything in the searched set) */}
@@ -3199,12 +3220,16 @@ export const InvoiceTable = ({
                           {fmtMoney(sumBy(searchedRows, r => msmmAtMonth(r, i)))}
                         </td>
                       ))}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
                         {fmtMoney(sumBy(searchedRows, ytdActualShown))}
                       </td>
+                      )}
+                      {SHOW_YTD_RF && (
                       <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
                         {fmtMoney(sumBy(searchedRows, rollforwardShown))}
                       </td>
+                      )}
                       <td className="total-cell"></td>
                     </tr>
                   </>
