@@ -3356,6 +3356,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const subNames = Array.from({ length: maxSubs }, (_, j) => subs[j]?.companyName || "");
       const months = Array.from({ length: 12 }, (_, i) => ({
         msmmAmount: msmmAtMonth(r, i),
+        invoiceNumber: (r.invoiceNumbers && r.invoiceNumbers[i]) || null,
         primePaid: !!(r.primePaid && r.primePaid[i]),
         primeHasFile: ((r.primeFiles && r.primeFiles[i]) || []).length > 0,
         subs: Array.from({ length: maxSubs }, (_, j) => {

@@ -1,19 +1,20 @@
 // "Print for Manish" — Excel (.xlsx) exporter for the Invoice page.
 //
-// Reproduces the customer-supplied template (one sheet per month, JAN–DEC):
-//   • Legend in B1:B3 (Green=Paid / Red=Unpaid / Yellow=Submitted)
-//   • Header row 4: Project No. | Project Name | Invoice No. | Total Invoice |
-//                   MSMM | Sub 1 Name | Sub 1 Amount | … (extends past 3 when
-//                   a project has more than 3 subs)
-//   • One row per qualifying project (Prime role + ≥1 sub). Total Invoice is
-//     a live =SUM(MSMM:lastAmount) — the text Sub-Name cells are ignored by
-//     SUM, so it totals MSMM + every sub amount.
+// ONE consolidated sheet (was one sheet per month). The 12 months stack
+// vertically as titled sections ("JANUARY 2026", …), each with its own header
+// row and one data row per qualifying project (Prime role + ≥1 sub). Rows are
+// sorted ascending by project number. Layout notes:
+//   • Legend in B1:B3 (Green=Paid / Red=Unpaid / Yellow=Submitted).
+//   • Everything is LEFT-aligned — text and money alike (the plain currency
+//     format below replaces the accounting format, which would otherwise force
+//     its own $-left / number-right layout and ignore the alignment).
+//   • Invoice No. column is populated from each month's prime/total invoice
+//     number (captured per month in-app).
+//   • Total Invoice is a live =SUM(MSMM:lastAmount) — text Sub-Name cells are
+//     skipped, so it totals MSMM + every sub amount.
 //   • Per-cell color mirrors the in-app InvoiceTable signal:
-//       paid tick → green · invoice PDF attached → yellow · amount only → red
-//     MSMM + Total follow the prime invoice's paid/attachment status; each
-//     Sub Name+Amount pair follows that sub's own status.
-//   • Every column is auto-sized to its widest content (incl. formatted
-//     currency + the legend text) so nothing is clipped on open.
+//       paid tick → green · invoice PDF attached → yellow · amount only → red.
+//   • Columns are auto-sized tight (no extra slack) from the widest content.
 //
 // exceljs is loaded via dynamic import() so it only ships when the button is
 // actually clicked (keeps it out of the initial bundle).
@@ -21,13 +22,14 @@
 const GREEN  = "FF00B050";
 const YELLOW = "FFFFFF00";
 const RED    = "FFFF0000";
-const MONEY_FMT =
-  '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)';
+// Plain currency (no accounting padding) so values sit flush-left with no gap
+// and actually honor the left alignment.
+const MONEY_FMT = '"$"#,##0.00';
 const FONT  = { name: "Aptos Narrow", size: 11 };
-const ALIGN = { horizontal: "center", vertical: "center" };
-const MONTH_LABELS = [
-  "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+const ALIGN = { horizontal: "left", vertical: "middle" };
+const MONTH_FULL = [
+  "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+  "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
 ];
 const LEGEND = [
   ["Green = Paid", GREEN],
@@ -39,7 +41,7 @@ const LEGEND = [
 // and occupy 2 columns each (Name, Amount). MSMM is the first amount column, so
 // SUM(MSMM:lastAmount) totals MSMM + every sub amount (text names are skipped).
 const PROJNO_COL = 2;     // B
-const NAME_COL   = 3;     // C  (Project Name — new)
+const NAME_COL   = 3;     // C
 const INVNO_COL  = 4;     // D
 const TOTAL_COL  = 5;     // E
 const MSMM_COL   = 6;     // F
@@ -68,41 +70,42 @@ function statusFill(paid, hasFile, amount) {
   return { type: "pattern", pattern: "solid", fgColor: { argb } };
 }
 
-// Apply shared font/alignment (+ optional money format + fill) to a cell.
-function style(cell, { money = false, fill = null } = {}) {
-  cell.font = FONT;
+// Apply shared font/alignment (+ optional money format / fill / bold / size).
+function style(cell, { money = false, fill = null, bold = false, size = null } = {}) {
+  cell.font = (bold || size)
+    ? { ...FONT, ...(bold ? { bold: true } : {}), ...(size ? { size } : {}) }
+    : FONT;
   cell.alignment = ALIGN;
   if (money) cell.numFmt = MONEY_FMT;
   if (fill) cell.fill = fill;
 }
 
-// Approximate the on-screen length of a value, used for column auto-sizing.
+// Approximate the on-screen length of a value, for column auto-sizing.
 const textLen = (v) => (v == null ? 0 : String(v).length);
-// Money cells render as the accounting format ($ left, value right, ".00",
-// thousands separators) — estimate that formatted length, not the raw number.
+// Money renders as plain "$#,##0.00" now — estimate that formatted length.
 function moneyLen(v) {
-  if (v == null || Number(v) === 0) return 4; // "$  -"
+  if (v == null || Number(v) === 0) return 0;
   const s = Math.abs(Number(v)).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   });
-  return ("$" + s).length + 2; // leading "$" + accounting edge padding
+  return ("$" + s).length;
 }
 
-// Compute one width per column from the widest content across ALL months, so
-// the 12 sheets share a consistent, clip-free layout. Returns { colNum: width }.
+// One width per column from the widest content across ALL months. Returns
+// { colNum: width }. Title rows are merged (B:E) so they never widen a column.
 function computeColWidths(data) {
   const { maxSubs, rows } = data;
   const need = {}; // colNum → max content length seen
   const bump = (col, len) => { if (len > (need[col] || 0)) need[col] = len; };
 
-  // Header labels.
+  // Header labels (no trailing padding spaces anymore).
   bump(PROJNO_COL, textLen("Project No."));
   bump(NAME_COL,   textLen("Project Name"));
   bump(INVNO_COL,  textLen("Invoice No."));
   bump(TOTAL_COL,  textLen("Total Invoice"));
-  bump(MSMM_COL,   textLen("MSMM "));
+  bump(MSMM_COL,   textLen("MSMM"));
   for (let s = 0; s < maxSubs; s++) {
-    bump(FIRST_SUB_COL + s * 2,     textLen(`Sub ${s + 1} Name `));
+    bump(FIRST_SUB_COL + s * 2,     textLen(`Sub ${s + 1} Name`));
     bump(FIRST_SUB_COL + s * 2 + 1, textLen(`Sub ${s + 1} Amount`));
   }
   // Legend text sits in column B (PROJNO_COL).
@@ -114,6 +117,7 @@ function computeColWidths(data) {
     bump(NAME_COL,   textLen(r.name));
     for (let s = 0; s < maxSubs; s++) bump(FIRST_SUB_COL + s * 2, textLen(r.subNames[s]));
     for (const m of r.months) {
+      bump(INVNO_COL, textLen(m.invoiceNumber));
       const subTotal = m.subs.reduce((a, x) => a + (Number(x.amount) || 0), 0);
       bump(TOTAL_COL, moneyLen((Number(m.msmmAmount) || 0) + subTotal));
       bump(MSMM_COL,  moneyLen(m.msmmAmount));
@@ -121,10 +125,10 @@ function computeColWidths(data) {
     }
   }
 
-  // Content length → Excel width (char units). Generous so text never clips:
-  // our cells use the narrow "Aptos Narrow" font while width units are sized
-  // to the wider default, so a small factor + padding always over-fits.
-  const MIN = 9, MAX = 80, PAD = 2, FACTOR = 1.15;
+  // Tight sizing — the narrow "Aptos Narrow" font makes char-count slightly
+  // over-estimate real width, so factor 1.0 + a single pad char fits with no
+  // extra slack (the old 1.15×+2 left columns visibly too wide).
+  const MIN = 8, MAX = 60, PAD = 1, FACTOR = 1.0;
   const widths = {};
   for (const [col, len] of Object.entries(need)) {
     widths[col] = Math.min(MAX, Math.max(MIN, Math.ceil(len * FACTOR) + PAD));
@@ -132,11 +136,19 @@ function computeColWidths(data) {
   return widths;
 }
 
-function buildMonthSheet(ws, monthIdx, data, colWidths) {
-  const { maxSubs, rows } = data;
+// Ascending by project number, numeric-aware ("202309" before "202401",
+// "9" before "10").
+function byProjectNumber(a, b) {
+  return String(a.projectNumber || "").localeCompare(
+    String(b.projectNumber || ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function buildConsolidatedSheet(ws, data, colWidths) {
+  const { maxSubs, year } = data;
+  const rows = [...data.rows].sort(byProjectNumber);
   const lastAmt = lastAmountCol(maxSubs);
 
-  // Column widths (auto-sized, same on every sheet).
+  // Column widths.
   for (const [col, width] of Object.entries(colWidths)) {
     ws.getColumn(Number(col)).width = width;
   }
@@ -148,72 +160,87 @@ function buildMonthSheet(ws, monthIdx, data, colWidths) {
     style(cell, { fill: { type: "pattern", pattern: "solid", fgColor: { argb } } });
   });
 
-  // Header row 4.
-  const setHeader = (col, text) => {
-    const cell = ws.getRow(4).getCell(col);
-    cell.value = text;
-    style(cell);
-  };
-  setHeader(PROJNO_COL, "Project No.");
-  setHeader(NAME_COL,   "Project Name");
-  setHeader(INVNO_COL,  "Invoice No.");
-  setHeader(TOTAL_COL,  "Total Invoice");
-  setHeader(MSMM_COL,   "MSMM ");
-  for (let s = 0; s < maxSubs; s++) {
-    setHeader(FIRST_SUB_COL + s * 2,     `Sub ${s + 1} Name `);
-    setHeader(FIRST_SUB_COL + s * 2 + 1, `Sub ${s + 1} Amount`);
-  }
+  let rowNum = 5; // leave a gap under the legend
+  for (let mi = 0; mi < 12; mi++) {
+    // Month title — merged across B:E, bold, slightly larger.
+    ws.mergeCells(rowNum, PROJNO_COL, rowNum, TOTAL_COL);
+    const titleCell = ws.getRow(rowNum).getCell(PROJNO_COL);
+    titleCell.value = `${MONTH_FULL[mi]} ${year || ""}`.trim();
+    style(titleCell, { bold: true, size: 12 });
+    rowNum++;
 
-  // Data rows from row 5.
-  let rowNum = 5;
-  for (const r of rows) {
-    const m = r.months[monthIdx];
-    const row = ws.getRow(rowNum);
-
-    // B — Project number.
-    row.getCell(PROJNO_COL).value = r.projectNumber || "";
-    style(row.getCell(PROJNO_COL));
-
-    // C — Project name.
-    row.getCell(NAME_COL).value = r.name || "";
-    style(row.getCell(NAME_COL));
-
-    // D — Invoice number (left blank per spec).
-    style(row.getCell(INVNO_COL));
-
-    // Total amount used only to decide the Total cell's red coloring; the
-    // displayed value is a live SUM formula so it recomputes if edited.
-    const subTotal = m.subs.reduce((a, s) => a + (Number(s.amount) || 0), 0);
-    const totalAmount = (Number(m.msmmAmount) || 0) + subTotal;
-
-    // E — Total Invoice (=SUM(MSMM:lastAmount)). Colored by prime status.
-    const dCell = row.getCell(TOTAL_COL);
-    dCell.value = {
-      formula: `SUM(${colLetter(MSMM_COL)}${rowNum}:${colLetter(lastAmt)}${rowNum})`,
+    // Header row (bold).
+    const setHeader = (col, text) => {
+      const cell = ws.getRow(rowNum).getCell(col);
+      cell.value = text;
+      style(cell, { bold: true });
     };
-    style(dCell, { money: true, fill: statusFill(m.primePaid, m.primeHasFile, totalAmount) });
-
-    // F — MSMM portion. Colored by the same prime status, gated on its own amount.
-    const eCell = row.getCell(MSMM_COL);
-    eCell.value = (m.msmmAmount != null && m.msmmAmount !== 0) ? Number(m.msmmAmount) : null;
-    style(eCell, { money: true, fill: statusFill(m.primePaid, m.primeHasFile, m.msmmAmount) });
-
-    // Sub pairs.
+    setHeader(PROJNO_COL, "Project No.");
+    setHeader(NAME_COL,   "Project Name");
+    setHeader(INVNO_COL,  "Invoice No.");
+    setHeader(TOTAL_COL,  "Total Invoice");
+    setHeader(MSMM_COL,   "MSMM");
     for (let s = 0; s < maxSubs; s++) {
-      const nameCol = FIRST_SUB_COL + s * 2;
-      const amtCol = nameCol + 1;
-      const sub = m.subs[s] || { amount: null, paid: false, hasFile: false };
-      const fill = statusFill(sub.paid, sub.hasFile, sub.amount);
+      setHeader(FIRST_SUB_COL + s * 2,     `Sub ${s + 1} Name`);
+      setHeader(FIRST_SUB_COL + s * 2 + 1, `Sub ${s + 1} Amount`);
+    }
+    rowNum++;
 
-      const nameCell = row.getCell(nameCol);
-      nameCell.value = r.subNames[s] || "";
-      style(nameCell, { fill });
+    // Data rows.
+    for (const r of rows) {
+      const m = r.months[mi];
+      const row = ws.getRow(rowNum);
 
-      const amtCell = row.getCell(amtCol);
-      amtCell.value = (sub.amount != null && sub.amount !== 0) ? Number(sub.amount) : null;
-      style(amtCell, { money: true, fill });
+      // B — Project number.
+      row.getCell(PROJNO_COL).value = r.projectNumber || "";
+      style(row.getCell(PROJNO_COL));
+
+      // C — Project name.
+      row.getCell(NAME_COL).value = r.name || "";
+      style(row.getCell(NAME_COL));
+
+      // D — Invoice number for this month (the prime/total invoice number).
+      const invCell = row.getCell(INVNO_COL);
+      invCell.value = m.invoiceNumber || "";
+      style(invCell);
+
+      // Total amount used only to decide the Total cell's red coloring; the
+      // displayed value is a live SUM formula so it recomputes if edited.
+      const subTotal = m.subs.reduce((a, s) => a + (Number(s.amount) || 0), 0);
+      const totalAmount = (Number(m.msmmAmount) || 0) + subTotal;
+
+      // E — Total Invoice (=SUM(MSMM:lastAmount)). Colored by prime status.
+      const dCell = row.getCell(TOTAL_COL);
+      dCell.value = {
+        formula: `SUM(${colLetter(MSMM_COL)}${rowNum}:${colLetter(lastAmt)}${rowNum})`,
+      };
+      style(dCell, { money: true, fill: statusFill(m.primePaid, m.primeHasFile, totalAmount) });
+
+      // F — MSMM portion. Colored by the same prime status, gated on its amount.
+      const eCell = row.getCell(MSMM_COL);
+      eCell.value = (m.msmmAmount != null && m.msmmAmount !== 0) ? Number(m.msmmAmount) : null;
+      style(eCell, { money: true, fill: statusFill(m.primePaid, m.primeHasFile, m.msmmAmount) });
+
+      // Sub pairs.
+      for (let s = 0; s < maxSubs; s++) {
+        const nameCol = FIRST_SUB_COL + s * 2;
+        const amtCol = nameCol + 1;
+        const sub = m.subs[s] || { amount: null, paid: false, hasFile: false };
+        const fill = statusFill(sub.paid, sub.hasFile, sub.amount);
+
+        const nameCell = row.getCell(nameCol);
+        nameCell.value = r.subNames[s] || "";
+        style(nameCell, { fill });
+
+        const amtCell = row.getCell(amtCol);
+        amtCell.value = (sub.amount != null && sub.amount !== 0) ? Number(sub.amount) : null;
+        style(amtCell, { money: true, fill });
+      }
+
+      rowNum++;
     }
 
+    // Blank separator row before the next month.
     rowNum++;
   }
 }
@@ -221,7 +248,7 @@ function buildMonthSheet(ws, monthIdx, data, colWidths) {
 // data = {
 //   year, maxSubs,
 //   rows: [{ projectNumber, name, subNames:[…maxSubs], months:[…12 of
-//            { msmmAmount, primePaid, primeHasFile,
+//            { msmmAmount, invoiceNumber, primePaid, primeHasFile,
 //              subs:[…maxSubs of { amount, paid, hasFile }] }] }]
 // }
 // Pure builder — returns a populated exceljs Workbook (no DOM/download).
@@ -231,10 +258,8 @@ export async function buildManishWorkbookObject(data) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MSMM Beacon";
   const colWidths = computeColWidths(data);
-  for (let mi = 0; mi < 12; mi++) {
-    const ws = wb.addWorksheet(MONTH_LABELS[mi]);
-    buildMonthSheet(ws, mi, data, colWidths);
-  }
+  const ws = wb.addWorksheet(String(data.year || "Invoices"));
+  buildConsolidatedSheet(ws, data, colWidths);
   return wb;
 }
 
