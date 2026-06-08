@@ -17,6 +17,7 @@ import { LoginPage } from "./login.jsx";
 import { AdminPanel } from "./admin.jsx";
 import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
 import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
+import { TimeOffTab } from "./leave.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { exportManishWorkbook } from "./utils/manish-xlsx.js";
@@ -71,6 +72,7 @@ const TAB_META = [
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "directory", label: "Directory",        stage: "stage-clients",   group: "side" },
   { key: "timesheet", label: "Timesheet",        stage: "stage-events",    group: "side" },
+  { key: "timeoff",   label: "Time Off",         stage: "stage-events",    group: "side" },
   { key: "time-admin",label: "Time Admin",       stage: "stage-events",    group: "side", adminOnly: true },
   { key: "team-cal",  label: "Team Calendar",    stage: "stage-events",    group: "side" },
 ];
@@ -86,6 +88,7 @@ const PAGE_META = {
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   timesheet: { title: "Timesheet", desc: "Your daily punches, this week's hours, and corrections. Punch in or out with the big button or tap your fob on the front-door reader." },
+  timeoff:   { title: "Time Off", desc: "Vacation and sick leave balances. Hours accrue automatically every pay period (every other Wednesday); admins can adjust balances." },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, weekly approvals, NFC enrollment, and timekeeping settings." },
   "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },
 };
@@ -4075,6 +4078,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {tab === "timesheet" && (
           <TimesheetTab focusDate={timesheetFocusDate}/>
         )}
+        {tab === "timeoff" && <TimeOffTab/>}
 
         {tab === "time-admin" && isAdmin && (
           <TimeAdminTab

@@ -945,8 +945,14 @@ function adaptOpenBid(r) {
 
 // app_settings is a singleton row. Null benchmark = "no target set" (chart
 // renders bars in a neutral color and hides the benchmark line).
+const LEAVE_SETTING_DEFAULTS = {
+  leavePayAnchor: "2026-06-03",        // a known pay date (every other Wednesday)
+  leavePayIntervalDays: 14,
+  leaveVacationAccrual: 3.076923077,   // hrs per pay period (= 80 hrs/yr over 26)
+  leaveSickAccrual: 1.538461538,       // hrs per pay period (= 40 hrs/yr over 26)
+};
 function adaptAppSettings(row) {
-  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null };
+  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null, ...LEAVE_SETTING_DEFAULTS };
   const v = row.monthly_invoice_benchmark;
   const dayRaw = row.invoice_actual_cutover_day;
   const day = dayRaw == null ? 1 : Math.min(31, Math.max(1, Math.round(Number(dayRaw)) || 1));
@@ -955,6 +961,10 @@ function adaptAppSettings(row) {
     invoiceActualCutoverDay: day,
     invoiceActualCutoverNextMonth: !!row.invoice_actual_cutover_next_month,
     updatedAt: row.updated_at || null,
+    leavePayAnchor:       row.leave_pay_anchor || LEAVE_SETTING_DEFAULTS.leavePayAnchor,
+    leavePayIntervalDays: row.leave_pay_interval_days ? Number(row.leave_pay_interval_days) : LEAVE_SETTING_DEFAULTS.leavePayIntervalDays,
+    leaveVacationAccrual: row.leave_vacation_accrual != null ? Number(row.leave_vacation_accrual) : LEAVE_SETTING_DEFAULTS.leaveVacationAccrual,
+    leaveSickAccrual:     row.leave_sick_accrual     != null ? Number(row.leave_sick_accrual)     : LEAVE_SETTING_DEFAULTS.leaveSickAccrual,
   };
 }
 
@@ -1007,6 +1017,81 @@ export async function updateInvoiceActualCutover(day, nextMonth = false) {
   if (error) throw error;
   _appSettings = adaptAppSettings(data);
   return _appSettings;
+}
+
+// ----------------------------------------------------------------------
+// Leave (vacation / sick) tracker — bi-weekly accrual.
+//
+// Stored figures are the NET-available balance "as of" as_of_date; the live
+// available balance accrues forward one pay period at a time. The pay schedule
+// is deterministic (anchor pay date + interval), so the accrued amount is a
+// pure function of the calendar — mirrors beacon_v2.v_leave_balances.
+// ----------------------------------------------------------------------
+const _epochDay      = (iso) => Math.round(Date.parse(`${iso}T00:00:00Z`) / 86400000);
+const _isoFromEpochDay = (d) => new Date(d * 86400000).toISOString().slice(0, 10);
+
+// Count of pay dates in (asOf, today] given the anchor/interval schedule.
+export function leaveAccrualPeriods(asOfISO, anchorISO, intervalDays, todayISO = todayInCT()) {
+  if (!asOfISO || !anchorISO || !intervalDays) return 0;
+  const a = _epochDay(anchorISO);
+  const idx = (iso) => Math.floor((_epochDay(iso) - a) / intervalDays);
+  return Math.max(0, idx(todayISO) - idx(asOfISO));
+}
+
+// First scheduled pay date strictly AFTER fromISO (the next accrual).
+export function leaveNextPayDate(settings, fromISO = todayInCT()) {
+  const a = _epochDay(settings.leavePayAnchor), i = settings.leavePayIntervalDays;
+  const k = Math.floor((_epochDay(fromISO) - a) / i) + 1;
+  return _isoFromEpochDay(a + k * i);
+}
+
+// Live available balances for one leave row (= stored balance + accrued).
+export function computeLeaveAvailable(lb, settings = getAppSettings(), todayISO = todayInCT()) {
+  const periods = lb.accrues
+    ? leaveAccrualPeriods(lb.asOfDate, settings.leavePayAnchor, settings.leavePayIntervalDays, todayISO)
+    : 0;
+  const r2 = (x) => Math.round(x * 100) / 100;
+  return {
+    periods,
+    vacationAvailable: r2((lb.vacationBalance || 0) + periods * (settings.leaveVacationAccrual || 0)),
+    sickAvailable:     r2((lb.sickBalance     || 0) + periods * (settings.leaveSickAccrual     || 0)),
+  };
+}
+
+export function adaptLeaveBalance(r) {
+  return {
+    userId:          r.user_id,
+    vacationBalance: Number(r.vacation_balance) || 0,
+    vacationUsed:    Number(r.vacation_used)    || 0,
+    sickBalance:     Number(r.sick_balance)     || 0,
+    sickUsed:        Number(r.sick_used)        || 0,
+    asOfDate:        r.as_of_date,
+    accrues:         r.accrues !== false,
+  };
+}
+
+// Load leave rows. RLS scopes the result: an admin gets everyone, a regular
+// user gets only their own. Degrades to [] if the migration isn't applied yet.
+export async function loadLeaveBalances() {
+  const { data, error } = await supabase.from("leave_balances").select("*");
+  if (error) { console.warn("[beacon_v2] leave_balances fetch skipped:", error.message); return []; }
+  return (data || []).map(adaptLeaveBalance);
+}
+
+// Admin-only writer for one person's leave row. Patch keys are the camelCase
+// fields from adaptLeaveBalance.
+export async function updateLeaveBalance(userId, patch) {
+  const MAP = {
+    vacationBalance: "vacation_balance", vacationUsed: "vacation_used",
+    sickBalance: "sick_balance", sickUsed: "sick_used",
+    asOfDate: "as_of_date", accrues: "accrues",
+  };
+  const db = {};
+  for (const [k, col] of Object.entries(MAP)) if (k in patch) db[col] = patch[k];
+  const { data, error } = await supabase
+    .from("leave_balances").update(db).eq("user_id", userId).select("*").single();
+  if (error) throw error;
+  return adaptLeaveBalance(data);
 }
 
 // ----------------------------------------------------------------------

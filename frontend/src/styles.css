@@ -9308,6 +9308,102 @@ html, body { overflow-x: clip; }
   .tk-presence-total { font-size: 12px; }
 }
 
+/* ── Time Off (vacation / sick leave) ── */
+.leave-page { display: grid; gap: 18px; max-width: 1100px; }
+
+.leave-hero {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 18px 20px;
+}
+.leave-hero-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+}
+.leave-hero-title { font-family: var(--font-display); font-size: 18px; margin: 0; }
+.leave-hero-sub { font-size: 12px; color: var(--text-soft); }
+.leave-hero-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.leave-empty-note { color: var(--text-soft); font-size: 13px; margin: 4px 0 0; }
+
+.leave-card {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.leave-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+}
+.leave-card.tone-sage::before { background: var(--sage); }
+.leave-card.tone-blue::before { background: #7E97B5; }
+.leave-card-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.leave-card-value { font-family: var(--font-display); font-size: 30px; line-height: 1.1; margin: 6px 0 4px; color: var(--text); font-variant-numeric: tabular-nums; }
+.leave-card-meta { font-size: 12px; color: var(--text-soft); }
+
+.leave-err {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: #8A4C47; background: var(--rose-soft);
+  border: 1px solid #E2B9B5; border-radius: 8px; padding: 7px 11px;
+}
+
+.leave-admin { display: grid; gap: 10px; }
+.leave-admin-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.leave-admin-head h3 { font-family: var(--font-display); font-size: 16px; margin: 0; }
+.leave-admin-sub { font-size: 12px; color: var(--text-soft); }
+.leave-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.leave-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.leave-table thead th {
+  text-align: right; font-weight: 600; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .03em; color: var(--text-soft);
+  padding: 10px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.leave-table th.leave-th-name { text-align: left; }
+.leave-table th.leave-th-accr { text-align: center; }
+.leave-table tbody td { padding: 7px 12px; text-align: right; border-bottom: 1px solid var(--border); }
+.leave-table tbody tr:last-child td { border-bottom: 0; }
+.leave-table tbody tr:hover { background: color-mix(in srgb, var(--accent-softer) 22%, var(--surface)); }
+.leave-table tr.is-noaccrue { opacity: .58; }
+.leave-td-name { display: flex; align-items: center; gap: 8px; text-align: left; }
+.leave-name-label { font-weight: 500; }
+.leave-table-empty { text-align: center !important; color: var(--text-soft); padding: 22px !important; font-style: italic; }
+
+.leave-num {
+  width: 78px; text-align: right;
+  font-family: var(--font-mono); font-size: 12.5px;
+  padding: 4px 7px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.leave-num.muted { color: var(--text-muted); }
+.leave-num:hover { border-color: var(--border); background: var(--surface); }
+.leave-num:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+/* hide number spinners */
+.leave-num::-webkit-outer-spin-button, .leave-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.leave-num { -moz-appearance: textfield; }
+
+.leave-td-accr { text-align: center; }
+.leave-accr-toggle {
+  appearance: none; border: 0; cursor: pointer;
+  width: 34px; height: 19px; border-radius: 999px;
+  background: var(--border-strong); position: relative; transition: background 140ms ease;
+  vertical-align: middle;
+}
+.leave-accr-toggle.on { background: var(--sage); }
+.leave-accr-knob {
+  position: absolute; top: 2px; left: 2px; width: 15px; height: 15px;
+  border-radius: 50%; background: #fff; transition: transform 140ms ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,.25);
+}
+.leave-accr-toggle.on .leave-accr-knob { transform: translateX(15px); }
+
+@media (max-width: 640px) {
+  .leave-hero-cards { grid-template-columns: 1fr; }
+}
+
 /* Team day view */
 .tk-team-day { display: grid; gap: 12px; }
 .tk-team-day-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
