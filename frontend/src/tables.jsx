@@ -15,6 +15,7 @@ import {
   BID_SERVICE_OPTIONS,
 } from "./data.js";
 import { LinkedProjectsSection } from "./panels.jsx";
+import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
 import { setCurrentTableSnapshot } from "./table-state.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
@@ -1915,8 +1916,11 @@ const SUB_DOCS = [
 export const InvoiceTable = ({
   tab, rows, updateInvoice, updateInvoiceMsmm, updateRow = _noopUpdate,
   onOpenDrawer, onAlert, flashId,
-  yearOptions, yearValue, onYearChange,
-  actualThru = TODAY_MONTH,   // last month index shown as "Actual" (cutover-aware)
+  // Rolling month window — a descriptor list { abs, year, monthIdx, mon, yy,
+  // label } (default = prev 3 + current + next 12 = 16 months) shared with the
+  // charts + Manish export. Back/Forward shift it by one month; Today resets.
+  windowMonths = [],
+  onWindowBack, onWindowFwd, onWindowToday, windowAtDefault = false,
   cutoverDay = 1,             // day-of-month the current month flips Proj→Actual (for legend copy)
   cutoverNextMonth = false,   // whether that flip lands in the next month (for legend copy)
   orangeSourceIds,   // Set<uuid> of Potential IDs that are tagged Orange
@@ -1934,6 +1938,7 @@ export const InvoiceTable = ({
   onUpdateSubMeta,   // ({projectId, companyId, kind, patch}) => void  — inline edit (amount/discipline)
   onRemoveSub,       // ({projectId, companyId, kind, companyName}) => void  — × button on sub row
   onNew,             // () => void  — opens the New Invoice CreateModal
+  onNotesChanged,    // (invoiceId, notesLog) => void  — sync the threaded Notes count back to App state
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -1946,18 +1951,8 @@ export const InvoiceTable = ({
   // flips the instant a bill lands. Applies to the project's MSMM, sub, and
   // total rows; the column header + cross-project grand totals stay on the
   // global cutover.
-  const hasPrimeBill = (row, i) => !!(row?.primeFiles && row.primeFiles[i] && row.primeFiles[i].length);
-  // month-state class for a project's month cell. `cue` adds the subtle
-  // "billed ahead" underline — used only on the total/prime row (where the
-  // bill lives) so the promoted column doesn't stack underlines on every row:
-  //   • date-driven actual            → "month-actual"
-  //   • promoted by a bill (ahead of  → "month-actual" (+ " month-promoted"
-  //     the cutover)                     when cue) — amber, billed
-  //   • still a projection            → "month-proj"
-  const monthCellState = (row, i, cue = false) =>
-    i <= actualThru ? "month-actual"
-    : hasPrimeBill(row, i) ? ("month-actual" + (cue ? " month-promoted" : ""))
-    : "month-proj";
+  // (Per-month Actual/Projection state + bill-ahead promotion now live in the
+  // rolling-window helpers below — monthStateAtDesc / hasPrimeBillAtDesc.)
   // The parent row IS the MSMM view of each project — every dollar value
   // shown there reflects MSMM's portion (auto-calculated as Total minus
   // every sub's portion, or the user-saved override when set). The expand
@@ -1971,16 +1966,6 @@ export const InvoiceTable = ({
   // MSMM, for cross-reference); it must not be subtracted from Total CV.
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
-  // MSMM monthly value at month i — override takes precedence; else
-  // auto = total[i] − Σ sub.amounts[i].
-  const msmmAtMonth = (r, i) => {
-    const override = r.msmmValues?.[i];
-    if (override != null) return Number(override);
-    const total = Number(r.values?.[i] || 0);
-    const subSum = subListFor(r).reduce(
-      (a, s) => a + Number((s.amounts && s.amounts[i]) || 0), 0);
-    return total - subSum;
-  };
   // MSMM contract portion — override (msmmAmount) takes precedence; else
   // auto = total contract − Σ sub.contractAmount.
   const msmmContractAuto = (r) => {
@@ -1992,35 +1977,62 @@ export const InvoiceTable = ({
   const msmmContractShown = (r) =>
     r.msmmAmount != null ? Number(r.msmmAmount) : msmmContractAuto(r);
 
-  // Auto-calculated defaults. Shown values respect per-row overrides from
-  // the DB (ytdActualOverride / rollforwardOverride). NULL override = auto.
-  // YTD Actual is the FULL-YEAR sum (Jan–Dec, actual + projected): editing
-  // any single month re-flows YTD automatically. Rollforward is the user's
-  // "remaining Jan 1" minus YTD — negative values are surfaced (no clamp)
-  // so contract overruns are visible at a glance.
-  const totalAll         = (r) => r.values.reduce((a,b) => a + (b || 0), 0);
-  const msmmTotalAll     = (r) => Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i)).reduce((a,b) => a + b, 0);
-  const ytdActualAuto    = (r) => msmmTotalAll(r);
-  const rollforwardAuto  = (r) => (Number(r.remainingStart) || 0) - ytdActualAuto(r);
-  const ytdActualShown   = (r) => r.ytdActualOverride   != null ? r.ytdActualOverride   : ytdActualAuto(r);
-  const rollforwardShown = (r) => r.rollforwardOverride != null ? r.rollforwardOverride : rollforwardAuto(r);
-  const isYtdOverride    = (r) => r.ytdActualOverride   != null;
-  const isRfOverride     = (r) => r.rollforwardOverride != null;
-  // Sub / prime / project-total YTD + RF — same semantics scoped to each
-  // line's own monthly amounts. "Remaining Jan 1" baseline = the row's own
-  // editable remainingStart override when set, else falls back to its contract
-  // amount (subs) / Total CV (project total) — matching the prior behavior.
-  const subYtdAuto       = (s) => (s.amounts || []).reduce((a,b) => a + (b || 0), 0);
-  const subRemaining     = (s) => s.remainingStart != null ? Number(s.remainingStart) : (Number(s.contractAmount) || 0);
-  const subRollforward   = (s) => subRemaining(s) - subYtdAuto(s);
-  const projectYtdAuto   = (r) => (r.values || []).reduce((a,b) => a + (b || 0), 0);
-  const projectRemaining = (r) => r.totalRemainingStart != null ? Number(r.totalRemainingStart) : (Number(r.amount) || 0);
-  const projectRollforward = (r) => projectRemaining(r) - projectYtdAuto(r);
+  // ---- Rolling-window month accessors -------------------------------------
+  // Each visible month is a descriptor d = { year, monthIdx, mon, label } from
+  // the `windowMonths` prop. The data for that month lives in the merged row's
+  // byYear[year] slot (a project's per-year invoice rows are folded together by
+  // mergeInvoiceYears), so EVERY month read goes through these helpers — never
+  // r.values[i] directly, since index i is no longer "month i of one year".
+  const yrow = (r, year) => r?.byYear?.[year] || null;
+  const valAtDesc          = (r, d) => Number(yrow(r, d.year)?.values?.[d.monthIdx] || 0);
+  const msmmOverrideAtDesc = (r, d) => yrow(r, d.year)?.msmmValues?.[d.monthIdx] ?? null;
+  const primePaidAtDesc    = (r, d) => !!(yrow(r, d.year)?.primePaid?.[d.monthIdx]);
+  const primeFilesAtDesc   = (r, d) => yrow(r, d.year)?.primeFiles?.[d.monthIdx] || [];
+  const invNumAtDesc       = (r, d) => yrow(r, d.year)?.invoiceNumbers?.[d.monthIdx] || null;
+  const subAmtAtDesc       = (s, d) => s?.byYear?.[d.year]?.amounts?.[d.monthIdx] ?? null;
+  const subFilesAtDesc     = (s, d) => s?.byYear?.[d.year]?.files?.[d.monthIdx] || [];
+  const subPaidAtDesc      = (s, d) => !!(s?.byYear?.[d.year]?.paid?.[d.monthIdx]);
+  const subPaidWhenDesc    = (s, d) => s?.byYear?.[d.year]?.paidAt?.[d.monthIdx] || null;
+  // A month is "Actual" when the date-driven cutover has reached it (year-aware
+  // via isActualInvoiceMonth) OR a bill is attached to the project's total/prime
+  // row for that month (promotes it ahead of the cutover). `cue` adds the
+  // "billed ahead" underline — used only on the total/prime row.
+  const hasPrimeBillAtDesc = (r, d) => primeFilesAtDesc(r, d).length > 0;
+  const monthStateAtDesc = (r, d, cue = false) =>
+    isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual"
+    : hasPrimeBillAtDesc(r, d) ? ("month-actual" + (cue ? " month-promoted" : ""))
+    : "month-proj";
+  // MSMM monthly value at a window descriptor — override wins, else
+  // total − Σ sub amounts for that (year, month).
+  const msmmAtDesc = (r, d) => {
+    const ov = msmmOverrideAtDesc(r, d);
+    if (ov != null) return Number(ov);
+    const total = valAtDesc(r, d);
+    const subSum = subListFor(r).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
+    return total - subSum;
+  };
+  // YTD Actual = ALL the actuals for the project, summed across EVERY year in
+  // byYear (the rolling-window definition — not just the current year). Computed
+  // / read-only now; the old per-row override + Rollforward column were removed.
+  const yearsOf = (r) => Object.keys(r?.byYear || {}).map(Number);
+  const msmmAtYM = (r, year, m) => {
+    const yr = yrow(r, year); if (!yr) return 0;
+    const ov = yr.msmmValues?.[m]; if (ov != null) return Number(ov);
+    const total = Number(yr.values?.[m] || 0);
+    const subSum = subListFor(r).reduce((a, s) => a + Number(s?.byYear?.[year]?.amounts?.[m] || 0), 0);
+    return total - subSum;
+  };
+  const msmmYtdAll    = (r) => yearsOf(r).reduce((a, y) =>
+    a + Array.from({ length: 12 }, (_, m) => msmmAtYM(r, y, m)).reduce((x, z) => x + z, 0), 0);
+  const projectYtdAll = (r) => yearsOf(r).reduce((a, y) =>
+    a + (yrow(r, y)?.values || []).reduce((x, z) => x + (z || 0), 0), 0);
+  const subYtdAll     = (s) => Object.values(s?.byYear || {}).reduce((a, yr) =>
+    a + (yr.amounts || []).reduce((x, z) => x + (z || 0), 0), 0);
+  // Index of the last visible month that is "Actual" by the global cutover —
+  // drives the amber Actual▸Projection boundary line in the window.
+  const lastActualWi = windowMonths.reduce(
+    (acc, d, wi) => (isActualInvoiceMonth(d.year, d.monthIdx) ? wi : acc), -1);
 
-  // Temporarily hide the YTD Actual + Rollforward columns. They're annual
-  // (Jan–Dec) concepts that don't fit the rolling-window rework; flip to true
-  // to bring them back.
-  const SHOW_YTD_RF = false;
   // v2 collapsed source_awarded_id + source_potential_id into a single
   // source_project_id (exposed as r.sourceId). orangeSourceIds is a Set of
   // Potential project ids tagged probability='Orange'; only those match.
@@ -2034,6 +2046,8 @@ export const InvoiceTable = ({
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   // Open note/description editor: { id, field, label, accent, name, value } | null
   const [noteModal, setNoteModal] = useState(null);
+  // Open threaded Notes log: { id, name, log } | null
+  const [notesThread, setNotesThread] = useState(null);
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2210,12 +2224,6 @@ export const InvoiceTable = ({
     );
   };
 
-  const [yearMenuOpen, setYearMenuOpen] = useState(false);
-  const yearBtnRef = useRef(null);
-  const hasYear = Array.isArray(yearOptions) && yearOptions.length > 0;
-  const yearChipLabel = hasYear
-    ? `Year: ${yearValue ?? "All"}`
-    : `Year: ${THIS_YEAR}`;
   const invoiceWrapRef = useRef(null);
   const invoiceTopScrollRef = useRef(null);
   const invoiceTableRef = useRef(null);
@@ -2309,18 +2317,50 @@ export const InvoiceTable = ({
           <span className="invoice-count-num mono" style={{ color: "var(--text-soft)" }}>{nonOrangeRows.length}</span>
           <span className="invoice-count-label">w/o Orange</span>
         </div>
-        {hasYear ? (
+        <div className="invoice-window-nav" role="group" aria-label="Visible month window">
+          {/* A compact "month dial" — Back / range / Forward share one
+              segmented pill; Today resets to the default window. The YTD
+              column stays pinned, so only the month columns slide. */}
           <button
-            ref={yearBtnRef}
-            className={"tool-chip" + (yearValue != null ? " on" : "")}
-            onClick={() => setYearMenuOpen(v => !v)}
+            type="button"
+            className="iwn-arrow back"
+            onClick={() => onWindowBack?.()}
+            title="Show one month earlier"
+            aria-label="Earlier months"
           >
-            <Icon name="calendar" size={13}/>
-            {yearChipLabel}
+            <Icon name="chevronRight" size={15}/>
           </button>
-        ) : (
-          <button className="tool-chip on"><Icon name="calendar" size={13}/>{yearChipLabel}</button>
-        )}
+          <span className="iwn-range" title="Visible month range — slide it with the arrows">
+            <Icon name="calendar" size={13}/>
+            <span className="iwn-range-text">
+              {windowMonths.length
+                ? `${windowMonths[0].label} – ${windowMonths[windowMonths.length - 1].label}`
+                : "—"}
+            </span>
+            <span className="iwn-range-sub mono">{windowMonths.length} mo</span>
+          </span>
+          <button
+            type="button"
+            className="iwn-arrow fwd"
+            onClick={() => onWindowFwd?.()}
+            title="Show one month later"
+            aria-label="Later months"
+          >
+            <Icon name="chevronRight" size={15}/>
+          </button>
+          <button
+            type="button"
+            className={"iwn-today" + (windowAtDefault ? " is-current" : "")}
+            onClick={() => onWindowToday?.()}
+            disabled={windowAtDefault}
+            title={windowAtDefault
+              ? "Already showing the default window — last 3 months, this month, and the next 12"
+              : "Reset to the default window — last 3 months, this month, and the next 12"}
+          >
+            <span className="iwn-today-dot"/>
+            Today
+          </button>
+        </div>
         <button
           ref={typeBtnRef}
           className={"tool-chip" + (typeFilterActive ? " on" : "")}
@@ -2363,10 +2403,10 @@ export const InvoiceTable = ({
         </button>
         <div className="tool-sep"/>
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          {actualThru >= 0 ? (
-            <>Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[actualThru]} as Actual</strong> · {MONTHS[actualThru+1] || "Jan"}–Dec as Projection</>
+          {lastActualWi >= 0 ? (
+            <>Actual through <strong style={{ color: "var(--accent-ink)" }}>{windowMonths[lastActualWi]?.label}</strong>, then Projection</>
           ) : (
-            <>Showing <strong style={{ color: "var(--accent-ink)" }}>all months as Projection</strong></>
+            <>Showing <strong style={{ color: "var(--accent-ink)" }}>all visible months as Projection</strong></>
           )} · a month flips to Actual on the {ordinal(cutoverDay)}{cutoverNextMonth ? " of the following month" : ""}
         </span>
         <div className="ml-auto" style={{ display: "flex", gap: 8 }}>
@@ -2424,43 +2464,11 @@ export const InvoiceTable = ({
             })}
           </Popover>
         )}
-        {yearMenuOpen && hasYear && (
-          <Popover anchorRef={yearBtnRef} onClose={() => setYearMenuOpen(false)} align="left">
-            <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-              Select year
-            </div>
-            <button
-              className="menu-item"
-              onClick={() => { onYearChange?.(null); setYearMenuOpen(false); }}
-              style={yearValue == null ? { color: "var(--accent-ink)" } : undefined}
-            >
-              <Icon name="calendar" size={13}/>
-              <span style={{ flex: 1 }}>All years</span>
-              {yearValue == null && (<span style={{ fontSize: 11, color: "var(--accent)" }}>✓</span>)}
-            </button>
-            <div className="menu-sep"/>
-            {yearOptions.map((y) => {
-              const active = yearValue === y;
-              return (
-                <button
-                  key={y}
-                  className="menu-item"
-                  onClick={() => { onYearChange?.(y); setYearMenuOpen(false); }}
-                  style={active ? { color: "var(--accent-ink)" } : undefined}
-                >
-                  <Icon name="calendar" size={13}/>
-                  <span style={{ flex: 1 }}>{y}</span>
-                  {active && (<span style={{ fontSize: 11, color: "var(--accent)" }}>✓</span>)}
-                </button>
-              );
-            })}
-          </Popover>
-        )}
       </div>
 
       {rows.length === 0 ? (
         <EmptyState
-          title="No invoice rows for this year"
+          title="No invoice rows"
           hint="Invoice rows appear here automatically for each awarded project. Use New invoice row to add one manually."
           iconName="trend"
         />
@@ -2501,18 +2509,18 @@ export const InvoiceTable = ({
                       live in the summary strip inside the expand block.
                       Sort removed — there's no parent-row value to sort by. */}
                   <th style={{ minWidth: 110 }}>Contract</th>
-                  <th style={{ minWidth: 96 }}>Remaining<br/>Jan&nbsp;1</th>
-                  {MONTHS.map((m, i) => (
-                    <th key={i} className={i <= actualThru ? "month-actual" : "month-proj"}>
-                      {m} {THIS_YEAR}
+                  <th style={{ minWidth: 96 }}>Remaining<br/>Amount</th>
+                  {windowMonths.map((d, wi) => (
+                    <th key={d.abs}
+                        className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "")}>
+                      {d.mon}
                       <div style={{ fontSize: 9, marginTop: 2, opacity: .7 }}>
-                        {i <= actualThru ? "actual" : "proj"}
+                        {d.year}
                       </div>
                     </th>
                   ))}
-                  {SHOW_YTD_RF && <th className="total-cell" style={{ minWidth: 96 }}>YTD Actual</th>}
-                  {SHOW_YTD_RF && <th className="total-cell" style={{ minWidth: 104 }}>Rollforward</th>}
-                  <th style={{ minWidth: 60 }}></th>
+                  <th className="total-cell inv-pin-ytd" style={{ minWidth: 96 }}>YTD Actual</th>
+                  <th className="inv-pin-act" aria-label="Actions"></th>
                 </tr>
               </thead>
               <tbody>
@@ -2584,18 +2592,27 @@ export const InvoiceTable = ({
                           );
                         })()}
                         <div className="inv-meta-chips" onDoubleClick={e => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            className={"inv-meta-chip accent" + (r.notes ? " has-content" : "")}
-                            title={r.notes || "Add notes for this project"}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setNoteModal({ id: r.id, field: "notes", label: "Notes",
-                                accent: "accent", name: r.name, value: r.notes || "" });
-                            }}>
-                            <Icon name="note" size={10}/>
-                            <span>Notes</span>
-                          </button>
+                          {(() => {
+                            const count = (r.notesLog || []).length;
+                            const latest = (r.notesLog || [])[0];
+                            const tip = count
+                              ? `${count} update${count === 1 ? "" : "s"} · latest: ${latest?.body?.slice(0, 80) || ""}`
+                              : "Add notes & updates for this project";
+                            return (
+                              <button
+                                type="button"
+                                className={"inv-meta-chip accent" + (count ? " has-content" : "")}
+                                title={tip}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setNotesThread({ id: r.id, name: r.name, log: r.notesLog || [] });
+                                }}>
+                                <Icon name="note" size={10}/>
+                                <span>Notes</span>
+                                {count > 0 && <span className="inv-meta-chip-count">{count}</span>}
+                              </button>
+                            );
+                          })()}
                           <button
                             type="button"
                             className={"inv-meta-chip blue" + (r.description ? " has-content" : "")}
@@ -2668,27 +2685,24 @@ export const InvoiceTable = ({
                         attachments live on the Project total row in the
                         expand block (= the project's prime billing PDFs,
                         not the MSMM-portion view). */}
-                    {r.values.map((_, i) => {
-                      const override = r.msmmValues?.[i];
+                    {windowMonths.map((d, wi) => {
+                      const override   = msmmOverrideAtDesc(r, d);
                       const isOverride = override != null;
-                      const auto       = msmmAtMonth(r, i);
+                      const auto       = msmmAtDesc(r, d);
                       const shown      = isOverride ? Number(override) : auto;
                       // Read-only mirror of the Project total row's status for
-                      // this month. The total (bottom of the expand) carries the
-                      // real attach/paid; surfacing them on the prominent MSMM/
-                      // top row gives an at-a-glance read without scrolling down.
-                      // Echoes the total row's layout: paid top-left (like its
-                      // toggle), attachment top-right (like its clip).
-                      const totalPaid  = !!(r.primePaid && r.primePaid[i]);
-                      const totalFiles = (r.primeFiles && r.primeFiles[i]) || [];
+                      // this month (paid top-left, attachment top-right) so the
+                      // prominent MSMM/top row reads at a glance.
+                      const totalPaid  = primePaidAtDesc(r, d);
+                      const totalFiles = primeFilesAtDesc(r, d);
                       return (
-                      <td key={i}
-                          className={monthCellState(r, i) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
+                      <td key={d.abs}
+                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
                           title={isOverride
                             ? `Override · auto would be ${fmtMoney(auto, false)}`
                             : "MSMM monthly · auto-calc. Click to override."}>
                         <EditableCell value={shown} type="number"
-                          onChange={nv => updateInvoiceMsmm?.(r.id, i,
+                          onChange={nv => updateInvoiceMsmm?.(r, d.year, d.monthIdx,
                             (nv == null || nv === "") ? null : Number(nv))}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                         />
@@ -2709,28 +2723,14 @@ export const InvoiceTable = ({
                       </td>
                       );
                     })}
-                    {SHOW_YTD_RF && (
-                    <td className={"total-cell" + (isYtdOverride(r) ? " inv-override" : "")}
-                        title={isYtdOverride(r)
-                          ? "Manually overridden — clear the cell to reset to auto-calc (sum of MSMM Jan–Dec)"
-                          : "Auto-calculated · sum of MSMM Jan–Dec (actual + projected). Click to override."}>
-                      <EditableCell value={ytdActualShown(r)} type="number"
-                        onChange={v => updateRow(r.id, { ytdActualOverride: v == null ? null : Number(v) })}
-                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                    <td className="total-cell inv-pin-ytd"
+                        title="Auto-calculated · all the MSMM actuals for this project, summed across every year">
+                      {(() => {
+                        const v = msmmYtdAll(r);
+                        return v ? fmtMoney(v) : <span className="empty-cell">—</span>;
+                      })()}
                     </td>
-                    )}
-                    {SHOW_YTD_RF && (
-                    <td className={"total-cell" + (isRfOverride(r) ? " inv-override" : "")}
-                        style={{ color: rollforwardShown(r) < 0 ? "var(--rose)" : "var(--accent-ink)" }}
-                        title={isRfOverride(r)
-                          ? "Manually overridden — clear the cell to reset to auto-calc (Remaining Jan 1 − YTD)"
-                          : "Auto-calculated · Remaining Jan 1 − YTD Actual. Negative = contract overrun. Click to override."}>
-                      <EditableCell value={rollforwardShown(r)} type="number"
-                        onChange={v => updateRow(r.id, { rollforwardOverride: v == null ? null : Number(v) })}
-                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                    </td>
-                    )}
-                    <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
+                    <td className="inv-pin-act" style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
                       <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                         <Icon name="bell" size={14}/>
                       </button>
@@ -2747,7 +2747,9 @@ export const InvoiceTable = ({
                             : "No prime or subs tracked on this project yet."}
                         </span>
                       </td>
-                      <td colSpan={16}/>
+                      <td colSpan={windowMonths.length + 2}/>
+                      <td className="inv-pin-ytd"/>
+                      <td className="inv-pin-act"/>
                     </tr>
                   )}
                   {isExpanded && subList.map((s) => {
@@ -2880,7 +2882,7 @@ export const InvoiceTable = ({
                       {/* Remaining Jan 1 (sub) — editable starting balance;
                           NULL falls back to the sub's contract amount. */}
                       <td className="mono"
-                          title="Remaining to bill at Jan 1 for this sub. Defaults to the contract amount; edit if some was billed in a prior year. Clear to reset.">
+                          title="Remaining amount to bill for this sub. Defaults to the contract amount; edit if some was billed previously. Clear to reset.">
                         <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
                           onChange={v => onUpdateSubMeta?.({
                             projectId: r.sourceId,
@@ -2890,18 +2892,20 @@ export const InvoiceTable = ({
                           })}
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
-                      {s.amounts.map((amt, i) => {
-                        const filesForCell = s.files[i] || [];
+                      {windowMonths.map((d, wi) => {
+                        const amt = subAmtAtDesc(s, d);
+                        const filesForCell = subFilesAtDesc(s, d);
                         const hasFiles = filesForCell.length > 0;
-                        const isPaid   = !!(s.paid && s.paid[i]);
+                        const isPaid   = subPaidAtDesc(s, d);
+                        const paidWhen = subPaidWhenDesc(s, d);
                         const hasAmount = amt != null && amt !== 0;
                         const showPaidToggle = hasAmount || isPaid;
                         return (
-                        <td key={i}
-                            className={monthCellState(r, i) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                        <td key={d.abs}
+                            className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
-                            onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv, entryKind)}
+                            onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
                             format={v => v != null && v !== 0
                               ? fmtMoney(v)
                               : <span style={{ opacity: 0.4 }}>—</span>}/>
@@ -2911,17 +2915,18 @@ export const InvoiceTable = ({
                               className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
                               title={isPaid
                                 ? (canUntickPaid
-                                    ? `Paid${s.paidAt?.[i] ? ` · ${fmtDate(s.paidAt[i])}` : ""} — click to unmark (confirmation required)`
-                                    : `Paid${s.paidAt?.[i] ? ` · ${fmtDate(s.paidAt[i])}` : ""} · locked — only an administrator can unmark`)
+                                    ? `Paid${paidWhen ? ` · ${fmtDate(paidWhen)}` : ""} — click to unmark (confirmation required)`
+                                    : `Paid${paidWhen ? ` · ${fmtDate(paidWhen)}` : ""} · locked — only an administrator can unmark`)
                                 : "Mark as paid"}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onTogglePaid?.({
                                   projectId: r.sourceId,
                                   companyId: s.companyId,
-                                  monthIdx: i,
+                                  monthIdx: d.monthIdx,
                                   paid: !isPaid,
                                   kind: entryKind,
+                                  year: d.year,
                                 });
                               }}>
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
@@ -2934,7 +2939,7 @@ export const InvoiceTable = ({
                             // projected month with no files shows a locked,
                             // non-opening clip; rows that already have files
                             // always open so they stay viewable.
-                            const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(r.year, i) && !hasFiles;
+                            const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(d.year, d.monthIdx) && !hasFiles;
                             return (
                             <button
                               type="button"
@@ -2949,7 +2954,7 @@ export const InvoiceTable = ({
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (attachLocked) return;
-                                onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: i, sub: s });
+                                onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: d.monthIdx, sub: s, year: d.year });
                               }}>
                               <Icon name="link" size={11}/>
                               {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
@@ -2959,38 +2964,16 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* YTD Actual (sub) — sum of all 12 months, auto-updates
-                          as cells change. Rollforward (sub) — contract amount
-                          minus YTD; negative means the sub has billed past
-                          their contract amount (surfaced in rose so it reads
-                          as a warning, not a quiet zero). */}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell mono"
-                          title="Auto-calculated · sum of Jan–Dec billings on this sub">
+                      {/* YTD Actual (sub) — every billing on this sub, summed
+                          across all years (all-time). Rollforward was removed. */}
+                      <td className="total-cell mono inv-pin-ytd"
+                          title="Auto-calculated · all billings on this sub, every year">
                         {(() => {
-                          const ytd = subYtdAuto(s);
+                          const ytd = subYtdAll(s);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
-                      )}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell mono"
-                          title="Auto-calculated · contract amount − YTD actual">
-                        {(() => {
-                          const rf = subRollforward(s);
-                          if (!s.contractAmount && !subYtdAuto(s)) {
-                            return <span className="empty-cell">—</span>;
-                          }
-                          const overrun = rf < 0;
-                          return (
-                            <span style={overrun ? { color: "var(--rose)" } : undefined}>
-                              {fmtMoney(rf)}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      )}
-                      <td/>
+                      <td className="inv-pin-act"/>
                     </tr>
                     );
                   })}
@@ -3005,7 +2988,7 @@ export const InvoiceTable = ({
                     <tr className="invoice-sub-add-row">
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1"/>
-                      <td className="sticky-2" colSpan={20}>
+                      <td className="sticky-2" colSpan={windowMonths.length + 6}>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           {!isPrimeRow && !hasPrimeEntry && (
                             <button
@@ -3029,6 +3012,8 @@ export const InvoiceTable = ({
                           </button>
                         </div>
                       </td>
+                      <td className="inv-pin-ytd"/>
+                      <td className="inv-pin-act"/>
                     </tr>
                     );
                   })()}
@@ -3059,25 +3044,26 @@ export const InvoiceTable = ({
                       {/* Remaining Jan 1 (project total) — editable starting
                           balance; NULL falls back to Total Contract Value. */}
                       <td className="mono"
-                          title="Remaining to bill at Jan 1 for the whole project. Defaults to Total Contract Value; edit if some was billed in a prior year. Clear to reset.">
+                          title="Remaining amount to bill for the whole project. Defaults to Total Contract Value; edit if some was billed previously. Clear to reset.">
                         <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"
                           onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
-                      {r.values.map((v, i) => {
-                        const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
+                      {windowMonths.map((d, wi) => {
+                        const v = valAtDesc(r, d);
+                        const filesForCell = primeFilesAtDesc(r, d);
                         const hasFiles = filesForCell.length > 0;
-                        const isPaid   = !!(r.primePaid && r.primePaid[i]);
+                        const isPaid   = primePaidAtDesc(r, d);
                         const hasAmount = v != null && v !== 0;
                         const showPaidToggle = hasAmount || isPaid;
                         // Per-month invoice number for this project total cell.
-                        const invNum = (r.invoiceNumbers && r.invoiceNumbers[i]) || null;
+                        const invNum = invNumAtDesc(r, d);
                         return (
-                        <td key={i}
-                            className={monthCellState(r, i, true) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                        <td key={d.abs}
+                            className={monthStateAtDesc(r, d, true) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={v} type="number"
-                            onChange={nv => updateInvoice(r.id, i, nv)}
+                            onChange={nv => updateInvoice(r, d.year, d.monthIdx, nv)}
                             format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                           />
                           {showPaidToggle && (
@@ -3091,7 +3077,7 @@ export const InvoiceTable = ({
                                 : "Mark prime invoice as paid"}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onTogglePrimePaid?.(r.id, i, !isPaid);
+                                onTogglePrimePaid?.(r, d.year, d.monthIdx, !isPaid);
                               }}>
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
@@ -3099,7 +3085,7 @@ export const InvoiceTable = ({
                           {(() => {
                             // Same ATTACH_ONLY_ON_ACTUAL gate as the sub clip
                             // above (currently OFF → always attachable).
-                            const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(r.year, i) && !hasFiles;
+                            const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(d.year, d.monthIdx) && !hasFiles;
                             return (
                             <button
                               type="button"
@@ -3112,7 +3098,7 @@ export const InvoiceTable = ({
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (attachLocked) return;
-                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: d.monthIdx, year: d.year });
                               }}>
                               <Icon name="link" size={11}/>
                               {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
@@ -3126,7 +3112,7 @@ export const InvoiceTable = ({
                               title={`Invoice #${invNum} · click to edit`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: i });
+                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: d.monthIdx, year: d.year });
                               }}>
                               <span className="invoice-cell-invnum-hash">#</span>
                               <span className="invoice-cell-invnum-val">{invNum}</span>
@@ -3135,36 +3121,16 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* YTD Actual (project) — sum of all 12 monthly project
-                          totals. Rollforward (project) — Total CV − YTD,
-                          negative in rose to flag a contract overrun. */}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell mono"
-                          title="Auto-calculated · sum of Jan–Dec project totals">
+                      {/* YTD Actual (project) — every monthly total summed across
+                          all years (all-time). Rollforward was removed. */}
+                      <td className="total-cell mono inv-pin-ytd"
+                          title="Auto-calculated · all project totals, every year">
                         {(() => {
-                          const ytd = projectYtdAuto(r);
+                          const ytd = projectYtdAll(r);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
-                      )}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell mono"
-                          title="Auto-calculated · Total Contract Value − YTD actual">
-                        {(() => {
-                          const rf = projectRollforward(r);
-                          if (!r.amount && !projectYtdAuto(r)) {
-                            return <span className="empty-cell">—</span>;
-                          }
-                          const overrun = rf < 0;
-                          return (
-                            <span style={overrun ? { color: "var(--rose)" } : undefined}>
-                              {fmtMoney(rf)}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      )}
-                      <td/>
+                      <td className="inv-pin-act"/>
                     </tr>
                   )}
                   </React.Fragment>
@@ -3186,22 +3152,15 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.remainingStart || 0))}</td>
-                      {MONTHS.map((_, i) => (
-                        <td key={i} className={(i <= actualThru ? "month-actual" : "month-proj") + " total-cell"}>
-                          {fmtMoney(sumBy(searchedNonOrange, r => msmmAtMonth(r, i)))}
+                      {windowMonths.map((d, wi) => (
+                        <td key={d.abs} className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "") + " total-cell"}>
+                          {fmtMoney(sumBy(searchedNonOrange, r => msmmAtDesc(r, d)))}
                         </td>
                       ))}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedNonOrange, ytdActualShown))}
+                      <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(searchedNonOrange, msmmYtdAll))}
                       </td>
-                      )}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedNonOrange, rollforwardShown))}
-                      </td>
-                      )}
-                      <td className="total-cell"></td>
+                      <td className="total-cell inv-pin-act"></td>
                     </tr>
                     {/* Total including orange (everything in the searched set) */}
                     <tr>
@@ -3215,22 +3174,15 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.remainingStart || 0))}</td>
-                      {MONTHS.map((_, i) => (
-                        <td key={i} className={(i <= actualThru ? "month-actual" : "month-proj") + " total-cell"}>
-                          {fmtMoney(sumBy(searchedRows, r => msmmAtMonth(r, i)))}
+                      {windowMonths.map((d, wi) => (
+                        <td key={d.abs} className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "") + " total-cell"}>
+                          {fmtMoney(sumBy(searchedRows, r => msmmAtDesc(r, d)))}
                         </td>
                       ))}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedRows, ytdActualShown))}
+                      <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(searchedRows, msmmYtdAll))}
                       </td>
-                      )}
-                      {SHOW_YTD_RF && (
-                      <td className="total-cell" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedRows, rollforwardShown))}
-                      </td>
-                      )}
-                      <td className="total-cell"></td>
+                      <td className="total-cell inv-pin-act"></td>
                     </tr>
                   </>
                 )}
@@ -3257,6 +3209,13 @@ export const InvoiceTable = ({
           meta={noteModal}
           onClose={() => setNoteModal(null)}
           onSave={(id, field, text) => updateRow(id, { [field]: text.trim() ? text : null })}
+        />
+      )}
+      {notesThread && (
+        <InvoiceNotesThread
+          meta={notesThread}
+          onClose={() => setNotesThread(null)}
+          onChange={(log) => onNotesChanged?.(notesThread.id, log)}
         />
       )}
     </div>

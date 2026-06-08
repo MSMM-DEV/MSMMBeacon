@@ -1,30 +1,26 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { Icon } from "./icons.jsx";
-import { fmtMoney, MONTHS, TODAY_MONTH, THIS_YEAR } from "./data.js";
+import { fmtMoney, isActualInvoiceMonth, THIS_YEAR, TODAY_MONTH } from "./data.js";
 
 // ============================================================================
 // InvoiceCharts — Engineering + Project Management cash-flow charts.
 //
 // Originally lived at the top-left quadrant of the Quad Sheet. The Quad Sheet
 // page was retired (2026-05) — the two charts moved verbatim to the top of
-// the Invoice tab, the Outstanding-Invoices panel moved to the bottom of the
-// same tab, and the executive lists (events / awaiting / hot leads) were
-// dropped since each had a dedicated tab already.
+// the Invoice tab.
 //
-// Behavior preserved as-is from the previous Quad Sheet wiring:
-//   • Two stacked charts — ENG up top, PM below, with a collapse-PM toggle
-//     persisted to localStorage as `beacon.quadPmCollapsed`.
-//   • Chart view ("pair" vs "average") only meaningful on ENG (PM has no
-//     Orange rows) — persisted as `beacon.chartView`. Both keys kept under
-//     their original `quad`-namespaced names so existing user preferences
-//     survive the relocation.
-//   • Same SVG geometry, KPIs, hover tooltip, benchmark chip, legend.
+// As of the rolling-window rework the charts follow the SAME sliding month
+// window as the InvoiceTable: a `windowMonths` descriptor list (default = prev
+// 3 + current + next 12 = 16 months) that crosses calendar years. Each bar
+// sums the merged rows' byYear[year].values[monthIdx] for its descriptor, so
+// the charts and the table always show the same months. Actual vs projection
+// is decided per (year, month) via isActualInvoiceMonth.
+//
+// Behavior preserved: ENG up top, collapsible PM below; Pair/Average view
+// toggle (ENG only — PM has no Orange); benchmark coloring; hover tooltip.
 // ============================================================================
 
-export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actualThru = TODAY_MONTH }) => {
-  // PM chart visibility — persisted across sessions. ENG is always visible;
-  // PM is the optional one because most exec views focus on engineering
-  // revenue, with PM treated as a supplementary cut.
+export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark }) => {
   const [pmCollapsed, setPmCollapsed] = useState(() => {
     try { return localStorage.getItem("beacon.quadPmCollapsed") === "1"; }
     catch { return false; }
@@ -34,10 +30,6 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
     catch { /* storage disabled — fine */ }
   }, [pmCollapsed]);
 
-  // Chart view — "pair" (two side-by-side bars per month) or "average"
-  // (single bar at the midpoint of with/without Orange). Only the ENG chart
-  // exposes the toggle UI; PM consumes the same state but has no Orange so
-  // it renders identically either way.
   const [chartView, setChartView] = useState(() => {
     try {
       const v = localStorage.getItem("beacon.chartView");
@@ -52,8 +44,12 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
   // Hard split by invoice_type_enum so the Invoice view shows Engineering
   // and PM revenue as independent stories. Rows with a missing/unknown type
   // default to ENG (see adaptInvoice in data.js), so the union is exhaustive.
-  const invoiceEng = invoice.filter(r => (r.type || "ENG") === "ENG");
-  const invoicePm  = invoice.filter(r => r.type === "PM");
+  const invoiceEng = rows.filter(r => (r.type || "ENG") === "ENG");
+  const invoicePm  = rows.filter(r => r.type === "PM");
+
+  const rangeLabel = windowMonths.length
+    ? `${windowMonths[0].label} – ${windowMonths[windowMonths.length - 1].label}`
+    : `${THIS_YEAR}`;
 
   return (
     <section className="quad-card inv-charts-card" data-accent="flow">
@@ -61,24 +57,22 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
         <div className="quad-eyebrow">Cash Flow</div>
         <h2 className="quad-title">Anticipated Invoice</h2>
         <div className="quad-sub-row">
-          <div className="quad-sub">{THIS_YEAR} · monthly actual vs. projection</div>
+          <div className="quad-sub">{rangeLabel} · monthly actual vs. projection</div>
         </div>
       </header>
       <div className="quad-body">
         <div className={"invoice-chart-stack" + (pmCollapsed ? " pm-collapsed" : "")}>
           <InvoiceChart
             eyebrow="Engineering · ENG"
-            invoice={invoiceEng}
+            rows={invoiceEng}
+            windowMonths={windowMonths}
             orangeSourceIds={orangeSourceIds}
             monthlyBenchmark={monthlyBenchmark}
             view={chartView}
             onViewChange={setChartView}
-            actualThru={actualThru}
           />
 
           {pmCollapsed ? (
-            // Collapsed PM section — a single thin bar acting as the
-            // disclosure header. Clicking anywhere expands.
             <button
               type="button"
               className="invoice-chart-toggle collapsed"
@@ -101,9 +95,6 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
             <>
               <div className="invoice-chart-divider" aria-hidden="true"/>
               <div className="invoice-chart-pm-wrap">
-                {/* Floating Hide button — top-right of the PM chart so it
-                    doesn't compete with the chart-eyebrow's letterpressed
-                    accent strip on the left. */}
                 <button
                   type="button"
                   className="invoice-chart-hide-btn"
@@ -116,18 +107,12 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
                 </button>
                 <InvoiceChart
                   eyebrow="Project Management · PM"
-                  invoice={invoicePm}
+                  rows={invoicePm}
+                  windowMonths={windowMonths}
                   orangeSourceIds={orangeSourceIds}
                   view={chartView}
-                  actualThru={actualThru}
-                  /* No onViewChange — PM doesn't render the toggle UI. PM
-                     rows have no Orange anyway (Orange is an ENG-side
-                     billing concept), so view choice is a no-op for PM
-                     visually. */
-                  /* Benchmark is engineering-revenue only — PM chart
-                     intentionally renders without a benchmark line
-                     (InvoiceChart treats missing/0 as "no benchmark set"
-                     and keeps bars neutral cadmium). */
+                  /* No onViewChange — PM doesn't render the toggle UI. */
+                  /* No benchmark — engineering-revenue only. */
                 />
               </div>
             </>
@@ -139,30 +124,11 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
 };
 
 // ============================================================================
-// InvoiceChart — twelve monthly bars, color-graded by benchmark verdict.
+// InvoiceChart — one bar per visible month, color-graded by benchmark verdict.
 // ============================================================================
-// Each bar's color is driven by the workspace-wide `monthlyBenchmark` (set by
-// Admins in Settings → Targets):
-//   total ≥ benchmark  → green ("on target")
-//   total <  benchmark → red   ("below target")
-//   benchmark unset    → neutral cadmium (keeps the chart legible before a
-//                                          target is configured)
-//
-// Each bar visualizes BOTH the with-Orange total and the without-Orange base
-// via side-by-side bars (or one averaged bar in "average" mode). Past months
-// are solid; projection months get a softer fill + diagonal hatch.
-// ----------------------------------------------------------------------------
-// Standard "nice numbers" axis ceiling — picks the smallest entry on a
-// tight ladder of nice multiples that's still ≥ peak (plus a small headroom).
-// Why: the previous implementation rounded up to the next power of 10, so
-// peak 1.1M jumped to 2M — bars only filled ~55% of the plot height. The
-// ladder below stays within ~92% fill on the peak bar while keeping the
-// resulting tick values clean (1.2/1.6/2.0/2.4… are all evenly divisible by
-// the four inner tick intervals, so axis labels never land on weird fractions).
 const NICE_LADDER = [1.0, 1.2, 1.4, 1.6, 2.0, 2.4, 2.8, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0];
 const niceChartMax = (peak) => {
   const safePeak = Math.max(Number(peak) || 0, 1);
-  // Tiny 4% headroom so the tallest bar doesn't kiss the top axis line.
   const target = safePeak * 1.04;
   const mag = Math.pow(10, Math.floor(Math.log10(target)));
   const ratio = target / mag;
@@ -170,28 +136,37 @@ const niceChartMax = (peak) => {
   return nice * mag;
 };
 
-const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange, actualThru = TODAY_MONTH }) => {
-  // Two parallel 12-month totals:
-  //   totalsBase — sum of invoices NOT sourced from an Orange potential row
-  //                (formally awarded work — the "secured" baseline)
-  //   totalsAll  — sum of ALL invoices (base + Orange pre-awarded)
-  //   totalsAvg  — arithmetic mean of base + all (the "midpoint" view, used
-  //                by the Average toggle to render a single consolidated bar
-  //                per month — exec read of "expected case").
+const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange }) => {
+  const N = Math.max(1, windowMonths.length);
+  // Per-window-month totals, summed from each merged row's byYear slot for
+  // that descriptor's (year, monthIdx):
+  //   totalsBase — invoices NOT sourced from an Orange potential (secured)
+  //   totalsAll  — all invoices (base + Orange pre-awarded)
+  //   totalsAvg  — midpoint of the two (the Average view)
   const { totalsBase, totalsAll, totalsAvg } = useMemo(() => {
-    const totalsBase = Array(12).fill(0);
-    const totalsAll  = Array(12).fill(0);
-    for (const r of invoice) {
+    const totalsBase = Array(N).fill(0);
+    const totalsAll  = Array(N).fill(0);
+    for (const r of rows) {
       const isOrange = !!(r.sourceId && orangeSourceIds?.has(r.sourceId));
-      for (let i = 0; i < 12; i++) {
-        const v = Number(r.values?.[i] || 0);
-        totalsAll[i] += v;
-        if (!isOrange) totalsBase[i] += v;
-      }
+      windowMonths.forEach((d, wi) => {
+        const v = Number(r.byYear?.[d.year]?.values?.[d.monthIdx] || 0);
+        totalsAll[wi] += v;
+        if (!isOrange) totalsBase[wi] += v;
+      });
     }
     const totalsAvg = totalsAll.map((v, i) => (v + totalsBase[i]) / 2);
     return { totalsBase, totalsAll, totalsAvg };
-  }, [invoice, orangeSourceIds]);
+  }, [rows, windowMonths, orangeSourceIds, N]);
+
+  // Actual / projection split is per (year, month). The actual months form a
+  // contiguous prefix of the window (past → present), so lastActualWi is the
+  // boundary and actualCount = lastActualWi + 1.
+  const lastActualWi = useMemo(
+    () => windowMonths.reduce((acc, d, wi) => (isActualInvoiceMonth(d.year, d.monthIdx) ? wi : acc), -1),
+    [windowMonths]);
+  const actualCount = lastActualWi + 1;
+  const isProjWi = (wi) => wi > lastActualWi;
+  const todayWi = windowMonths.findIndex(d => d.year === THIS_YEAR && d.monthIdx === TODAY_MONTH);
 
   const svgRef = useRef(null);
   const [box, setBox] = useState({ w: 1600, h: 400 });
@@ -220,8 +195,8 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
 
-  const slot = plotW / 12;
-  const hasOrange = invoice.some(r => r.sourceId && orangeSourceIds?.has(r.sourceId));
+  const slot = plotW / N;
+  const hasOrange = rows.some(r => r.sourceId && orangeSourceIds?.has(r.sourceId));
   const isAvgView = view === "average" && hasOrange;
   const visibleBarValues = isAvgView
     ? totalsAvg
@@ -259,7 +234,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
       setHoverIdx(null);
       return;
     }
-    const idx = Math.max(0, Math.min(11, Math.floor((x - padL) / slot)));
+    const idx = Math.max(0, Math.min(N - 1, Math.floor((x - padL) / slot)));
     setHoverIdx(idx);
   };
 
@@ -269,7 +244,6 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
     return v >= Number(monthlyBenchmark) ? "above" : "below";
   };
 
-  const actualCount   = Math.max(0, actualThru + 1);   // # of months counted as Actual
   const ytdActualAll  = totalsAll.slice(0, actualCount).reduce((a, b) => a + b, 0);
   const ytdActualBase = totalsBase.slice(0, actualCount).reduce((a, b) => a + b, 0);
   const projRemAll    = totalsAll.slice(actualCount).reduce((a, b) => a + b, 0);
@@ -316,7 +290,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
       )}
       <div className="chart-kpis">
         <div className="kpi">
-          <div className="kpi-label">YTD Actual</div>
+          <div className="kpi-label">Actual in view</div>
           <div className="kpi-val">{fmtMoney(ytdActualAll, false)}</div>
           {hasOrange && (
             <div className="kpi-sub">w/o Orange · {fmtMoney(ytdActualBase, false)}</div>
@@ -324,7 +298,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
-          <div className="kpi-label">Projection remaining</div>
+          <div className="kpi-label">Projection in view</div>
           <div className="kpi-val ink-soft">{fmtMoney(projRemAll, false)}</div>
           {hasOrange && (
             <div className="kpi-sub">w/o Orange · {fmtMoney(projRemBase, false)}</div>
@@ -332,11 +306,11 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
         </div>
         <div className="kpi-sep"/>
         <div className="kpi">
-          <div className="kpi-label">{hasBenchmark ? "Months on target" : "Full year"}</div>
+          <div className="kpi-label">{hasBenchmark ? "Months on target" : "Window total"}</div>
           {hasBenchmark ? (
             <>
               <div className="kpi-val mono-xl">
-                {ytdAboveCount}<span className="kpi-frac">/{actualCount}</span>
+                {ytdAboveCount}<span className="kpi-frac">/{Math.max(0, actualCount)}</span>
               </div>
               <div className="kpi-sub">benchmark · {fmtMoney(monthlyBenchmark, false)}/mo</div>
             </>
@@ -383,21 +357,22 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           </g>
         ))}
 
-        {MONTHS.map((m, i) => (
-          <text key={i}
-                x={slotCx(i)} y={H - 14}
+        {windowMonths.map((d, wi) => (
+          <text key={d.abs}
+                x={slotCx(wi)} y={H - 14}
                 textAnchor="middle"
-                className={"chart-month" + (i === TODAY_MONTH ? " is-today" : "")}>
-            {m}
+                className={"chart-month" + (wi === todayWi ? " is-today" : "")}>
+            {(d.monthIdx === 0 || wi === 0) ? `${d.mon} '${d.yy}` : d.mon}
           </text>
         ))}
 
-        {/* Actual/Projection divider — sits at the cutover boundary, which
-            equals the real-month boundary when the cutover day is 1. */}
-        <line
-          x1={padL + slot * actualCount} x2={padL + slot * actualCount}
-          y1={padT} y2={padT + plotH}
-          className="chart-today"/>
+        {/* Actual/Projection divider — sits at the cutover boundary. */}
+        {actualCount > 0 && actualCount < N && (
+          <line
+            x1={padL + slot * actualCount} x2={padL + slot * actualCount}
+            y1={padT} y2={padT + plotH}
+            className="chart-today"/>
+        )}
 
         {hasBenchmark && (
           <line
@@ -410,7 +385,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
         {totalsAll.map((vAll, i) => {
           const vBase = totalsBase[i];
           const vAvg  = totalsAvg[i];
-          const isProj = i > actualThru;
+          const isProj = isProjWi(i);
           const verdictAll  = verdictFor(i);
           const verdictBase = !hasBenchmark
             ? "neutral"
@@ -554,17 +529,18 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           </g>
         )}
 
-        {hoverIdx != null && (() => {
+        {hoverIdx != null && windowMonths[hoverIdx] && (() => {
+          const d = windowMonths[hoverIdx];
           const vAll  = totalsAll[hoverIdx];
           const vBase = totalsBase[hoverIdx];
           const vAvg  = totalsAvg[hoverIdx];
           const v = isAvgView ? vAvg : vAll;
           const verdict = verdictFor(hoverIdx);
-          const isProj = hoverIdx > actualThru;
+          const isProj = isProjWi(hoverIdx);
           const x = slotCx(hoverIdx);
           const yTop = yFor(v);
           const lines = [];
-          lines.push({ y: 18, cls: "chart-tip-label", text: `${MONTHS[hoverIdx]} ${THIS_YEAR} · ${isProj ? "Projection" : "Actual"}` });
+          lines.push({ y: 18, cls: "chart-tip-label", text: `${d.mon} ${d.year} · ${isProj ? "Projection" : "Actual"}` });
           lines.push({ y: 38, cls: `chart-tip-val verdict-${verdict}`, text: fmtMoney(v, false) + (isAvgView ? " avg" : "") });
           if (isAvgView) {
             lines.push({ y: 56, cls: "chart-tip-sub", text: `range · ${fmtMoney(vBase, false)} – ${fmtMoney(vAll, false)}` });

@@ -26,6 +26,7 @@ import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth,
+  mergeInvoiceYears, adaptInvoiceRow, monthDescsForWindow, defaultWindowStartAbs, WINDOW_SIZE,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
@@ -347,24 +348,22 @@ const EXPORT_COLUMNS = {
     { label: "Type",              wMm: 14,                             get: r => r.type || "" },
     { label: "PM",                wMm: 24, wrap: true,                 get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(r.amount) },
-    { label: "Remaining Jan 1",   wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
+    { label: "Remaining Amount",  wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
     ...MONTHS.map((m, i) => ({
       label: m, wMm: 20, wrap: true, halign: "right",
       get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
     })),
-    // YTD Actual = sum of all 12 monthly project totals (Jan–Dec, actual +
-    // projected). Auto-recalcs whenever a month changes; honored by the
-    // per-row override when the user explicitly set one. Rollforward =
-    // Remaining Jan 1 − YTD; negatives are kept so contract overruns
-    // are visible in the export.
+    // YTD Actual = ALL the actuals for the project, summed across EVERY year
+    // (not just the current one) — the rolling-window definition. Merged rows
+    // carry a byYear map; fall back to the row's own months if absent.
     { label: "YTD Actual",        wMm: 24, wrap: true, halign: "right",
-      get: r => fmtMoney(r.ytdActualOverride != null
-        ? r.ytdActualOverride
-        : (r.values || []).reduce((a,b) => a+(b||0), 0)) },
-    { label: "Rollforward",       wMm: 24, wrap: true, halign: "right",
-      get: r => fmtMoney(r.rollforwardOverride != null
-        ? r.rollforwardOverride
-        : (Number(r.remainingStart) || 0) - (r.values || []).reduce((a,b) => a+(b||0), 0)) },
+      get: r => {
+        const sumYr = (yr) => (yr?.values || []).reduce((a,b) => a+(b||0), 0);
+        const total = r.byYear
+          ? Object.values(r.byYear).reduce((a, yr) => a + sumYr(yr), 0)
+          : (r.values || []).reduce((a,b) => a+(b||0), 0);
+        return fmtMoney(total);
+      } },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
@@ -1662,6 +1661,85 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // ---- Rolling-window year-aware month edits ---------------------------------
+  // The InvoiceTable shows a sliding 16-month window that crosses calendar
+  // years, but each month's data lives in the anticipated_invoice row for that
+  // specific year. These wrappers resolve (merged project, year) → the flat
+  // year-row id, MINTING the row on the fly when a month is edited in a year
+  // that has none yet, then delegate to the existing per-id writers.
+  const resolveInvoiceYearId = async (mergedRow, year) => {
+    const existing = mergedRow?.byYear?.[year]?.id;
+    if (existing) return existing;
+    const payload = {
+      source_project_id: mergedRow.sourceId || null,
+      project_name: mergedRow.name || "",
+      project_number: mergedRow.projectNumber || null,
+      type: mergedRow.type || "ENG",
+      contract_amount: mergedRow.amount ?? null,
+      year,
+    };
+    const { data, error } = await supabase
+      .from("anticipated_invoice")
+      .insert(payload)
+      .select("*, pms:anticipated_invoice_pms(user_id)")
+      .single();
+    if (error) {
+      // 23505 = a concurrent edit in the same new year won the (source_project_id,
+      // year) unique race. Fetch the row that landed instead of erroring.
+      if (error.code === "23505" && mergedRow.sourceId) {
+        const { data: raced } = await supabase
+          .from("anticipated_invoice")
+          .select("*, pms:anticipated_invoice_pms(user_id)")
+          .eq("source_project_id", mergedRow.sourceId)
+          .eq("year", year)
+          .eq("type", mergedRow.type || "ENG")
+          .limit(1)
+          .maybeSingle();
+        if (raced) {
+          setInvoice(rs => rs.some(r => r.id === raced.id)
+            ? rs
+            : [...rs, adaptInvoiceRow(raced, { role: mergedRow.role || "Prime" })]);
+          return raced.id;
+        }
+      }
+      showToast(`Couldn't add the ${year} invoice row: ${error.message}`, "x");
+      return null;
+    }
+    setInvoice(rs => [...rs, adaptInvoiceRow(data, { role: mergedRow.role || "Prime" })]);
+    return data.id;
+  };
+  const editInvoiceTotalMonth = async (mergedRow, year, monthIdx, v) => {
+    const id = await resolveInvoiceYearId(mergedRow, year);
+    if (id) updateInvoiceCell(id, monthIdx, v);
+  };
+  const editInvoiceMsmmMonth = async (mergedRow, year, monthIdx, v) => {
+    const id = await resolveInvoiceYearId(mergedRow, year);
+    if (id) updateInvoiceMsmmCell(id, monthIdx, v);
+  };
+  const editInvoicePrimePaidMonth = async (mergedRow, year, monthIdx, paid) => {
+    const id = await resolveInvoiceYearId(mergedRow, year);
+    if (id) updateInvoicePrimePaid(id, monthIdx, paid);
+  };
+
+  // Open the files modal for a month cell, year-aware. Prime files attach to an
+  // invoice_id, so we ensure the year's invoice row exists first; sub files read
+  // the sub entry's byYear[year]. Party (firm-level) files are year-agnostic.
+  const openInvoiceFiles = async (payload) => {
+    const { kind } = payload;
+    if (kind === "party-msmm" || kind === "party-prime" || kind === "party-sub") {
+      setFilesModal(payload);
+      return;
+    }
+    const year = payload.year ?? (payload.projectRow?.year || THIS_YEAR);
+    if (kind === "prime") {
+      const id = await resolveInvoiceYearId(payload.projectRow, year);
+      if (!id) return;
+      setFilesModal({ ...payload, year, yearRowId: id });
+    } else {
+      setFilesModal({ ...payload, year });
+    }
+  };
+
   // Delete an anticipated_invoice row. The BEFORE DELETE trigger from the
   // alerts wiring migration deactivates any related alerts; the
   // anticipated_invoice_pms join cascades. Optimistic local removal first,
@@ -1740,50 +1818,37 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // confirmed; marking paid is open. Routes through requestPaidUntick on untick.
   const setSubInvoicePaidStatus = async (args) => {
     if (!args.paid) {
-      const label = `${companyById(args.companyId)?.name || "Sub"} · ${MONTHS[args.monthIdx]}`;
+      const yr = args.year ?? THIS_YEAR;
+      const label = `${companyById(args.companyId)?.name || "Sub"} · ${MONTHS[args.monthIdx]} ${yr}`;
       requestPaidUntick({ label, onConfirm: () => doSetSubInvoicePaid(args) });
       return;
     }
     await doSetSubInvoicePaid(args);
   };
 
-  const doSetSubInvoicePaid = async ({ projectId, companyId, monthIdx, paid, kind = "sub" }) => {
+  const doSetSubInvoicePaid = async ({ projectId, companyId, monthIdx, paid, kind = "sub", year = THIS_YEAR }) => {
     try {
       const row = await ensureSubInvoiceRow({
         projectId, companyId,
-        year: THIS_YEAR,
+        year,
         month: monthIdx + 1,
         kind,
       });
       await setSubInvoicePaid(row.id, paid);
-      setSubInvoices(prev => {
-        const next = new Map(prev);
-        const list = next.get(projectId);
-        if (!list) return prev;
-        const updated = list.map(s => {
-          if (s.companyId !== companyId) return s;
-          const newPaid     = [...(s.paid     || Array(12).fill(false))];
-          const newPaidAt   = [...(s.paidAt   || Array(12).fill(null))];
-          const newSubIds   = [...(s.subInvoiceIds || Array(12).fill(null))];
-          newPaid[monthIdx] = paid;
-          newPaidAt[monthIdx] = paid ? new Date().toISOString() : null;
-          newSubIds[monthIdx] = row.id;
-          return { ...s, paid: newPaid, paidAt: newPaidAt, subInvoiceIds: newSubIds };
-        });
-        next.set(projectId, updated);
-        return next;
-      });
+      // Rebuild the matrix (incl. every year's byYear) so the cell flips in the
+      // window regardless of which year it belongs to.
+      await refreshInvoiceArtifacts();
     } catch (e) {
       showToast(`Mark ${paid ? "paid" : "pending"} failed: ${e?.message || e}`, "x");
     }
   };
 
-  const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value, kind = "sub") => {
+  const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value, kind = "sub", year = THIS_YEAR) => {
     try {
       const cleaned = value === "" || value == null ? null : Number(value);
       await upsertSubInvoiceAmount({
         projectId, companyId,
-        year: THIS_YEAR,
+        year,
         month: monthIdx + 1,
         amount: cleaned,
         kind,
@@ -3319,35 +3384,40 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const handleExportManish = async () => {
     if (tab !== "invoice") return;
     const date = new Date().toISOString().slice(0, 10);
-    const exportYear = yearFilter.invoice ?? THIS_YEAR;
-    const filename = `msmm-invoice-manish-${exportYear}-${date}.xlsx`;
+    // One section per month in the current rolling window (spans calendar
+    // years). The xlsx stacks the 16 months vertically; each section title
+    // carries its own year.
+    const MONTH_FULL = [
+      "JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE",
+      "JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER",
+    ];
+    const win = invWindowMonths;
+    const monthTitles = win.map(d => `${MONTH_FULL[d.monthIdx]} ${d.year}`);
+    const filename = `msmm-invoice-manish-${win[0].label.replace(/\s/g, "")}-${win[win.length - 1].label.replace(/\s/g, "")}-${date}.xlsx`;
 
-    // Honor the current view (year filter / search / sort) like the other
-    // two invoice prints, then keep only Prime-role projects that have subs,
-    // scoped to one year so a project can't appear twice.
-    const snap = getCurrentTableSnapshot();
-    const baseRows = (snap && snap.tab === "invoice" && snap.processedRows)
-      ? snap.processedRows
-      : currentRows;
+    // currentRows = filtered.invoice = MERGED rows (one per project, byYear).
+    const baseRows = currentRows;
 
-    const allEntriesFor = (r) => subInvoices?.get(r.sourceId) || [];
-    const subListFor = (r) => allEntriesFor(r).filter(s => (s.kind || "sub") === "sub");
-    const msmmAtMonth = (r, i) => {
-      const override = r.msmmValues?.[i];
+    const subListFor = (r) =>
+      (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
+    // MSMM portion for a (merged row, window-month descriptor): the right
+    // year's total minus its subs, honoring a per-month MSMM override.
+    const msmmAtDesc = (r, d) => {
+      const yr = r.byYear?.[d.year];
+      if (!yr) return 0;
+      const override = yr.msmmValues?.[d.monthIdx];
       if (override != null) return Number(override);
-      const total = Number(r.values?.[i] || 0);
+      const total = Number(yr.values?.[d.monthIdx] || 0);
       const subSum = subListFor(r).reduce(
-        (a, s) => a + Number((s.amounts && s.amounts[i]) || 0), 0);
+        (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);
       return total - subSum;
     };
 
     const included = baseRows.filter(r =>
-      r.role === "Prime" &&
-      r.year === exportYear &&
-      subListFor(r).length > 0);
+      r.role === "Prime" && subListFor(r).length > 0);
 
     if (included.length === 0) {
-      showToast(`No Prime projects with subs for ${exportYear}`, "x");
+      showToast("No Prime projects with subs in this window", "x");
       return;
     }
 
@@ -3358,27 +3428,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const rows = included.map(r => {
       const subs = subListFor(r);
       const subNames = Array.from({ length: maxSubs }, (_, j) => subs[j]?.companyName || "");
-      const months = Array.from({ length: 12 }, (_, i) => ({
-        msmmAmount: msmmAtMonth(r, i),
-        invoiceNumber: (r.invoiceNumbers && r.invoiceNumbers[i]) || null,
-        primePaid: !!(r.primePaid && r.primePaid[i]),
-        primeHasFile: ((r.primeFiles && r.primeFiles[i]) || []).length > 0,
-        subs: Array.from({ length: maxSubs }, (_, j) => {
-          const s = subs[j];
-          if (!s) return { amount: null, paid: false, hasFile: false };
-          return {
-            amount: (s.amounts && s.amounts[i]) ?? null,
-            paid: !!(s.paid && s.paid[i]),
-            hasFile: ((s.files && s.files[i]) || []).length > 0,
-          };
-        }),
-      }));
+      const months = win.map((d) => {
+        const yr = r.byYear?.[d.year] || {};
+        return {
+          msmmAmount: msmmAtDesc(r, d),
+          invoiceNumber: (yr.invoiceNumbers && yr.invoiceNumbers[d.monthIdx]) || null,
+          primePaid: !!(yr.primePaid && yr.primePaid[d.monthIdx]),
+          primeHasFile: ((yr.primeFiles && yr.primeFiles[d.monthIdx]) || []).length > 0,
+          subs: Array.from({ length: maxSubs }, (_, j) => {
+            const s = subs[j];
+            const sy = s?.byYear?.[d.year];
+            if (!s) return { amount: null, paid: false, hasFile: false };
+            return {
+              amount: (sy?.amounts && sy.amounts[d.monthIdx]) ?? null,
+              paid: !!(sy?.paid && sy.paid[d.monthIdx]),
+              hasFile: ((sy?.files && sy.files[d.monthIdx]) || []).length > 0,
+            };
+          }),
+        };
+      });
       return { projectNumber: r.projectNumber, name: r.name, subNames, months };
     });
 
     try {
       showToast("Preparing Excel…", "export");
-      await exportManishWorkbook({ year: exportYear, maxSubs, rows }, filename);
+      await exportManishWorkbook({ monthTitles, maxSubs, rows }, filename);
       showToast(`Exported ${included.length} project${included.length === 1 ? "" : "s"} → Excel`, "export");
     } catch (err) {
       showToast(`Export failed: ${err.message || err}`, "x");
@@ -3446,7 +3520,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       awaiting:  apply("awaiting",  awaiting),
       awarded:   apply("awarded",   awarded),
       closed:    apply("closed",    closed),
-      invoice:   applyYear("invoice", invoice),
+      // Invoice is a rolling multi-year window now — no per-year filter.
+      // mergeInvoiceYears folds each project's per-year rows into one merged
+      // row carrying a `byYear` map; the window slice happens in InvoiceTable.
+      invoice:   mergeInvoiceYears(invoice),
       events:    apply("events",    events),
       hotleads:  apply("hotleads",  hotLeads),
       openbids:  apply("openbids",  openBids),
@@ -3464,6 +3541,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     () => new Set(potential.filter(p => p.probability === "Orange").map(p => p.id)),
     [potential]
   );
+
+  // Invoice rolling-window — absolute-month index (year*12 + monthIdx) of the
+  // leftmost visible month. Shared by the InvoiceTable, the cash-flow charts,
+  // and the Manish export so all three slide together. Persisted so navigation
+  // survives a reload; Back/Forward shift by one month, "Today" resets to the
+  // default (prev 3 + current + next 12 = 16 months).
+  const [invWindowStart, setInvWindowStart] = useState(() => {
+    try {
+      const v = localStorage.getItem("beacon.invoiceWindowStart");
+      if (v != null && v !== "") return Number(v);
+    } catch { /* storage disabled — fine */ }
+    return defaultWindowStartAbs();
+  });
+  useEffect(() => {
+    try { localStorage.setItem("beacon.invoiceWindowStart", String(invWindowStart)); }
+    catch { /* storage disabled — fine */ }
+  }, [invWindowStart]);
+  const invWindowMonths = useMemo(() => monthDescsForWindow(invWindowStart), [invWindowStart]);
+  const invWindowAtDefault = invWindowStart === defaultWindowStartAbs();
 
   // Expose the projects-by-type snapshot to EXPORT_COLUMNS' countRefs helper.
   useEffect(() => {
@@ -3814,17 +3910,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           return (
             <>
               <InvoiceCharts
-                invoice={invoice}
+                rows={filtered.invoice}
+                windowMonths={invWindowMonths}
                 orangeSourceIds={orangeSourceIds}
                 monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
-                actualThru={actualThru}
               />
               <InvoiceTable rows={filtered.invoice}
-                actualThru={actualThru}
+                windowMonths={invWindowMonths}
+                onWindowBack={() => setInvWindowStart(s => s - 1)}
+                onWindowFwd={() => setInvWindowStart(s => s + 1)}
+                onWindowToday={() => setInvWindowStart(defaultWindowStartAbs())}
+                windowAtDefault={invWindowAtDefault}
                 cutoverDay={appSettings.invoiceActualCutoverDay}
                 cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
-                updateInvoice={updateInvoiceCell}
-                updateInvoiceMsmm={updateInvoiceMsmmCell}
+                updateInvoice={editInvoiceTotalMonth}
+                updateInvoiceMsmm={editInvoiceMsmmMonth}
                 updateRow={updateInvoice}
                 onOpenDrawer={r => openDrawer(r, "invoice")}
                 onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
@@ -3834,17 +3934,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 subInvoices={subInvoices}
                 onUpdateSubAmount={updateSubInvoiceCell}
                 onTogglePaid={setSubInvoicePaidStatus}
-                onTogglePrimePaid={updateInvoicePrimePaid}
+                onTogglePrimePaid={editInvoicePrimePaidMonth}
                 canUntickPaid={isAdmin}
-                onOpenFiles={(payload) => setFilesModal(payload)}
+                onOpenFiles={openInvoiceFiles}
                 onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
                 onUpdateSubMeta={updateSubMeta}
                 onRemoveSub={removeSub}
                 onChangeRole={setInvoiceRoleHandler}
-                onNew={() => setCreateTable("invoice")}
-                yearOptions={availableYears.invoice}
-                yearValue={yearFilter.invoice}
-                onYearChange={(y) => setYear("invoice", y)}/>
+                onNotesChanged={(id, log) =>
+                  setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
+                onNew={() => setCreateTable("invoice")}/>
               <SubsReceivablesPanel
                 subInvoices={subInvoices}
                 projectsById={projectsById}
@@ -4238,12 +4337,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       )}
 
       {filesModal && (() => {
-        const { kind, projectRow, monthIdx, sub, companyId, companyName } = filesModal;
+        const { kind, projectRow, monthIdx, sub, companyId, companyName, yearRowId } = filesModal;
         const isParty = kind === "party-msmm" || kind === "party-prime" || kind === "party-sub";
         const isSub   = kind === "sub";
+        // The window crosses calendar years — resolve which flat year-row this
+        // cell belongs to. Prime: the resolved yearRowId. Sub: read byYear[year]
+        // off the live sub entry. Party: the merged row's primary year row.
+        const cellYear = filesModal.year ?? (projectRow?.year || THIS_YEAR);
         // Always re-read the invoice row from live state so file counts /
-        // partyFiles annotations reflect the latest refresh.
-        const liveProjectRow = invoice.find(r => r.id === projectRow.id) || projectRow;
+        // partyFiles annotations reflect the latest refresh. For prime month
+        // files that's the resolved year-row; otherwise the merged primary row.
+        const liveProjectRow =
+          (yearRowId && invoice.find(r => r.id === yearRowId))
+          || invoice.find(r => r.id === projectRow.id)
+          || projectRow;
         if (isParty) {
           // Party mode: resolve the right bucket from partyFiles.
           const partyKind = kind === "party-msmm" ? "msmm" : kind === "party-prime" ? "prime" : "sub";
@@ -4264,31 +4371,34 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             />
           );
         }
-        // Month-cell mode (existing): resolve sub fresh from the live matrix.
+        // Month-cell mode: resolve sub fresh from the live matrix, scoped to
+        // the cell's year via byYear. Prime data comes off the resolved
+        // year-row (liveProjectRow).
         const liveSub = isSub
           ? (subInvoices.get(projectRow.sourceId) || []).find(s => s.companyId === sub.companyId) || sub
           : null;
+        const ysub = (isSub && liveSub?.byYear?.[cellYear]) || {};
         const filesForCell = isSub
-          ? (liveSub?.files?.[monthIdx] || [])
+          ? (ysub.files?.[monthIdx] || [])
           : (liveProjectRow?.primeFiles?.[monthIdx] || []);
         const cellAmount = isSub
-          ? (liveSub?.amounts?.[monthIdx] ?? null)
+          ? (ysub.amounts?.[monthIdx] ?? null)
           : (liveProjectRow?.values?.[monthIdx] ?? null);
-        const cellPaid   = isSub ? !!(liveSub?.paid?.[monthIdx])    : false;
-        const cellPaidAt = isSub ? (liveSub?.paidAt?.[monthIdx] || null) : null;
+        const cellPaid   = isSub ? !!(ysub.paid?.[monthIdx])    : false;
+        const cellPaidAt = isSub ? (ysub.paidAt?.[monthIdx] || null) : null;
         return (
           <InvoiceFilesModal
             kind={kind}
-            projectId={liveProjectRow.sourceId}
-            projectName={liveProjectRow.name}
-            year={liveProjectRow.year || THIS_YEAR}
+            projectId={projectRow.sourceId}
+            projectName={projectRow.name}
+            year={cellYear}
             monthIdx={monthIdx}
             files={filesForCell}
             amount={cellAmount}
             paid={cellPaid}
             paidAt={cellPaidAt}
             primeInvoiceId={!isSub ? liveProjectRow.id : undefined}
-            subInvoiceId={isSub ? liveSub?.subInvoiceIds?.[monthIdx] : undefined}
+            subInvoiceId={isSub ? ysub.subInvoiceIds?.[monthIdx] : undefined}
             companyId={isSub ? liveSub?.companyId : undefined}
             companyName={isSub ? liveSub?.companyName : undefined}
             invoiceNumber={!isSub ? (liveProjectRow?.invoiceNumbers?.[monthIdx] || "") : undefined}
@@ -4297,7 +4407,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               : undefined}
             canUntickPaid={isAdmin}
             onRequestUntick={requestPaidUntick}
-            canAttach={!ATTACH_ONLY_ON_ACTUAL || isActualInvoiceMonth(liveProjectRow.year || THIS_YEAR, monthIdx)}
+            canAttach={!ATTACH_ONLY_ON_ACTUAL || isActualInvoiceMonth(cellYear, monthIdx)}
             onClose={() => setFilesModal(null)}
             onChanged={refreshInvoiceArtifacts}
           />

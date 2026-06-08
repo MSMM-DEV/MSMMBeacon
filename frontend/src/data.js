@@ -262,6 +262,45 @@ export function isActualInvoiceMonth(year, monthIdx) {
 // to bring the lock back without touching the call sites.
 export const ATTACH_ONLY_ON_ACTUAL = false;
 
+// ----------------------------------------------------------------------
+// Invoice rolling-window
+// ----------------------------------------------------------------------
+// The Invoice tab shows a SLIDING window of months instead of a fixed
+// Jan–Dec calendar year. The default window = the previous WINDOW_PREV
+// months, the current month, and the next WINDOW_NEXT months (16 total).
+// The window crosses calendar years, so months are addressed by an
+// ABSOLUTE index (year*12 + monthIdx); the table / charts / Manish export
+// stitch the per-(project, year) anticipated_invoice rows together for
+// display via mergeInvoiceYears (each merged row carries a `byYear` map).
+// Bump WINDOW_NEXT to 13 if the window should end at Jul 2027 (17 months)
+// for a June-2026 "today" instead of Jun 2027 (16 months).
+export const WINDOW_PREV = 3;
+export const WINDOW_NEXT = 12;
+export const WINDOW_SIZE = WINDOW_PREV + 1 + WINDOW_NEXT; // 16
+export const ymToAbs = (year, monthIdx) => year * 12 + monthIdx;
+export const absToYM = (abs) => ({
+  year: Math.floor(abs / 12),
+  monthIdx: ((abs % 12) + 12) % 12,
+});
+// Absolute index of the leftmost month for today's default window.
+export function defaultWindowStartAbs(date = new Date()) {
+  return ymToAbs(date.getFullYear(), date.getMonth()) - WINDOW_PREV;
+}
+// Descriptor list for a window beginning at startAbs:
+//   { abs, year, monthIdx, mon: "Mar", yy: "26", label: "Mar 2026" }
+export function monthDescsForWindow(startAbs, size = WINDOW_SIZE) {
+  return Array.from({ length: size }, (_, k) => {
+    const abs = startAbs + k;
+    const { year, monthIdx } = absToYM(abs);
+    return {
+      abs, year, monthIdx,
+      mon: MONTHS[monthIdx],
+      yy: String(year).slice(2),
+      label: `${MONTHS[monthIdx]} ${year}`,
+    };
+  });
+}
+
 // Open Bids → Service Description dropdown options. Mirrors the
 // beacon_v2.bid_service_enum values defined in 20260527120000_open_bids.sql.
 // Keep these two in sync — adding a new service requires both an ALTER TYPE
@@ -670,6 +709,126 @@ function adaptInvoice(r) {
   };
 }
 
+// Adapt a freshly-INSERTED anticipated_invoice row into the App's flat
+// invoice-state shape (= adaptInvoice + the load-time annotations). Used by
+// the rolling-window UI when a month is edited in a year that has no row yet
+// and we mint one on the fly. A brand-new year row has no attachments, so
+// primeFiles / partyFiles start empty; role is inherited from the merged row.
+export function adaptInvoiceRow(dbRow, { role = "Prime" } = {}) {
+  return {
+    ...adaptInvoice(dbRow),
+    role,
+    primeFiles: Array.from({ length: 12 }, () => []),
+    partyFiles: { msmm: [], prime: {}, sub: {} },
+    notesLog: [],
+  };
+}
+
+// A single threaded invoice note (beacon_v2.invoice_notes row). authorId may be
+// NULL (author removed, or a legacy/backfilled note) — the UI resolves the name
+// via userById() and falls back to "Unknown" when unresolvable.
+export function adaptNote(r) {
+  return {
+    id:        r.id,
+    invoiceId: r.invoice_id,
+    authorId:  r.author_user_id || null,
+    body:      r.body || "",
+    createdAt: r.created_at || null,
+    editedAt:  r.edited_at  || null,
+  };
+}
+
+// ── Threaded invoice notes — CRUD ──────────────────────────────────────────
+// All four resolve to adapted note objects (or throw). Authorship is stamped
+// server-side-safe from the cached current user; the RLS insert policy also
+// enforces author_user_id = the caller, so a forged author is rejected.
+
+// Post a new note. Returns the adapted, persisted row (with real id + server
+// created_at) so the caller can swap out any optimistic placeholder.
+export async function addInvoiceNote(invoiceId, body) {
+  const text = (body || "").trim();
+  if (!text) throw new Error("Note can't be empty");
+  const me = getCurrentBeaconUser();
+  const { data, error } = await supabase
+    .from("invoice_notes")
+    .insert({ invoice_id: invoiceId, author_user_id: me?.id || null, body: text })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return adaptNote(data);
+}
+
+// Edit a note in place. Stamps edited_at so the UI can show "· edited". RLS
+// restricts this to the author or an Admin.
+export async function editInvoiceNote(noteId, body) {
+  const text = (body || "").trim();
+  if (!text) throw new Error("Note can't be empty");
+  const { data, error } = await supabase
+    .from("invoice_notes")
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq("id", noteId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return adaptNote(data);
+}
+
+// Delete a note. RLS restricts this to the author or an Admin.
+export async function deleteInvoiceNote(noteId) {
+  const { error } = await supabase.from("invoice_notes").delete().eq("id", noteId);
+  if (error) throw error;
+}
+
+// Re-fetch one invoice's thread (newest-first). Called when the thread modal
+// opens so a user sees colleagues' posts made since the last full load, without
+// needing a Realtime subscription.
+export async function reloadInvoiceNotes(invoiceId) {
+  const { data, error } = await supabase
+    .from("invoice_notes")
+    .select("*")
+    .eq("invoice_id", invoiceId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(adaptNote);
+}
+
+// Fold the flat per-(project, year) invoice rows into one MERGED row per
+// project so the rolling-window table can show months that span calendar
+// years. Merge key = source_project_id (else project_number, else id) + type,
+// so ENG and PM stay distinct and a project's 2025 / 2026 / 2027 rows fold
+// together. Each merged row carries:
+//   • the PRIMARY year-row's scalar fields (name, amount, type, pmIds, role,
+//     remainingStart, notes, …) — preferring the current year, else the year
+//     closest to it — so the drawer, project-level edits, and alerts keep
+//     working by the merged row's `id`.
+//   • byYear: { [year]: <that year's flat row> } — the per-month data source.
+//   • years: sorted number[] of the years present.
+export function mergeInvoiceYears(rows) {
+  const groups = new Map();
+  for (const r of (rows || [])) {
+    const base = r.sourceId
+      ? `src:${r.sourceId}`
+      : (r.projectNumber ? `num:${String(r.projectNumber).trim().toLowerCase()}` : `id:${r.id}`);
+    const key = `${base}::${r.type || "ENG"}`;
+    let g = groups.get(key);
+    if (!g) { g = []; groups.set(key, g); }
+    g.push(r);
+  }
+  const merged = [];
+  for (const g of groups.values()) {
+    const byYear = {};
+    for (const r of g) byYear[r.year] = r;
+    const years = Object.keys(byYear).map(Number).sort((a, b) => a - b);
+    const primaryYear = years.includes(THIS_YEAR)
+      ? THIS_YEAR
+      : years.reduce((best, y) =>
+          Math.abs(y - THIS_YEAR) < Math.abs(best - THIS_YEAR) ? y : best, years[0]);
+    const primary = byYear[primaryYear] || g[0];
+    merged.push({ ...primary, byYear, years });
+  }
+  return merged;
+}
+
 function adaptEvent(r) {
   return {
     id: r.id,
@@ -853,6 +1012,54 @@ async function pget(builder, label) {
   return data || [];
 }
 
+// Empty per-year slot for the sub matrix — 12 months of amount/file/paid.
+function emptyMonthSlot() {
+  return {
+    amounts: Array(12).fill(null),
+    files: Array(12).fill(null).map(() => []),
+    subInvoiceIds: Array(12).fill(null),
+    paid: Array(12).fill(false),
+    paidAt: Array(12).fill(null),
+  };
+}
+// Aggregate sub_invoices rows (ALL years) into
+//   "projectId:kind:companyId" → { [year]: <month slot> }
+// so the rolling-window Invoice table can read any year's sub billing.
+function buildSubAggregate(subInvRows, subFilesBySubInvoice) {
+  const agg = new Map();
+  for (const r of (subInvRows || [])) {
+    const m = (r.month || 0) - 1;
+    if (m < 0 || m > 11) continue;
+    const kind = r.kind || "sub";
+    const tk = `${r.project_id}:${kind}:${r.company_id}`;
+    let byYear = agg.get(tk);
+    if (!byYear) { byYear = {}; agg.set(tk, byYear); }
+    const slot = byYear[r.year] || (byYear[r.year] = emptyMonthSlot());
+    slot.amounts[m] = r.amount != null ? Number(r.amount) : null;
+    slot.subInvoiceIds[m] = r.id;
+    slot.files[m] = (subFilesBySubInvoice.get(r.id) || []);
+    slot.paid[m] = !!r.paid;
+    slot.paidAt[m] = r.paid_at || null;
+  }
+  return agg;
+}
+// One sub-matrix entry's data: the flat THIS_YEAR arrays (kept for the
+// Receivables panel, which is still single-year) PLUS the full byYear map
+// (consumed by the rolling-window InvoiceTable). `touched` = any year present.
+function subEntryArrays(agg, projectId, kind, companyId) {
+  const byYear = agg.get(`${projectId}:${kind}:${companyId}`) || {};
+  const flat = byYear[THIS_YEAR] || emptyMonthSlot();
+  return {
+    amounts: flat.amounts,
+    files: flat.files,
+    subInvoiceIds: flat.subInvoiceIds,
+    paid: flat.paid,
+    paidAt: flat.paidAt,
+    byYear,
+    touched: Object.keys(byYear).length > 0,
+  };
+}
+
 export async function loadBeacon() {
   // v2 collapsed the 5 v1 pipeline tables (potential_projects, awaiting_verdict,
   // awarded_projects, closed_out_projects, soq) into a single beacon_v2.projects
@@ -863,7 +1070,7 @@ export async function loadBeacon() {
   const [
     users, clients, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
-    openBidRows,
+    openBidRows, invoiceNoteRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -876,9 +1083,12 @@ export async function loadBeacon() {
       "projects"
     ),
     pget(
+      // All years — the Invoice tab is a rolling multi-year window now, so we
+      // can't scope to THIS_YEAR. mergeInvoiceYears folds a project's per-year
+      // rows together for display; the volume is small (one row per project
+      // per year), so a full pull is fine.
       supabase.from("anticipated_invoice")
         .select("*, pms:anticipated_invoice_pms(user_id)")
-        .eq("year", THIS_YEAR)
         .order("project_name"),
       "anticipated_invoice"
     ),
@@ -903,7 +1113,8 @@ export async function loadBeacon() {
       }),
     // Sub invoices + their attached files; if the migration isn't applied
     // yet, gracefully degrade to empty arrays so the rest of the app boots.
-    supabase.from("sub_invoices").select("*").eq("year", THIS_YEAR)
+    // All years — sub billing also feeds the rolling multi-year window.
+    supabase.from("sub_invoices").select("*")
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] sub_invoices fetch skipped:", error.message); return []; }
         return data || [];
@@ -940,6 +1151,18 @@ export async function loadBeacon() {
       .order("due_at", { ascending: true, nullsFirst: false })
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] open_bids fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    // Threaded Invoice notes (20260608130000). Fetched as its own query —
+    // rather than embedded on the anticipated_invoice select — so that a DB
+    // without the migration applied degrades to an empty thread instead of
+    // failing the whole invoice load. Newest-first; annotated onto each
+    // invoice row as `notesLog` below.
+    supabase.from("invoice_notes")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] invoice_notes fetch skipped:", error.message); return []; }
         return data || [];
       }),
   ]);
@@ -1055,6 +1278,14 @@ export async function loadBeacon() {
     if (!role) role = p.prime_company_id ? "Sub" : "Prime";
     projectRoleById.set(p.id, role);
   }
+  // Group the threaded invoice notes by invoice_id, newest-first (the query
+  // already orders by created_at desc, so push order is preserved).
+  const notesByInvoice = new Map();
+  for (const n of (invoiceNoteRows || [])) {
+    const arr = notesByInvoice.get(n.invoice_id) || [];
+    arr.push(adaptNote(n));
+    notesByInvoice.set(n.invoice_id, arr);
+  }
   const adaptedInvoices = reconciledInvoices.map(adaptInvoice).map(inv => ({
     ...inv,
     role: inv.sourceId ? (projectRoleById.get(inv.sourceId) || "Prime") : "Prime",
@@ -1062,6 +1293,10 @@ export async function loadBeacon() {
       primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
     ),
     partyFiles: partyFilesByInvoice.get(inv.id) || { msmm: [], prime: {}, sub: {} },
+    // Threaded notes for this (project, year) row, newest-first. mergeInvoiceYears
+    // spreads the primary year-row, so the merged row inherits this list — the
+    // same row whose id the Notes chip keys on.
+    notesLog: notesByInvoice.get(inv.id) || [],
   }));
 
   // Build the per-project sub matrix. For each project that has subs in
@@ -1071,42 +1306,18 @@ export async function loadBeacon() {
   // Key includes kind so the same company can theoretically appear once
   // per kind per month. Today we only ever look up by (project, company,
   // month, kind) but the matrix builder respects the kind discriminator.
-  const subInvoicesByProjectCompany = new Map(); // "projectId:kind:companyId:month" → sub_invoice row
-  const subInvoiceById = new Map();              // sub_invoice.id → row (for files lookup)
-  for (const r of (subInvRows || [])) {
-    const k = r.kind || "sub";
-    subInvoicesByProjectCompany.set(`${r.project_id}:${k}:${r.company_id}:${r.month}`, r);
-    subInvoiceById.set(r.id, r);
-  }
   const subFilesBySubInvoice = new Map();
   for (const f of (subInvFileRows || [])) {
     const arr = subFilesBySubInvoice.get(f.sub_invoice_id) || [];
     arr.push(f);
     subFilesBySubInvoice.set(f.sub_invoice_id, arr);
   }
-  // Helper — pulls per-month amounts/paid/files for a (project, kind, company)
-  // tuple from the sub_invoices map. Used by both the project_subs-driven
-  // path AND the synthetic prime-fallback path below.
-  const buildMonthlyArrays = (projectId, kind, companyId) => {
-    const amounts = Array(12).fill(null);
-    const files   = Array(12).fill(null).map(() => []);
-    const subInvoiceIds = Array(12).fill(null);
-    const paid    = Array(12).fill(false);
-    const paidAt  = Array(12).fill(null);
-    let touched = false;
-    for (let m = 1; m <= 12; m++) {
-      const row = subInvoicesByProjectCompany.get(`${projectId}:${kind}:${companyId}:${m}`);
-      if (row) {
-        touched = true;
-        amounts[m - 1] = row.amount != null ? Number(row.amount) : null;
-        subInvoiceIds[m - 1] = row.id;
-        files[m - 1] = subFilesBySubInvoice.get(row.id) || [];
-        paid[m - 1] = !!row.paid;
-        paidAt[m - 1] = row.paid_at || null;
-      }
-    }
-    return { amounts, files, subInvoiceIds, paid, paidAt, touched };
-  };
+  // Aggregate ALL years of sub billing → "projectId:kind:companyId" → byYear.
+  // subEntryArrays then yields each entry's flat THIS_YEAR arrays (Receivables)
+  // + the byYear map (rolling-window InvoiceTable).
+  const subAgg = buildSubAggregate(subInvRows, subFilesBySubInvoice);
+  const buildMonthlyArrays = (projectId, kind, companyId) =>
+    subEntryArrays(subAgg, projectId, kind, companyId);
 
   const subInvoicesMatrix = new Map();   // project_id → [{ companyId, companyName, contractAmount, discipline, amounts[12], files[12], subInvoiceIds[12] }]
   for (const p of projects) {
@@ -1135,6 +1346,7 @@ export async function loadBeacon() {
         subInvoiceIds: arrays.subInvoiceIds,
         paid: arrays.paid,
         paidAt: arrays.paidAt,
+        byYear: arrays.byYear,
       };
     });
 
@@ -1164,6 +1376,7 @@ export async function loadBeacon() {
           subInvoiceIds: arrays.subInvoiceIds,
           paid: arrays.paid,
           paidAt: arrays.paidAt,
+          byYear: arrays.byYear,
           synthetic: true,
         });
       }
@@ -1817,7 +2030,8 @@ export async function reloadInvoicePartyFiles() {
 // pieces so App.jsx can replace its slices in one call.
 export async function reloadInvoiceArtifacts(projects, companies) {
   const [subInvRows, subInvFileRows, primeInvFileRows] = await Promise.all([
-    supabase.from("sub_invoices").select("*").eq("year", THIS_YEAR)
+    // All years — the Invoice tab is a rolling multi-year window.
+    supabase.from("sub_invoices").select("*")
       .then(({ data, error }) => { if (error) return []; return data || []; }),
     supabase.from("sub_invoice_files").select("*")
       .then(({ data, error }) => { if (error) return []; return data || []; }),
@@ -1831,16 +2045,12 @@ export async function reloadInvoiceArtifacts(projects, companies) {
     const arr = primeFilesByKey.get(k) || [];
     arr.push(f); primeFilesByKey.set(k, arr);
   }
-  const subInvoicesByProjectCompany = new Map();
-  for (const r of subInvRows) {
-    const k = r.kind || "sub";
-    subInvoicesByProjectCompany.set(`${r.project_id}:${k}:${r.company_id}:${r.month}`, r);
-  }
   const subFilesBySubInvoice = new Map();
   for (const f of subInvFileRows) {
     const arr = subFilesBySubInvoice.get(f.sub_invoice_id) || [];
     arr.push(f); subFilesBySubInvoice.set(f.sub_invoice_id, arr);
   }
+  const subAgg = buildSubAggregate(subInvRows, subFilesBySubInvoice);
   const subInvoicesMatrix = new Map();
   for (const p of projects) {
     const subs = dedupeSubsByCompanyKind(
@@ -1848,24 +2058,10 @@ export async function reloadInvoiceArtifacts(projects, companies) {
     );
     if (subs.length === 0) continue;
     const entries = subs.map(s => {
-      const company = companies.find(c => c.id === s.cId || c.id === s.company_id);
-      const kind = s.kind || "sub";
-      const amounts = Array(12).fill(null);
-      const files = Array(12).fill(null).map(() => []);
-      const subInvoiceIds = Array(12).fill(null);
-      const paid    = Array(12).fill(false);
-      const paidAt  = Array(12).fill(null);
       const cId = s.cId || s.company_id;
-      for (let m = 1; m <= 12; m++) {
-        const row = subInvoicesByProjectCompany.get(`${p.id}:${kind}:${cId}:${m}`);
-        if (row) {
-          amounts[m-1] = row.amount != null ? Number(row.amount) : null;
-          subInvoiceIds[m-1] = row.id;
-          files[m-1] = subFilesBySubInvoice.get(row.id) || [];
-          paid[m-1] = !!row.paid;
-          paidAt[m-1] = row.paid_at || null;
-        }
-      }
+      const kind = s.kind || "sub";
+      const company = companies.find(c => c.id === cId);
+      const arrays = subEntryArrays(subAgg, p.id, kind, cId);
       return {
         kind,
         companyId: cId,
@@ -1876,7 +2072,12 @@ export async function reloadInvoiceArtifacts(projects, companies) {
         subAgreement: !!(s.subAgreement ?? s.sub_agreement),
         w9: !!s.w9,
         coi: !!s.coi,
-        amounts, files, subInvoiceIds, paid, paidAt,
+        amounts: arrays.amounts,
+        files: arrays.files,
+        subInvoiceIds: arrays.subInvoiceIds,
+        paid: arrays.paid,
+        paidAt: arrays.paidAt,
+        byYear: arrays.byYear,
       };
     });
     subInvoicesMatrix.set(p.id, entries);

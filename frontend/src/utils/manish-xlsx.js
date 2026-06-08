@@ -144,7 +144,9 @@ function byProjectNumber(a, b) {
 }
 
 function buildConsolidatedSheet(ws, data, colWidths) {
-  const { maxSubs, year } = data;
+  // monthTitles drives the section titles (e.g. "MARCH 2026") and the number of
+  // stacked sections — one per month in the rolling window (spans years).
+  const { maxSubs, monthTitles } = data;
   const rows = [...data.rows].sort(byProjectNumber);
   const lastAmt = lastAmountCol(maxSubs);
 
@@ -161,11 +163,11 @@ function buildConsolidatedSheet(ws, data, colWidths) {
   });
 
   let rowNum = 5; // leave a gap under the legend
-  for (let mi = 0; mi < 12; mi++) {
+  for (let mi = 0; mi < monthTitles.length; mi++) {
     // Month title — merged across B:E, bold, slightly larger.
     ws.mergeCells(rowNum, PROJNO_COL, rowNum, TOTAL_COL);
     const titleCell = ws.getRow(rowNum).getCell(PROJNO_COL);
-    titleCell.value = `${MONTH_FULL[mi]} ${year || ""}`.trim();
+    titleCell.value = monthTitles[mi];
     style(titleCell, { bold: true, size: 12 });
     rowNum++;
 
@@ -246,8 +248,9 @@ function buildConsolidatedSheet(ws, data, colWidths) {
 }
 
 // data = {
-//   year, maxSubs,
-//   rows: [{ projectNumber, name, subNames:[…maxSubs], months:[…12 of
+//   monthTitles: ["MARCH 2026", …],   // one section per rolling-window month
+//   maxSubs,
+//   rows: [{ projectNumber, name, subNames:[…maxSubs], months:[…monthTitles.length of
 //            { msmmAmount, invoiceNumber, primePaid, primeHasFile,
 //              subs:[…maxSubs of { amount, paid, hasFile }] }] }]
 // }
@@ -258,7 +261,7 @@ export async function buildManishWorkbookObject(data) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "MSMM Beacon";
   const colWidths = computeColWidths(data);
-  const ws = wb.addWorksheet(String(data.year || "Invoices"));
+  const ws = wb.addWorksheet("Invoices");
   buildConsolidatedSheet(ws, data, colWidths);
   return wb;
 }

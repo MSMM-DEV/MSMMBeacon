@@ -595,6 +595,92 @@ html, body { overflow-x: clip; }
   color: var(--text-muted);
   margin: 0 2px;
 }
+/* Invoice rolling-window navigator — a compact "month dial". Back / range /
+   Forward share one segmented pill; Today resets to the default window. Warm
+   ledger styling, sized to sit in the toolbar beside the count chip. */
+.invoice-window-nav {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+}
+/* The three segments fuse into one pill — shared edges, single outline. */
+.invoice-window-nav .iwn-arrow,
+.invoice-window-nav .iwn-range {
+  height: 30px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.invoice-window-nav .iwn-arrow {
+  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, transform .12s ease;
+}
+.invoice-window-nav .iwn-arrow.back { border-radius: 8px 0 0 8px; border-right: none; }
+.invoice-window-nav .iwn-arrow.fwd  { border-radius: 0 8px 8px 0; border-left: none; }
+.invoice-window-nav .iwn-arrow.back svg { transform: rotate(180deg); }
+.invoice-window-nav .iwn-arrow:hover { background: var(--accent-softer); color: var(--accent-ink); }
+.invoice-window-nav .iwn-arrow.back:hover { transform: translateX(-1.5px); }
+.invoice-window-nav .iwn-arrow.fwd:hover  { transform: translateX(1.5px); }
+.invoice-window-nav .iwn-arrow:active { background: var(--accent-soft); }
+.invoice-window-nav .iwn-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 0;
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  letter-spacing: .01em;
+}
+.invoice-window-nav .iwn-range svg { color: var(--accent); opacity: .9; }
+.invoice-window-nav .iwn-range-sub {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  letter-spacing: 0;
+}
+/* Today — separate reset affordance; the dot inks when there's somewhere to
+   return to (off-default) and mutes when you're already on the now-window. */
+.invoice-window-nav .iwn-today {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, opacity .15s ease;
+}
+.invoice-window-nav .iwn-today:not(:disabled):hover {
+  background: var(--accent-softer);
+  border-color: var(--accent);
+}
+.invoice-window-nav .iwn-today:disabled { opacity: .5; cursor: default; }
+.invoice-window-nav .iwn-today-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+.invoice-window-nav .iwn-today.is-current .iwn-today-dot {
+  background: var(--text-soft);
+  box-shadow: none;
+}
 @media (max-width: 720px) {
   .invoice-count-chip { display: none; }
 }
@@ -1155,7 +1241,7 @@ html, body { overflow-x: clip; }
     var(--surface);
   box-shadow: inset 4px 0 0 var(--prob-orange);
 }
-.invoice-table tr[data-prob="orange"] td:not(.sticky-1):not(.sticky-2):not(.month-actual):not(.month-proj):not(.total-cell) { background-color: var(--prob-orange-bg); }
+.invoice-table tr[data-prob="orange"] td:not(.sticky-1):not(.sticky-2):not(.month-actual):not(.month-proj):not(.total-cell):not(.inv-pin-act) { background-color: var(--prob-orange-bg); }
 
 /* ---- Org-type palette (Awaiting Verdict, matches the customer's xlsx)
     City uses the exact purple seen in the source (#C7A1E3). Other org
@@ -1976,6 +2062,43 @@ html, body { overflow-x: clip; }
 .invoice-table th.sticky-1, .invoice-table td.sticky-1 { left: 0; min-width: 110px; max-width: 110px; }
 .invoice-table th.sticky-2, .invoice-table td.sticky-2 { left: 110px; }
 
+/* Pinned right rail — YTD Actual + row actions stay frozen against the right
+   edge while the month window scrolls / navigates. Mirrors the sticky-left
+   treatment. The action column is fixed-width so the YTD column's right-offset
+   lands flush against it (box-sizing: border-box is global, so widths are exact). */
+.invoice-table { --inv-act-w: 54px; }
+.invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd,
+.invoice-table th.inv-pin-act, .invoice-table td.inv-pin-act {
+  position: sticky;
+  background: var(--bg-elev);
+  z-index: 2;
+}
+.invoice-table th.inv-pin-act, .invoice-table td.inv-pin-act {
+  right: 0;
+  width: var(--inv-act-w);
+  min-width: var(--inv-act-w);
+  max-width: var(--inv-act-w);
+  text-align: center;
+  border-right: none;
+}
+.invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd {
+  right: var(--inv-act-w);
+}
+/* The YTD cell is the rail's leading edge — cast a soft shadow leftward so the
+   months visibly slide *under* the frozen column (echoes the sticky-left seam). */
+.invoice-table td.inv-pin-ytd {
+  box-shadow: -11px 0 13px -11px color-mix(in srgb, var(--accent-ink) 30%, transparent);
+}
+/* Header pinned cells: keep the header hairline AND the rail shadow, and sit
+   above the body pinned cells at the top-right corner. */
+.invoice-table thead th.inv-pin-ytd {
+  box-shadow:
+    inset 0 -1px 0 var(--border-strong),
+    -11px 0 13px -11px color-mix(in srgb, var(--accent-ink) 30%, transparent);
+}
+.invoice-table thead th.inv-pin-ytd,
+.invoice-table thead th.inv-pin-act { z-index: 4; }
+
 /* Sortable headers — pointer cursor + a fixed-width caret slot so clicking
    doesn't shift the column width between sorted/unsorted states. The
    caret only inks when the column is the active sort. Light hover tint
@@ -2168,11 +2291,11 @@ html, body { overflow-x: clip; }
   background: var(--accent);
   box-shadow: 0 0 0 1.5px var(--bg-elev);
 }
-.invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2) { filter: brightness(0.98); }
+.invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2):not(.inv-pin-ytd):not(.inv-pin-act) { filter: brightness(0.98); }
 /* Tame the dark-mode hover lift — brightness(1.1) on the warm month-actual
    color produced the "aggressive orange wash" the user reported in the
    screenshot. 1.04 keeps the hover signal without blowing the saturation. */
-[data-theme="dark"] .invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2) { filter: brightness(1.04); }
+[data-theme="dark"] .invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2):not(.inv-pin-ytd):not(.inv-pin-act) { filter: brightness(1.04); }
 .invoice-legend {
   display: flex; gap: 16px; font-size: 12px; color: var(--text-muted);
   padding: 10px 14px;
@@ -6264,6 +6387,216 @@ html, body { overflow-x: clip; }
   color: var(--text-soft);
 }
 
+/* ── Threaded Notes log (InvoiceNotesThread) ──────────────────────────────
+   Activity feed off the Invoice row's "Notes" chip: composer on top, then
+   posts newest-first with author avatar + exact date/time + relative age. */
+
+/* count badge on the Notes chip */
+.inv-meta-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  margin-left: 1px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+[data-theme="dark"] .inv-meta-chip-count { color: #1b140c; }
+
+.notes-thread-modal { max-width: calc(100vw - 32px); }
+.notes-thread-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: min(72vh, 680px);
+}
+
+/* Composer */
+.notes-composer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.notes-composer > .avatar { flex-shrink: 0; margin-top: 2px; }
+.notes-composer-main { flex: 1; min-width: 0; }
+.notes-composer-input {
+  width: 100%;
+  min-height: 64px;
+  max-height: 200px;
+  resize: vertical;
+  line-height: 1.5;
+  padding: 9px 11px;
+  font-family: var(--font-body);
+}
+.notes-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 7px;
+}
+
+.notes-thread-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: #8A4C47;
+  background: var(--rose-soft);
+  border: 1px solid #E2B9B5;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+[data-theme="dark"] .notes-thread-error { color: var(--rose); border-color: #4A2E2B; }
+
+/* Thread list — vertical timeline rail through the avatars */
+.notes-thread-list {
+  position: relative;
+  flex: 1;
+  min-height: 60px;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 2px 4px 2px;
+}
+.notes-thread-list::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 6px;
+  bottom: 6px;
+  width: 1.5px;
+  background: linear-gradient(var(--border-strong), transparent);
+}
+
+.notes-thread-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 30px 0 26px;
+  color: var(--text-soft);
+  text-align: center;
+}
+.notes-thread-empty .icon { opacity: .55; margin-bottom: 2px; }
+.notes-thread-empty span { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.notes-thread-empty small { font-size: 11.5px; }
+
+/* One note entry */
+.note-entry {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 9px 2px 9px;
+}
+.note-entry + .note-entry { border-top: 1px solid var(--border); }
+.note-entry > .avatar {
+  flex-shrink: 0;
+  margin-top: 1px;
+  z-index: 1;                 /* sit above the timeline rail */
+  box-shadow: 0 0 0 3px var(--surface);
+}
+.note-entry.pending { opacity: .6; }
+.note-entry-main { flex: 1; min-width: 0; }
+.note-entry-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.note-entry-author {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.note-entry-time {
+  font-size: 10.5px;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.note-entry-ago { color: var(--text-muted); opacity: .8; }
+.note-entry-edited {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 0 4px;
+  line-height: 1.5;
+}
+.note-entry-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.note-entry:hover .note-entry-actions,
+.note-entry:focus-within .note-entry-actions { opacity: 1; }
+.note-entry-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.note-entry-actions button:hover { background: var(--surface-2); color: var(--text); }
+.note-entry-actions button:last-child:hover { color: var(--rose); }
+.note-entry-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@media (hover: none) and (pointer: coarse) {
+  .note-entry-actions { opacity: 1; }   /* no hover on touch — always show */
+}
+
+/* Inline edit + delete-confirm */
+.note-entry-edit textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  line-height: 1.5;
+  padding: 8px 10px;
+  font-family: var(--font-body);
+}
+.note-entry-edit-foot,
+.note-entry-confirm-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 7px;
+}
+.note-entry-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.note-entry-confirm-btns { margin-top: 0; }
+
 /* InvoiceFilesModal · staged files list (multi-file upload).
    Shows below the dropzone with one row per File picked/dropped, plus a
    "Clear all" row at the bottom when more than one is staged. */
@@ -8467,7 +8800,7 @@ html, body { overflow-x: clip; }
    the user called out). The base rule composites at the new 32% alpha
    over --surface — re-assert here at heightened alpha specifically for
    invoice rows since the user explicitly wants to see them. */
-[data-theme="dark"] .invoice-table tr[data-prob="orange"] td:not(.sticky-1):not(.sticky-2):not(.month-actual):not(.month-proj):not(.total-cell):not(.invoice-expand-col) {
+[data-theme="dark"] .invoice-table tr[data-prob="orange"] td:not(.sticky-1):not(.sticky-2):not(.month-actual):not(.month-proj):not(.total-cell):not(.invoice-expand-col):not(.inv-pin-act) {
   background-color: rgba(248, 167, 102, 0.22);
 }
 [data-theme="dark"] .invoice-table tr[data-prob="orange"] td.sticky-1,

@@ -297,9 +297,11 @@ export const DetailDrawer = ({
       { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "amount",         label: "Total Contract Value",    type: "money" },
       { k: "msmmAmount",     label: "MSMM Portion",            type: "money" },
-      { k: "remainingStart", label: "Remaining to Bill (Jan 1)", type: "money" },
+      { k: "remainingStart", label: "Remaining Amount",          type: "money" },
       { k: "description",    label: "Description",             type: "textarea", placeholder: "Project scope / description…" },
-      { k: "notes",          label: "Notes",                   type: "textarea", placeholder: "Billing notes, reminders…" },
+      // Notes moved to the threaded, multi-author Notes log — opened from the
+      // "Notes" chip on the Invoice row (InvoiceNotesThread). No single-text
+      // editor here so the two stores can't diverge.
     ],
     events: [
       { k: "title",          label: "Title",                                           readOnlyIf: (r) => r.source === "outlook" },
