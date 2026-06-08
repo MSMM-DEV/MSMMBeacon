@@ -218,6 +218,27 @@ export const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oc
 export const TODAY_MONTH = new Date().getMonth();
 export const THIS_YEAR   = new Date().getFullYear();
 
+// Rolling invoice window: January of the current year through (current month +
+// 12), derived from `date` at call time so it auto-advances as the calendar
+// month rolls over — no code change needed when the month flips. Past months of
+// the current year are kept (so the Invoice tab's elapsed columns stay exactly
+// as they were); the forward edge always reaches 12 months past today.
+//   • June 2026  → Jan 2026 … Jun 2027 (18 columns)
+//   • Jan  2027  → Jan 2027 … Jan 2028 (13 columns; resets each January)
+// `monthIndex` is 0–11 — the storage index into jan_amount…dec_amount /
+// values[] / msmmValues[] etc. for that calendar month. Columns whose `year`
+// !== THIS_YEAR have no loaded data today and render blank/read-only.
+export function buildInvoiceWindow(date = new Date()) {
+  const startAbs = date.getFullYear() * 12;                        // Jan of current year
+  const endAbs   = date.getFullYear() * 12 + date.getMonth() + 12; // current month + 12
+  const out = [];
+  for (let a = startAbs; a <= endAbs; a++) {
+    const year = Math.floor(a / 12), monthIndex = a % 12;
+    out.push({ year, monthIndex, label: `${MONTHS[monthIndex]} ${year}` });
+  }
+  return out;
+}
+
 // The "actual through" month index (0–11) for the Invoice tab's Actual vs
 // Projection split. A month becomes Actual on the configurable cutover day,
 // which can land in the SAME month or the NEXT month:

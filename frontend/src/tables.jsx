@@ -11,6 +11,7 @@ import {
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
   MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL,
+  buildInvoiceWindow,
   linkedProjectsFor,
   BID_SERVICE_OPTIONS,
 } from "./data.js";
@@ -1938,6 +1939,13 @@ export const InvoiceTable = ({
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
   const pmOptions = USERS.map(u => ({ value: u.id, label: u.name }));
+  // Rolling month window for the table columns — Jan(THIS_YEAR) … current+12,
+  // derived from the clock at mount (re-derives on every reload so it
+  // auto-advances). Each entry: { year, monthIndex (0–11), label "MMM YYYY" }.
+  // Columns where year === THIS_YEAR map to the loaded values[]/amounts[]
+  // arrays at monthIndex (fully editable, exactly as before); next-year columns
+  // have no loaded data and render blank + read-only.
+  const invWindow = useMemo(() => buildInvoiceWindow(), []);
   // A project month counts as "Actual" when the date-driven cutover has reached
   // it OR a bill has been attached to that month on the project's total/prime
   // row — attaching a bill promotes that month from Projection to Actual for
@@ -1954,10 +1962,17 @@ export const InvoiceTable = ({
   //   • promoted by a bill (ahead of  → "month-actual" (+ " month-promoted"
   //     the cutover)                     when cue) — amber, billed
   //   • still a projection            → "month-proj"
-  const monthCellState = (row, i, cue = false) =>
-    i <= actualThru ? "month-actual"
-    : hasPrimeBill(row, i) ? ("month-actual" + (cue ? " month-promoted" : ""))
-    : "month-proj";
+  // `col` is a window entry { year, monthIndex, label }. Date-driven actual is
+  // year-aware (isActualInvoiceMonth handles past years / future years); the
+  // bill-ahead promotion only applies to the current year's loaded data.
+  const monthCellState = (row, col, cue = false) =>
+    isActualInvoiceMonth(col.year, col.monthIndex) ? "month-actual"
+    : (col.year === THIS_YEAR && hasPrimeBill(row, col.monthIndex))
+      ? ("month-actual" + (cue ? " month-promoted" : ""))
+      : "month-proj";
+  // True when this window column is the live calendar month (drives the
+  // "month-today" boundary marker).
+  const isTodayCol = (col) => col.year === THIS_YEAR && col.monthIndex === TODAY_MONTH;
   // The parent row IS the MSMM view of each project — every dollar value
   // shown there reflects MSMM's portion (auto-calculated as Total minus
   // every sub's portion, or the user-saved override when set). The expand
@@ -2364,7 +2379,7 @@ export const InvoiceTable = ({
         <div className="tool-sep"/>
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
           {actualThru >= 0 ? (
-            <>Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[actualThru]} as Actual</strong> · {MONTHS[actualThru+1] || "Jan"}–Dec as Projection</>
+            <>Showing <strong style={{ color: "var(--accent-ink)" }}>Jan–{MONTHS[actualThru]} as Actual</strong> · {MONTHS[actualThru+1] || "Jan"}–{invWindow[invWindow.length - 1].label} as Projection</>
           ) : (
             <>Showing <strong style={{ color: "var(--accent-ink)" }}>all months as Projection</strong></>
           )} · a month flips to Actual on the {ordinal(cutoverDay)}{cutoverNextMonth ? " of the following month" : ""}
@@ -2502,14 +2517,17 @@ export const InvoiceTable = ({
                       Sort removed — there's no parent-row value to sort by. */}
                   <th style={{ minWidth: 110 }}>Contract</th>
                   <th style={{ minWidth: 96 }}>Remaining<br/>Jan&nbsp;1</th>
-                  {MONTHS.map((m, i) => (
-                    <th key={i} className={i <= actualThru ? "month-actual" : "month-proj"}>
-                      {m} {THIS_YEAR}
-                      <div style={{ fontSize: 9, marginTop: 2, opacity: .7 }}>
-                        {i <= actualThru ? "actual" : "proj"}
-                      </div>
-                    </th>
-                  ))}
+                  {invWindow.map((col, ci) => {
+                    const actual = isActualInvoiceMonth(col.year, col.monthIndex);
+                    return (
+                      <th key={ci} className={actual ? "month-actual" : "month-proj"}>
+                        {col.label}
+                        <div style={{ fontSize: 9, marginTop: 2, opacity: .7 }}>
+                          {actual ? "actual" : "proj"}
+                        </div>
+                      </th>
+                    );
+                  })}
                   {SHOW_YTD_RF && <th className="total-cell" style={{ minWidth: 96 }}>YTD Actual</th>}
                   {SHOW_YTD_RF && <th className="total-cell" style={{ minWidth: 104 }}>Rollforward</th>}
                   <th style={{ minWidth: 60 }}></th>
@@ -2668,7 +2686,18 @@ export const InvoiceTable = ({
                         attachments live on the Project total row in the
                         expand block (= the project's prime billing PDFs,
                         not the MSMM-portion view). */}
-                    {r.values.map((_, i) => {
+                    {invWindow.map((col, ci) => {
+                      const i = col.monthIndex;
+                      // Next-year columns have no loaded data — render a blank,
+                      // read-only cell (no override editor / paid / clip mirror).
+                      if (col.year !== THIS_YEAR) {
+                        return (
+                          <td key={ci}
+                              className={monthCellState(r, col) + (isTodayCol(col) ? " month-today" : "") + " invoice-cell"}>
+                            <span style={{ opacity: .4 }}>—</span>
+                          </td>
+                        );
+                      }
                       const override = r.msmmValues?.[i];
                       const isOverride = override != null;
                       const auto       = msmmAtMonth(r, i);
@@ -2682,8 +2711,8 @@ export const InvoiceTable = ({
                       const totalPaid  = !!(r.primePaid && r.primePaid[i]);
                       const totalFiles = (r.primeFiles && r.primeFiles[i]) || [];
                       return (
-                      <td key={i}
-                          className={monthCellState(r, i) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
+                      <td key={ci}
+                          className={monthCellState(r, col) + (isTodayCol(col) ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
                           title={isOverride
                             ? `Override · auto would be ${fmtMoney(auto, false)}`
                             : "MSMM monthly · auto-calc. Click to override."}>
@@ -2747,7 +2776,7 @@ export const InvoiceTable = ({
                             : "No prime or subs tracked on this project yet."}
                         </span>
                       </td>
-                      <td colSpan={16}/>
+                      <td colSpan={invWindow.length + 4}/>
                     </tr>
                   )}
                   {isExpanded && subList.map((s) => {
@@ -2890,15 +2919,26 @@ export const InvoiceTable = ({
                           })}
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
-                      {s.amounts.map((amt, i) => {
+                      {invWindow.map((col, ci) => {
+                        const i = col.monthIndex;
+                        // Next-year columns: no loaded sub data → blank read-only.
+                        if (col.year !== THIS_YEAR) {
+                          return (
+                            <td key={ci}
+                                className={monthCellState(r, col) + (isTodayCol(col) ? " month-today" : "") + " invoice-cell"}>
+                              <span style={{ opacity: 0.4 }}>—</span>
+                            </td>
+                          );
+                        }
+                        const amt = s.amounts[i];
                         const filesForCell = s.files[i] || [];
                         const hasFiles = filesForCell.length > 0;
                         const isPaid   = !!(s.paid && s.paid[i]);
                         const hasAmount = amt != null && amt !== 0;
                         const showPaidToggle = hasAmount || isPaid;
                         return (
-                        <td key={i}
-                            className={monthCellState(r, i) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                        <td key={ci}
+                            className={monthCellState(r, col) + (isTodayCol(col) ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
                             onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, i, nv, entryKind)}
@@ -3005,7 +3045,7 @@ export const InvoiceTable = ({
                     <tr className="invoice-sub-add-row">
                       <td className="invoice-expand-col"/>
                       <td className="sticky-1"/>
-                      <td className="sticky-2" colSpan={20}>
+                      <td className="sticky-2" colSpan={invWindow.length + 8}>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           {!isPrimeRow && !hasPrimeEntry && (
                             <button
@@ -3064,7 +3104,18 @@ export const InvoiceTable = ({
                           onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
-                      {r.values.map((v, i) => {
+                      {invWindow.map((col, ci) => {
+                        const i = col.monthIndex;
+                        // Next-year columns: no loaded data → blank read-only.
+                        if (col.year !== THIS_YEAR) {
+                          return (
+                            <td key={ci}
+                                className={monthCellState(r, col, true) + (isTodayCol(col) ? " month-today" : "") + " invoice-cell"}>
+                              <span style={{ opacity: .4 }}>—</span>
+                            </td>
+                          );
+                        }
+                        const v = r.values[i];
                         const filesForCell = (r.primeFiles && r.primeFiles[i]) || [];
                         const hasFiles = filesForCell.length > 0;
                         const isPaid   = !!(r.primePaid && r.primePaid[i]);
@@ -3073,8 +3124,8 @@ export const InvoiceTable = ({
                         // Per-month invoice number for this project total cell.
                         const invNum = (r.invoiceNumbers && r.invoiceNumbers[i]) || null;
                         return (
-                        <td key={i}
-                            className={monthCellState(r, i, true) + (i === actualThru ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                        <td key={ci}
+                            className={monthCellState(r, col, true) + (isTodayCol(col) ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={v} type="number"
                             onChange={nv => updateInvoice(r.id, i, nv)}
@@ -3186,9 +3237,11 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.remainingStart || 0))}</td>
-                      {MONTHS.map((_, i) => (
-                        <td key={i} className={(i <= actualThru ? "month-actual" : "month-proj") + " total-cell"}>
-                          {fmtMoney(sumBy(searchedNonOrange, r => msmmAtMonth(r, i)))}
+                      {invWindow.map((col, ci) => (
+                        <td key={ci} className={(isActualInvoiceMonth(col.year, col.monthIndex) ? "month-actual" : "month-proj") + " total-cell"}>
+                          {col.year === THIS_YEAR
+                            ? fmtMoney(sumBy(searchedNonOrange, r => msmmAtMonth(r, col.monthIndex)))
+                            : <span style={{ opacity: .4 }}>—</span>}
                         </td>
                       ))}
                       {SHOW_YTD_RF && (
@@ -3215,9 +3268,11 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.remainingStart || 0))}</td>
-                      {MONTHS.map((_, i) => (
-                        <td key={i} className={(i <= actualThru ? "month-actual" : "month-proj") + " total-cell"}>
-                          {fmtMoney(sumBy(searchedRows, r => msmmAtMonth(r, i)))}
+                      {invWindow.map((col, ci) => (
+                        <td key={ci} className={(isActualInvoiceMonth(col.year, col.monthIndex) ? "month-actual" : "month-proj") + " total-cell"}>
+                          {col.year === THIS_YEAR
+                            ? fmtMoney(sumBy(searchedRows, r => msmmAtMonth(r, col.monthIndex)))
+                            : <span style={{ opacity: .4 }}>—</span>}
                         </td>
                       ))}
                       {SHOW_YTD_RF && (

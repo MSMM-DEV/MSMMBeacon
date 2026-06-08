@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { Icon } from "./icons.jsx";
-import { fmtMoney, MONTHS, TODAY_MONTH, THIS_YEAR } from "./data.js";
+import { fmtMoney, MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, buildInvoiceWindow } from "./data.js";
 
 // ============================================================================
 // InvoiceCharts — Engineering + Project Management cash-flow charts.
@@ -55,13 +55,19 @@ export const InvoiceCharts = ({ invoice, orangeSourceIds, monthlyBenchmark, actu
   const invoiceEng = invoice.filter(r => (r.type || "ENG") === "ENG");
   const invoicePm  = invoice.filter(r => r.type === "PM");
 
+  // Rolling window span label for the subheader (e.g. "Jan 2026 – Jun 2027").
+  const windowSpanLabel = useMemo(() => {
+    const w = buildInvoiceWindow();
+    return `${w[0].label} – ${w[w.length - 1].label}`;
+  }, []);
+
   return (
     <section className="quad-card inv-charts-card" data-accent="flow">
       <header className="quad-head">
         <div className="quad-eyebrow">Cash Flow</div>
         <h2 className="quad-title">Anticipated Invoice</h2>
         <div className="quad-sub-row">
-          <div className="quad-sub">{THIS_YEAR} · monthly actual vs. projection</div>
+          <div className="quad-sub">{windowSpanLabel} · monthly actual vs. projection</div>
         </div>
       </header>
       <div className="quad-body">
@@ -171,7 +177,14 @@ const niceChartMax = (peak) => {
 };
 
 const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange, actualThru = TODAY_MONTH }) => {
-  // Two parallel 12-month totals:
+  // Rolling month window — Jan(THIS_YEAR) … current+12, derived from the clock
+  // at mount. Each bucket is a window column { year, monthIndex, label }; the
+  // chart has one slot per column. Columns whose year !== THIS_YEAR have no
+  // loaded data and stay at 0 (blank bars on the projection side).
+  const win = useMemo(() => buildInvoiceWindow(), []);
+  const N = win.length;
+
+  // Two parallel per-window-column totals (length N, one per window slot):
   //   totalsBase — sum of invoices NOT sourced from an Orange potential row
   //                (formally awarded work — the "secured" baseline)
   //   totalsAll  — sum of ALL invoices (base + Orange pre-awarded)
@@ -179,19 +192,20 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
   //                by the Average toggle to render a single consolidated bar
   //                per month — exec read of "expected case").
   const { totalsBase, totalsAll, totalsAvg } = useMemo(() => {
-    const totalsBase = Array(12).fill(0);
-    const totalsAll  = Array(12).fill(0);
+    const totalsBase = Array(N).fill(0);
+    const totalsAll  = Array(N).fill(0);
     for (const r of invoice) {
       const isOrange = !!(r.sourceId && orangeSourceIds?.has(r.sourceId));
-      for (let i = 0; i < 12; i++) {
-        const v = Number(r.values?.[i] || 0);
-        totalsAll[i] += v;
-        if (!isOrange) totalsBase[i] += v;
-      }
+      win.forEach((col, ci) => {
+        if (col.year !== THIS_YEAR) return; // no loaded data for future years
+        const v = Number(r.values?.[col.monthIndex] || 0);
+        totalsAll[ci] += v;
+        if (!isOrange) totalsBase[ci] += v;
+      });
     }
     const totalsAvg = totalsAll.map((v, i) => (v + totalsBase[i]) / 2);
     return { totalsBase, totalsAll, totalsAvg };
-  }, [invoice, orangeSourceIds]);
+  }, [invoice, orangeSourceIds, win, N]);
 
   const svgRef = useRef(null);
   const [box, setBox] = useState({ w: 1600, h: 400 });
@@ -220,7 +234,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
 
-  const slot = plotW / 12;
+  const slot = plotW / N;
   const hasOrange = invoice.some(r => r.sourceId && orangeSourceIds?.has(r.sourceId));
   const isAvgView = view === "average" && hasOrange;
   const visibleBarValues = isAvgView
@@ -259,7 +273,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
       setHoverIdx(null);
       return;
     }
-    const idx = Math.max(0, Math.min(11, Math.floor((x - padL) / slot)));
+    const idx = Math.max(0, Math.min(N - 1, Math.floor((x - padL) / slot)));
     setHoverIdx(idx);
   };
 
@@ -269,7 +283,15 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
     return v >= Number(monthlyBenchmark) ? "above" : "below";
   };
 
-  const actualCount   = Math.max(0, actualThru + 1);   // # of months counted as Actual
+  // # of leading window columns counted as Actual. The actual run is
+  // contiguous at the front of the window (elapsed current-year months up to
+  // the cutover); everything after — including all next-year columns — is
+  // Projection. Year-aware via isActualInvoiceMonth.
+  let actualCount = 0;
+  for (const col of win) {
+    if (isActualInvoiceMonth(col.year, col.monthIndex)) actualCount++;
+    else break;
+  }
   const ytdActualAll  = totalsAll.slice(0, actualCount).reduce((a, b) => a + b, 0);
   const ytdActualBase = totalsBase.slice(0, actualCount).reduce((a, b) => a + b, 0);
   const projRemAll    = totalsAll.slice(actualCount).reduce((a, b) => a + b, 0);
@@ -383,14 +405,28 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           </g>
         ))}
 
-        {MONTHS.map((m, i) => (
-          <text key={i}
-                x={slotCx(i)} y={H - 14}
-                textAnchor="middle"
-                className={"chart-month" + (i === TODAY_MONTH ? " is-today" : "")}>
-            {m}
-          </text>
-        ))}
+        {win.map((col, i) => {
+          const isToday = col.year === THIS_YEAR && col.monthIndex === TODAY_MONTH;
+          // With up to ~24 slots, the short month abbrev keeps the axis
+          // readable; the year is shown once, under each January, so the
+          // window's year boundaries stay legible.
+          return (
+            <g key={i}>
+              <text x={slotCx(i)} y={H - 14}
+                    textAnchor="middle"
+                    className={"chart-month" + (isToday ? " is-today" : "")}>
+                {MONTHS[col.monthIndex]}
+              </text>
+              {col.monthIndex === 0 && (
+                <text x={slotCx(i)} y={H - 3}
+                      textAnchor="middle"
+                      className="chart-month chart-month-year">
+                  {col.year}
+                </text>
+              )}
+            </g>
+          );
+        })}
 
         {/* Actual/Projection divider — sits at the cutover boundary, which
             equals the real-month boundary when the cutover day is 1. */}
@@ -410,7 +446,7 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
         {totalsAll.map((vAll, i) => {
           const vBase = totalsBase[i];
           const vAvg  = totalsAvg[i];
-          const isProj = i > actualThru;
+          const isProj = !isActualInvoiceMonth(win[i].year, win[i].monthIndex);
           const verdictAll  = verdictFor(i);
           const verdictBase = !hasBenchmark
             ? "neutral"
@@ -560,11 +596,12 @@ const InvoiceChart = ({ invoice, orangeSourceIds, monthlyBenchmark, eyebrow, vie
           const vAvg  = totalsAvg[hoverIdx];
           const v = isAvgView ? vAvg : vAll;
           const verdict = verdictFor(hoverIdx);
-          const isProj = hoverIdx > actualThru;
+          const hoverCol = win[hoverIdx];
+          const isProj = !isActualInvoiceMonth(hoverCol.year, hoverCol.monthIndex);
           const x = slotCx(hoverIdx);
           const yTop = yFor(v);
           const lines = [];
-          lines.push({ y: 18, cls: "chart-tip-label", text: `${MONTHS[hoverIdx]} ${THIS_YEAR} · ${isProj ? "Projection" : "Actual"}` });
+          lines.push({ y: 18, cls: "chart-tip-label", text: `${hoverCol.label} · ${isProj ? "Projection" : "Actual"}` });
           lines.push({ y: 38, cls: `chart-tip-val verdict-${verdict}`, text: fmtMoney(v, false) + (isAvgView ? " avg" : "") });
           if (isAvgView) {
             lines.push({ y: 56, cls: "chart-tip-sub", text: `range · ${fmtMoney(vBase, false)} – ${fmtMoney(vAll, false)}` });

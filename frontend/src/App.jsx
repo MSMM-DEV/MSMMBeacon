@@ -25,7 +25,7 @@ import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
-  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth,
+  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth, buildInvoiceWindow,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
@@ -348,9 +348,15 @@ const EXPORT_COLUMNS = {
     { label: "PM",                wMm: 24, wrap: true,                 get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(r.amount) },
     { label: "Remaining Jan 1",   wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
-    ...MONTHS.map((m, i) => ({
-      label: m, wMm: 20, wrap: true, halign: "right",
-      get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
+    // Rolling month window — Jan(THIS_YEAR) … current+12, derived from the
+    // clock at module load (re-derives each page load so it auto-advances).
+    // Each col carries `monthMeta` ({year, monthIndex}) so invoiceCellStyle and
+    // the subs export can recover the calendar month without parsing the label.
+    // Next-year columns have no loaded data → blank.
+    ...buildInvoiceWindow().map((col) => ({
+      label: col.label, monthMeta: col, wMm: 20, wrap: true, halign: "right",
+      get: r => (col.year === THIS_YEAR && r.values[col.monthIndex])
+        ? fmtMoney(r.values[col.monthIndex]) : "",
     })),
     // YTD Actual = sum of all 12 monthly project totals (Jan–Dec, actual +
     // projected). Auto-recalcs whenever a month changes; honored by the
@@ -2930,13 +2936,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       ? (row, _colIndex, col) => {
           const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
           const label = col?.label;
-          const monthIdx = MONTHS.indexOf(label);
-          // A projected month with a bill attached is promoted to Actual (same
-          // rule as the on-screen cells), so the print matches the UI.
-          const billedAhead = monthIdx >= 0 && monthIdx > actualThru
-            && !!(row?.primeFiles && row.primeFiles[monthIdx] && row.primeFiles[monthIdx].length);
-          const isActualMonth = monthIdx >= 0 && (monthIdx <= actualThru || billedAhead);
-          const isProjMonth   = monthIdx >= 0 && !isActualMonth;
+          // Month cols carry `monthMeta` ({year, monthIndex}); recover the
+          // calendar month from it (labels are now "MMM YYYY", not "Jan").
+          const meta = col?.monthMeta || null;
+          const mi = meta ? meta.monthIndex : -1;
+          // A projected current-year month with a bill attached is promoted to
+          // Actual (same rule as the on-screen cells) so the print matches the UI.
+          const billedAhead = !!meta && meta.year === THIS_YEAR && !isActualInvoiceMonth(meta.year, mi)
+            && !!(row?.primeFiles && row.primeFiles[mi] && row.primeFiles[mi].length);
+          const isActualMonth = !!meta && (isActualInvoiceMonth(meta.year, mi) || billedAhead);
+          const isProjMonth   = !!meta && !isActualMonth;
           const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
           if (isActualMonth) return { fillColor: INVOICE_PALETTE.AMBER_ACTUAL, textColor: INVOICE_PALETTE.ACCENT_INK };
           if (isProjMonth)   return { fillColor: INVOICE_PALETTE.CREAM_PROJ,   textColor: INVOICE_PALETTE.PROJ_INK };
@@ -3030,14 +3039,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // own per-row monthly arrays in `values`.
     const baseDefs = EXPORT_COLUMNS.invoice || [];
     const defs = baseDefs.map((c) => {
-      const monthIdx = MONTHS.indexOf(c.label);
-      if (monthIdx >= 0) {
+      // Month cols carry `monthMeta` ({year, monthIndex}). Next-year columns
+      // have no loaded data → blank; current-year cols render MSMM/total monthly.
+      if (c.monthMeta) {
+        const { year, monthIndex } = c.monthMeta;
         return {
           ...c,
           get: (r) => {
+            if (year !== THIS_YEAR) return "";
             const v = r._kind === "project"
-              ? msmmAtMonth(r, monthIdx)
-              : (r.values?.[monthIdx] ?? 0);
+              ? msmmAtMonth(r, monthIndex)
+              : (r.values?.[monthIndex] ?? 0);
             return v ? fmtMoney(v) : "";
           },
         };
@@ -3212,9 +3224,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
     const cellStyle = (row, _colIndex, col) => {
       const label = col?.label;
-      const monthIdx = MONTHS.indexOf(label);
-      const isActualMonth = monthIdx >= 0 && monthIdx <= actualThru;
-      const isProjMonth   = monthIdx >= 0 && monthIdx >  actualThru;
+      // Month cols carry `monthMeta` ({year, monthIndex}); year-aware
+      // actual/projection (next-year cols are projection / blank).
+      const meta = col?.monthMeta || null;
+      const isActualMonth = !!meta && isActualInvoiceMonth(meta.year, meta.monthIndex);
+      const isProjMonth   = !!meta && !isActualMonth;
       const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
       const kind = row?._kind || "project";
 
