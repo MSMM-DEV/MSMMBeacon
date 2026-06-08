@@ -1271,6 +1271,154 @@ export async function createOneShotAlert({ subjectTable = "timesheet", subjectRo
 }
 
 // ----------------------------------------------------------------------
+// Licenses & Certifications.
+//
+// "Days until due" is derived, never stored: expiration_date − today (CT).
+// Color bands: ≤30 days incl. expired = red, 31–60 = amber, ≥61 = green,
+// no expiration = neutral. Reminder emails (milestone-based) are sent by the
+// license-reminders Edge Function, not here.
+// ----------------------------------------------------------------------
+
+// Days until expiry. null expiration → null (no due date).
+export function licenseDaysUntil(expirationISO, todayISO = todayInCT()) {
+  if (!expirationISO) return null;
+  return _epochDay(expirationISO) - _epochDay(todayISO);
+}
+
+// Urgency band for a days-until value. tone keys map to the license CSS palette.
+export function licenseBand(days) {
+  if (days == null) return { key: "none",     tone: "grey",  label: "No expiry" };
+  if (days < 0)     return { key: "expired",  tone: "red",   label: "Expired" };
+  if (days <= 30)   return { key: "critical", tone: "red",   label: "Due ≤ 30 days" };
+  if (days <= 60)   return { key: "soon",     tone: "amber", label: "Due 31–60 days" };
+  return              { key: "healthy",  tone: "green", label: "61+ days" };
+}
+
+export function adaptLicenseFile(r) {
+  return {
+    id:         r.id,
+    licenseId:  r.license_id,
+    path:       r.file_path,
+    name:       r.file_name,
+    uploadedAt: r.uploaded_at,
+  };
+}
+
+export function adaptLicense(r) {
+  return {
+    id:               r.id,
+    legacyId:         r.legacy_id ?? null,
+    entity:           r.entity || "",
+    state:            r.state || "",
+    type:             r.lic_type || "",
+    licenseNo:        r.license_no || "",
+    asceMNo:          r.asce_m_no || "",
+    firstIssueDate:   r.first_issue_date || null,
+    expirationDate:   r.expiration_date || null,
+    notifyEmails:     Array.isArray(r.notify_emails) ? r.notify_emails : [],
+    emailEnabled:     r.email_enabled !== false,
+    notes:            r.notes || "",
+    lastNotifiedBand: r.last_notified_band ?? null,
+    lastNotifiedAt:   r.last_notified_at || null,
+    files:            (r.files || []).map(adaptLicenseFile),
+    createdAt:        r.created_at,
+    updatedAt:        r.updated_at,
+  };
+}
+
+// camelCase patch key → DB column (the editable surface).
+const LICENSE_COLS = {
+  entity: "entity", state: "state", type: "lic_type",
+  licenseNo: "license_no", asceMNo: "asce_m_no",
+  firstIssueDate: "first_issue_date", expirationDate: "expiration_date",
+  notifyEmails: "notify_emails", emailEnabled: "email_enabled", notes: "notes",
+};
+
+function licensePatchToDb(patch) {
+  const db = {};
+  for (const [k, col] of Object.entries(LICENSE_COLS)) if (k in patch) db[col] = patch[k];
+  // Empty date strings must persist as NULL, not "".
+  if ("first_issue_date" in db && !db.first_issue_date) db.first_issue_date = null;
+  if ("expiration_date"  in db && !db.expiration_date)  db.expiration_date  = null;
+  // Trim blank free-text to NULL so filters/sorts stay clean.
+  for (const c of ["state", "lic_type", "license_no", "asce_m_no", "notes"]) {
+    if (c in db && typeof db[c] === "string" && db[c].trim() === "") db[c] = null;
+  }
+  if ("notify_emails" in db && !Array.isArray(db.notify_emails)) db.notify_emails = [];
+  return db;
+}
+
+// RLS-scoped read (every signed-in user sees all licenses). Degrades to [] if
+// the migration hasn't been applied yet.
+export async function loadLicenses() {
+  const { data, error } = await supabase
+    .from("licenses")
+    .select("*, files:license_files(*)")
+    .order("expiration_date", { ascending: true, nullsFirst: false });
+  if (error) { console.warn("[beacon_v2] licenses fetch skipped:", error.message); return []; }
+  return (data || []).map(adaptLicense);
+}
+
+export async function createLicense(patch) {
+  const db = licensePatchToDb(patch);
+  if (!db.entity || !String(db.entity).trim()) db.entity = "(unnamed)";
+  const { data, error } = await supabase
+    .from("licenses").insert(db).select("*, files:license_files(*)").single();
+  if (error) throw error;
+  return adaptLicense(data);
+}
+
+export async function updateLicense(id, patch) {
+  const db = licensePatchToDb(patch);
+  const { data, error } = await supabase
+    .from("licenses").update(db).eq("id", id).select("*, files:license_files(*)").single();
+  if (error) throw error;
+  return adaptLicense(data);
+}
+
+export async function deleteLicense(id) {
+  // Remove attached Storage binaries first so nothing is orphaned (the row
+  // cascade-deletes license_files, but not the bucket objects).
+  const { data: files } = await supabase.from("license_files").select("file_path").eq("license_id", id);
+  const paths = (files || []).map(f => f.file_path).filter(Boolean);
+  if (paths.length) await supabase.storage.from("license-files").remove(paths);
+  const { error } = await supabase.from("licenses").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---- license attachments ----
+export async function uploadLicenseFile(licenseId, file) {
+  const me = getCurrentBeaconUser();
+  const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
+  const path = `${licenseId}/${Date.now()}-${safe}`;
+  const { error: upErr } = await supabase.storage.from("license-files").upload(path, file, { upsert: false });
+  if (upErr) throw upErr;
+  const { data, error } = await supabase.from("license_files")
+    .insert({ license_id: licenseId, file_path: path, file_name: file.name, uploaded_by: me?.id || null })
+    .select("*").single();
+  if (error) throw error;
+  return adaptLicenseFile(data);
+}
+
+export async function deleteLicenseFile(fileRow) {
+  if (fileRow?.path) await supabase.storage.from("license-files").remove([fileRow.path]);
+  const { error } = await supabase.from("license_files").delete().eq("id", fileRow.id);
+  if (error) throw error;
+}
+
+export async function licenseFileUrl(path) {
+  const { data, error } = await supabase.storage.from("license-files").createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data?.signedUrl || null;
+}
+
+// Manual "send reminders now" — invokes the license-reminders Edge Function
+// with the caller's session (admin). No-op-safe before the function is deployed
+// (the caller surfaces the error).
+export const licenseRunReminders = () =>
+  supabase.functions.invoke("license-reminders", { body: {} });
+
+// ----------------------------------------------------------------------
 // Linked-projects resolver — used by both the Directory drawer (panels.jsx)
 // and the inline expand row in DirectoryTable (tables.jsx). Walks every
 // pipeline state slice, tags each match with the entity's role on that

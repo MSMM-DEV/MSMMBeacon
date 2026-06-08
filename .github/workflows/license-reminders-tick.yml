@@ -1,0 +1,42 @@
+name: license-reminders-tick
+
+# Once a day, POST to the Supabase Edge Function `license-reminders` so it can
+# email each enabled license's notification addresses when the license crosses
+# a reminder milestone (60 / 30 / 14 / 7 / 1 days out, or on the expiry day).
+# Each license emails at most once per band as it counts down (the function
+# tracks last_notified_band), so a daily tick never produces duplicate mail.
+#
+# Repo secrets required:
+#   LICENSE_REMINDERS_URL   https://<project-ref>.supabase.co/functions/v1/license-reminders
+#   LICENSE_REMINDERS_AUTH  the Supabase service-role key for this project
+#
+# Kill switch: set the function secret LICENSE_REMINDERS_ENABLED=false.
+
+on:
+  schedule:
+    - cron: '0 13 * * *'      # 13:00 UTC ≈ 8:00 AM Central (standard time)
+  workflow_dispatch:
+
+concurrency:
+  group: license-reminders-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST to license-reminders
+        env:
+          LICENSE_REMINDERS_URL:  ${{ secrets.LICENSE_REMINDERS_URL }}
+          LICENSE_REMINDERS_AUTH: ${{ secrets.LICENSE_REMINDERS_AUTH }}
+        run: |
+          if [ -z "$LICENSE_REMINDERS_URL" ] || [ -z "$LICENSE_REMINDERS_AUTH" ]; then
+            echo "Missing LICENSE_REMINDERS_URL or LICENSE_REMINDERS_AUTH repo secret." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$LICENSE_REMINDERS_URL" \
+            -H "Authorization: Bearer $LICENSE_REMINDERS_AUTH" \
+            -H "Content-Type: application/json" \
+            --max-time 240 \
+            -d '{}'

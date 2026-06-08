@@ -17,6 +17,7 @@ import { LoginPage } from "./login.jsx";
 import { AdminPanel } from "./admin.jsx";
 import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
 import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
+import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { exportManishWorkbook } from "./utils/manish-xlsx.js";
@@ -70,6 +71,7 @@ const TAB_META = [
   { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
   { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
   { key: "directory", label: "Directory",        stage: "stage-clients",   group: "side" },
+  { key: "licenses",  label: "Licenses",         stage: "stage-events",    group: "side" },
   { key: "timesheet", label: "Timesheet",        stage: "stage-events",    group: "side" },
   { key: "time-admin",label: "Time Admin",       stage: "stage-events",    group: "side", adminOnly: true },
   { key: "team-cal",  label: "Team Calendar",    stage: "stage-events",    group: "side" },
@@ -85,6 +87,7 @@ const PAGE_META = {
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
+  licenses:  { title: "Licenses & Certifications", desc: "Every company and individual license with its expiration. Color-coded by days until due; reminder emails go out at 60 / 30 / 14 / 7 / 1 days before expiry." },
   timesheet: { title: "Timesheet", desc: "Your daily punches, this week's hours, leave balances, and time-off requests. Punch in or out with the big button or tap your fob on the front-door reader." },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, leave requests + balances, NFC enrollment, and timekeeping settings." },
   "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },
@@ -4072,6 +4075,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             mergeResetKey={mergeResetKey}
             tab="directory"/>
         )}
+        {tab === "licenses" && <LicensesTab/>}
+
         {tab === "timesheet" && (
           <TimesheetTab focusDate={timesheetFocusDate}/>
         )}

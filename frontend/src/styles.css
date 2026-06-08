@@ -15119,3 +15119,192 @@ html, body { overflow-x: clip; }
 }
 [data-theme="dark"] .msmm-mirror.paid { background: color-mix(in srgb, var(--sage) 22%, transparent); }
 [data-theme="dark"] .msmm-mirror.clip { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* ===================================================================
+   Licenses & Certifications — status board, urgency cards with a
+   days-until-due gauge, and a slide-in edit drawer. Deliberately NOT a
+   table: urgency reads through color + the ring gauge.
+   =================================================================== */
+.licenses-page {
+  --lic-red:        var(--rose);
+  --lic-red-soft:   var(--rose-soft);
+  --lic-green:      var(--sage);
+  --lic-green-soft: var(--sage-soft);
+  --lic-amber:      #B9851A;
+  --lic-amber-soft: #F6EAC8;
+  --lic-grey:       var(--text-muted);
+  --lic-grey-soft:  color-mix(in srgb, var(--text-muted) 13%, transparent);
+  display: grid; gap: 16px; max-width: 1240px;
+}
+[data-theme="dark"] .licenses-page { --lic-amber: #E2B45A; --lic-amber-soft: #3A3013; }
+
+/* Tone → local color vars consumed by tiles / ring / spine / lane heads. */
+.tone-red   { --c: var(--lic-red);   --c-soft: var(--lic-red-soft);   }
+.tone-amber { --c: var(--lic-amber); --c-soft: var(--lic-amber-soft); }
+.tone-green { --c: var(--lic-green); --c-soft: var(--lic-green-soft); }
+.tone-grey  { --c: var(--lic-grey);  --c-soft: var(--lic-grey-soft);  }
+.lic-tile.tone-neutral { --c: var(--accent); --c-soft: var(--accent-softer); }
+
+/* Header */
+.lic-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.lic-head-title { display: inline-flex; align-items: center; gap: 9px; margin: 0; font-family: var(--font-display); font-size: 20px; }
+.lic-head-title .icon { color: var(--accent); }
+.lic-head-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-soft); max-width: 64ch; }
+.lic-head-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lic-remind-msg { font-size: 12px; color: var(--text-muted); }
+
+/* Summary tiles (filters) */
+.lic-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.lic-tile {
+  display: grid; gap: 2px; padding: 12px 14px; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  border-left: 4px solid var(--c); transition: transform .12s, box-shadow .12s, border-color .12s;
+}
+.lic-tile:hover { transform: translateY(-1px); box-shadow: 0 6px 16px -10px rgba(0,0,0,.35); }
+.lic-tile.is-active { border-color: var(--c); box-shadow: 0 0 0 1px var(--c) inset, 0 6px 16px -10px rgba(0,0,0,.35); }
+.lic-tile-count { font-family: var(--font-display); font-size: 24px; line-height: 1; color: var(--c); font-variant-numeric: tabular-nums; }
+.lic-tile.tone-neutral .lic-tile-count { color: var(--text); }
+.lic-tile-label { font-size: 11.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+
+/* Controls */
+.lic-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.lic-search {
+  flex: 1 1 280px; display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.lic-search .icon { color: var(--text-muted); flex: none; }
+.lic-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; outline: none; }
+.lic-search-clear { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; display: inline-flex; }
+.lic-select {
+  padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+}
+
+.lic-err { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--radius); background: var(--rose-soft); color: var(--rose); font-size: 13px; }
+.lic-empty { display: grid; place-items: center; gap: 10px; padding: 56px 16px; color: var(--text-muted); text-align: center; }
+.lic-empty .icon { opacity: .5; }
+
+/* Lanes */
+.lic-lane { display: grid; gap: 10px; }
+.lic-lane-head { display: flex; align-items: center; gap: 9px; }
+.lic-lane-head h3 { margin: 0; font-family: var(--font-display); font-size: 15px; }
+.lic-lane-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 3px var(--c-soft); }
+.lic-lane-count { font-size: 12px; font-weight: 700; color: var(--c); background: var(--c-soft); border-radius: 999px; padding: 1px 9px; }
+
+/* Card grid */
+.lic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+
+.lic-card {
+  position: relative; display: grid; grid-template-columns: auto 1fr; gap: 13px; align-items: start;
+  text-align: left; cursor: pointer; padding: 14px 16px 13px 20px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  transition: transform .12s, box-shadow .14s, border-color .14s;
+}
+.lic-card:hover { transform: translateY(-2px); box-shadow: 0 12px 26px -16px rgba(0,0,0,.45); border-color: color-mix(in srgb, var(--c, var(--border)) 45%, var(--border)); }
+.lic-card-spine { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 14px 0 0 14px; background: var(--c); }
+.lic-card[data-band="expired"] { background: color-mix(in srgb, var(--lic-red) 6%, var(--surface)); }
+.lic-card-body { min-width: 0; display: grid; gap: 6px; }
+.lic-card-entity { font-weight: 650; font-size: 14.5px; line-height: 1.25; color: var(--text); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.lic-card-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.lic-chip { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--accent-softer); color: var(--accent-ink); white-space: nowrap; }
+.lic-chip-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+.lic-card-exp { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-soft); }
+.lic-card-exp .icon { color: var(--text-muted); }
+.lic-muted { color: var(--text-muted); }
+.lic-card-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.lic-meta { display: inline-flex; align-items: center; gap: 3px; }
+.lic-card-foot { display: flex; align-items: center; gap: 8px; margin-top: 1px; }
+.lic-foot-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-muted); }
+.lic-foot-pill.is-on { background: var(--sage-soft); color: var(--sage); }
+.lic-foot-pill.is-off { opacity: .65; text-decoration: line-through; }
+.lic-foot-note { color: var(--text-muted); display: inline-flex; }
+
+/* Days-until-due ring */
+.lic-ring { position: relative; width: 60px; height: 60px; flex: none; }
+.lic-ring-track { stroke: color-mix(in srgb, var(--c) 16%, transparent); }
+.lic-ring-fill  { stroke: var(--c); transition: stroke-dashoffset .5s ease; }
+.lic-ring-none  { stroke: color-mix(in srgb, var(--lic-grey) 55%, transparent); }
+.lic-ring-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 0; }
+.lic-ring-num { font-family: var(--font-display); font-size: 19px; line-height: 1; color: var(--c); font-variant-numeric: tabular-nums; }
+.lic-ring.tone-grey .lic-ring-num { color: var(--text-muted); }
+.lic-ring-lbl { font-size: 7.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-top: 2px; }
+
+/* ---- Edit drawer ---- */
+.lic-drawer-backdrop {
+  position: fixed; inset: 0; z-index: 1000; display: flex; justify-content: flex-end;
+  background: color-mix(in srgb, #000 40%, transparent); backdrop-filter: blur(2px);
+  --lic-red: var(--rose); --lic-red-soft: var(--rose-soft);
+  --lic-green: var(--sage); --lic-green-soft: var(--sage-soft);
+  --lic-amber: #B9851A; --lic-amber-soft: #F6EAC8;
+  --lic-grey: var(--text-muted); --lic-grey-soft: color-mix(in srgb, var(--text-muted) 13%, transparent);
+}
+[data-theme="dark"] .lic-drawer-backdrop { --lic-amber: #E2B45A; --lic-amber-soft: #3A3013; }
+.lic-drawer {
+  width: min(470px, 100%); height: 100%; background: var(--surface); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; box-shadow: -16px 0 48px -16px rgba(0,0,0,.4);
+  animation: lic-slide-in .18s ease;
+}
+@keyframes lic-slide-in { from { transform: translateX(24px); opacity: .5; } to { transform: none; opacity: 1; } }
+.lic-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.lic-drawer-eyebrow { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+.lic-drawer-title { margin: 3px 0 0; font-family: var(--font-display); font-size: 18px; line-height: 1.2; }
+.lic-drawer-body { flex: 1; overflow-y: auto; padding: 16px 18px; display: grid; gap: 13px; }
+.lic-drawer-preview {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px;
+  background: var(--c-soft); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+}
+.lic-drawer-preview-text { display: grid; gap: 2px; }
+.lic-drawer-preview-text strong { font-size: 14px; color: var(--c); }
+.lic-drawer-preview-text span { font-size: 12.5px; color: var(--text-soft); }
+
+.lic-field { display: grid; gap: 5px; }
+.lic-field-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.lic-field-label em { color: var(--rose); font-style: normal; }
+.lic-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lic-toggle-row { display: flex; align-items: center; gap: 10px; }
+.lic-toggle { width: 40px; height: 22px; border-radius: 999px; border: 0; background: var(--border-strong, var(--border)); cursor: pointer; position: relative; transition: background .14s; flex: none; padding: 0; }
+.lic-toggle.on { background: var(--sage); }
+.lic-toggle-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .14s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.lic-toggle.on .lic-toggle-knob { transform: translateX(18px); }
+.lic-toggle-state { font-size: 12.5px; color: var(--text-soft); }
+
+/* Email chip editor */
+.lic-emailchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.lic-emailchips:focus-within { border-color: var(--accent); }
+.lic-emailchip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 4px 3px 9px; border-radius: 999px; background: var(--accent-softer); color: var(--accent-ink); }
+.lic-emailchip button { border: 0; background: transparent; color: inherit; cursor: pointer; display: inline-flex; opacity: .7; }
+.lic-emailchip button:hover { opacity: 1; }
+.lic-emailchip-input { flex: 1; min-width: 120px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; outline: none; padding: 3px; }
+
+/* Attachments */
+.lic-files { display: grid; gap: 6px; }
+.lic-file-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.lic-file-name { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; text-align: left; min-width: 0; }
+.lic-file-name:hover { color: var(--accent); }
+.lic-file-name .icon { color: var(--text-muted); flex: none; }
+.lic-file-del { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; display: inline-flex; }
+.lic-file-del:hover { color: var(--rose); }
+.lic-file-add { display: inline-flex; }
+
+/* Drawer footer */
+.lic-drawer-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); }
+.lic-drawer-foot-right { display: inline-flex; gap: 8px; margin-left: auto; }
+.lic-confirm-del { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-soft); }
+
+/* Destructive button helpers (the rest of the .btn-* family already exists) */
+.btn-danger { background: var(--rose); color: #fff; border-color: var(--rose); }
+.btn-danger:hover:not(:disabled) { background: #A54238; border-color: #A54238; }
+.btn-danger-ghost { color: var(--rose); }
+.btn-danger-ghost:hover:not(:disabled) { background: var(--rose-soft); color: var(--rose); }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .lic-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .lic-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lic-grid { grid-template-columns: 1fr; }
+  .lic-drawer { width: 100%; }
+  .lic-field-row { grid-template-columns: 1fr; }
+  .lic-head-actions { width: 100%; }
+}
