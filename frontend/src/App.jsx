@@ -356,7 +356,7 @@ const EXPORT_COLUMNS = {
     // YTD Actual = ALL the actuals for the project, summed across EVERY year
     // (not just the current one) — the rolling-window definition. Merged rows
     // carry a byYear map; fall back to the row's own months if absent.
-    { label: "YTD Actual",        wMm: 24, wrap: true, halign: "right",
+    { label: "Total Billed",      wMm: 24, wrap: true, halign: "right",
       get: r => {
         const sumYr = (yr) => (yr?.values || []).reduce((a,b) => a+(b||0), 0);
         const total = r.byYear
@@ -3002,7 +3002,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             && !!(row?.primeFiles && row.primeFiles[monthIdx] && row.primeFiles[monthIdx].length);
           const isActualMonth = monthIdx >= 0 && (monthIdx <= actualThru || billedAhead);
           const isProjMonth   = monthIdx >= 0 && !isActualMonth;
-          const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
+          const isTotalCol    = label === "Total Billed" || label === "Rollforward";
           if (isActualMonth) return { fillColor: INVOICE_PALETTE.AMBER_ACTUAL, textColor: INVOICE_PALETTE.ACCENT_INK };
           if (isProjMonth)   return { fillColor: INVOICE_PALETTE.CREAM_PROJ,   textColor: INVOICE_PALETTE.PROJ_INK };
           if (isTotalCol)    return { fillColor: INVOICE_PALETTE.TOTAL_BG,     fontStyle: "bold" };
@@ -3116,7 +3116,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           },
         };
       }
-      if (c.label === "YTD Actual") {
+      if (c.label === "Total Billed") {
         return {
           ...c,
           get: (r) => {
@@ -3280,7 +3280,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const monthIdx = MONTHS.indexOf(label);
       const isActualMonth = monthIdx >= 0 && monthIdx <= actualThru;
       const isProjMonth   = monthIdx >= 0 && monthIdx >  actualThru;
-      const isTotalCol    = label === "YTD Actual" || label === "Rollforward";
+      const isTotalCol    = label === "Total Billed" || label === "Rollforward";
       const kind = row?._kind || "project";
 
       // Spacer between projects — paint white, suppress the cell border so

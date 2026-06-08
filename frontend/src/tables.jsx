@@ -2519,7 +2519,7 @@ export const InvoiceTable = ({
                       </div>
                     </th>
                   ))}
-                  <th className="total-cell inv-pin-ytd" style={{ minWidth: 96 }}>YTD Actual</th>
+                  <th className="total-cell inv-pin-ytd" style={{ minWidth: 96 }}>Total Billed</th>
                   <th className="inv-pin-act" aria-label="Actions"></th>
                 </tr>
               </thead>
