@@ -46,7 +46,9 @@ export function DayTimeline({
   onIntervalClick,
   height = 28,
   showHourGrid = true,
+  leaveBlocks = [],           // approved-leave overlay band(s) for this (user, date)
 }) {
+  const leave = (leaveBlocks || [])[0] || null;
   const span = TRACK_END_HOUR - TRACK_START_HOUR;
   const hours = Array.from({ length: span + 1 }, (_, i) => TRACK_START_HOUR + i);
 
@@ -89,6 +91,18 @@ export function DayTimeline({
       )}
 
       <div className="tk-day-track">
+        {/* Approved-leave band — spans the full track behind everything else. */}
+        {leave && (
+          <div
+            className={`tk-day-leave-band tone-${leave.leaveType === "sick" ? "blue" : "sage"}`}
+            title={`${leave.leaveType === "sick" ? "Sick leave" : "Vacation"} · ${leave.hoursPerDay}h (approved)`}
+          >
+            <span className="tk-day-leave-label">
+              {leave.leaveType === "sick" ? "Sick" : "Vacation"} · {leave.hoursPerDay}h
+            </span>
+          </div>
+        )}
+
         {/* Workday window — subtle band 8a–5p */}
         {(() => {
           const left  = trackFractionForMin(WORKDAY_START_MIN) * 100;
@@ -159,7 +173,7 @@ export function DayTimeline({
             </button>
           );
         })}
-        {segments.length === 0 && (
+        {segments.length === 0 && !leave && (
           <div className="tk-day-empty">No punches on this day</div>
         )}
       </div>

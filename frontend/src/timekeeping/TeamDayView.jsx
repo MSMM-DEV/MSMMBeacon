@@ -74,6 +74,7 @@ export function TeamDayView({ date, onDate, onUserDay }) {
               <DayTimeline
                 date={date}
                 intervals={r.intervals}
+                leaveBlocks={r.leaveBlocks}
                 onIntervalClick={() => onUserDay?.({ userId: r.user.id, date })}
                 height={22}
                 showHourGrid={false}

@@ -163,7 +163,7 @@ let _companies = [];
 // on every loadBeacon and on every successful updateMonthlyBenchmark write so
 // the in-memory copy never drifts from the DB. Defaults shape used when the
 // table is empty / migration not yet applied:
-let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null };
+let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null, tkHolidays: [], tkWorkdayHours: 8 };
 
 export const getUsers     = () => _users;
 export const getAppSettings = () => _appSettings;
@@ -952,7 +952,7 @@ const LEAVE_SETTING_DEFAULTS = {
   leaveSickAccrual: 1.538461538,       // hrs per pay period (= 40 hrs/yr over 26)
 };
 function adaptAppSettings(row) {
-  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null, ...LEAVE_SETTING_DEFAULTS };
+  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null, tkHolidays: [], tkWorkdayHours: 8, ...LEAVE_SETTING_DEFAULTS };
   const v = row.monthly_invoice_benchmark;
   const dayRaw = row.invoice_actual_cutover_day;
   const day = dayRaw == null ? 1 : Math.min(31, Math.max(1, Math.round(Number(dayRaw)) || 1));
@@ -961,6 +961,11 @@ function adaptAppSettings(row) {
     invoiceActualCutoverDay: day,
     invoiceActualCutoverNextMonth: !!row.invoice_actual_cutover_next_month,
     updatedAt: row.updated_at || null,
+    // Company holidays (jsonb array of 'YYYY-MM-DD') + nominal workday length —
+    // surfaced app-wide so the leave day-counter (weekdays minus holidays) and
+    // the request preview can read them without a separate settings fetch.
+    tkHolidays:     Array.isArray(row.tk_holidays) ? row.tk_holidays : [],
+    tkWorkdayHours: row.tk_workday_hours != null ? Number(row.tk_workday_hours) : 8,
     leavePayAnchor:       row.leave_pay_anchor || LEAVE_SETTING_DEFAULTS.leavePayAnchor,
     leavePayIntervalDays: row.leave_pay_interval_days ? Number(row.leave_pay_interval_days) : LEAVE_SETTING_DEFAULTS.leavePayIntervalDays,
     leaveVacationAccrual: row.leave_vacation_accrual != null ? Number(row.leave_vacation_accrual) : LEAVE_SETTING_DEFAULTS.leaveVacationAccrual,
@@ -1058,6 +1063,32 @@ export function computeLeaveAvailable(lb, settings = getAppSettings(), todayISO 
   };
 }
 
+// Count eligible LEAVE days in an inclusive [startISO, endISO] range: weekdays
+// (Mon–Fri) only, excluding company holidays. Weekends and holidays never count
+// against a leave balance. `holidays` is an array of 'YYYY-MM-DD' strings.
+export function leaveBusinessDays(startISO, endISO, holidays = getAppSettings().tkHolidays) {
+  if (!startISO || !endISO) return 0;
+  const hol = new Set(holidays || []);
+  let s = _epochDay(startISO), e = _epochDay(endISO);
+  if (e < s) return 0;
+  let n = 0;
+  for (let d = s; d <= e; d++) {
+    const iso = _isoFromEpochDay(d);
+    // getUTCDay on a midnight-UTC epoch day: 0 = Sun, 6 = Sat.
+    const dow = new Date(d * 86400000).getUTCDay();
+    if (dow === 0 || dow === 6) continue;     // weekend
+    if (hol.has(iso)) continue;               // company holiday
+    n++;
+  }
+  return n;
+}
+
+// Total leave hours for a range = eligible weekdays × hours-per-day.
+export function leaveHoursFor(startISO, endISO, hoursPerDay, holidays = getAppSettings().tkHolidays) {
+  const days = leaveBusinessDays(startISO, endISO, holidays);
+  return Math.round(days * (Number(hoursPerDay) || 0) * 100) / 100;
+}
+
 export function adaptLeaveBalance(r) {
   return {
     userId:          r.user_id,
@@ -1092,6 +1123,151 @@ export async function updateLeaveBalance(userId, patch) {
     .from("leave_balances").update(db).eq("user_id", userId).select("*").single();
   if (error) throw error;
   return adaptLeaveBalance(data);
+}
+
+// ----------------------------------------------------------------------
+// Leave REQUESTS — submit · approve · deduct · revert.
+//
+// A request is a date range + hours-per-day + type + reason. It lands
+// 'pending'; an admin approves (deducts balance via approve_leave_request RPC),
+// rejects (no balance change), or reverts an approved one (adds hours back).
+// Day counting (weekdays minus holidays) is snapshotted into business_days /
+// total_hours at submit so a later holiday edit can't re-price an open request.
+// ----------------------------------------------------------------------
+export function adaptLeaveRequest(r) {
+  return {
+    id:           r.id,
+    userId:       r.user_id,
+    leaveType:    r.leave_type,
+    dateStart:    r.date_start,
+    dateEnd:      r.date_end,
+    hoursPerDay:  Number(r.hours_per_day) || 0,
+    businessDays: Number(r.business_days) || 0,
+    totalHours:   Number(r.total_hours)   || 0,
+    reason:       r.reason || "",
+    status:       r.status,
+    requestedAt:  r.requested_at,
+    reviewedBy:   r.reviewed_by || null,
+    reviewedAt:   r.reviewed_at || null,
+    reviewNote:   r.review_note || "",
+  };
+}
+
+// RLS scopes the result: a regular user sees only their own requests.
+export async function loadMyLeaveRequests() {
+  const u = getCurrentBeaconUser();
+  if (!u) return [];
+  const { data, error } = await supabase
+    .from("leave_requests").select("*")
+    .eq("user_id", u.id)
+    .order("date_start", { ascending: false });
+  if (error) { console.warn("[beacon_v2] leave_requests (mine) skipped:", error.message); return []; }
+  return (data || []).map(adaptLeaveRequest);
+}
+
+// Admin gets everyone (RLS admin-select); a non-admin only their own rows.
+export async function loadAllLeaveRequests() {
+  const { data, error } = await supabase
+    .from("leave_requests").select("*")
+    .order("requested_at", { ascending: false });
+  if (error) { console.warn("[beacon_v2] leave_requests (all) skipped:", error.message); return []; }
+  return (data || []).map(adaptLeaveRequest);
+}
+
+// Submit a new leave request for the signed-in user. Computes the eligible-day
+// snapshot, then best-effort emails admins (never blocks the insert).
+export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursPerDay, reason }) {
+  const u = getCurrentBeaconUser();
+  if (!u) throw new Error("not signed in");
+  const holidays = getAppSettings().tkHolidays;
+  const businessDays = leaveBusinessDays(dateStart, dateEnd, holidays);
+  const hpd = Number(hoursPerDay) || 0;
+  const totalHours = Math.round(businessDays * hpd * 100) / 100;
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .insert({
+      user_id: u.id, leave_type: leaveType,
+      date_start: dateStart, date_end: dateEnd,
+      hours_per_day: hpd, business_days: businessDays, total_hours: totalHours,
+      reason: reason || null, status: "pending",
+    })
+    .select("*").single();
+  if (error) throw error;
+  const req = adaptLeaveRequest(data);
+  try {
+    const admins = getUsers().filter(x => x.role === "Admin").map(x => x.id);
+    const who = userById(u.id)?.name || "A teammate";
+    const kind = leaveType === "sick" ? "sick leave" : "vacation";
+    const msg = `Leave request — ${who}: ${totalHours}h ${kind}, ${dateStart} to ${dateEnd}.${reason ? ` Reason: ${reason}` : ""} Review in Time Admin → Leaves.`;
+    await createOneShotAlert({ subjectRowId: u.id, message: msg, recipientUserIds: admins });
+  } catch (e) { console.warn("[leave] admin notify skipped:", e.message); }
+  return req;
+}
+
+// A user cancels their own still-pending request (RLS pending→cancelled).
+export async function cancelLeaveRequest(id) {
+  const { data, error } = await supabase
+    .from("leave_requests").update({ status: "cancelled" })
+    .eq("id", id).select("*").single();
+  if (error) throw error;
+  return adaptLeaveRequest(data);
+}
+
+async function _decideLeaveRequest(rpc, args, outcomeWord) {
+  const { data, error } = await supabase.rpc(rpc, args);
+  if (error) throw error;
+  const req = adaptLeaveRequest(Array.isArray(data) ? data[0] : data);
+  if (outcomeWord) {
+    try {
+      const kind = req.leaveType === "sick" ? "sick leave" : "vacation";
+      const msg = `Your ${kind} request ${req.dateStart} to ${req.dateEnd} (${req.totalHours}h) was ${outcomeWord}.`;
+      await createOneShotAlert({ subjectRowId: req.userId, message: msg, recipientUserIds: [req.userId] });
+    } catch (e) { console.warn("[leave] requester notify skipped:", e.message); }
+  }
+  return req;
+}
+
+export function approveLeaveRequest(id, note = null) {
+  return _decideLeaveRequest("approve_leave_request", { p_id: id, p_note: note }, "approved");
+}
+export function rejectLeaveRequest(id, note = null) {
+  return _decideLeaveRequest("reject_leave_request", { p_id: id, p_note: note }, "rejected");
+}
+// Revert restores the balance; no requester email (admin housekeeping action).
+export function revertLeaveRequest(id) {
+  return _decideLeaveRequest("revert_leave_request", { p_id: id }, null);
+}
+
+// One-shot alert (alerts + recipients + a pending fire) reusing the existing
+// alerts→send-alert→Resend pipeline. subject_table='timesheet' renders the
+// message verbatim, so no Edge Function change is needed. Best-effort: callers
+// wrap this in try/catch so a notify failure never blocks the core action.
+export async function createOneShotAlert({ subjectTable = "timesheet", subjectRowId, message, recipientUserIds }) {
+  const ids = [...new Set((recipientUserIds || []).filter(Boolean))];
+  if (!ids.length || !subjectRowId) return null;
+  const me = getCurrentBeaconUser();
+  const firstFireAt = new Date().toISOString();
+  const { data: row, error: aErr } = await supabase
+    .from("alerts")
+    .insert({
+      subject_table: subjectTable,
+      subject_row_id: subjectRowId,
+      first_fire_at: firstFireAt,
+      recurrence: "one_time",
+      message: message || null,
+      timezone: "America/Chicago",
+      created_by: me?.id || null,
+      is_active: true,
+    })
+    .select("id").single();
+  if (aErr) throw aErr;
+  const { error: rErr } = await supabase.from("alert_recipients")
+    .insert(ids.map(uid => ({ alert_id: row.id, user_id: uid })));
+  if (rErr) throw rErr;
+  const { error: fErr } = await supabase.from("alert_fires")
+    .insert({ alert_id: row.id, scheduled_at: firstFireAt, status: "pending" });
+  if (fErr) throw fErr;
+  return row.id;
 }
 
 // ----------------------------------------------------------------------
@@ -2565,7 +2741,7 @@ export function adaptPunchResponseToState(response, prevToday = null) {
 export async function loadDayDetail(userId, date) {
   const start = new Date(`${date}T00:00:00`).toISOString();
   const end   = new Date(`${date}T23:59:59.999`).toISOString();
-  const [{ data: ivs }, { data: day }, { data: punches }] = await Promise.all([
+  const [{ data: ivs }, { data: day }, { data: punches }, leaveRes] = await Promise.all([
     supabase.from("time_intervals")
       .select("*").eq("user_id", userId)
       .gte("start_at", start).lte("start_at", end)
@@ -2576,13 +2752,28 @@ export async function loadDayDetail(userId, date) {
       .select("*").eq("user_id", userId)
       .gte("punched_at", start).lte("punched_at", end)
       .order("punched_at", { ascending: true }),
+    supabase.from("leave_requests")
+      .select("*").eq("user_id", userId).eq("status", "approved")
+      .lte("date_start", date).gte("date_end", date),
   ]);
   return {
     date,
     intervals: (ivs     || []).map(adaptInterval),
     punches:   (punches || []).map(adaptPunch),
     day:       day ? adaptTimesheetDay(day) : null,
+    leaveBlocks: _leaveEligibleOnDate(date)
+      ? (leaveRes?.data || []).map(adaptLeaveRequest)
+      : [],
   };
+}
+
+// Approved leave shows as a timeline band only on days it actually consumes a
+// balance: weekdays that aren't company holidays (matches leaveBusinessDays).
+function _leaveEligibleOnDate(date, holidays = getAppSettings().tkHolidays) {
+  if (!date) return false;
+  const dow = new Date(_epochDay(date) * 86400000).getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  return !(holidays || []).includes(date);
 }
 
 // 7 days of (timesheet_days, timesheet_week) for one user, week-aligned to Monday.
@@ -2655,11 +2846,15 @@ export async function loadTeamDay(date) {
     .from("timesheet_days")
     .select("*")
     .eq("date", date);
+  const { data: leaves } = await supabase
+    .from("leave_requests")
+    .select("*").eq("status", "approved")
+    .lte("date_start", date).gte("date_end", date);
 
   const byUser = new Map();
   for (const u of getUsers()) {
     byUser.set(u.id, {
-      user: u, intervals: [], day: null,
+      user: u, intervals: [], day: null, leaveBlocks: [],
     });
   }
   for (const iv of (ivs || [])) {
@@ -2669,6 +2864,12 @@ export async function loadTeamDay(date) {
   for (const d of (days || [])) {
     const slot = byUser.get(d.user_id);
     if (slot) slot.day = adaptTimesheetDay(d);
+  }
+  if (_leaveEligibleOnDate(date)) {
+    for (const lr of (leaves || [])) {
+      const slot = byUser.get(lr.user_id);
+      if (slot) slot.leaveBlocks.push(adaptLeaveRequest(lr));
+    }
   }
   return [...byUser.values()];
 }

@@ -20,6 +20,8 @@ import { UserDayModal } from "./UserDayModal";
 import { PunchPromptModal } from "./PunchPromptModal";
 import { IntervalReclassifyPopover } from "./IntervalReclassifyPopover";
 import { TeamPresenceView } from "./TeamPresenceView";
+import { LeaveRequestModal } from "./LeaveRequestModal";
+import { MyLeaveSection } from "../leave.jsx";
 
 export function TimesheetTab({ focusDate = null }) {
   const me        = getCurrentBeaconUser();
@@ -51,6 +53,8 @@ export function TimesheetTab({ focusDate = null }) {
   const [editDay,       setEditDay]       = useState(false);
   const [focusInterval, setFocusInterval] = useState(null);
   const [prompt,        setPrompt]        = useState(null);   // { kind, interval } | null
+  const [showLeave,     setShowLeave]     = useState(false);  // Request-leave modal
+  const [leaveReloadKey, setLeaveReloadKey] = useState(0);    // bump → MyLeaveSection refetch
 
   // Persist whenever state changes so reloads/cross-tab opens see truth.
   useEffect(() => { if (userId) saveCachedPunchState(userId, state); }, [userId, state]);
@@ -221,6 +225,9 @@ export function TimesheetTab({ focusDate = null }) {
         </section>
       )}
 
+      {/* Leave balances + my requests */}
+      <MyLeaveSection reloadKey={leaveReloadKey}/>
+
       {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
       <section className="tk-day-card tk-day-card-cal">
         <header className="tk-day-card-head">
@@ -232,10 +239,30 @@ export function TimesheetTab({ focusDate = null }) {
               {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
             </span>
           </div>
-          <button className="tk-correction-cta" onClick={() => setEditDay(true)}>
-            <Icon name="edit" size={13}/> Edit day
-          </button>
+          <div className="tk-day-card-head-actions">
+            <button className="tk-correction-cta" onClick={() => setShowLeave(true)}>
+              <Icon name="sun" size={13}/> Request leave
+            </button>
+            <button className="tk-correction-cta" onClick={() => setEditDay(true)}>
+              <Icon name="edit" size={13}/> Edit day
+            </button>
+          </div>
         </header>
+
+        {/* Approved-leave band(s) for this day */}
+        {(day.leaveBlocks || []).length > 0 && (
+          <div className="tk-leave-band-wrap">
+            {day.leaveBlocks.map((lb, i) => (
+              <div key={lb.id || i} className={`tk-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
+                <Icon name="sun" size={13}/>
+                <span className="tk-leave-band-label">
+                  {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · {lb.hoursPerDay}h
+                </span>
+                <span className="tk-leave-band-badge">approved</span>
+              </div>
+            ))}
+          </div>
+        )}
         {/*
           List-view across every viewport width. The absolute-positioned
           hour rail can't avoid overlap when several punches cluster within
@@ -288,6 +315,12 @@ export function TimesheetTab({ focusDate = null }) {
           interval={prompt.interval}
           onClose={() => setPrompt(null)}
           onSaved={() => refresh({ silent: true })}
+        />
+      )}
+      {showLeave && (
+        <LeaveRequestModal
+          onClose={() => setShowLeave(false)}
+          onSubmitted={() => setLeaveReloadKey(k => k + 1)}
         />
       )}
       </>)}

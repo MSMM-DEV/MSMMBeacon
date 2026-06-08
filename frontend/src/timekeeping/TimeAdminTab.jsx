@@ -21,11 +21,14 @@ import { PeopleFilter }      from "./PeopleFilter";
 import { NfcEnrollPanel }    from "./NfcEnrollPanel";
 import { TimeSettingsPanel } from "./TimeSettingsPanel";
 import { UserDayModal }      from "./UserDayModal";
+import { LeavesPanel }       from "./LeavesPanel";
 
 // Approval was retired (everyone edits their own time directly), so there's no
 // Approvals view anymore. Admins can still open & edit anyone's day from Team.
+// Leaves carries the leave-request queue + team balances.
 const VIEWS = [
   { key: "team",      label: "Team",            icon: "users" },
+  { key: "leaves",    label: "Leaves",          icon: "calendar" },
   { key: "nfc",       label: "NFC enrollment",  icon: "link" },
   { key: "settings",  label: "Settings",        icon: "settings" },
 ];
@@ -169,6 +172,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
             onOpenUserDay={openUserDay}
           />
         )}
+        {view === "leaves"    && <LeavesPanel/>}
         {view === "nfc"       && <NfcEnrollPanel/>}
         {view === "settings"  && <TimeSettingsPanel/>}
       </div>
