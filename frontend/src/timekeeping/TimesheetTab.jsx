@@ -19,12 +19,24 @@ import { WeekSummary } from "./WeekSummary";
 import { UserDayModal } from "./UserDayModal";
 import { PunchPromptModal } from "./PunchPromptModal";
 import { IntervalReclassifyPopover } from "./IntervalReclassifyPopover";
+import { TeamPresenceView } from "./TeamPresenceView";
 
 export function TimesheetTab({ focusDate = null }) {
   const me        = getCurrentBeaconUser();
   const userId    = me?.id;
   const [date,    setDate]    = useState(focusDate || todayInCT());
   const weekStart = weekStartCT(date);
+
+  // "me" (personal punch + day editor) vs "team" (read-only presence board for
+  // everyone). Persisted so the choice survives reloads.
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem("beacon.tkTimesheetView") === "team" ? "team" : "me"; }
+    catch { return "me"; }
+  });
+  const changeView = (v) => {
+    setView(v);
+    try { localStorage.setItem("beacon.tkTimesheetView", v); } catch { /* ignore */ }
+  };
 
   // Punch state — hydrate from localStorage so reload shows the correct
   // IN/OUT toggle instantly. Background fetch reconciles within ~200 ms.
@@ -127,6 +139,20 @@ export function TimesheetTab({ focusDate = null }) {
 
   return (
     <div className="tk-timesheet-page">
+
+      {/* My timesheet vs. read-only Team presence */}
+      <div className="tk-ts-views" role="tablist" aria-label="Timesheet view">
+        <button type="button" role="tab" aria-selected={view === "me"}
+          className={view === "me" ? "active" : ""} onClick={() => changeView("me")}>
+          <Icon name="user" size={12}/> My timesheet
+        </button>
+        <button type="button" role="tab" aria-selected={view === "team"}
+          className={view === "team" ? "active" : ""} onClick={() => changeView("team")}>
+          <Icon name="users" size={12}/> Team
+        </button>
+      </div>
+
+      {view === "team" ? <TeamPresenceView/> : (<>
 
       {/* Day picker */}
       <div className="tk-day-bar">
@@ -264,6 +290,7 @@ export function TimesheetTab({ focusDate = null }) {
           onSaved={() => refresh({ silent: true })}
         />
       )}
+      </>)}
     </div>
   );
 }

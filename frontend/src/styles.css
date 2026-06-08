@@ -9136,6 +9136,178 @@ html, body { overflow-x: clip; }
 .tk-section-head h3 { margin: 0; font-size: 15px; }
 .tk-section-sub { font-size: 12px; color: var(--text-muted); }
 
+/* ── Timesheet view toggle (My timesheet | Team) ── */
+.tk-ts-views {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.tk-ts-views button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.tk-ts-views button:hover { color: var(--text); }
+.tk-ts-views button.active {
+  background: var(--surface);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+
+/* ── Team presence board (read-only) ── */
+.tk-presence { display: grid; gap: 12px; }
+.tk-presence-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px;
+}
+.tk-presence-title {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-display);
+  font-size: 18px; margin: 0;
+}
+.tk-presence-live {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-body);
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: #6E8F62;
+}
+.tk-presence-sub { margin: 2px 0 0; font-size: 12px; color: var(--text-soft); }
+.tk-presence-daybar { display: inline-flex; align-items: center; gap: 6px; }
+.tk-presence-stats {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+  font-size: 12px; color: var(--text-muted);
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.tk-presence-stat strong { color: var(--text); font-family: var(--font-display); font-size: 14px; }
+.tk-presence-stat.is-in strong  { color: #5E7C52; }
+.tk-presence-stat.is-out strong { color: var(--rose); }
+
+.tk-presence-rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.tk-presence-row {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.tk-presence-row::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--border-strong);
+}
+.tk-presence-row.tone-green::before { background: #6E8F62; }
+.tk-presence-row.tone-blue::before  { background: #7E97B5; }
+.tk-presence-row.tone-sage::before  { background: var(--sage); }
+.tk-presence-row.tone-rose::before  { background: var(--rose); }
+.tk-presence-row.tone-muted::before,
+.tk-presence-row.tone-ghost::before { background: var(--border-strong); }
+.tk-presence-row.tone-ghost { opacity: .72; }
+.tk-presence-row:hover { border-color: var(--border-strong); box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+
+.tk-presence-main {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1.5fr) minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  appearance: none; background: transparent; border: 0;
+  padding: 11px 14px 11px 16px;
+  cursor: pointer;
+  text-align: left;
+}
+.tk-presence-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--border-strong); flex-shrink: 0;
+}
+.tk-presence-dot.in {
+  background: #6E8F62;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #6E8F62 22%, transparent);
+}
+.tk-presence-dot.out  { background: transparent; border: 2px solid var(--rose); width: 11px; height: 11px; }
+.tk-presence-dot.done { background: var(--text-soft); }
+.tk-presence-dot.none { background: transparent; border: 1.5px dashed var(--border-strong); }
+
+.tk-presence-who { min-width: 0; display: grid; gap: 3px; }
+.tk-presence-name { font-weight: 600; font-size: 13.5px; color: var(--text); }
+.tk-presence-status { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.tk-presence-pill {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: 700; letter-spacing: .01em;
+  padding: 1px 8px; border-radius: 9px; line-height: 1.5;
+  border: 1px solid transparent;
+}
+.tk-presence-pill.tone-green { background: color-mix(in srgb, #6E8F62 16%, transparent); color: #41562F; border-color: color-mix(in srgb, #6E8F62 30%, transparent); }
+.tk-presence-pill.tone-blue  { background: var(--blue-soft); color: #334B66; }
+.tk-presence-pill.tone-sage  { background: var(--sage-soft); color: #4C5840; }
+.tk-presence-pill.tone-rose  { background: var(--rose-soft); color: #8A4C47; }
+.tk-presence-pill.tone-muted { background: var(--surface-2); color: var(--text-muted); }
+.tk-presence-pill.tone-ghost { background: transparent; color: var(--text-soft); border: 1px dashed var(--border-strong); }
+[data-theme="dark"] .tk-presence-pill.tone-green { color: #B7CBA6; }
+[data-theme="dark"] .tk-presence-pill.tone-blue  { color: #B7C7DA; }
+[data-theme="dark"] .tk-presence-pill.tone-sage  { color: #BFcdb0; }
+.tk-presence-since { font-size: 11px; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.tk-presence-note {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text-muted);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-presence-note .icon { opacity: .6; flex-shrink: 0; }
+.tk-presence-timeline { min-width: 0; }
+.tk-presence-total { font-family: var(--font-display); font-size: 13px; color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.tk-presence-caret { color: var(--text-soft); display: inline-flex; }
+
+/* expanded per-interval detail */
+.tk-presence-detail {
+  border-top: 1px dashed var(--border);
+  padding: 10px 16px 12px 40px;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+}
+.tk-presence-detail-empty { font-size: 12px; color: var(--text-soft); }
+.tk-presence-ivs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tk-presence-iv {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  font-size: 12px; color: var(--text-muted);
+}
+.tk-presence-iv-time { font-variant-numeric: tabular-nums; color: var(--text); min-width: 116px; }
+.tk-presence-iv-tag {
+  font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 6px; line-height: 1.7;
+}
+.tk-presence-iv-tag.tone-green { background: color-mix(in srgb, #6E8F62 16%, transparent); color: #41562F; }
+.tk-presence-iv-tag.tone-blue  { background: var(--blue-soft); color: #334B66; }
+.tk-presence-iv-tag.tone-sage  { background: var(--sage-soft); color: #4C5840; }
+.tk-presence-iv-tag.tone-rose  { background: var(--rose-soft); color: #8A4C47; }
+.tk-presence-iv-tag.tone-muted { background: var(--surface-2); color: var(--text-muted); }
+.tk-presence-iv-cal { display: inline-flex; align-items: center; gap: 3px; color: var(--text-soft); }
+.tk-presence-iv-note { color: var(--text-soft); font-style: italic; }
+.tk-presence-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 36px 0; color: var(--text-soft);
+}
+
+@media (max-width: 760px) {
+  .tk-presence-main {
+    grid-template-columns: auto auto 1fr auto;
+    row-gap: 8px;
+  }
+  .tk-presence-timeline { grid-column: 1 / -1; order: 5; }
+  .tk-presence-total { font-size: 12px; }
+}
+
 /* Team day view */
 .tk-team-day { display: grid; gap: 12px; }
 .tk-team-day-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }

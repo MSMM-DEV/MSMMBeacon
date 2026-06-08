@@ -2294,6 +2294,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         type: _invoiceType || "ENG",
         remainingStart: rest.msmmRemaining || 0,
         values: Array(12).fill(0),
+        year: rest.year,                        // keep shape consistent w/ other paths
       };
       setInvoice(rs => [invRow, ...rs]);
       setFlashId(invRow.id);
@@ -2950,11 +2951,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     //   tab's defined columns + filtered rows if the snapshot isn't ready.
     const snap = getCurrentTableSnapshot();
     let cols, rows;
-    if (snap && snap.tab === tab && snap.visibleColumns && snap.processedRows) {
-      cols = snap.visibleColumns
-        .map(uc => defsByLabel.get(uc.label))
-        .filter(Boolean);
+    if (snap && snap.tab === tab && snap.processedRows) {
       rows = snap.processedRows;
+      // TableView tabs publish visibleColumns (honoring reorder + hidden
+      // cols); the Invoice tab renders its own table with fixed columns and
+      // publishes none, so fall back to the full column defs there.
+      cols = snap.visibleColumns
+        ? snap.visibleColumns.map(uc => defsByLabel.get(uc.label)).filter(Boolean)
+        : defs;
     } else {
       cols = defs;
       rows = currentRows;

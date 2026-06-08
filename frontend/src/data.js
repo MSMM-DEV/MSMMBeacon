@@ -792,39 +792,92 @@ export async function reloadInvoiceNotes(invoiceId) {
   return (data || []).map(adaptNote);
 }
 
-// Fold the flat per-(project, year) invoice rows into one MERGED row per
+// Count of months that carry a billed amount on a flat invoice row — used to
+// pick the "richer" row when two rows collide on the same (project, year).
+function invoiceMonthsFilled(r) {
+  return (r?.values || []).reduce((n, v) => n + (v ? 1 : 0), 0);
+}
+
+// Fold the flat per-(project, year) invoice rows into ONE merged row per
 // project so the rolling-window table can show months that span calendar
-// years. Merge key = source_project_id (else project_number, else id) + type,
-// so ENG and PM stay distinct and a project's 2025 / 2026 / 2027 rows fold
-// together. Each merged row carries:
+// years.
+//
+// ROBUSTNESS (fixes the "duplicate / stale historical entry that a refresh
+// cleared" bug): a project must collapse to a single row even when its year
+// rows carry INCONSISTENT identity — e.g. the 2026 row has a source_project_id
+// link but the 2025 row (older import, or a not-yet-persisted optimistic row)
+// does not. The old key `source_id ELSE project_number ELSE id` split such a
+// project into two displayed rows. Now:
+//   • Pass 1 — rows WITH source_project_id define the canonical per-project
+//     groups (keyed by source+type) and index their (type, project number).
+//   • Pass 2 — source-less rows ATTACH to the matching source group by
+//     (type, number) when one exists, so mixed-identity years reunite; else
+//     they group by number, else stand alone by id.
+// Also tolerant of: year-less optimistic rows (skipped from byYear, never a
+// phantom row), duplicate ids, and two rows sharing a (project, year) — the
+// row with more billed months wins so a stale duplicate can't shadow real
+// data. Pure + idempotent. Each merged row carries:
 //   • the PRIMARY year-row's scalar fields (name, amount, type, pmIds, role,
-//     remainingStart, notes, …) — preferring the current year, else the year
-//     closest to it — so the drawer, project-level edits, and alerts keep
-//     working by the merged row's `id`.
+//     remainingStart, notes, primeFiles, …) — preferring the current year,
+//     else the nearest — so the drawer, project edits, and alerts keep working
+//     by the merged row's `id`; `sourceId` is back-filled from any year row
+//     that has it so sub lookups / edit routing stay correct.
 //   • byYear: { [year]: <that year's flat row> } — the per-month data source.
 //   • years: sorted number[] of the years present.
 export function mergeInvoiceYears(rows) {
-  const groups = new Map();
-  for (const r of (rows || [])) {
-    const base = r.sourceId
-      ? `src:${r.sourceId}`
-      : (r.projectNumber ? `num:${String(r.projectNumber).trim().toLowerCase()}` : `id:${r.id}`);
-    const key = `${base}::${r.type || "ENG"}`;
+  const list = rows || [];
+  const typeOf  = (r) => r.type || "ENG";
+  const normNum = (n) =>
+    (n != null && String(n).trim() !== "") ? String(n).trim().toLowerCase() : "";
+
+  const groups  = new Map();   // group key -> rows[]
+  const numToKey = new Map();  // `${type}::${number}` -> source-group key
+  const ensure = (key) => {
     let g = groups.get(key);
     if (!g) { g = []; groups.set(key, g); }
-    g.push(r);
+    return g;
+  };
+
+  // Pass 1 — source-linked rows define the canonical groups.
+  for (const r of list) {
+    if (!r.sourceId) continue;
+    const key = `src:${r.sourceId}::${typeOf(r)}`;
+    ensure(key).push(r);
+    const nn = normNum(r.projectNumber);
+    const nk = `${typeOf(r)}::${nn}`;
+    if (nn && !numToKey.has(nk)) numToKey.set(nk, key);
   }
+  // Pass 2 — source-less rows join their project by number, else group alone.
+  for (const r of list) {
+    if (r.sourceId) continue;
+    const nn = normNum(r.projectNumber);
+    const key = (nn && numToKey.get(`${typeOf(r)}::${nn}`))
+      || (nn ? `num:${nn}::${typeOf(r)}` : `id:${r.id}::${typeOf(r)}`);
+    ensure(key).push(r);
+  }
+
   const merged = [];
   for (const g of groups.values()) {
     const byYear = {};
-    for (const r of g) byYear[r.year] = r;
+    for (const r of g) {
+      const y = Number(r.year);
+      if (!Number.isFinite(y)) continue;          // year-less optimistic row
+      const prev = byYear[y];
+      byYear[y] = (!prev || invoiceMonthsFilled(r) > invoiceMonthsFilled(prev)) ? r : prev;
+    }
     const years = Object.keys(byYear).map(Number).sort((a, b) => a - b);
+    const srcId = g.find(r => r.sourceId)?.sourceId || null;   // project's true id
+    if (!years.length) {
+      // Group had only year-less rows — surface one so nothing silently drops.
+      merged.push({ ...g[0], sourceId: g[0].sourceId || srcId, byYear: {}, years: [] });
+      continue;
+    }
     const primaryYear = years.includes(THIS_YEAR)
       ? THIS_YEAR
       : years.reduce((best, y) =>
           Math.abs(y - THIS_YEAR) < Math.abs(best - THIS_YEAR) ? y : best, years[0]);
-    const primary = byYear[primaryYear] || g[0];
-    merged.push({ ...primary, byYear, years });
+    const primary = byYear[primaryYear];
+    merged.push({ ...primary, sourceId: primary.sourceId || srcId, byYear, years });
   }
   return merged;
 }

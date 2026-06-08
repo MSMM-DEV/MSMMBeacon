@@ -2044,6 +2044,12 @@ export const InvoiceTable = ({
 
   // Set of invoice-row ids whose sub list is currently expanded inline.
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  // Ref to the currently-flashed (just-created) row's <tr>, so a freshly
+  // added invoice row can be scrolled into view. Unlike the other tabs (which
+  // prepend new rows to the top), InvoiceTable re-sorts by project name, so a
+  // new row lands alphabetically mid-list — without this it can be created
+  // below the fold and look like nothing happened.
+  const flashRowRef = useRef(null);
   // Open note/description editor: { id, field, label, accent, name, value } | null
   const [noteModal, setNoteModal] = useState(null);
   // Open threaded Notes log: { id, name, log } | null
@@ -2165,6 +2171,45 @@ export const InvoiceTable = ({
   const searchedNonOrange = sortGroup(nonOrangeRows.filter(passes));
   const searchedOrange    = sortGroup(orangeRows.filter(passes));
   const searchedRows      = [...searchedNonOrange, ...searchedOrange];
+
+  // Publish the current display order + filters so the "Print for Mark"
+  // exports (handleExport / handleExportInvoiceSubs in App.jsx) render the
+  // SAME rows the user sees: sorted by the active column sort, Orange rows
+  // pinned to the bottom, and filtered by type/search. InvoiceTable renders
+  // its own <table> (not TableView), so it must publish its own snapshot —
+  // without this the exports fell back to the unsorted base rows and ignored
+  // the column sort entirely. Columns aren't reorderable/hideable here, so we
+  // omit visibleColumns (the export uses the full column defs in that case).
+  useEffect(() => {
+    setCurrentTableSnapshot({
+      tab,
+      processedRows: searchedRows,
+      sort: sortBy,
+      search,
+      year: null,
+    });
+    // Deps are the full set of inputs to `searchedRows`; it's recomputed each
+    // render from these, so referencing it in the closure is always current.
+  }, [tab, rows, sortBy, search, typeFilter, orangeSourceIds]);
+
+  // When a row is freshly created (flashId set by handleCreated), make sure
+  // it's actually visible, then scroll it into view. Two ways a brand-new
+  // invoice row can look like a no-op even though it saved:
+  //   1. It's hidden by the active type filter (e.g. a new PM row while the
+  //      default ENG-only view is on) — widen the filter so it shows.
+  //   2. It renders but the name sort places it off-screen — scroll to it.
+  useEffect(() => {
+    if (!flashId) return;
+    const created = rows.find(r => r.id === flashId);
+    if (created && typeFilterActive && created.type && !typeFilter.has(created.type)) {
+      // Reveal the just-created row's type; the re-render re-runs this effect
+      // (typeFilter dep) and then scrolls now that the row is on-screen.
+      setTypeFilter(prev => new Set([...prev, created.type]));
+      return;
+    }
+    const node = flashRowRef.current;
+    if (node) node.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [flashId, rows, typeFilter, typeFilterActive]);
 
   // Expand-/collapse-all, scoped to the currently visible (filtered) rows so
   // it never toggles a project hidden by the type/year/search filter. Union
@@ -2545,7 +2590,8 @@ export const InvoiceTable = ({
                   const hasPrimeEntry = !!primeEntry;
                   return (
                   <React.Fragment key={r.id}>
-                  <tr className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
+                  <tr ref={flashId === r.id ? flashRowRef : null}
+                      className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
                       data-prob={isOrange(r) ? "orange" : undefined}
                       onDoubleClick={() => onOpenDrawer?.(r)}
                       style={{ cursor: "default" }}>
