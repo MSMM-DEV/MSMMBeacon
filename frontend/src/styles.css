@@ -15180,6 +15180,50 @@ html, body { overflow-x: clip; }
   color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
 }
 
+/* Expiring-soon timeline */
+.lic-timeline { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 15px 18px 12px; display: grid; gap: 8px; }
+.lic-timeline-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.lic-timeline-head h3 { margin: 0; display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-display); font-size: 15px; }
+.lic-timeline-head h3 .icon { color: var(--accent); }
+.lic-timeline-sub { font-size: 12px; color: var(--text-muted); }
+.lic-tl-overdue { border: 0; background: var(--rose-soft); color: var(--rose); font: inherit; font-size: 11px; font-weight: 700; padding: 1px 9px; border-radius: 999px; cursor: pointer; }
+.lic-tl-overdue:hover { background: color-mix(in srgb, var(--rose) 26%, transparent); }
+.lic-timeline-empty { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px; padding: 8px 0 4px; }
+.lic-timeline-empty .icon { color: var(--sage); }
+
+.lic-timeline-scroll { overflow-x: auto; overflow-y: visible; }
+.lic-timeline-track { position: relative; height: 138px; min-width: 580px; }
+.lic-tl-zone { position: absolute; top: 14px; bottom: 26px; border-radius: 8px; }
+.lic-tl-zone-red   { left: 0;   width: 50%; background: color-mix(in srgb, var(--rose) 9%, transparent); }
+.lic-tl-zone-amber { left: 50%; right: 0;   background: color-mix(in srgb, var(--lic-amber, #B9851A) 11%, transparent); }
+.lic-tl-axis { position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: color-mix(in srgb, var(--text-muted) 30%, transparent); transform: translateY(-50%); }
+.lic-tl-divider { position: absolute; left: 50%; top: 14px; bottom: 26px; width: 1px; background: color-mix(in srgb, var(--text-muted) 22%, transparent); }
+.lic-tl-axis-label { position: absolute; bottom: 0; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.lic-tl-axis-label.start { left: 0; }
+.lic-tl-axis-label.mid   { left: 50%; transform: translateX(-50%); }
+.lic-tl-axis-label.end   { right: 0; }
+
+.lic-tl-marker { position: absolute; top: 0; height: 100%; width: 150px; transform: translateX(-50%); border: 0; background: transparent; padding: 0; cursor: pointer; --c: var(--lic-grey); }
+.lic-tl-marker.tone-red   { --c: var(--rose); }
+.lic-tl-marker.tone-amber { --c: var(--lic-amber, #B9851A); }
+.lic-tl-marker.tone-green { --c: var(--sage); }
+.lic-tl-marker:hover { z-index: 6; }
+.lic-tl-dot { position: absolute; top: 50%; left: 50%; width: 13px; height: 13px; border-radius: 50%; background: var(--c); transform: translate(-50%, -50%); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent); z-index: 2; }
+.lic-tl-stem { position: absolute; left: 50%; width: 2px; background: color-mix(in srgb, var(--c) 45%, transparent); transform: translateX(-50%); }
+.lic-tl-marker.is-above .lic-tl-stem { bottom: 50%; height: 22px; }
+.lic-tl-marker.is-below .lic-tl-stem { top: 50%; height: 22px; }
+.lic-tl-flag {
+  position: absolute; left: 50%; transform: translateX(-50%); width: max-content; max-width: 150px;
+  display: grid; gap: 1px; padding: 5px 10px; border-radius: 10px; text-align: center;
+  background: var(--surface); border: 1px solid color-mix(in srgb, var(--c) 38%, var(--border));
+  box-shadow: 0 5px 14px -9px rgba(0,0,0,.45); transition: border-color .12s, transform .12s;
+}
+.lic-tl-marker.is-above .lic-tl-flag { bottom: calc(50% + 24px); }
+.lic-tl-marker.is-below .lic-tl-flag { top: calc(50% + 24px); }
+.lic-tl-marker:hover .lic-tl-flag { border-color: var(--c); transform: translateX(-50%) translateY(-1px); }
+.lic-tl-flag-name { font-size: 11.5px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 132px; }
+.lic-tl-flag-days { font-size: 10px; font-weight: 700; color: var(--c); white-space: nowrap; }
+
 .lic-err { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--radius); background: var(--rose-soft); color: var(--rose); font-size: 13px; }
 .lic-empty { display: grid; place-items: center; gap: 10px; padding: 56px 16px; color: var(--text-muted); text-align: center; }
 .lic-empty .icon { opacity: .5; }

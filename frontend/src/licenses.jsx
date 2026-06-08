@@ -138,6 +138,13 @@ export function LicensesTab() {
         </div>
       </header>
 
+      {/* Quick overview — what's expiring in the next 60 days */}
+      <ExpiringTimeline
+        rows={rows}
+        onOpen={(r) => setEditing(r)}
+        onShowOverdue={() => setLane("expired")}
+      />
+
       {/* Summary tiles (clickable filters) */}
       <div className="lic-summary" role="tablist" aria-label="Filter by status">
         <SummaryTile active={lane === "all"}     onClick={() => setLane("all")}     tone="neutral" label="All"        count={counts.all}/>
@@ -217,6 +224,74 @@ function SummaryTile({ active, onClick, tone, label, count }) {
       <span className="lic-tile-count">{count}</span>
       <span className="lic-tile-label">{label}</span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expiring-soon timeline — a today→+60d runway. Each license due in the window
+// is plotted by its exact days-until-due and alternates above/below the axis so
+// labels don't collide. Click a marker to open it; the overdue count links to
+// the Expired lane.
+// ---------------------------------------------------------------------------
+const TL_WINDOW = 60;
+function ExpiringTimeline({ rows, onOpen, onShowOverdue }) {
+  const soon = useMemo(
+    () => rows.filter(r => r.days != null && r.days >= 0 && r.days <= TL_WINDOW).sort((a, b) => a.days - b.days),
+    [rows],
+  );
+  const overdue = useMemo(() => rows.filter(r => r.days != null && r.days < 0).length, [rows]);
+
+  // Map days∈[0,60] → [6%,94%] so flags never clip the track edges.
+  const posOf = (days) => 6 + (days / TL_WINDOW) * 88;
+
+  return (
+    <section className="lic-timeline">
+      <header className="lic-timeline-head">
+        <h3><Icon name="clock" size={14}/> Expiring soon</h3>
+        <span className="lic-timeline-sub">
+          Next 60 days · {soon.length} license{soon.length === 1 ? "" : "s"}
+          {overdue > 0 && (
+            <> · <button type="button" className="lic-tl-overdue" onClick={onShowOverdue}>{overdue} overdue</button></>
+          )}
+        </span>
+      </header>
+
+      {soon.length === 0 ? (
+        <div className="lic-timeline-empty">
+          <Icon name="check" size={14}/> Nothing expiring in the next 60 days.
+        </div>
+      ) : (
+        <div className="lic-timeline-scroll">
+          <div className="lic-timeline-track">
+            <div className="lic-tl-zone lic-tl-zone-red"/>
+            <div className="lic-tl-zone lic-tl-zone-amber"/>
+            <div className="lic-tl-axis"/>
+            <div className="lic-tl-divider"/>
+            <span className="lic-tl-axis-label start">Today</span>
+            <span className="lic-tl-axis-label mid">30 days</span>
+            <span className="lic-tl-axis-label end">60 days</span>
+
+            {soon.map((r, i) => (
+              <button
+                key={r.id}
+                type="button"
+                className={`lic-tl-marker tone-${r.band.tone} ${i % 2 === 0 ? "is-above" : "is-below"}`}
+                style={{ left: `${posOf(r.days)}%` }}
+                onClick={() => onOpen(r)}
+                title={`${r.entity} — expires ${fmtDate(r.expirationDate)} (${r.days} day${r.days === 1 ? "" : "s"})`}
+              >
+                <span className="lic-tl-flag">
+                  <span className="lic-tl-flag-name">{r.entity}</span>
+                  <span className="lic-tl-flag-days">{r.days}d · {fmtDate(r.expirationDate)}</span>
+                </span>
+                <span className="lic-tl-stem"/>
+                <span className="lic-tl-dot"/>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
