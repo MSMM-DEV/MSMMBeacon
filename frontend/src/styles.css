@@ -15134,7 +15134,7 @@ html, body { overflow-x: clip; }
   --lic-amber-soft: #F6EAC8;
   --lic-grey:       var(--text-muted);
   --lic-grey-soft:  color-mix(in srgb, var(--text-muted) 13%, transparent);
-  display: grid; gap: 16px; max-width: 1240px;
+  display: grid; gap: 16px;   /* full-width: fills the page like the table tabs do */
 }
 [data-theme="dark"] .licenses-page { --lic-amber: #E2B45A; --lic-amber-soft: #3A3013; }
 
