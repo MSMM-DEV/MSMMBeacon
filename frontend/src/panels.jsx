@@ -3,7 +3,7 @@ import { Icon } from "./icons.jsx";
 import { StatusChip, StarRating } from "./primitives.jsx";
 import {
   getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions,
-  getUsers, companyById, userById, fmtMoney, fmtDate, MONTHS,
+  getUsers, companyById, userById, fmtMoney, fmtDate, fmtDateTime, MONTHS,
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
   uploadInvoicePartyFile, deleteInvoicePartyFile,
   ensureSubInvoiceRow, monthFolder, addProjectSub, addCompany,
@@ -406,7 +406,11 @@ export const DetailDrawer = ({
         );
       }
       if (f.type === "datetime") {
-        return <div className="field-readonly mono">{val || "—"}</div>;
+        // Outlook-synced datetimes are stored as UTC timestamptz (e.g.
+        // "2026-12-10T15:30:00+00:00"). Run through fmtDateTime so the
+        // drawer shows the local wall-clock ("Dec 10 · 9:30 AM") like the
+        // table/calendar do — NOT the raw UTC ISO string.
+        return <div className="field-readonly mono">{val ? fmtDateTime(val) : "—"}</div>;
       }
       if (f.type === "money") {
         return (
