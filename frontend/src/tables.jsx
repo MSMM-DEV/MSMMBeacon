@@ -1939,6 +1939,8 @@ export const InvoiceTable = ({
   onRemoveSub,       // ({projectId, companyId, kind, companyName}) => void  — × button on sub row
   onNew,             // () => void  — opens the New Invoice CreateModal
   onNotesChanged,    // (invoiceId, notesLog) => void  — sync the threaded Notes count back to App state
+  canEditMsmm = true,   // Admin? The MSMM/parent-row dollar cells are auto-calc; non-admins can't edit them.
+  onBlockedMsmmEdit,    // () => void  — fired when a non-admin clicks a locked MSMM cell (shows a toast)
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -2708,11 +2710,14 @@ export const InvoiceTable = ({
                       const isOverride = r.msmmAmount != null;
                       const shown = msmmContractShown(r);
                       return (
-                        <td className={isOverride ? "inv-override" : ""}
-                            title={isOverride
-                              ? `Override · auto would be ${fmtMoney(msmmContractAuto(r), false)} — clear to resume auto-calc`
-                              : "MSMM Portion · auto-calculated as Total Contract Value − Σ subs. Click to override."}>
+                        <td className={(isOverride ? "inv-override" : "") + (canEditMsmm ? "" : " msmm-locked")}
+                            title={!canEditMsmm
+                              ? "MSMM Portion is auto-calculated (Total − Σ subs). Only an admin can edit it — change the Total or a sub instead."
+                              : (isOverride
+                                ? `Override · auto would be ${fmtMoney(msmmContractAuto(r), false)} — clear to resume auto-calc`
+                                : "MSMM Portion · auto-calculated as Total Contract Value − Σ subs. Click to override.")}>
                           <EditableCell value={shown} type="number"
+                            disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
                             onChange={v => updateRow(r.id, {
                               msmmAmount: (v == null || v === "") ? null : Number(v)
                             })}
@@ -2720,8 +2725,10 @@ export const InvoiceTable = ({
                         </td>
                       );
                     })()}
-                    <td>
+                    <td className={canEditMsmm ? "" : "msmm-locked"}
+                        title={!canEditMsmm ? "MSMM value — only an admin can edit it. Change the Total or a sub instead." : undefined}>
                       <EditableCell value={r.remainingStart} type="number"
+                        disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
                         onChange={v => updateRow(r.id, { remainingStart: v })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
@@ -2743,11 +2750,14 @@ export const InvoiceTable = ({
                       const totalFiles = primeFilesAtDesc(r, d);
                       return (
                       <td key={d.abs}
-                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "")}
-                          title={isOverride
-                            ? `Override · auto would be ${fmtMoney(auto, false)}`
-                            : "MSMM monthly · auto-calc. Click to override."}>
+                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "") + (canEditMsmm ? "" : " msmm-locked")}
+                          title={!canEditMsmm
+                            ? "MSMM monthly value is auto-calculated (Total − Σ subs). Only an admin can edit it — change the Total or a sub instead."
+                            : (isOverride
+                              ? `Override · auto would be ${fmtMoney(auto, false)}`
+                              : "MSMM monthly · auto-calc. Click to override.")}>
                         <EditableCell value={shown} type="number"
+                          disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
                           onChange={nv => updateInvoiceMsmm?.(r, d.year, d.monthIdx,
                             (nv == null || nv === "") ? null : Number(nv))}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}

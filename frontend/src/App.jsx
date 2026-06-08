@@ -3947,6 +3947,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 onChangeRole={setInvoiceRoleHandler}
                 onNotesChanged={(id, log) =>
                   setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
+                canEditMsmm={isAdmin}
+                onBlockedMsmmEdit={() => showToast("MSMM values are auto-calculated — only an admin can edit them. Edit the Total (or a sub) instead.", "lock")}
                 onNew={() => setCreateTable("invoice")}/>
               <SubsReceivablesPanel
                 subInvoices={subInvoices}

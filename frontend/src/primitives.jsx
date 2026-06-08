@@ -184,6 +184,7 @@ export const EditableCell = ({
   placeholder,
   disabled = false,
   emptyLabel,
+  onBlocked,   // when disabled: called on click (e.g. a toast) instead of silently ignoring
 }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -259,7 +260,12 @@ export const EditableCell = ({
     return (
       <span
         onClick={(e) => {
-          if (disabled) return;
+          if (disabled) {
+            // A blocked (read-only) cell can still explain why — e.g. a toast —
+            // rather than silently doing nothing on click.
+            if (onBlocked) { e.stopPropagation(); onBlocked(); }
+            return;
+          }
           // Do NOT stopPropagation here — but dblclick isn't affected by
           // stopPropagation on click, and the row uses onDoubleClick.
           e.stopPropagation();
@@ -271,7 +277,7 @@ export const EditableCell = ({
           cancelPendingEdit();
         }}
         style={{
-          cursor: disabled ? "default" : "text",
+          cursor: disabled ? (onBlocked ? "not-allowed" : "default") : "text",
           display: "block",
           width: "100%",
         }}

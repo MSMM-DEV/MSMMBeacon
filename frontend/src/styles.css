@@ -14821,6 +14821,31 @@ html, body { overflow-x: clip; }
    MSMM-row mirror indicators (read-only echo of the Project total
    row's attach / paid state, shown on the parent/MSMM month cells)
    ============================================================ */
+/* MSMM (auto-calculated) parent-row dollar cells are read-only for non-admins.
+   EditableCell already sets cursor:not-allowed via onBlocked; this adds a quiet
+   "locked" hover outline that doesn't fight the month Actual/Projection fills,
+   plus a faint lock glyph in the corner so the lock reads at a glance. */
+.invoice-table td.msmm-locked:hover {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.invoice-table td.msmm-locked::before {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  width: 9px;
+  height: 9px;
+  background: currentColor;
+  color: var(--text-soft);
+  opacity: 0;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='4' y='10' width='16' height='10' rx='2'/><path d='M8 10V7a4 4 0 1 1 8 0v3' fill='none' stroke='black' stroke-width='2'/></svg>") center/contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='4' y='10' width='16' height='10' rx='2'/><path d='M8 10V7a4 4 0 1 1 8 0v3' fill='none' stroke='black' stroke-width='2'/></svg>") center/contain no-repeat;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.invoice-table td.msmm-locked { position: relative; }
+.invoice-table td.msmm-locked:hover::before { opacity: 0.5; }
+
 .msmm-mirror {
   position: absolute;
   top: 2px;

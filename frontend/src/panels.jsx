@@ -296,8 +296,8 @@ export const DetailDrawer = ({
       { k: "type",           label: "Type",                    type: "select", options: ["ENG","PM"] },
       { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "amount",         label: "Total Contract Value",    type: "money" },
-      { k: "msmmAmount",     label: "MSMM Portion",            type: "money" },
-      { k: "remainingStart", label: "Remaining Amount",          type: "money" },
+      { k: "msmmAmount",     label: "MSMM Portion",            type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
+      { k: "remainingStart", label: "Remaining Amount",          type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
       { k: "description",    label: "Description",             type: "textarea", placeholder: "Project scope / description…" },
       // Notes moved to the threaded, multi-author Notes log — opened from the
       // "Notes" chip on the Invoice row (InvoiceNotesThread). No single-text
@@ -407,6 +407,18 @@ export const DetailDrawer = ({
       }
       if (f.type === "datetime") {
         return <div className="field-readonly mono">{val || "—"}</div>;
+      }
+      if (f.type === "money") {
+        return (
+          <div className="field-readonly mono">
+            {val != null && val !== "" ? fmtMoney(val) : <span className="muted">—</span>}
+            {f.readOnlyHint && (
+              <span className="muted" style={{ fontSize: 11, marginLeft: 8, fontFamily: "var(--font-body)" }}>
+                {f.readOnlyHint}
+              </span>
+            )}
+          </div>
+        );
       }
       return <div className="field-readonly">{val || <span className="muted">—</span>}</div>;
     }
