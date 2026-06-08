@@ -116,15 +116,9 @@ export function LicensesTab() {
 
   return (
     <div className="licenses-page">
-      {/* Header */}
+      {/* Action bar — the page title + description come from the shared page
+          header (PAGE_META), so we only render the actions here. */}
       <header className="lic-head">
-        <div className="lic-head-titles">
-          <h2 className="lic-head-title"><Icon name="shield" size={18}/> Licenses &amp; Certifications</h2>
-          <p className="lic-head-sub">
-            {counts.all} tracked · {counts.expired + counts.critical} need attention.
-            Reminders email each license’s addresses at 60 / 30 / 14 / 7 / 1 days out.
-          </p>
-        </div>
         <div className="lic-head-actions">
           {remindMsg && <span className="lic-remind-msg">{remindMsg}</span>}
           {admin && (

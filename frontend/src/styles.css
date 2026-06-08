@@ -15146,7 +15146,7 @@ html, body { overflow-x: clip; }
 .lic-tile.tone-neutral { --c: var(--accent); --c-soft: var(--accent-softer); }
 
 /* Header */
-.lic-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.lic-head { display: flex; align-items: center; justify-content: flex-end; gap: 16px; flex-wrap: wrap; margin-top: -8px; }
 .lic-head-title { display: inline-flex; align-items: center; gap: 9px; margin: 0; font-family: var(--font-display); font-size: 20px; }
 .lic-head-title .icon { color: var(--accent); }
 .lic-head-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-soft); max-width: 64ch; }
