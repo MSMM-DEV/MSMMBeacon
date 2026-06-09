@@ -1991,6 +1991,42 @@ export async function runOutlookSyncNow() {
   return data; // { ok, processed, inserted, updated, cancelled, skipped, disabled? }
 }
 
+// Read a File as raw base64 (no `data:<mime>;base64,` prefix) for relaying to
+// the generate-description Edge Function. The function re-adds the data-URI
+// prefix when it builds the OpenAI `input_file` content part.
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result || "");
+      const comma = res.indexOf(",");
+      resolve(comma >= 0 ? res.slice(comma + 1) : res);
+    };
+    reader.onerror = () => reject(reader.error || new Error("file read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// AI project-description generation. Posts ephemeral sources (base64 files +
+// inline text) and options to the generate-description Edge Function, which
+// calls the OpenAI Responses API and returns the draft text. The caller's
+// session JWT is auto-attached by supabase.functions.invoke.
+export async function generateInvoiceDescription(payload) {
+  const { data, error } = await supabase.functions.invoke("generate-description", { body: payload });
+  if (error) {
+    // supabase-js puts the function's response body on error.context when non-2xx.
+    let detail = error.message || "generation failed";
+    try {
+      const ctx = error.context;
+      const text = ctx && typeof ctx.text === "function" ? await ctx.text() : null;
+      if (text) { try { detail = JSON.parse(text).error || text; } catch { detail = text; } }
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  if (!data?.ok) throw new Error(data?.error || "generation failed");
+  return data.text;
+}
+
 // Refetch the events list after an Outlook sync (or any external change) so
 // the UI reflects new/updated/cancelled rows without a full loadBeacon().
 export async function reloadEvents() {

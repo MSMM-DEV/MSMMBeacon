@@ -16,6 +16,7 @@ import {
 } from "./data.js";
 import { LinkedProjectsSection } from "./panels.jsx";
 import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
+import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { setCurrentTableSnapshot } from "./table-state.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
@@ -2668,7 +2669,8 @@ export const InvoiceTable = ({
                             onClick={(e) => {
                               e.stopPropagation();
                               setNoteModal({ id: r.id, field: "description", label: "Description",
-                                accent: "blue", name: r.name, value: r.description || "" });
+                                accent: "blue", name: r.name, projectNumber: r.projectNumber,
+                                value: r.description || "" });
                             }}>
                             <Icon name="alignLeft" size={10}/>
                             <span>Description</span>
@@ -3284,6 +3286,11 @@ export const InvoiceTable = ({
 // Closing via overlay / X / Save / ⌘↵ commits; Cancel / Esc discards.
 function InvoiceNoteModal({ meta, onClose, onSave }) {
   const [text, setText] = useState(meta.value || "");
+  // AI generator is launched from within the Description editor (description
+  // field only) and stacks on top; accepting a draft drops the text into this
+  // textarea for review before the user Saves through the normal path.
+  const [genOpen, setGenOpen] = useState(false);
+  const canGenerate = meta.field === "description";
   const taRef = useRef();
   const dirty = text !== (meta.value || "");
 
@@ -3297,6 +3304,7 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (genOpen) return; // the stacked generator owns the keyboard while open
       if (e.key === "Escape") { e.preventDefault(); cancel(); }
       else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
     };
@@ -3338,7 +3346,14 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
           </div>
         </div>
         <div className="modal-foot">
-          <div className="note-modal-foothint">Also shown in the row's detail drawer</div>
+          {canGenerate ? (
+            <button className="btn sm note-modal-genbtn" onClick={() => setGenOpen(true)}
+              title="Draft this description with AI from project documents & testimonials">
+              <Icon name="sparkles" size={13}/> Generate with AI
+            </button>
+          ) : (
+            <div className="note-modal-foothint">Also shown in the row's detail drawer</div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn sm" onClick={cancel}>Cancel</button>
             <button className="btn primary sm" onClick={commit} disabled={!dirty}>
@@ -3347,6 +3362,13 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
           </div>
         </div>
       </div>
+      {genOpen && (
+        <DescriptionGeneratorModal
+          meta={{ id: meta.id, name: meta.name, projectNumber: meta.projectNumber, current: text }}
+          acceptLabel="Use this draft"
+          onClose={() => setGenOpen(false)}
+          onAccept={(_id, draft) => { setText(draft); setGenOpen(false); }}/>
+      )}
     </>,
     document.body
   );

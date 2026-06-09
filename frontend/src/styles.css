@@ -6387,6 +6387,103 @@ html, body { overflow-x: clip; }
   color: var(--text-soft);
 }
 
+/* "Generate with AI" launcher inside the Description editor footer. */
+.note-modal-genbtn { color: var(--accent-ink); border-color: var(--accent-soft); }
+.note-modal-genbtn:hover { background: var(--accent-softer); border-color: var(--accent); }
+.note-modal-genbtn .icon { color: var(--accent); }
+
+/* ── AI Description Generator (DescriptionGeneratorModal) ─────────────────
+   Stacks above the Description editor. Reuses .modal / .overlay / .invoice-
+   dropzone / .invoice-staged-* ; only the layout + result chrome is new. */
+.overlay.gen-overlay { z-index: 90; }
+.modal.gen-modal     { z-index: 91; max-width: calc(100vw - 32px); }
+.gen-badge { background: var(--accent-softer); color: var(--accent); }
+.gen-body { max-height: min(68vh, 640px); overflow-y: auto; }
+
+.gen-section-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-soft);
+  margin: 2px 0 8px;
+}
+.gen-section-label .icon { opacity: .8; }
+
+.gen-field { margin-bottom: 12px; }
+.gen-subhead {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 5px;
+}
+.gen-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-soft); }
+.gen-empty { font-size: 11.5px; color: var(--text-soft); font-style: italic; padding: 2px 0 6px; }
+
+.gen-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) { .gen-two { grid-template-columns: 1fr; } }
+
+/* compact dropzone variant */
+.gen-dropzone { cursor: pointer; padding: 12px; min-height: 0; }
+.gen-staged { margin-top: 6px; }
+
+/* testimonial slot — segmented text/file toggle + body */
+.gen-tgroup { display: flex; flex-direction: column; }
+.gen-testimonial { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; margin-bottom: 8px; background: var(--surface); }
+.gen-seg { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.gen-seg-btn {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.gen-seg-btn.on { background: var(--accent-softer); border-color: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.gen-testimonial-remove {
+  margin-left: auto; display: inline-flex; border: 0; background: transparent;
+  color: var(--text-soft); cursor: pointer; padding: 2px; border-radius: 4px;
+}
+.gen-testimonial-remove:hover { background: var(--surface-2); color: var(--text); }
+.gen-textarea-sm { width: 100%; resize: vertical; min-height: 48px; font-size: 12.5px; }
+.gen-file-slot { display: flex; align-items: center; gap: 8px; }
+
+/* options grid */
+.gen-options { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px 12px; }
+@media (max-width: 640px) { .gen-options { grid-template-columns: 1fr 1fr; } }
+.gen-opt { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--text-muted); }
+.gen-opt > span em { font-style: normal; color: var(--text-soft); font-size: 10.5px; }
+.gen-opt-wide { grid-column: 1 / -1; }
+
+/* result / draft */
+.gen-result-block { border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 4px; animation: genReveal .28s ease; }
+@keyframes genReveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.gen-result { width: 100%; resize: vertical; min-height: 160px; font-size: 13px; line-height: 1.5; }
+
+.gen-skeleton { position: relative; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--surface); }
+.gen-shimmer-line {
+  display: block; height: 10px; border-radius: 5px; margin-bottom: 9px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--bg-elev) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%; animation: genShimmer 1.1s ease-in-out infinite;
+}
+.gen-shimmer-line.short { width: 55%; }
+.gen-skeleton-label { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--accent); margin-top: 4px; }
+.gen-skeleton-label .icon { animation: genPulse 1.2s ease-in-out infinite; }
+@keyframes genShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes genPulse { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+
+.gen-error {
+  display: flex; align-items: center; gap: 7px; margin-top: 10px;
+  font-size: 12px; color: var(--rose, #b4434e);
+  background: color-mix(in srgb, var(--rose, #b4434e) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rose, #b4434e) 30%, transparent);
+  border-radius: var(--radius); padding: 8px 10px;
+}
+
+/* footer: constraint chips + actions */
+.gen-foot { gap: 10px; flex-wrap: wrap; }
+.gen-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; min-width: 0; }
+.gen-chip {
+  font-size: 10.5px; font-family: var(--font-mono); color: var(--text-soft);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+}
+.gen-foot-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.gen-go.is-busy { opacity: .8; }
+.gen-go.is-busy .icon { animation: genPulse 1.2s ease-in-out infinite; }
+
 /* ── Threaded Notes log (InvoiceNotesThread) ──────────────────────────────
    Activity feed off the Invoice row's "Notes" chip: composer on top, then
    posts newest-first with author avatar + exact date/time + relative age. */
