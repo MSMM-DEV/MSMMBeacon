@@ -15,7 +15,7 @@ import {
 export const CATEGORY_USER_OPTIONS = [
   ["work",             "Working"             ],
   ["meeting",          "Meeting"             ],
-  ["travel",           "Travel"              ],
+  ["travel",           "Site visit"          ],
   ["lunch",            "Lunch"               ],
   ["break",            "Break"               ],
   ["vacation",         "Vacation"            ],
@@ -37,6 +37,7 @@ export function IntervalReclassifyPopover({ interval, locked, onClose, onSaved }
         category,
         outlookEventId: interval.outlookEventId,
         notes: notes.trim() || null,
+        interval,
       });
       onSaved?.();
       onClose?.();

@@ -27,7 +27,7 @@ import {
 const CATEGORY_CHOICES = [
   { key: "work",             label: "Working"          },
   { key: "meeting",          label: "Meeting"          },
-  { key: "travel",           label: "Travel"           },
+  { key: "travel",           label: "Site visit"       },
   { key: "lunch",            label: "Lunch"            },
   { key: "break",            label: "Break"            },
   { key: "vacation",         label: "Vacation"         },
@@ -88,6 +88,7 @@ export function PunchPromptModal({
         category,
         notes: notes.trim() || null,
         outlookEventId: interval.outlookEventId || null,
+        interval,
       });
       onSaved?.();
       onClose?.();

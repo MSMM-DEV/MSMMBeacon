@@ -55,6 +55,14 @@ function svc() {
   });
 }
 
+function categoryPresencePatch(category: string): Record<string, unknown> {
+  if (category === "work") return { category, is_out: false };
+  if (["travel", "lunch", "break", "eod", "vacation", "holiday", "off", "meeting_untagged"].includes(category)) {
+    return { category, is_out: true };
+  }
+  return { category };
+}
+
 async function authorize(req: Request): Promise<{ admin_user_id: string }> {
   const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!bearer) throw bad("missing authorization header", 401);
@@ -467,7 +475,7 @@ async function applyCorrection(sb: ReturnType<typeof svc>, corr: any, adminUserI
       if (!p.category)    throw new Error("reclassify_interval: payload missing category");
       const { data, error } = await sb.from("time_intervals")
         .update({
-          category:        p.category,
+          ...categoryPresencePatch(String(p.category)),
           category_source: "admin",
           notes:           p.notes ?? null,
           outlook_event_id: p.outlook_event_id ?? null,
@@ -509,7 +517,7 @@ async function reclassifyInterval(payload: any, admin: { admin_user_id: string }
   const { error } = await sb
     .from("time_intervals")
     .update({
-      category,
+      ...categoryPresencePatch(category),
       category_source:    "admin",
       notes,
       outlook_event_id:   eventId,

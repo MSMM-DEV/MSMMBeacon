@@ -3,6 +3,7 @@
 // Copy `.env.example` → `.env.local` and fill in your own values.
 
 import { createClient } from "@supabase/supabase-js";
+import { patchForIntervalCategory } from "./timekeepingPolicy";
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -3361,9 +3362,9 @@ export async function callTimeclockPunch({ source = "web", geo = null, note = nu
 
 // User reclassifies their own interval (category + optional outlook link).
 // DB RLS policy lets the row's owner UPDATE it directly.
-export async function setIntervalCategory(intervalId, { category, outlookEventId = null, notes = null }) {
+export async function setIntervalCategory(intervalId, { category, outlookEventId = null, notes = null, interval = null }) {
   const patch = {
-    category,
+    ...patchForIntervalCategory({ category, interval }),
     category_source: "user",
     outlook_event_id: outlookEventId || null,
     notes,
@@ -3372,6 +3373,11 @@ export async function setIntervalCategory(intervalId, { category, outlookEventId
   const { error } = await supabase
     .from("time_intervals").update(patch).eq("id", intervalId);
   if (error) throw error;
+  if (interval?.userId && interval?.startAt) {
+    const date = new Date(interval.startAt).toLocaleDateString("en-CA", { timeZone: CT_TZ });
+    const { error: rErr } = await supabase.rpc("fn_recompute_day", { _user_id: interval.userId, _date: date });
+    if (rErr) throw rErr;
+  }
 }
 
 // User edits travel buffer on one of their calendar events.
@@ -3569,9 +3575,9 @@ export async function adminDeleteInterval(interval, userId, date) {
 // Admin retag + comment on one interval (category_source='admin' so it survives
 // future rebuilds + the classifier). Lighter than a full rebuild — just
 // re-aggregates the day's category buckets.
-export async function adminReclassifyInterval(intervalId, { category, notes = null, outlookEventId = null }, userId, date) {
+export async function adminReclassifyInterval(intervalId, { category, notes = null, outlookEventId = null, interval = null }, userId, date) {
   const { error } = await supabase.from("time_intervals").update({
-    category,
+    ...patchForIntervalCategory({ category, interval }),
     category_source:  "admin",
     notes:            notes || null,
     outlook_event_id: outlookEventId || null,
@@ -3652,7 +3658,7 @@ export function subscribeEnrollSession(adminUserId, onChange) {
 export const TK_CATEGORY_TONE = {
   work:             "green",      // "you were on the clock" — bold green
   meeting:          "blue",
-  travel:           "blue",       // grouped with meeting visually
+  travel:           "rose",
   lunch:            "sage",       // muted olive — distinct from work green
   break:            "muted",
   eod:              "muted",      // "Done for the day" — quiet end-of-day card
@@ -3665,7 +3671,7 @@ export const TK_CATEGORY_TONE = {
 export const TK_CATEGORY_LABEL = {
   work:             "Working",
   meeting:          "Meeting",
-  travel:           "Travel",
+  travel:           "Site visit",
   lunch:            "Lunch",
   break:            "Break",
   eod:              "Done for the day",   // signals "leaving the office" — stops the red gap overlay
@@ -3999,4 +4005,3 @@ export function mergeRefSummary(entity, { projectsByType, invoice, hotLeads = []
     total: projects.length + leadCount + bidCount,
   };
 }
-

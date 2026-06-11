@@ -87,6 +87,14 @@ const TAGGABLE_CATEGORIES = new Set([
   "work", "lunch", "break", "meeting", "travel", "eod", "vacation", "off",
 ]);
 
+function categoryPresencePatch(category: string): Record<string, unknown> {
+  if (category === "work") return { category, is_out: false };
+  if (["travel", "lunch", "break", "eod", "vacation", "holiday", "off", "meeting_untagged"].includes(category)) {
+    return { category, is_out: true };
+  }
+  return { category };
+}
+
 // Only allow tagging an interval that started recently — a shared device must
 // not be able to relabel arbitrary history.
 const TAG_MAX_AGE_MS = 30 * 60 * 1000;
@@ -114,7 +122,7 @@ async function handleTag(body: PunchBody): Promise<Response> {
   const { error: upErr } = await sb
     .from("time_intervals")
     .update({
-      category,
+      ...categoryPresencePatch(category),
       category_source: "user",
       notes:           body.note ?? null,
       computed_at:     new Date().toISOString(),

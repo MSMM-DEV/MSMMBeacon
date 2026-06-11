@@ -29,7 +29,7 @@ import { EditableDayTimeline } from "./EditableDayTimeline";
 import { DayTimeline } from "./DayTimeline";
 
 const ADMIN_CATEGORIES = [
-  ["work", "Working"], ["meeting", "Meeting"], ["travel", "Travel"],
+  ["work", "Working"], ["meeting", "Meeting"], ["travel", "Site visit"],
   ["lunch", "Lunch"], ["break", "Break"], ["eod", "Done for day"],
   ["vacation", "Vacation"], ["off", "Off"], ["meeting_untagged", "Untagged"],
 ];
@@ -188,7 +188,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
       }
       if (targetId) {
         await adminReclassifyInterval(targetId, {
-          category: draft.category, notes: draft.notes, outlookEventId: sel.outlookEventId,
+          category: draft.category, notes: draft.notes, outlookEventId: sel.outlookEventId, interval: sel,
         }, userId, date);
       }
     }
@@ -247,7 +247,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
         <div className="tk-de-stats">
           <Stat label="Worked" value={fmtHM(minutesWork, { always: true })} tone="green" big />
           <Stat label="Meetings" value={fmtHM(minutesMeeting, { always: true })} tone="blue" dim={minutesMeeting === 0} />
-          <Stat label="Travel" value={fmtHM(minutesTravel, { always: true })} tone="blue" dim={minutesTravel === 0} />
+          <Stat label="Site visits" value={fmtHM(minutesTravel, { always: true })} tone="rose" dim={minutesTravel === 0} />
           <Stat label="Untagged" value={fmtHM(minutesUntagged, { always: true })} tone="rose" dim={minutesUntagged === 0} />
           <Stat label="Punches" value={(day.punches || []).length} tone="muted" />
         </div>

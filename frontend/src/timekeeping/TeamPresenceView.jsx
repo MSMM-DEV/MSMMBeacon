@@ -23,7 +23,7 @@ const LIVE_TICK_MS = 30_000;
 const OUT_PHRASE = {
   lunch:            "At lunch",
   meeting:          "In a meeting",
-  travel:           "Traveling",
+  travel:           "On a site visit",
   break:            "On a break",
   eod:              "Left for the day",
   meeting_untagged: "Out — untagged",
