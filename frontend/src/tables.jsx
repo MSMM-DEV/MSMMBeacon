@@ -1502,7 +1502,7 @@ export const AwaitingTable = ({
 
 // ---------- Awarded Projects ----------
 export const AwardedTable = ({
-  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onMoveToPotential, onAlert, flashId, filters,
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
   // Awarded ↔ Invoice links (project_invoice_links). The Proj # column
   // renders each row's linked invoice projects as chips backed by the live
@@ -1728,12 +1728,6 @@ export const AwardedTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end" }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
-                {onMoveToPotential && (
-                  <button className="row-btn" title="Move → Potential (billing candidate)"
-                          onClick={() => onMoveToPotential(r)}>
-                    <Icon name="briefcase" size={14}/>
-                  </button>
-                )}
                 {onForward && (
                   <button className="row-btn forward" title="Move → Invoice"
                           onClick={() => onForward(r)}>
@@ -2592,7 +2586,10 @@ export const InvoiceTable = ({
                       live in the summary strip inside the expand block.
                       Sort removed — there's no parent-row value to sort by. */}
                   <th style={{ minWidth: 110 }}>Contract</th>
-                  <th style={{ minWidth: 96 }}>Remaining<br/>Amount</th>
+                  <th style={{ minWidth: 96 }}
+                      title="Roll-forward from 2025 — the carry-in starting amount. Beacon's billing history starts in 2026, so this is what was still left to bill on Jan 1.">
+                    Rollforward
+                  </th>
                   {windowMonths.map((d, wi) => (
                     <th key={d.abs}
                         className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "")}>
@@ -3838,7 +3835,7 @@ function fmtQuickTime(iso) {
 // prime_company_id on the underlying row via routeClientPick (handled in
 // updateHotLeads in App.jsx). Chronological, sorted newest-first.
 export const HotLeadsTable = ({
-  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onAlert, flashId, filters,
+  tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
 }) => {
   const cols = [
@@ -3981,6 +3978,12 @@ export const HotLeadsTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end" }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
+                {onForward && (
+                  <button className="row-btn forward" title="Move → Proposals"
+                          onClick={() => onForward(r)}>
+                    <Icon name="forward" size={14}/>
+                  </button>
+                )}
                 <button className="row-btn alert" title="Set alert" onClick={() => onAlert && onAlert(r)}>
                   <Icon name="bell" size={14}/>
                 </button>

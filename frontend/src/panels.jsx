@@ -297,7 +297,7 @@ export const DetailDrawer = ({
       { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "amount",         label: "Total Contract Value",    type: "money" },
       { k: "msmmAmount",     label: "MSMM Portion",            type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
-      { k: "remainingStart", label: "Remaining Amount",          type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
+      { k: "remainingStart", label: "Rollforward (from 2025)",   type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
       { k: "description",    label: "Description",             type: "textarea", placeholder: "Project scope / description…" },
       // Notes moved to the threaded, multi-author Notes log — opened from the
       // "Notes" chip on the Invoice row (InvoiceNotesThread). No single-text
@@ -950,6 +950,25 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
     // confirmMove); everything else is captured here. clientId carries
     // straight through. Bid row stays as historical breadcrumb linked via
     // moved_to_project_id.
+    // Hot Lead → Proposals. MOVE semantics: a Proposals project is born from
+    // the lead (title seeds the project name, notes carry over, client
+    // carries straight through) and the lead row is removed — its purpose is
+    // served. The toast offers Undo (re-inserts the lead + attendees).
+    "hotleads→awaiting": {
+      title: "Move to Proposals",
+      subtitle: "Creates a Proposals project · the lead is removed (Undo available)",
+      carried: ["title", "clientId"],
+      newFields: [
+        { k: "projectName",      label: "Project Name *",               placeholder: "Working title for the proposal", value: row.title || "" },
+        { k: "year",             label: "Year",                         type: "number", value: new Date().getFullYear() },
+        { k: "projectNumber",    label: "Project Number",               placeholder: "e.g. 26-101" },
+        { k: "dateSubmitted",    label: "Date Submitted",               type: "date", value: new Date().toISOString().substr(0, 10) },
+        { k: "anticipatedResultDate", label: "Anticipated Result Date", type: "date" },
+        { k: "msmmRemaining",    label: "MSMM Remaining",               type: "money", value: 0 },
+        { k: "notes",            label: "Notes",                        type: "textarea", value: row.notes || "",
+          placeholder: "Lead notes carry over — edit freely." },
+      ],
+    },
     "openbids→awaiting": {
       title: "Move to Proposals",
       subtitle: "Carries to Proposals · Open Bid stays as historical record",
@@ -981,7 +1000,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
   if (!cfg) return null;
 
   const labels = {
-    year: "Year", name: "Project", clientId: "Client", role: "Role", subs: "Subs",
+    year: "Year", name: "Project", title: "Lead", clientId: "Client", role: "Role", subs: "Subs",
     notes: "Notes", projectNumber: "Project #", dateSubmitted: "Submitted",
     clientContract: "Client Contract", msmmContract: "MSMM Contract",
     msmmUsed: "MSMM Used", msmmRemaining: "MSMM Rem.", pmIds: "PMs",

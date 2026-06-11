@@ -85,9 +85,12 @@ const TAB_META = [
 // order; a single-tab group renders with no sub-tab strip. Pipeline groups
 // keep the → arrows between them.
 const NAV_GROUPS = [
+  // Potential was removed from the navbar (2026-06 follow-up) — the flow is
+  // Leads & Bids → Proposals → Awarded → Invoice ⇄ In-Between → Closed Out.
+  // The "potential" TAB KEY stays valid (deep links + Directory project
+  // jumps still render the hidden page); it's just not navigable from here.
   { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids"] },
   { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded"] },
-  { key: "potential", label: "Potential",           stage: "stage-potential", group: "pipeline", tabs: ["potential"] },
   { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "pipeline", tabs: ["invoice", "between", "closed"] },
   { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "side", tabs: ["events"] },
   { key: "directory", label: "Directory",           stage: "stage-clients",   group: "side", tabs: ["directory"] },
@@ -380,7 +383,7 @@ const EXPORT_COLUMNS = {
     { label: "Type",              wMm: 14,                             get: r => r.type || "" },
     { label: "PM",                wMm: 24, wrap: true,                 get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(r.amount) },
-    { label: "Remaining Amount",  wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
+    { label: "Rollforward",       wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
     ...MONTHS.map((m, i) => ({
       label: m, wMm: 20, wrap: true, halign: "right",
       get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
@@ -2232,7 +2235,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // DB-side state — branches that persist also pass an async DB reverser to
   // undoLastMove below.
   const buildPipelineSnapshot = () => ({
-    potential, awaiting, awarded, closed, invoice,
+    potential, awaiting, awarded, closed, invoice, hotLeads,
   });
   const restorePipelineSnapshot = (snap) => {
     setPotential(snap.potential);
@@ -2240,6 +2243,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setAwarded(snap.awarded);
     setClosed(snap.closed);
     setInvoice(snap.invoice);
+    if (snap.hotLeads) setHotLeads(snap.hotLeads);
   };
 
   // Wraps a "show toast with Undo" call. `dbReverse` is optional; when
@@ -3097,6 +3101,98 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           showToast(`Move failed: ${e.message || e}`, "x");
         }
       })();
+    } else if (from === "hotleads" && to === "awaiting") {
+      // Hot Lead → Proposals: MOVE semantics — a new projects row is born
+      // (status='awaiting') and the lead row is deleted; its purpose is
+      // served once a real proposal exists. The BEFORE DELETE trigger on
+      // beacon_v2.leads deactivates any future alert fires. Undo re-inserts
+      // the lead (same id) + its attendees and drops the new project.
+      const tempProjectId = mkId();
+      const awaitingRow = {
+        id: tempProjectId,
+        year: Number(newData.year) || THIS_YEAR,
+        name: newData.projectName || row.title || "",
+        role: "Prime",
+        clientId: row.clientId || null,
+        amount: null,
+        msmm: Number(newData.msmmRemaining) || 0,
+        subs: [],
+        pmIds: [],
+        notes: newData.notes || "",
+        dates: "",
+        projectNumber: newData.projectNumber || "",
+        status: "Proposal",
+        dateSubmitted: newData.dateSubmitted || new Date().toISOString().substr(0, 10),
+        anticipatedResultDate: newData.anticipatedResultDate || "",
+        clientContract: "",
+        msmmContract: "",
+        msmmUsed: 0,
+        msmmRemaining: Number(newData.msmmRemaining) || 0,
+      };
+      const prevHotLeads = hotLeads;
+      const prevAwaiting = awaiting;
+      setAwaiting(rs => [awaitingRow, ...rs]);
+      setHotLeads(rs => rs.filter(r => r.id !== row.id));
+      setFlashId(tempProjectId);
+      setTab("awaiting");
+      (async () => {
+        try {
+          const insertPayload = {
+            status: "awaiting",
+            project_name: awaitingRow.name,
+            year: awaitingRow.year,
+            // Leads store the firm on either client_id or prime_company_id;
+            // the router picks the right projects column for the value.
+            ...routeClientPick(row.clientId || null),
+            date_submitted: awaitingRow.dateSubmitted || null,
+            anticipated_result_date: awaitingRow.anticipatedResultDate || null,
+            msmm_remaining: awaitingRow.msmmRemaining || null,
+            project_number: awaitingRow.projectNumber || null,
+            notes: awaitingRow.notes || null,
+          };
+          const { data: projData, error: projErr } = await supabase
+            .from("projects").insert(insertPayload).select().single();
+          if (projErr) throw projErr;
+          const { error: delErr } = await supabase
+            .from("leads").delete().eq("id", row.id);
+          if (delErr) throw delErr;
+          setAwaiting(rs => rs.map(r => r.id === tempProjectId
+            ? { ...r, id: projData.id }
+            : r));
+          setFlashId(projData.id);
+          offerUndo(
+            "Moved to Proposals · lead removed",
+            snap,
+            async () => {
+              // Reverse: drop the new project, resurrect the lead with its
+              // original id (links/alert history line back up) + attendees.
+              const { error: dErr } = await supabase
+                .from("projects").delete().eq("id", projData.id);
+              if (dErr) throw dErr;
+              const { error: rErr } = await supabase.from("leads").insert({
+                id: row.id,
+                title: row.title,
+                date_time: row.dateTime || null,
+                status: row.status || "Scheduled",
+                type: row.type || null,
+                stars: row.stars ?? null,
+                notes: row.notes || null,
+                ...routeClientPick(row.clientId || null),
+              });
+              if (rErr) throw rErr;
+              if ((row.attendees || []).length > 0) {
+                const { error: aErr } = await supabase.from("lead_attendees")
+                  .insert(row.attendees.map(uid => ({ lead_id: row.id, user_id: uid })));
+                if (aErr) throw aErr;
+              }
+            }
+          );
+        } catch (e) {
+          setAwaiting(prevAwaiting);
+          setHotLeads(prevHotLeads);
+          showToast(`Move failed: ${e.message || e}`, "x");
+        }
+      })();
     }
     setMoving(null);
     setTimeout(() => setFlashId(null), 1500);
@@ -3279,7 +3375,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             && !!(row?.primeFiles && row.primeFiles[monthIdx] && row.primeFiles[monthIdx].length);
           const isActualMonth = monthIdx >= 0 && (monthIdx <= actualThru || billedAhead);
           const isProjMonth   = monthIdx >= 0 && !isActualMonth;
-          const isTotalCol    = label === "Total Billed" || label === "Rollforward";
+          const isTotalCol    = label === "Total Billed";
           if (isActualMonth) return { fillColor: INVOICE_PALETTE.AMBER_ACTUAL, textColor: INVOICE_PALETTE.ACCENT_INK };
           if (isProjMonth)   return { fillColor: INVOICE_PALETTE.CREAM_PROJ,   textColor: INVOICE_PALETTE.PROJ_INK };
           if (isTotalCol)    return { fillColor: INVOICE_PALETTE.TOTAL_BG,     fontStyle: "bold" };
@@ -3408,21 +3504,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           },
         };
       }
-      if (c.label === "Rollforward") {
-        return {
-          ...c,
-          get: (r) => {
-            if (r._kind === "project") {
-              if (r.rollforwardOverride != null) return fmtMoney(r.rollforwardOverride);
-              const ytd = Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i))
-                .reduce((a, b) => a + b, 0);
-              return fmtMoney((Number(r.remainingStart) || 0) - ytd);
-            }
-            const sum = (r.values || []).reduce((a, b) => a + (b || 0), 0);
-            return fmtMoney((Number(r.remainingStart) || 0) - sum);
-          },
-        };
-      }
+      // (No "Rollforward"-derived override here: the Rollforward column is
+      // the carry-in amount from 2025 (remainingStart) and renders verbatim
+      // via its base accessor — the old derived remaining−billed column was
+      // removed when the UI hid YTD/Rollforward.)
       return c;
     });
 
@@ -3891,9 +3976,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   }));
 
   const stats = useMemo(() => {
-    const pot = potential.reduce((a,r) => a + (r.msmm || 0), 0);
     const awa = awaiting.reduce((a,r) => a + (r.msmm || 0), 0);
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
+    // In-Between: paused projects (merged) — contract value sitting on hold.
+    const paused = invoiceMerged.filter(r => r.billingState === "between");
+    const btw = paused.reduce((a,r) => a + (r.amount || 0), 0);
     // Closed-out projects' archived rows don't count toward YTD (parity with
     // the pre-billing_state era, when close-out deleted them). Paused
     // (In-Between) projects DO count — those dollars were really billed.
@@ -3901,12 +3988,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .filter(r => (r.billingState || "active") !== "closed")
       .reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
-      { label: "Pipeline MSMM",       val: pot, sub: `${potential.length} potential`, spark: [3,4,3,5,4,6,7,8,7,9] },
       { label: "Proposals",           val: awa, sub: `${awaiting.length} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
       { label: "Active backlog",      val: awd, sub: `${awarded.length} awarded`,     spark: [5,5,6,7,6,7,8,9,10,11] },
+      { label: "In-Between",          val: btw, sub: `${paused.length} paused`,       spark: [4,4,3,4,3,3,4,3,3,4] },
       { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
-  }, [potential, awaiting, awarded, invoice, actualThru]);
+  }, [awaiting, awarded, invoice, invoiceMerged, actualThru]);
 
   const tabCounts = {
     openbids: openBids.length,
@@ -4044,22 +4131,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 role="tab"
                 aria-selected={g.tabs.includes(tab)}
               >
-                <span className="dot"/>
                 {g.label}
                 {groupCount(g) != null && (
                   <span className="count">{groupCount(g)}</span>
                 )}
               </button>
-              {i < arr.length - 1 && <span className="tab-sep">→</span>}
+              {i < arr.length - 1 && (
+                <span className="tab-sep" aria-hidden="true">
+                  <Icon name="chevronRight" size={12} stroke={2}/>
+                </span>
+              )}
             </React.Fragment>
           ))}
-          <div style={{ width: 14 }}/>
+          <span className="tab-rail-divider" aria-hidden="true"/>
           {NAV_GROUPS.filter(g => g.group === "side" && (!g.adminOnly || isAdmin)).map(g => (
             <button key={g.key}
               className={`tab ${g.stage} ${g.tabs.includes(tab) ? "active" : ""}`}
               onClick={() => gotoGroup(g)} role="tab"
               aria-selected={g.tabs.includes(tab)}>
-              <span className="dot"/>
               {g.label}
               {groupCount(g) != null && (
                 <span className="count">{groupCount(g)}</span>
@@ -4128,7 +4217,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </div>
         )}
 
-        {["potential","awaiting","awarded","invoice","between","closed"].includes(tab) && (
+        {["awaiting","awarded","invoice","between","closed"].includes(tab) && (
           <div className="stats">
             {stats.map((s, i) => (
               <div key={i} className="stat">
@@ -4190,7 +4279,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <AwardedTable rows={filtered.awarded} updateRow={updateAwarded}
             onOpenDrawer={r => openDrawer(r, "awarded")}
             onForward={r => triggerForward(r, "awarded", "invoice")}
-            onMoveToPotential={r => triggerForward(r, "awarded", "potential")}
             onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
             flashId={flashId}
             filters={chipsFor("awarded")}
@@ -4232,6 +4320,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 windowMonths={invWindowMonths}
                 orangeSourceIds={orangeSourceIds}
                 monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
+                subInvoices={subInvoices}
               />
               <InvoiceTable rows={filtered.invoice}
                 windowMonths={invWindowMonths}
@@ -4387,6 +4476,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             <HotLeadsTable rows={filtered.hotleads}
               updateRow={updateHotLeads}
               onOpenDrawer={r => openDrawer(r, "hotleads")}
+              onForward={r => triggerForward(r, "hotleads", "awaiting")}
               onAlert={r => setAlertObj({ row: r, tab: "hotleads" })}
               flashId={flashId}
               filters={chipsFor("hotleads")}
@@ -4509,6 +4599,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "awaiting"  ? () => { triggerForward(liveRow, "awaiting", "awarded"); setDrawer(null); } :
             drawer.table === "awarded"   ? () => { triggerForward(liveRow, "awarded", "invoice"); setDrawer(null); } :
             drawer.table === "potential" ? () => { triggerForward(liveRow, "potential", "invoice"); setDrawer(null); } :
+            drawer.table === "hotleads"  ? () => { triggerForward(liveRow, "hotleads", "awaiting"); setDrawer(null); } :
             drawer.table === "openbids" && liveRow.approvalStatus === "approved"
               ? () => { triggerForward(liveRow, "openbids", "awaiting"); setDrawer(null); } :
             null
@@ -4569,7 +4660,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   )) return;
                   updatePotential(liveRow.sourceId, { probability: "High" });
                   setDrawer(null);
-                  setTab("potential");
+                  // The Potential page left the navbar (2026-06) — stay put
+                  // and explain where the row went instead of navigating to
+                  // a hidden page.
+                  showToast("Demoted from Orange — tracked as a High-probability Potential (no longer billed).");
                 }
               : null
           }

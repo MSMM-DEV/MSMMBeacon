@@ -1103,7 +1103,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
                    style={{ fontFamily: "var(--font-mono)" }}
                    placeholder="auto-calc (= total − subs)"/>
           </Field>
-          <Field label="MSMM Remaining Amount">
+          <Field label="MSMM Rollforward (carry-in from 2025)">
             <input className="input" type="number"
                    value={form.msmm_remaining_to_bill_year_start}
                    onChange={e => set("msmm_remaining_to_bill_year_start", e.target.value)}

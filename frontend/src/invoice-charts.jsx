@@ -12,15 +12,18 @@ import { fmtMoney, isActualInvoiceMonth, THIS_YEAR, TODAY_MONTH } from "./data.j
 // As of the rolling-window rework the charts follow the SAME sliding month
 // window as the InvoiceTable: a `windowMonths` descriptor list (default = prev
 // 3 + current + next 12 = 16 months) that crosses calendar years. Each bar
-// sums the merged rows' byYear[year].values[monthIdx] for its descriptor, so
-// the charts and the table always show the same months. Actual vs projection
-// is decided per (year, month) via isActualInvoiceMonth.
+// sums the merged rows' MSMM PORTION for that month — the same msmmAtDesc
+// math as the InvoiceTable's parent rows and grand-total rows (per-month MSMM
+// override wins; else year total − Σ sub amounts) — so the bars, tooltips,
+// and the table's "Total — excl./incl. Orange" rows reconcile exactly. This
+// needs the `subInvoices` matrix (Map<project_id, sub_entry[]>) from App.
+// Actual vs projection is decided per (year, month) via isActualInvoiceMonth.
 //
 // Behavior preserved: ENG up top, collapsible PM below; Pair/Average view
 // toggle (ENG only — PM has no Orange); benchmark coloring; hover tooltip.
 // ============================================================================
 
-export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark }) => {
+export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices }) => {
   const [pmCollapsed, setPmCollapsed] = useState(() => {
     try { return localStorage.getItem("beacon.quadPmCollapsed") === "1"; }
     catch { return false; }
@@ -57,7 +60,7 @@ export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, m
         <div className="quad-eyebrow">Cash Flow</div>
         <h2 className="quad-title">Anticipated Invoice</h2>
         <div className="quad-sub-row">
-          <div className="quad-sub">{rangeLabel} · monthly actual vs. projection</div>
+          <div className="quad-sub">{rangeLabel} · monthly MSMM billing — actual vs. projection (matches the table totals)</div>
         </div>
       </header>
       <div className="quad-body">
@@ -68,6 +71,7 @@ export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, m
             windowMonths={windowMonths}
             orangeSourceIds={orangeSourceIds}
             monthlyBenchmark={monthlyBenchmark}
+            subInvoices={subInvoices}
             view={chartView}
             onViewChange={setChartView}
           />
@@ -110,6 +114,7 @@ export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, m
                   rows={invoicePm}
                   windowMonths={windowMonths}
                   orangeSourceIds={orangeSourceIds}
+                  subInvoices={subInvoices}
                   view={chartView}
                   /* No onViewChange — PM doesn't render the toggle UI. */
                   /* No benchmark — engineering-revenue only. */
@@ -136,27 +141,42 @@ const niceChartMax = (peak) => {
   return nice * mag;
 };
 
-const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark, eyebrow, view = "pair", onViewChange }) => {
+const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices, eyebrow, view = "pair", onViewChange }) => {
   const N = Math.max(1, windowMonths.length);
-  // Per-window-month totals, summed from each merged row's byYear slot for
-  // that descriptor's (year, monthIdx):
+  // Per-window-month totals — each row contributes its MSMM PORTION for the
+  // month, mirroring the InvoiceTable's msmmAtDesc exactly (the per-month
+  // MSMM override wins; else year total − Σ that month's sub amounts). This
+  // is what the table's "Total — excl./incl. Orange" rows sum, so the chart
+  // and the table can never disagree:
   //   totalsBase — invoices NOT sourced from an Orange potential (secured)
   //   totalsAll  — all invoices (base + Orange pre-awarded)
   //   totalsAvg  — midpoint of the two (the Average view)
   const { totalsBase, totalsAll, totalsAvg } = useMemo(() => {
+    const subListFor = (r) =>
+      (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
+    const msmmAtDesc = (r, d) => {
+      const yr = r.byYear?.[d.year];
+      if (!yr) return 0;
+      const override = yr.msmmValues?.[d.monthIdx];
+      if (override != null) return Number(override);
+      const total = Number(yr.values?.[d.monthIdx] || 0);
+      const subSum = subListFor(r).reduce(
+        (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);
+      return total - subSum;
+    };
     const totalsBase = Array(N).fill(0);
     const totalsAll  = Array(N).fill(0);
     for (const r of rows) {
       const isOrange = !!(r.sourceId && orangeSourceIds?.has(r.sourceId));
       windowMonths.forEach((d, wi) => {
-        const v = Number(r.byYear?.[d.year]?.values?.[d.monthIdx] || 0);
+        const v = msmmAtDesc(r, d);
         totalsAll[wi] += v;
         if (!isOrange) totalsBase[wi] += v;
       });
     }
     const totalsAvg = totalsAll.map((v, i) => (v + totalsBase[i]) / 2);
     return { totalsBase, totalsAll, totalsAvg };
-  }, [rows, windowMonths, orangeSourceIds, N]);
+  }, [rows, windowMonths, orangeSourceIds, subInvoices, N]);
 
   // Actual / projection split is per (year, month). The actual months form a
   // contiguous prefix of the window (past → present), so lastActualWi is the
