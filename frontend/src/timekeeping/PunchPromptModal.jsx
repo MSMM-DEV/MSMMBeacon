@@ -22,10 +22,14 @@ import {
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
 } from "../data";
 
-// Ordered to match the punch-context: things you actively DO first, passive
-// things after, "leave as auto" last.
-const CATEGORY_CHOICES = [
+// Ordered to match the punch-context. A punch-in starts an IN interval; a
+// punch-out starts an OUT interval. Meeting is available in both contexts.
+const IN_CATEGORY_CHOICES = [
   { key: "work",             label: "Working"          },
+  { key: "meeting",          label: "Meeting"          },
+];
+
+const OUT_CATEGORY_CHOICES = [
   { key: "meeting",          label: "Meeting"          },
   { key: "travel",           label: "Site visit"       },
   { key: "lunch",            label: "Lunch"            },
@@ -34,7 +38,9 @@ const CATEGORY_CHOICES = [
   { key: "eod",              label: "Done for the day" },   // stops the red overlay
 ];
 
-const CHOICE_KEYS = new Set(CATEGORY_CHOICES.map(c => c.key));
+function choicesForKind(kind) {
+  return kind === "in" ? IN_CATEGORY_CHOICES : OUT_CATEGORY_CHOICES;
+}
 
 // Preselect a sensible chip. A freshly-opened OUT interval arrives tagged
 // 'meeting_untagged' (a placeholder, not a real choice) — default it to
@@ -42,7 +48,8 @@ const CHOICE_KEYS = new Set(CATEGORY_CHOICES.map(c => c.key));
 // already-tagged interval, keep its real category.
 function defaultCategory(kind, interval) {
   const c = interval?.category;
-  if (c && CHOICE_KEYS.has(c)) return c;
+  const keys = new Set(choicesForKind(kind).map(choice => choice.key));
+  if (c && keys.has(c)) return c;
   return kind === "in" ? "work" : "meeting";
 }
 
@@ -115,7 +122,7 @@ export function PunchPromptModal({
         <div className="modal-body">
           {/* Hero chip grid — one-tap category pick on touch */}
           <div className="tk-prompt-grid" role="radiogroup" aria-label="Category">
-            {CATEGORY_CHOICES.map(c => (
+            {choicesForKind(kind).map(c => (
               <button
                 key={c.key}
                 type="button"
@@ -128,6 +135,12 @@ export function PunchPromptModal({
                 {c.label}
               </button>
             ))}
+          </div>
+          <div className={`tk-prompt-presence ${kind === "in" ? "is-in" : "is-out"}`}>
+            <span className="tk-prompt-presence-dot" />
+            {kind === "in"
+              ? "Saved as in-time unless you later mark this meeting as away."
+              : "Saved as out-time. Meeting can still be changed later if it happened at your desk."}
           </div>
 
           <div className="form-row">

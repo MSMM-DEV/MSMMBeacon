@@ -60,12 +60,14 @@ function currentStatus(intervals) {
            note: last?.notes || null, lastOut: last?.endAt };
 }
 
-export function TeamPresenceView() {
-  const [date, setDate]   = useState(todayInCT());
-  const [rows, setRows]   = useState([]);
-  const [busy, setBusy]   = useState(false);
-  const [err,  setErr]    = useState(null);
-  const [open, setOpen]   = useState(() => new Set());   // expanded user ids
+export function TeamPresenceView({ date: controlledDate = null, onDate = null, embedded = false }) {
+  const [localDate, setLocalDate] = useState(todayInCT());
+  const date = controlledDate || localDate;
+  const setDate = onDate || setLocalDate;
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState(null);
+  const [open, setOpen] = useState(() => new Set());   // expanded user ids
   const isToday = date === todayInCT();
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
@@ -107,32 +109,36 @@ export function TeamPresenceView() {
   });
 
   return (
-    <div className="tk-presence">
+    <div className={`tk-presence ${embedded ? "is-embedded" : ""}`}>
       <header className="tk-presence-head">
         <div className="tk-presence-head-titles">
           <h3 className="tk-presence-title">
-            Team presence
+            {isToday ? "Team right now" : "Team snapshot"}
             {isToday && <span className="tk-presence-live"><span className="tk-pulse-dot"/>live</span>}
           </h3>
-          <p className="tk-presence-sub">Read-only · where everyone is right now</p>
+          <p className="tk-presence-sub">
+            {isToday ? "Who is in, out, or done for the day." : "Read-only view for the selected date."}
+          </p>
         </div>
-        <div className="tk-presence-daybar">
-          <button className="btn btn-ghost btn-sm" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day">
-            <Icon name="back" size={14}/>
-          </button>
-          <input
-            type="date" className="tk-day-input"
-            value={date} max={todayInCT()}
-            onChange={e => setDate(e.target.value || todayInCT())}
-          />
-          <button className="btn btn-ghost btn-sm" onClick={() => setDate(shiftDay(date, +1))}
-            disabled={date >= todayInCT()} aria-label="Next day">
-            <Icon name="forward" size={14}/>
-          </button>
-          {!isToday && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>Today</button>
-          )}
-        </div>
+        {!embedded && (
+          <div className="tk-presence-daybar">
+            <button className="btn btn-ghost btn-sm" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day">
+              <Icon name="back" size={14}/>
+            </button>
+            <input
+              type="date" className="tk-day-input"
+              value={date} max={todayInCT()}
+              onChange={e => setDate(e.target.value || todayInCT())}
+            />
+            <button className="btn btn-ghost btn-sm" onClick={() => setDate(shiftDay(date, +1))}
+              disabled={date >= todayInCT()} aria-label="Next day">
+              <Icon name="forward" size={14}/>
+            </button>
+            {!isToday && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>Today</button>
+            )}
+          </div>
+        )}
       </header>
 
       <div className="tk-presence-stats">

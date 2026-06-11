@@ -9025,6 +9025,54 @@ html, body { overflow-x: clip; }
 /* ---- Personal Timesheet tab ---- */
 .tk-timesheet-page { display: grid; gap: 16px; padding: 14px 0; }
 
+.tk-ts-commandbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--accent-softer));
+}
+.tk-ts-command-copy { min-width: 0; display: grid; gap: 2px; }
+.tk-ts-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.tk-ts-command-copy h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  color: var(--text);
+}
+.tk-ts-command-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.tk-timesheet-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  gap: 16px;
+  align-items: start;
+}
+.tk-timesheet-main,
+.tk-timesheet-side {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.tk-timesheet-side {
+  align-self: start;
+  position: sticky;
+  top: 12px;
+}
+
 .tk-day-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tk-day-input {
   padding: 7px 10px; font-size: 13px; font-family: inherit;
@@ -9034,7 +9082,7 @@ html, body { overflow-x: clip; }
 
 .tk-hero {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
   gap: 20px;
   padding: 22px;
   background: var(--surface);
@@ -9042,7 +9090,16 @@ html, body { overflow-x: clip; }
   border-radius: 14px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
-.tk-hero-side { display: grid; gap: 8px; align-content: center; min-width: 180px; }
+.tk-hero-side {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  min-width: 180px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-2) 62%, var(--surface));
+}
 .tk-hero-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .tk-hero-key { color: var(--text-muted); }
 .tk-hero-val { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -9245,41 +9302,12 @@ html, body { overflow-x: clip; }
 .tk-section-head h3 { margin: 0; font-size: 15px; }
 .tk-section-sub { font-size: 12px; color: var(--text-muted); }
 
-/* ── Timesheet view toggle (My timesheet | Team) ── */
-.tk-ts-views {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 14px;
-}
-.tk-ts-views button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-body);
-  font-size: 12.5px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 7px;
-  cursor: pointer;
-  transition: background 140ms ease, color 140ms ease;
-}
-.tk-ts-views button:hover { color: var(--text); }
-.tk-ts-views button.active {
-  background: var(--surface);
-  color: var(--accent-ink);
-  box-shadow: 0 1px 2px rgba(0,0,0,.06);
-}
-
 /* ── Team presence board (read-only) ── */
 .tk-presence { display: grid; gap: 12px; }
+.tk-presence.is-embedded {
+  align-self: start;
+  padding: 0;
+}
 .tk-presence-head {
   display: flex; align-items: flex-end; justify-content: space-between;
   flex-wrap: wrap; gap: 12px;
@@ -9301,6 +9329,17 @@ html, body { overflow-x: clip; }
   display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
   font-size: 12px; color: var(--text-muted);
   padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.tk-presence.is-embedded .tk-presence-stats {
+  gap: 8px;
+}
+.tk-presence.is-embedded .tk-presence-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
 }
 .tk-presence-stat strong { color: var(--text); font-family: var(--font-display); font-size: 14px; }
 .tk-presence-stat.is-in strong  { color: #5E7C52; }
@@ -9338,6 +9377,13 @@ html, body { overflow-x: clip; }
   padding: 11px 14px 11px 16px;
   cursor: pointer;
   text-align: left;
+}
+.tk-presence.is-embedded .tk-presence-main {
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+}
+.tk-presence.is-embedded .tk-presence-timeline,
+.tk-presence.is-embedded .tk-presence-total {
+  display: none;
 }
 .tk-presence-dot {
   width: 9px; height: 9px; border-radius: 50%;
@@ -9936,7 +9982,7 @@ html, body { overflow-x: clip; }
 .tk-settings-note { font-size: 12px; color: var(--text-muted); padding: 10px 12px; background: var(--surface-2); border-radius: 8px; line-height: 1.5; }
 
 /* Tiny chip used in the reclassify popover */
-.tk-category-chip { margin-top: 6px; }
+.tk-category-chip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .tk-cat {
   display: inline-block;
   padding: 3px 8px;
@@ -9950,21 +9996,35 @@ html, body { overflow-x: clip; }
 .tk-cat.tone-blue   { background: color-mix(in srgb, #4A6EA9 22%, var(--surface-2)); color: #19315A; }
 .tk-cat.tone-rose   { background: color-mix(in srgb, #B85C5C 24%, var(--surface-2)); color: #5A1D1D; }
 .tk-cat.tone-muted  { background: var(--surface-2); color: var(--text-muted); }
+.tk-cat-presence {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.tk-cat-presence.is-in {
+  color: #41562F;
+  background: color-mix(in srgb, #6E8F62 16%, transparent);
+}
+.tk-cat-presence.is-out {
+  color: #8A4C47;
+  background: var(--rose-soft);
+}
 
 /* ---- Tablet (≥641 and <1024): two-column Timesheet ----------------- */
 @media (min-width: 760px) and (max-width: 1023px) {
-  .tk-timesheet-page {
-    grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
-    column-gap: 16px;
-    row-gap: 14px;
+  .tk-timesheet-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
-  /* Day picker spans both columns at the top. */
-  .tk-day-bar      { grid-column: 1 / -1; }
-  /* Hero punch panel lives in the left column; day calendar + week summary
-     stack on the right. */
-  .tk-hero         { grid-column: 1; align-self: start; }
-  .tk-day-card-cal { grid-column: 2; grid-row: 2 / span 2; }
-  .tk-week-card    { grid-column: 1; align-self: start; }
+  .tk-timesheet-side {
+    position: static;
+    order: -1;
+  }
 }
 
 /* ---- Phone breakpoint: thumb-reach punch button, simpler layouts ---- */
@@ -9974,6 +10034,20 @@ html, body { overflow-x: clip; }
     grid-template-columns: 1fr;
     gap: 12px;
     padding: 10px 0 20px;
+  }
+  .tk-ts-commandbar {
+    display: grid;
+    padding: 12px;
+    gap: 10px;
+  }
+  .tk-ts-command-copy h3 { font-size: 17px; }
+  .tk-ts-command-copy p { font-size: 12px; }
+  .tk-timesheet-grid { grid-template-columns: 1fr; gap: 12px; }
+  .tk-timesheet-main,
+  .tk-timesheet-side { gap: 12px; }
+  .tk-timesheet-side {
+    position: static;
+    order: -1;
   }
 
   /* Day picker bar: full-width date input, controls don't crowd. */
@@ -9995,7 +10069,7 @@ html, body { overflow-x: clip; }
 
   /* Hero collapses to a single column; tighten padding. */
   .tk-hero { grid-template-columns: 1fr; padding: 14px; gap: 12px; }
-  .tk-hero-side { min-width: 0; gap: 6px; }
+  .tk-hero-side { min-width: 0; gap: 6px; padding: 10px 12px; }
   .tk-punch-btn  { min-height: 220px; }
   .tk-punch-label { font-size: 24px; }
   .tk-hero-warn-banner { font-size: 12px; padding: 8px 10px; }
@@ -11522,6 +11596,32 @@ html, body { overflow-x: clip; }
 .tk-prompt-chip.is-active.tone-sage   { box-shadow: inset 0 0 0 2px color-mix(in srgb, #6E8F62 50%, transparent), 0 2px 6px rgba(60,46,18,0.08); }
 .tk-prompt-chip.is-active.tone-blue   { box-shadow: inset 0 0 0 2px color-mix(in srgb, #4A6EA9 50%, transparent), 0 2px 6px rgba(60,46,18,0.08); }
 .tk-prompt-chip.is-active.tone-rose   { box-shadow: inset 0 0 0 2px color-mix(in srgb, #B85C5C 50%, transparent), 0 2px 6px rgba(60,46,18,0.08); }
+.tk-prompt-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  margin: -4px 0 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.tk-prompt-presence-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.tk-prompt-presence.is-in .tk-prompt-presence-dot {
+  background: #6E8F62;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #6E8F62 18%, transparent);
+}
+.tk-prompt-presence.is-out .tk-prompt-presence-dot {
+  background: #B85C5C;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #B85C5C 18%, transparent);
+}
 .form-label-soft {
   color: var(--text-soft);
   font-weight: 400;

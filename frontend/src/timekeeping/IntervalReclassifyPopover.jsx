@@ -11,6 +11,7 @@ import {
   fmtClock, setIntervalCategory,
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
 } from "../data";
+import { presenceForCategory } from "../timekeepingPolicy";
 
 export const CATEGORY_USER_OPTIONS = [
   ["work",             "Working"             ],
@@ -45,6 +46,15 @@ export function IntervalReclassifyPopover({ interval, locked, onClose, onSaved }
     finally { setBusy(false); }
   };
 
+  const forcedPresence = presenceForCategory(category, interval);
+  const presenceLabel = category === "meeting"
+    ? "Keeps current in/out state"
+    : forcedPresence === false
+    ? "Counts as in-time"
+    : forcedPresence === true
+      ? "Marked as out-time"
+      : "Keeps current in/out state";
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal-narrow" onClick={e => e.stopPropagation()}>
@@ -72,6 +82,9 @@ export function IntervalReclassifyPopover({ interval, locked, onClose, onSaved }
             <div className="tk-category-chip">
               <span className={`tk-cat tone-${TK_CATEGORY_TONE[category] || "muted"}`}>
                 {TK_CATEGORY_LABEL[category] || category}
+              </span>
+              <span className={`tk-cat-presence ${forcedPresence ? "is-out" : "is-in"}`}>
+                {presenceLabel}
               </span>
             </div>
           </div>

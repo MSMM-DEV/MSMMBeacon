@@ -29,17 +29,6 @@ export function TimesheetTab({ focusDate = null }) {
   const [date,    setDate]    = useState(focusDate || todayInCT());
   const weekStart = weekStartCT(date);
 
-  // "me" (personal punch + day editor) vs "team" (read-only presence board for
-  // everyone). Persisted so the choice survives reloads.
-  const [view, setView] = useState(() => {
-    try { return localStorage.getItem("beacon.tkTimesheetView") === "team" ? "team" : "me"; }
-    catch { return "me"; }
-  });
-  const changeView = (v) => {
-    setView(v);
-    try { localStorage.setItem("beacon.tkTimesheetView", v); } catch { /* ignore */ }
-  };
-
   // Punch state — hydrate from localStorage so reload shows the correct
   // IN/OUT toggle instantly. Background fetch reconciles within ~200 ms.
   // `phase` distinguishes "we genuinely don't know yet" from "we know they're
@@ -144,42 +133,35 @@ export function TimesheetTab({ focusDate = null }) {
   return (
     <div className="tk-timesheet-page">
 
-      {/* My timesheet vs. read-only Team presence */}
-      <div className="tk-ts-views" role="tablist" aria-label="Timesheet view">
-        <button type="button" role="tab" aria-selected={view === "me"}
-          className={view === "me" ? "active" : ""} onClick={() => changeView("me")}>
-          <Icon name="user" size={12}/> My timesheet
-        </button>
-        <button type="button" role="tab" aria-selected={view === "team"}
-          className={view === "team" ? "active" : ""} onClick={() => changeView("team")}>
-          <Icon name="users" size={12}/> Team
-        </button>
-      </div>
+      <header className="tk-ts-commandbar">
+        <div className="tk-ts-command-copy">
+          <div className="tk-ts-eyebrow">Timesheet</div>
+          <h3>{isToday ? "Today" : formatDateLabel(date)}</h3>
+          <p>{isToday ? "Punch, tag, review your day, and see who is available." : "Review your time and the team snapshot for this date."}</p>
+        </div>
 
-      {view === "team" ? <TeamPresenceView/> : (<>
-
-      {/* Day picker */}
-      <div className="tk-day-bar">
-        <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, -1)}>
-          <Icon name="back" size={14}/>
-        </button>
-        <input
-          type="date"
-          className="tk-day-input"
-          value={date}
-          onChange={e => setDate(e.target.value || todayInCT())}
-          max={todayInCT()}
-        />
-        <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, +1)}
-          disabled={date >= todayInCT()}>
-          <Icon name="forward" size={14}/>
-        </button>
-        {!isToday && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>
-            Today
+        <div className="tk-day-bar" aria-label="Timesheet date">
+          <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, -1)} aria-label="Previous day">
+            <Icon name="back" size={14}/>
           </button>
-        )}
-      </div>
+          <input
+            type="date"
+            className="tk-day-input"
+            value={date}
+            onChange={e => setDate(e.target.value || todayInCT())}
+            max={todayInCT()}
+          />
+          <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, +1)}
+            disabled={date >= todayInCT()} aria-label="Next day">
+            <Icon name="forward" size={14}/>
+          </button>
+          {!isToday && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>
+              Today
+            </button>
+          )}
+        </div>
+      </header>
 
       {/* Hero punch panel — only on today */}
       {isToday && (
@@ -225,71 +207,80 @@ export function TimesheetTab({ focusDate = null }) {
         </section>
       )}
 
-      {/* Leave balances + my requests */}
-      <MyLeaveSection reloadKey={leaveReloadKey}/>
+      <div className="tk-timesheet-grid">
+        <main className="tk-timesheet-main">
 
-      {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
-      <section className="tk-day-card tk-day-card-cal">
-        <header className="tk-day-card-head">
-          <div className="tk-day-card-head-meta">
-            <h3>Day timeline</h3>
-            <span className="tk-day-card-sub">
-              {(day.punches || []).length} {(day.punches || []).length === 1 ? "punch" : "punches"} ·{" "}
-              {(day.intervals || []).filter(i => i.endAt).length} closed
-              {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
-            </span>
-          </div>
-          <div className="tk-day-card-head-actions">
-            <button className="tk-correction-cta" onClick={() => setShowLeave(true)}>
-              <Icon name="sun" size={13}/> Request leave
-            </button>
-            <button className="tk-correction-cta" onClick={() => setEditDay(true)}>
-              <Icon name="edit" size={13}/> Edit day
-            </button>
-          </div>
-        </header>
-
-        {/* Approved-leave band(s) for this day */}
-        {(day.leaveBlocks || []).length > 0 && (
-          <div className="tk-leave-band-wrap">
-            {day.leaveBlocks.map((lb, i) => (
-              <div key={lb.id || i} className={`tk-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
-                <Icon name="sun" size={13}/>
-                <span className="tk-leave-band-label">
-                  {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · {lb.hoursPerDay}h
+          {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
+          <section className="tk-day-card tk-day-card-cal">
+            <header className="tk-day-card-head">
+              <div className="tk-day-card-head-meta">
+                <h3>My day</h3>
+                <span className="tk-day-card-sub">
+                  {(day.punches || []).length} {(day.punches || []).length === 1 ? "punch" : "punches"} ·{" "}
+                  {(day.intervals || []).filter(i => i.endAt).length} closed
+                  {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
                 </span>
-                <span className="tk-leave-band-badge">approved</span>
               </div>
-            ))}
-          </div>
-        )}
-        {/*
-          List-view across every viewport width. The absolute-positioned
-          hour rail can't avoid overlap when several punches cluster within
-          a short window (punch markers collide with interval cards at the
-          card boundaries; back-to-back intervals abut). The list scales
-          linearly with the count, never overlaps, and surfaces category /
-          note / source / Outlook subject as primary content. Matches what
-          the admin's UserDayModal already does.
-        */}
-        <DayCalendar
-          date={date}
-          intervals={day.intervals}
-          punches={day.punches}
-          onIntervalClick={setFocusInterval}
-          onAddTagForInterval={setFocusInterval}
-          forceList
-        />
-      </section>
+              <div className="tk-day-card-head-actions">
+                <button className="tk-correction-cta" onClick={() => setEditDay(true)}>
+                  <Icon name="edit" size={13}/> Edit day
+                </button>
+                <button className="tk-correction-cta" onClick={() => setShowLeave(true)}>
+                  <Icon name="sun" size={13}/> Request leave
+                </button>
+              </div>
+            </header>
 
-      {/* Week summary */}
-      <WeekSummary
-        userId={userId}
-        weekStart={weekStart}
-        days={week.days}
-        week={week.week}
-        onChanged={refresh}
-      />
+            {/* Approved-leave band(s) for this day */}
+            {(day.leaveBlocks || []).length > 0 && (
+              <div className="tk-leave-band-wrap">
+                {day.leaveBlocks.map((lb, i) => (
+                  <div key={lb.id || i} className={`tk-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
+                    <Icon name="sun" size={13}/>
+                    <span className="tk-leave-band-label">
+                      {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · {lb.hoursPerDay}h
+                    </span>
+                    <span className="tk-leave-band-badge">approved</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/*
+              List-view across every viewport width. The absolute-positioned
+              hour rail can't avoid overlap when several punches cluster within
+              a short window (punch markers collide with interval cards at the
+              card boundaries; back-to-back intervals abut). The list scales
+              linearly with the count, never overlaps, and surfaces category /
+              note / source / Outlook subject as primary content. Matches what
+              the admin's UserDayModal already does.
+            */}
+            <DayCalendar
+              date={date}
+              intervals={day.intervals}
+              punches={day.punches}
+              onIntervalClick={setFocusInterval}
+              onAddTagForInterval={setFocusInterval}
+              forceList
+            />
+          </section>
+
+          {/* Week summary */}
+          <WeekSummary
+            userId={userId}
+            weekStart={weekStart}
+            days={week.days}
+            week={week.week}
+            onChanged={refresh}
+          />
+
+          {/* Leave balances + my requests */}
+          <MyLeaveSection reloadKey={leaveReloadKey}/>
+        </main>
+
+        <aside className="tk-timesheet-side">
+          <TeamPresenceView date={date} onDate={setDate} embedded />
+        </aside>
+      </div>
 
       {/* Modals */}
       {editDay && (
@@ -323,7 +314,6 @@ export function TimesheetTab({ focusDate = null }) {
           onSubmitted={() => setLeaveReloadKey(k => k + 1)}
         />
       )}
-      </>)}
     </div>
   );
 }
@@ -334,3 +324,8 @@ function shiftDay(date, setDate, delta) {
   setDate(d.toISOString().slice(0, 10));
 }
 
+function formatDateLabel(date) {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", {
+    weekday: "long", month: "short", day: "numeric",
+  });
+}
