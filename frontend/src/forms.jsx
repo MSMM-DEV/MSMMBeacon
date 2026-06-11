@@ -33,7 +33,7 @@ const DB_TABLES = {
 
 const TITLES = {
   potential: { title: "New potential project",  icon: "briefcase" },
-  awaiting:  { title: "New awaiting verdict",   icon: "clock"     },
+  awaiting:  { title: "New proposal",           icon: "clock"     },
   awarded:   { title: "New awarded project",    icon: "check"     },
   events:    { title: "New event",               icon: "calendar"  },
   hotleads:  { title: "New hot lead",            icon: "trend"     },
@@ -1241,7 +1241,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             marginTop: 4,
           }}>
             <Icon name="lock" size={11}/> New bids start as <strong>Pending</strong>.
-            An Admin approves the bid before it can move forward to Awaiting Verdict.
+            An Admin approves the bid before it can move forward to Proposals.
           </div>
         </>
       );

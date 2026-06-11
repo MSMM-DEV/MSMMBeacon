@@ -31,7 +31,9 @@ const SUBJECT_META = {
 // Project status → user-facing label. Mirrors how the adapters in data.js
 // stamp `status` on each adapted UI row (Potential rows leave it unset).
 const PROJECT_STATUS_LABEL = {
-  "Awaiting Verdict": "Awaiting",
+  "Proposal":         "Proposal",
+  // Legacy label — rows shaped before the Proposals rename.
+  "Awaiting Verdict": "Proposal",
   "Awarded":          "Awarded",
   "Closed Out":       "Closed Out",
 };

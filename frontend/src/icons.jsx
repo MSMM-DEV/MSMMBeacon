@@ -52,6 +52,8 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     hash:       <><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></>,
     merge:      <><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="12" r="2.6"/><path d="M6 8.6v6.8"/><path d="M8.5 6.4A7 7 0 0 0 15.4 12"/></>,
     warn:       <><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></>,
+    pause:      <><path d="M9 5v14M15 5v14"/></>,
+    play:       <><path d="M7 5l12 7-12 7V5Z"/></>,
   };
   const d = paths[name];
   return (

@@ -582,7 +582,7 @@ function adaptAwaiting(r) {
     notes: r.notes || "",
     dates: "",
     projectNumber: r.project_number || "",
-    status: "Awaiting Verdict",
+    status: "Proposal",
     dateSubmitted: r.date_submitted || "",
     anticipatedResultDate: r.anticipated_result_date || "",
     clientContract: r.client_contract_number || "",
@@ -706,6 +706,10 @@ function adaptInvoice(r) {
     // INVOICE_COL_MAP whitelist in App.jsx's updateInvoice.
     notes:       r.notes || "",
     description: r.description || "",
+    // 'active' | 'between' | 'closed' (20260611120000). Drives which Invoice
+    // sub-tab the project appears on. Missing column (un-migrated DB) reads
+    // as undefined → 'active', so everything stays on the Invoices tab.
+    billingState: r.billing_state || "active",
   };
 }
 
@@ -856,6 +860,17 @@ export function mergeInvoiceYears(rows) {
     ensure(key).push(r);
   }
 
+  // Billing-state priority — a project group surfaces its most-ACTIVE state.
+  // Transitions write the same state to every row in the group, so this is
+  // normally unanimous; the priority rule keeps partial/legacy data visible
+  // (one stray 'active' year-row keeps the project on the Invoices tab
+  // rather than silently hiding it).
+  const STATE_RANK = { active: 0, between: 1, closed: 2 };
+  const groupState = (g) => g.reduce((best, r) => {
+    const s = r.billingState || "active";
+    return STATE_RANK[s] < STATE_RANK[best] ? s : best;
+  }, "closed");
+
   const merged = [];
   for (const g of groups.values()) {
     const byYear = {};
@@ -867,9 +882,16 @@ export function mergeInvoiceYears(rows) {
     }
     const years = Object.keys(byYear).map(Number).sort((a, b) => a - b);
     const srcId = g.find(r => r.sourceId)?.sourceId || null;   // project's true id
+    // Every underlying anticipated_invoice row id in this group — byYear keeps
+    // only the best row per year, but billing-state transitions must touch ALL
+    // rows (incl. same-year duplicates) or a stray row drags the group back.
+    const groupIds = g.map(r => r.id);
     if (!years.length) {
       // Group had only year-less rows — surface one so nothing silently drops.
-      merged.push({ ...g[0], sourceId: g[0].sourceId || srcId, byYear: {}, years: [] });
+      merged.push({
+        ...g[0], sourceId: g[0].sourceId || srcId, byYear: {}, years: [],
+        groupIds, billingState: groupState(g),
+      });
       continue;
     }
     const primaryYear = years.includes(THIS_YEAR)
@@ -877,10 +899,20 @@ export function mergeInvoiceYears(rows) {
       : years.reduce((best, y) =>
           Math.abs(y - THIS_YEAR) < Math.abs(best - THIS_YEAR) ? y : best, years[0]);
     const primary = byYear[primaryYear];
-    merged.push({ ...primary, sourceId: primary.sourceId || srcId, byYear, years });
+    merged.push({
+      ...primary, sourceId: primary.sourceId || srcId, byYear, years,
+      groupIds, billingState: groupState(g),
+    });
   }
   return merged;
 }
+
+// Canonical MATCH KEY for an invoice project number (trimmed + lowercased) —
+// mirrors mergeInvoiceYears' normNum so the Awarded link chips and the
+// Invoice table agree on what "the same project" means. Display/storage keep
+// the user's original (trimmed) casing; only lookups go through this.
+export const normInvoiceNumber = (n) =>
+  (n != null && String(n).trim() !== "") ? String(n).trim().toLowerCase() : "";
 
 function adaptEvent(r) {
   return {
@@ -1532,7 +1564,7 @@ export async function loadBeacon() {
   const [
     users, clients, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
-    openBidRows, invoiceNoteRows,
+    openBidRows, invoiceNoteRows, invoiceLinkRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -1625,6 +1657,15 @@ export async function loadBeacon() {
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] invoice_notes fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    // Awarded ↔ Invoice project links (20260611120100). Keyed on the invoice
+    // PROJECT NUMBER (the merge key of the Invoice table), not an invoice row
+    // id. Own graceful-degrade query so an un-migrated DB just shows no links.
+    supabase.from("project_invoice_links")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] project_invoice_links fetch skipped:", error.message); return []; }
         return data || [];
       }),
   ]);
@@ -1847,10 +1888,22 @@ export async function loadBeacon() {
     if (entries.length > 0) subInvoicesMatrix.set(p.id, entries);
   }
 
+  // Group the awarded↔invoice links per project. Annotated onto each awarded
+  // row as `invoiceLinks: string[]` (invoice project numbers, insertion order).
+  const linksByProject = new Map();
+  for (const l of (invoiceLinkRows || [])) {
+    const arr = linksByProject.get(l.project_id) || [];
+    arr.push(l.project_number);
+    linksByProject.set(l.project_id, arr);
+  }
+
   return {
     potential: potential.map(adaptPotential),
     awaiting:  awaiting.map(adaptAwaiting),
-    awarded:   awarded.map(adaptAwarded),
+    awarded:   awarded.map(adaptAwarded).map(r => ({
+      ...r,
+      invoiceLinks: linksByProject.get(r.id) || [],
+    })),
     closed:    closed.map(adaptClosed),
     invoices:  adaptedInvoices,
     events:    events.map(adaptEvent),
@@ -3803,8 +3856,8 @@ export async function setOpenBidApproval(id, status) {
   return adaptOpenBid(data);
 }
 
-// Link an open_bid to the freshly-created Awaiting Verdict project. Called
-// from confirmMove after the projects insert succeeds — keeps the
+// Link an open_bid to the freshly-created Proposals (awaiting) project.
+// Called from confirmMove after the projects insert succeeds — keeps the
 // historical breadcrumb intact (open_bid row stays, points forward).
 export async function markOpenBidMovedForward(id, projectId) {
   const { error } = await supabase
@@ -3812,6 +3865,37 @@ export async function markOpenBidMovedForward(id, projectId) {
     .update({ moved_to_project_id: projectId })
     .eq("id", id);
   if (error) throw new Error(`open_bids forward-link: ${error.message}`);
+}
+
+// ----------------------------------------------------------------------
+// Awarded ↔ Invoice project links (beacon_v2.project_invoice_links).
+// One awarded project ↔ many invoice project numbers. The number (trimmed,
+// original casing) is stored; matching elsewhere goes through
+// normInvoiceNumber. Both calls are idempotent at the UI level — duplicate
+// insert (23505) reads as "already linked", missing delete is a no-op.
+// ----------------------------------------------------------------------
+export async function addProjectInvoiceLink(projectId, projectNumber) {
+  const num = String(projectNumber ?? "").trim();
+  if (!projectId || !num) throw new Error("addProjectInvoiceLink requires projectId + projectNumber");
+  const { error } = await supabase
+    .from("project_invoice_links")
+    .insert({ project_id: projectId, project_number: num });
+  if (error) {
+    if (error.code === "23505") return { existed: true };   // already linked
+    throw new Error(`project_invoice_links insert: ${error.message}`);
+  }
+  return { existed: false };
+}
+
+export async function removeProjectInvoiceLink(projectId, projectNumber) {
+  const num = String(projectNumber ?? "").trim();
+  if (!projectId || !num) return;
+  const { error } = await supabase
+    .from("project_invoice_links")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("project_number", num);
+  if (error) throw new Error(`project_invoice_links delete: ${error.message}`);
 }
 
 // ----- Storage: bid-rfqs bucket -----

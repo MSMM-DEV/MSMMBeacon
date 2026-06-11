@@ -74,6 +74,8 @@ export const RoleChip = ({ role }) => {
 export const StatusChip = ({ status }) => {
   const map = {
     "Potential":        { cls: "muted",   dot: "awaiting" },
+    "Proposal":         { cls: "accent",  dot: "awaiting" },
+    // Legacy label — rows shaped before the Proposals rename still carry it.
     "Awaiting Verdict": { cls: "accent",  dot: "awaiting" },
     "Awarded":          { cls: "sage",    dot: "awarded" },
     "Closed Out":       { cls: "rose",    dot: "closed" },

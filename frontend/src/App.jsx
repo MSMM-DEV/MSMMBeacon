@@ -40,6 +40,7 @@ import {
   createOpenBid, updateOpenBid as updateOpenBidDb, deleteOpenBid as deleteOpenBidDb,
   setOpenBidApproval, markOpenBidMovedForward,
   uploadOpenBidPdf, deleteOpenBidPdf, getOpenBidPdfSignedUrl,
+  normInvoiceNumber, addProjectInvoiceLink, removeProjectInvoiceLink,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -55,35 +56,73 @@ const countRefs = (id) => {
 // linkedProjectsFor moved to data.js so both the Directory drawer (panels.jsx)
 // and the inline expand row (DirectoryTable in tables.jsx) can use it.
 
-// Display order differs from the move-forward flow: Invoice is shown first
-// because it's what leadership looks at most. The actual pipeline (Potential
-// → Awaiting Verdict → Awarded / Closed Out) keeps its → arrows; the Invoice
-// tab sits in its own "head" group separated by a gap so no arrow implies
-// a bogus Invoice → Potential flow.
+// 2026-06 IA: the rail shows GROUPED pages; several tab keys live inside one
+// navbar entry and switch via an in-page sub-tab strip. The underlying tab
+// keys are unchanged (deep links like ?tab=awaiting / ?tab=closed from old
+// alert emails keep working) — only the navigation chrome is grouped:
+//   Leads & Bids        = hotleads · openbids
+//   Proposals & Awarded = awaiting (renamed "Proposals") · awarded
+//   Invoice             = invoice (active billing) · between (paused) · closed
+// TAB_META stays the registry of every valid tab key (deep-link validation).
 const TAB_META = [
-  { key: "openbids",  label: "Open Bids",        stage: "stage-openbids",  group: "pipeline" },
-  { key: "awaiting",  label: "Awaiting Verdict", stage: "stage-awaiting",  group: "pipeline" },
-  { key: "awarded",   label: "Awarded",          stage: "stage-awarded",   group: "pipeline" },
-  { key: "closed",    label: "Closed Out",       stage: "stage-closed",    group: "pipeline" },
-  { key: "potential", label: "Potential",        stage: "stage-potential", group: "pipeline" },
-  { key: "invoice",   label: "Invoice",          stage: "stage-invoice",   group: "pipeline" },
-  // SOQ was removed entirely in beacon_v2 (no table, no data).
-  { key: "hotleads",  label: "Hot Leads",        stage: "stage-events",    group: "side" },
-  { key: "events",    label: "Events & Other",   stage: "stage-events",    group: "side" },
-  { key: "directory", label: "Directory",        stage: "stage-clients",   group: "side" },
-  { key: "licenses",  label: "Licenses",         stage: "stage-events",    group: "side" },
-  { key: "timesheet", label: "Timesheet",        stage: "stage-events",    group: "side" },
-  { key: "time-admin",label: "Time Admin",       stage: "stage-events",    group: "side", adminOnly: true },
-  { key: "team-cal",  label: "Team Calendar",    stage: "stage-events",    group: "side" },
+  { key: "hotleads",  label: "Hot Leads",     stage: "stage-events"    },
+  { key: "openbids",  label: "Open Bids",     stage: "stage-openbids"  },
+  { key: "awaiting",  label: "Proposals",     stage: "stage-awaiting"  },
+  { key: "awarded",   label: "Awarded",       stage: "stage-awarded"   },
+  { key: "potential", label: "Potential",     stage: "stage-potential" },
+  { key: "invoice",   label: "Invoices",      stage: "stage-invoice"   },
+  { key: "between",   label: "In-Between",    stage: "stage-invoice"   },
+  { key: "closed",    label: "Closed Out",    stage: "stage-closed"    },
+  { key: "events",    label: "Events & Other",stage: "stage-events"    },
+  { key: "directory", label: "Directory",     stage: "stage-clients"   },
+  { key: "licenses",  label: "Licenses",      stage: "stage-events"    },
+  { key: "timesheet", label: "Timesheet",     stage: "stage-events"    },
+  { key: "time-admin",label: "Time Admin",    stage: "stage-events", adminOnly: true },
+  { key: "team-cal",  label: "Team Calendar", stage: "stage-events"    },
 ];
 
+// One entry per navbar pill. `tabs` lists the member tab keys in sub-tab
+// order; a single-tab group renders with no sub-tab strip. Pipeline groups
+// keep the → arrows between them.
+const NAV_GROUPS = [
+  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids"] },
+  { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded"] },
+  { key: "potential", label: "Potential",           stage: "stage-potential", group: "pipeline", tabs: ["potential"] },
+  { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "pipeline", tabs: ["invoice", "between", "closed"] },
+  { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "side", tabs: ["events"] },
+  { key: "directory", label: "Directory",           stage: "stage-clients",   group: "side", tabs: ["directory"] },
+  { key: "licenses",  label: "Licenses",            stage: "stage-events",    group: "side", tabs: ["licenses"] },
+  { key: "timesheet", label: "Timesheet",           stage: "stage-events",    group: "side", tabs: ["timesheet"] },
+  { key: "time-admin",label: "Time Admin",          stage: "stage-events",    group: "side", tabs: ["time-admin"], adminOnly: true },
+  { key: "team-cal",  label: "Team Calendar",       stage: "stage-events",    group: "side", tabs: ["team-cal"] },
+];
+const navGroupOf = (tabKey) => NAV_GROUPS.find(g => g.tabs.includes(tabKey));
+
+// Sub-tab strip definitions for the multi-tab groups.
+const SUB_TABS = {
+  leads: [
+    { key: "hotleads", label: "Hot Leads", icon: "trend" },
+    { key: "openbids", label: "Open Bids", icon: "flag"  },
+  ],
+  proposals: [
+    { key: "awaiting", label: "Proposals", icon: "clock" },
+    { key: "awarded",  label: "Awarded",   icon: "check" },
+  ],
+  invoice: [
+    { key: "invoice", label: "Invoices",   icon: "trend" },
+    { key: "between", label: "In-Between", icon: "pause" },
+    { key: "closed",  label: "Closed Out", icon: "x"     },
+  ],
+};
+
 const PAGE_META = {
-  openbids:  { title: "Open Bids", desc: "RFQ/RFPs under evaluation. Admins approve a bid before it can be moved forward to Awaiting Verdict." },
+  openbids:  { title: "Open Bids", desc: "RFQ/RFPs under evaluation. Admins approve a bid before it can be moved forward to Proposals." },
   potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
-  awaiting:  { title: "Awaiting Verdict", desc: "Entry point for submitted proposals. Add here, then mark as Awarded or Closed Out when the verdict lands." },
-  awarded:   { title: "Awarded Projects", desc: "Won contracts. Move to Potential to track as a billing candidate, or directly to Invoice when billing starts." },
-  closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements." },
+  awaiting:  { title: "Proposals", desc: "Submitted proposals awaiting a verdict. Add here, then mark as Awarded or Closed Out when the verdict lands." },
+  awarded:   { title: "Awarded Projects", desc: "Won contracts. Attach invoice projects by number, track capacity, or move forward when billing starts." },
+  closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements — billing history is kept." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
+  between:   { title: "In-Between", desc: "Paused projects. Every dollar, sub, attachment, and note stays intact — resume to Invoices or close out." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
@@ -226,18 +265,8 @@ const FILTER_CHIPS = {
 // ======================================================================
 // Labels MUST match the table column labels in tables.jsx so the export can
 // map the user's visible/ordered columns onto these export defs by label.
-// Awarded view-toggle buckets. Each row is placed by its `stage`:
-//   "single" → "Single Use Contract (Project)"
-//   "multi"  → "Multi-Use Contract" | "AE Selected List"
-//   "others" → everything else (design/construction stages, NULL, untagged)
-// Used in both the awarded tab render (partition) and updateAwarded (toast
-// when a stage edit moves the row out of the active view).
-const AWARDED_BUCKETS = { single: "Single-Use", multi: "Multi/List", others: "Others" };
-const awardedBucketOf = (stage) => {
-  if (stage === "Single Use Contract (Project)") return "single";
-  if (stage === "Multi-Use Contract" || stage === "AE Selected List") return "multi";
-  return "others";
-};
+// (The Awarded single/multi/others view buckets were removed in the 2026-06
+// IA restructure — the Awarded sub-tab shows one table.)
 
 // Approval-state pretty-print for the Open Bids export.
 const _approvalLabel = (r) => {
@@ -289,7 +318,7 @@ const EXPORT_COLUMNS = {
     { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
     { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
-    { label: "Status",            wMm: 28,  get: r => r.status || "Awaiting Verdict" },
+    { label: "Status",            wMm: 28,  get: r => r.status || "Proposal" },
     { label: "MSMM Used",         wMm: 24,  get: r => fmtMoney(r.msmmUsed) },
     { label: "Notes",                       get: r => r.notes || "" },
   ],
@@ -304,7 +333,7 @@ const EXPORT_COLUMNS = {
     { label: "Remaining",         wMm: 24,  get: r => fmtMoney(r.msmmRemaining) },
     { label: "Expiry",            wMm: 22,  get: r => fmtDate(r.contractExpiry) },
     { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
-    { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
+    { label: "Proj #",            wMm: 26,  get: r => (r.invoiceLinks && r.invoiceLinks.length) ? r.invoiceLinks.join(", ") : (r.projectNumber || "") },
     { label: "Role",              wMm: 18,  get: r => r.role || "" },
     { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
     { label: "Submitted",         wMm: 22,  get: r => fmtDate(r.dateSubmitted) },
@@ -408,6 +437,8 @@ const EXPORT_COLUMNS = {
     { label: "Projects",          wMm: 20,  get: r => countRefs(r.id) },
   ],
 };
+// The In-Between tab is the same table shape as Invoices — share its defs.
+EXPORT_COLUMNS.between = EXPORT_COLUMNS.invoice;
 
 // DB row → UI row adapter for newly-inserted rows from CreateModal
 function adaptInsertedRow(table, dbRow, extras = {}) {
@@ -445,7 +476,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       notes: dbRow.notes || "",
       dates: "",
       projectNumber: dbRow.project_number || "",
-      status: "Awaiting Verdict",
+      status: "Proposal",
       dateSubmitted: dbRow.date_submitted || "",
       anticipatedResultDate: dbRow.anticipated_result_date || "",
       clientContract: dbRow.client_contract_number || "",
@@ -926,10 +957,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try { return localStorage.getItem("beacon.eventsViewMode") || "list"; }
     catch { return "list"; }
   });
-  const [awardedViewMode, setAwardedViewModeState] = useState(() => {
-    try { return localStorage.getItem("beacon.awardedViewMode") || "single"; }
-    catch { return "single"; }
-  });
   const [calendarViewMode, setCalendarViewModeState] = useState(() => {
     try { return localStorage.getItem("beacon.calendarViewMode") || "month"; }
     catch { return "month"; }
@@ -938,10 +965,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const setEventsViewMode = (v) => {
     setEventsViewModeState(v);
     try { localStorage.setItem("beacon.eventsViewMode", v); } catch {}
-  };
-  const setAwardedViewMode = (v) => {
-    setAwardedViewModeState(v);
-    try { localStorage.setItem("beacon.awardedViewMode", v); } catch {}
   };
   const setCalendarViewMode = (v) => {
     setCalendarViewModeState(v);
@@ -1234,15 +1257,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
         "project_pms", "project_id");
-    }
-    if ("stage" in patch && patch.stage !== existing.stage) {
-      const from = awardedBucketOf(existing.stage);
-      const to   = awardedBucketOf(patch.stage);
-      if (from !== to && awardedViewMode === from) {
-        showToast(`Moved to ${AWARDED_BUCKETS[to]}`, "forward", {
-          action: { label: "View", onClick: () => setAwardedViewMode(to) },
-        });
-      }
     }
   };
 
@@ -2193,13 +2207,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!pendingFocusRowId) return;
     const rowsByTab = {
       potential, awaiting, awarded, closed,
-      invoice, events, hotleads: hotLeads,
+      invoice, between: invoice, events, hotleads: hotLeads,
       directory: [...clients, ...companies],
     };
     const rows = rowsByTab[tab] || [];
     const match = rows.find(r => r.id === pendingFocusRowId);
     if (match) {
-      openDrawer(match, tab);
+      // Invoice rows live behind two sub-tabs now — land on the one the
+      // project is actually visible on (old alert deep links say ?tab=invoice
+      // even for a project that has since been paused).
+      if ((tab === "invoice" || tab === "between")) {
+        const wantTab = match.billingState === "between" ? "between" : "invoice";
+        if (wantTab !== tab) setTab(wantTab);
+        openDrawer(match, "invoice");
+      } else {
+        openDrawer(match, tab);
+      }
       setPendingFocusRowId(null);
     }
   }, [pendingFocusRowId, tab, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
@@ -2245,18 +2268,130 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     });
   };
 
-  // Pipeline transitions. New flow (2026-04):
-  //   Awaiting Verdict → Awarded (MOVE: row leaves Awaiting, appears in Awarded)
-  //   Awaiting Verdict → Closed Out (MOVE)
+  // ----------------------------------------------------------------------
+  // Invoice billing-state transitions (2026-06 IA): a project's invoice rows
+  // carry billing_state ∈ active | between | closed. Pause/resume flip the
+  // state on EVERY row in the merged group (groupIds — all years + dupes);
+  // close-out keeps the rows (state='closed') instead of deleting them.
+  // ----------------------------------------------------------------------
+  // Resolve EVERY anticipated_invoice row id in a project's merged group.
+  // Merged rows carry groupIds; raw year-rows (e.g. the DetailDrawer's
+  // liveRow, which is looked up in the unmerged invoice slice) don't — for
+  // those, re-derive the group by lineage / normalized number + type so a
+  // transition never strands a sibling year-row in the old state.
+  const invoiceGroupIdsFor = (row) => {
+    if (row.groupIds && row.groupIds.length) return row.groupIds;
+    const key = normInvoiceNumber(row.projectNumber);
+    const t = row.type || "ENG";
+    const matches = invoice.filter(r =>
+      r.id === row.id ||
+      ((r.type || "ENG") === t && (
+        (row.sourceId && r.sourceId === row.sourceId) ||
+        (key && normInvoiceNumber(r.projectNumber) === key)
+      )));
+    return matches.length ? matches.map(r => r.id) : [row.id];
+  };
+
+  const setInvoiceBillingState = async (row, state, successMsg, successIcon = "check") => {
+    const ids = invoiceGroupIdsFor(row);
+    const prevState = row.billingState || "active";
+    setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: state } : r));
+    const { error } = await supabase
+      .from("anticipated_invoice")
+      .update({ billing_state: state })
+      .in("id", ids);
+    if (error) {
+      setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: prevState } : r));
+      showToast(`Move failed: ${error.message} — apply migration 20260611120000 if billing_state is missing.`, "x");
+      return false;
+    }
+    if (successMsg) showToast(successMsg, successIcon);
+    return true;
+  };
+  const pauseInvoiceProject = (r) =>
+    setInvoiceBillingState(r, "between", `${r.name || "Project"} → In-Between · resume any time`, "pause");
+  const resumeInvoiceProject = (r) =>
+    setInvoiceBillingState(r, "active", `${r.name || "Project"} resumed → Invoices`, "play");
+
+  // Every invoice row belonging to a project — by lineage (sourceId) or by
+  // matching project number — scoped to one invoice type (ENG/PM groups are
+  // separate projects in the Invoice table).
+  const findInvoiceGroupForProject = (projectRow, invType) =>
+    invoice.filter(r =>
+      (r.sourceId === projectRow.id ||
+        (projectRow.projectNumber &&
+         normInvoiceNumber(r.projectNumber) === normInvoiceNumber(projectRow.projectNumber)))
+      && (r.type || "ENG") === (invType || "ENG"));
+
+  // ----------------------------------------------------------------------
+  // Awarded ↔ Invoice links (project_invoice_links). Optimistic local update
+  // on the awarded slice + best-effort persist; 23505 reads as "already".
+  // ----------------------------------------------------------------------
+  const addInvoiceLink = async (row, number) => {
+    const num = String(number || "").trim();
+    if (!num) return;
+    if ((row.invoiceLinks || []).some(n => normInvoiceNumber(n) === normInvoiceNumber(num))) {
+      showToast(`${num} is already linked`, "check");
+      return;
+    }
+    setAwarded(rs => rs.map(r => r.id === row.id
+      ? { ...r, invoiceLinks: [...(r.invoiceLinks || []), num] } : r));
+    try {
+      await addProjectInvoiceLink(row.id, num);
+      showToast(`Linked invoice project ${num}`, "link");
+    } catch (e) {
+      setAwarded(rs => rs.map(r => r.id === row.id
+        ? { ...r, invoiceLinks: (r.invoiceLinks || []).filter(n => n !== num) } : r));
+      showToast(`Link failed: ${e.message || e} — apply migration 20260611120100 if the links table is missing.`, "x");
+    }
+  };
+  const removeInvoiceLink = async (row, number) => {
+    const prev = row.invoiceLinks || [];
+    setAwarded(rs => rs.map(r => r.id === row.id
+      ? { ...r, invoiceLinks: prev.filter(n => n !== number) } : r));
+    try {
+      await removeProjectInvoiceLink(row.id, number);
+      showToast(`Unlinked ${number}`);
+    } catch (e) {
+      setAwarded(rs => rs.map(r => r.id === row.id ? { ...r, invoiceLinks: prev } : r));
+      showToast(`Unlink failed: ${e.message || e}`, "x");
+    }
+  };
+  // Jump from an awarded row's project card to the invoice project itself —
+  // landing on whichever sub-tab the project currently lives on.
+  const openInvoiceProject = (inv) => {
+    const state = inv.billingState || "active";
+    if (state === "closed") {
+      const proj = inv.sourceId ? closed.find(p => p.id === inv.sourceId) : null;
+      setTab("closed");
+      if (proj) setDrawer({ row: proj, table: "closed" });
+      else showToast("This project is closed out — its billing rows are archived.", "check");
+      return;
+    }
+    setDrawer(null);
+    setTab(state === "between" ? "between" : "invoice");
+    setFlashId(inv.id);
+    setTimeout(() => setFlashId(null), 1600);
+  };
+
+  // Pipeline transitions. Flow (2026-06 IA):
+  //   Proposals (awaiting) → Awarded (MOVE: row leaves Proposals, appears in Awarded)
+  //   Proposals (awaiting) → Closed Out (MOVE)
   //   Awarded → Potential (COPY: Awarded stays as historical log; Potential
   //                        gets a new row representing it as a billing candidate)
-  //   Awarded → Invoice  (COPY: Awarded stays; new Invoice row spawned)
+  //   Awarded → Invoice  (COPY: Awarded stays; the project's invoice rows are
+  //                        REVIVED if they exist (billing_state → active),
+  //                        else a new anticipated_invoice row is inserted —
+  //                        and the awarded row auto-links to the number)
   //   Potential → Invoice (COPY: Potential stays as a pipeline tracker;
   //                        new Invoice row spawned)
-  //   Invoice → Closed (PERSIST: project status flips to closed_out, invoice deleted)
+  //   Invoice / In-Between → Closed (PERSIST: project status flips to
+  //                        closed_out; invoice rows KEEP their data with
+  //                        billing_state='closed' — nothing is deleted)
+  //   Invoice ⇄ In-Between (billing_state flip via pause/resume above)
   //   Closed → Awaiting / Awarded / Invoice (PERSIST: reopens a closed-out
-  //                        project; flips status back, optionally re-spawns
-  //                        an anticipated_invoice row)
+  //                        project; flips status back; closed→invoice revives
+  //                        the archived invoice rows when they exist)
   // Orange-probability Potentials still auto-spawn an Invoice row at create
   // time (special-case shortcut — see handleCreated() below).
   const confirmMove = (newData) => {
@@ -2286,23 +2421,114 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       offerUndo("Tracked as Potential billing candidate", snap, null);
       setTab("potential");
     } else if (from === "awarded" && to === "invoice") {
-      // COPY: Awarded stays; mint an Invoice row with Awarded-carried fields.
+      // COPY: Awarded stays. If the project already has invoice rows (e.g.
+      // it was paused or closed out earlier), REVIVE them — flipping
+      // billing_state back to 'active' — instead of inserting a duplicate
+      // (which would also trip the (source_project_id, year) unique index).
+      // Otherwise insert + persist a fresh anticipated_invoice row. Either
+      // way, auto-link the awarded row to the invoice project number.
       const { _invoiceType, ...rest } = newRow;
-      const invRow = {
-        id: rest.id, sourceId: row.id,
-        projectNumber: rest.projectNumber, name: rest.name,
-        pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
-        msmmAmount: null,                       // auto-calc by default
-        msmmValues: Array(12).fill(null),       // auto-calc per month
-        type: _invoiceType || "ENG",
-        remainingStart: rest.msmmRemaining || 0,
-        values: Array(12).fill(0),
-        year: rest.year,                        // keep shape consistent w/ other paths
+      const invType = _invoiceType || "ENG";
+      const existingGroup = findInvoiceGroupForProject(row, invType);
+      const autoLink = (num) => {
+        const n = String(num || "").trim();
+        if (!n) return;
+        if ((row.invoiceLinks || []).some(x => normInvoiceNumber(x) === normInvoiceNumber(n))) return;
+        setAwarded(rs => rs.map(r => r.id === row.id
+          ? { ...r, invoiceLinks: [...(r.invoiceLinks || []), n] } : r));
+        addProjectInvoiceLink(row.id, n).catch(() => { /* links table optional */ });
       };
-      setInvoice(rs => [invRow, ...rs]);
-      setFlashId(invRow.id);
-      offerUndo("Invoice row created from Awarded project", snap, null);
-      setTab("invoice");
+
+      if (existingGroup.length > 0) {
+        const anyActive = existingGroup.some(r => (r.billingState || "active") === "active");
+        const target = existingGroup[0];
+        if (anyActive) {
+          showToast("Already in the Invoice table — jumping to it.", "check");
+        }
+        autoLink(target.projectNumber || rest.projectNumber);
+        if (!anyActive) {
+          const prevState = target.billingState || "closed";
+          const ids = existingGroup.map(r => r.id);
+          setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: "active" } : r));
+          (async () => {
+            const { error } = await supabase
+              .from("anticipated_invoice")
+              .update({ billing_state: "active" })
+              .in("id", ids);
+            if (error) {
+              restorePipelineSnapshot(snap);
+              showToast(`Move failed: ${error.message}`, "x");
+              return;
+            }
+            offerUndo("Invoice rows revived from Awarded project", snap, async () => {
+              const { error: revErr } = await supabase
+                .from("anticipated_invoice")
+                .update({ billing_state: prevState })
+                .in("id", ids);
+              if (revErr) throw revErr;
+            });
+          })();
+        }
+        setFlashId(target.id);
+        setTab("invoice");
+      } else {
+        const invRow = {
+          id: rest.id, sourceId: row.id,
+          projectNumber: rest.projectNumber, name: rest.name,
+          pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
+          msmmAmount: null,                       // auto-calc by default
+          msmmValues: Array(12).fill(null),       // auto-calc per month
+          type: invType,
+          remainingStart: rest.msmmRemaining || 0,
+          values: Array(12).fill(0),
+          year: rest.year,                        // keep shape consistent w/ other paths
+          ytdActualOverride: null,
+          rollforwardOverride: null,
+          billingState: "active",
+          primeFiles: Array.from({ length: 12 }, () => []),
+          partyFiles: { msmm: [], prime: {}, sub: {} },
+          notesLog: [],
+        };
+        const prevInvoice = invoice;
+        setInvoice(rs => [invRow, ...rs]);
+        setFlashId(invRow.id);
+        setTab("invoice");
+        (async () => {
+          try {
+            const { data: invData, error: invErr } = await supabase
+              .from("anticipated_invoice").insert({
+                source_project_id: row.id,
+                project_name: rest.name,
+                project_number: rest.projectNumber || null,
+                year: rest.year ?? THIS_YEAR,
+                contract_amount: rest.amount ?? null,
+                // MSMM portion stays NULL → auto-calc in the expand row.
+                type: invType,
+                msmm_remaining_to_bill_year_start: rest.msmmRemaining ?? null,
+              }).select().single();
+            if (invErr) throw invErr;
+            if ((rest.pmIds || []).length > 0) {
+              const { error: pmErr } = await supabase
+                .from("anticipated_invoice_pms")
+                .insert(rest.pmIds.map(uid => ({
+                  anticipated_invoice_id: invData.id, user_id: uid,
+                })));
+              if (pmErr) throw pmErr;
+            }
+            // Replace the temp local id with the DB id so future edits hit it.
+            setInvoice(rs => rs.map(r => r.id === invRow.id ? { ...r, id: invData.id } : r));
+            autoLink(rest.projectNumber);
+            offerUndo("Invoice row created from Awarded project", snap, async () => {
+              const { error: delErr } = await supabase
+                .from("anticipated_invoice").delete().eq("id", invData.id);
+              if (delErr) throw delErr;
+            });
+          } catch (e) {
+            setInvoice(prevInvoice);
+            showToast(`Move failed: ${e.message || e}`, "x");
+          }
+        })();
+      }
     } else if (from === "potential" && to === "invoice") {
       // MOVE: Potential row leaves; Invoice row lands. The invoice row
       // persists to anticipated_invoice with source_project_id pointing back
@@ -2401,12 +2627,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         }
       })();
     } else if (from === "invoice" && to === "closed") {
-      // The invoice row is removed from anticipated_invoice. The upstream
-      // project (if any) flips status='closed_out' with date_closed and
-      // reason_for_closure set; stage-specific fields disallowed on
-      // closed_out are nulled to satisfy the projects_*_only_on_* check
-      // constraints. If the invoice has no upstream project, a fresh
-      // closed_out row is minted. Local state mirrors the DB.
+      // Close-out KEEPS the billing history: every anticipated_invoice row in
+      // the project's merged group flips billing_state='closed' (months,
+      // attachments, subs, and notes all survive — they're just hidden from
+      // the Invoices / In-Between tabs). The upstream project (if any) flips
+      // status='closed_out' with date_closed and reason_for_closure set;
+      // stage-specific fields disallowed on closed_out are nulled to satisfy
+      // the projects_*_only_on_* check constraints. If the invoice has no
+      // upstream project, a fresh closed_out row is minted. Local state
+      // mirrors the DB. Reached from BOTH the Invoices and In-Between tabs.
       const sourceId = row.sourceId;
       const sourceRow = sourceId
         ? (awarded.find(r => r.id === sourceId)
@@ -2414,14 +2643,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
            || awaiting.find(r => r.id === sourceId)
            || closed.find(r => r.id === sourceId))
         : null;
+      const groupIds = invoiceGroupIdsFor(row);
+      const prevBillingState = row.billingState || "active";
       const prevInvoice = invoice;
       const prevPotential = potential;
       const prevAwaiting = awaiting;
       const prevAwarded = awarded;
       const prevClosed = closed;
-      // Optimistic: remove the invoice + drop the source from any upstream
-      // slice; landed-closed entry is added below once we know its id.
-      setInvoice(rs => rs.filter(r => r.id !== row.id));
+      // Optimistic: archive the invoice rows + drop the source from any
+      // upstream slice; landed-closed entry is added below once we know its id.
+      setInvoice(rs => rs.map(r => groupIds.includes(r.id) ? { ...r, billingState: "closed" } : r));
       if (sourceId) {
         setPotential(rs => rs.filter(r => r.id !== sourceId));
         setAwaiting(rs => rs.filter(r => r.id !== sourceId));
@@ -2463,7 +2694,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             }
           }
           const { error: invErr } = await supabase
-            .from("anticipated_invoice").delete().eq("id", row.id);
+            .from("anticipated_invoice")
+            .update({ billing_state: "closed" })
+            .in("id", groupIds);
           if (invErr) throw invErr;
           const closedRow = {
             id: closedId,
@@ -2490,12 +2723,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             return [closedRow, ...filtered];
           });
           setFlashId(closedId);
-          // Undo: restore the previous project status + re-insert the
-          // anticipated_invoice row. We capture the source row's status
-          // (was 'awarded'/'potential'/'awaiting') so we can flip back to
-          // exactly what it was. If the invoice had no upstream project
-          // (closedId was minted), undoing deletes the freshly-created
-          // closed_out project entirely.
+          // Undo: restore the previous project status + flip the invoice
+          // rows' billing_state back to what it was (active or between). We
+          // capture the source row's status (was 'awarded'/'potential'/
+          // 'awaiting') so we can flip back to exactly what it was. If the
+          // invoice had no upstream project (closedId was minted), undoing
+          // deletes the freshly-created closed_out project entirely.
           const wasMintedClosed = !sourceId;
           const restoreStatus =
             sourceRow ? (
@@ -2534,32 +2767,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 }).eq("id", sourceId);
                 if (error) throw error;
               }
-              // Recreate the anticipated_invoice row with its original id so
-              // the snapshot's invoice list lines up after the restore.
+              // Un-archive the invoice rows — the data never left.
               const { error: invErr2 } = await supabase
-                .from("anticipated_invoice").insert({
-                  id: row.id,
-                  source_project_id: sourceId || null,
-                  project_name: row.name,
-                  project_number: row.projectNumber || null,
-                  year: row.year ?? null,
-                  contract_amount: row.amount ?? null,
-                  // Preserve any prior MSMM override (NULL ⟹ auto-calc).
-                  msmm_amount: row.msmmAmount ?? null,
-                  type: row.type || "ENG",
-                  msmm_remaining_to_bill_year_start: row.remainingStart ?? null,
-                  ytd_actual_override: row.ytdActualOverride ?? null,
-                  rollforward_override: row.rollforwardOverride ?? null,
-                });
+                .from("anticipated_invoice")
+                .update({ billing_state: prevBillingState })
+                .in("id", groupIds);
               if (invErr2) throw invErr2;
-              if ((row.pmIds || []).length > 0) {
-                const { error: pmErr } = await supabase
-                  .from("anticipated_invoice_pms")
-                  .insert(row.pmIds.map(uid => ({
-                    anticipated_invoice_id: row.id, user_id: uid,
-                  })));
-                if (pmErr) throw pmErr;
-              }
             }
           );
         } catch (e) {
@@ -2582,7 +2795,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         ...row,
         ...newData,
         id: row.id,                              // same DB id
-        status: to === "awaiting" ? "Awaiting Verdict" : "Awarded",
+        status: to === "awaiting" ? "Proposal" : "Awarded",
         dateClosed: "",
         reason: "",
       };
@@ -2614,7 +2827,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           if (error) throw error;
           offerUndo(
             to === "awaiting"
-              ? "Reopened to Awaiting Verdict"
+              ? "Reopened to Proposals"
               : "Reopened to Awarded",
             snap,
             async () => {
@@ -2637,13 +2850,74 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         }
       })();
     } else if (from === "closed" && to === "invoice") {
-      // Reopen as Active: project status flips back to 'awarded' AND a fresh
-      // anticipated_invoice row is spawned with the carried fields. The
-      // project re-appears in the Awarded tab too (consistent with how
-      // awarded → invoice keeps the source visible).
+      // Reopen as Active: project status flips back to 'awarded'. If the
+      // project's invoice rows still exist (close-out keeps them archived
+      // with billing_state='closed'), REVIVE them — every month amount,
+      // attachment, and note returns exactly as it was. Only when no rows
+      // exist (e.g. closed before the billing_state era and the rows were
+      // deleted) is a fresh anticipated_invoice row spawned. The project
+      // re-appears in the Awarded tab too (consistent with how awarded →
+      // invoice keeps the source visible).
       const invType  = newData._invoiceType || "ENG";
       const invAmt   = Number(newData._amount) || null;
       const invRem   = Number(newData._remaining) || null;
+      const reopenedAwarded = {
+        ...row,
+        id: row.id,
+        status: "Awarded",
+        dateClosed: "",
+        reason: "",
+        stage: "Multi-Use Contract",
+      };
+      const existingGroup = findInvoiceGroupForProject(row, invType);
+      if (existingGroup.length > 0) {
+        // ---- Revive path: un-archive the project's invoice rows. ----
+        const ids = existingGroup.map(r => r.id);
+        setClosed(rs => rs.filter(r => r.id !== row.id));
+        setAwarded(rs => [reopenedAwarded, ...rs]);
+        setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: "active" } : r));
+        setFlashId(existingGroup[0].id);
+        setTab("invoice");
+        (async () => {
+          try {
+            const { error: upErr } = await supabase.from("projects").update({
+              status: "awarded",
+              date_closed: null,
+              reason_for_closure: null,
+            }).eq("id", row.id);
+            if (upErr) throw upErr;
+            const { error: invErr } = await supabase
+              .from("anticipated_invoice")
+              .update({ billing_state: "active" })
+              .in("id", ids);
+            if (invErr) throw invErr;
+            offerUndo(
+              "Reopened as Active · billing history revived",
+              snap,
+              async () => {
+                const { error: revInvErr } = await supabase
+                  .from("anticipated_invoice")
+                  .update({ billing_state: "closed" })
+                  .in("id", ids);
+                if (revInvErr) throw revInvErr;
+                const { error: revErr } = await supabase.from("projects").update({
+                  status: "closed_out",
+                  date_closed: row.dateClosed || null,
+                  reason_for_closure: row.reason || null,
+                }).eq("id", row.id);
+                if (revErr) throw revErr;
+              }
+            );
+          } catch (e) {
+            restorePipelineSnapshot(snap);
+            showToast(`Reopen failed: ${e.message || e}`, "x");
+          }
+        })();
+        setMoving(null);
+        setTimeout(() => setFlashId(null), 1500);
+        return;
+      }
+      // ---- Spawn path: no archived rows — mint a fresh invoice row. ----
       // Local invoice row uses a temp id; replaced once we have the DB id.
       const tempInvId = mkId();
       const invRow = {
@@ -2661,14 +2935,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         year: row.year,
         ytdActualOverride: null,
         rollforwardOverride: null,
-      };
-      const reopenedAwarded = {
-        ...row,
-        id: row.id,
-        status: "Awarded",
-        dateClosed: "",
-        reason: "",
-        stage: "Multi-Use Contract",
+        billingState: "active",
+        primeFiles: Array.from({ length: 12 }, () => []),
+        partyFiles: { msmm: [], prime: {}, sub: {} },
+        notesLog: [],
       };
       setClosed(rs => rs.filter(r => r.id !== row.id));
       setAwarded(rs => [reopenedAwarded, ...rs]);
@@ -2732,7 +3002,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         }
       })();
     } else if (from === "openbids" && to === "awaiting") {
-      // Open Bid → Awaiting Verdict: MOVE-like semantics but the open_bids
+      // Open Bid → Proposals (awaiting): MOVE-like semantics but the open_bids
       // row is preserved as the historical breadcrumb (moved_to_project_id
       // links forward). DB trigger gates approval changes; the UI also
       // disables Move Forward when approval_status !== 'approved', so by
@@ -2763,7 +3033,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         notes: combinedNotes,
         dates: "",
         projectNumber: newData.projectNumber || "",
-        status: "Awaiting Verdict",
+        status: "Proposal",
         dateSubmitted: newData.dateSubmitted || new Date().toISOString().substr(0, 10),
         anticipatedResultDate: newData.anticipatedResultDate || "",
         clientContract: newData.clientContract || "",
@@ -2811,7 +3081,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             : r));
           setFlashId(projData.id);
           offerUndo(
-            "Moved to Awaiting Verdict",
+            "Moved to Proposals",
             snap,
             async () => {
               // Reverse: drop the new project + clear the forward link.
@@ -2998,7 +3268,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       ACCENT_INK:    [107,  63,  16], // --accent-ink (amber text on actual cells)
       PROJ_INK:      [110, 102,  89], // --text-muted (dim text on projection)
     };
-    const invoiceCellStyle = tab === "invoice"
+    const invoiceCellStyle = (tab === "invoice" || tab === "between")
       ? (row, _colIndex, col) => {
           const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
           const label = col?.label;
@@ -3036,11 +3306,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         // A3 landscape gives Invoice's 17 columns (12 months + totals)
         // enough width to render full dollar amounts without ellipsizing.
         // Other tabs stay on A4 — fewer columns, more text-oriented.
-        format: tab === "invoice" ? "a3" : "a4",
+        format: (tab === "invoice" || tab === "between") ? "a3" : "a4",
         // Zebra striping fights the Invoice's per-cell fill palette
         // (actual amber, projection cream, orange tint) — turn it off
         // on Invoice so the colors read cleanly.
-        alternateRows: tab !== "invoice",
+        alternateRows: tab !== "invoice" && tab !== "between",
       });
       showToast(`Exported ${rows.length} rows`, "export");
     } catch (err) {
@@ -3492,6 +3762,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     };
   }, [potential, awaiting, awarded, closed, invoice, events, hotLeads, openBids]);
 
+  // Merged invoice projects (one row per (type, project number), byYear map,
+  // groupIds, billingState) — computed once and split across the Invoice
+  // page's sub-tabs below. Also feeds the Awarded tab's link cards.
+  const invoiceMerged = useMemo(() => mergeInvoiceYears(invoice), [invoice]);
+
+  // Invoice project lookup by normalized project number — powers the Awarded
+  // tab's link chips + project cards. On a number collision (ENG + PM rows
+  // share a number; an active row coexists with an old closed one) prefer the
+  // most-active state, then ENG over PM.
+  const invoiceByNumber = useMemo(() => {
+    const rank = { active: 0, between: 1, closed: 2 };
+    const m = new Map();
+    for (const r of invoiceMerged) {
+      const k = normInvoiceNumber(r.projectNumber);
+      if (!k) continue;
+      const prev = m.get(k);
+      if (!prev) { m.set(k, r); continue; }
+      const better =
+        (rank[r.billingState || "active"] - rank[prev.billingState || "active"]) ||
+        ((r.type || "ENG") === "ENG" ? -1 : 1);
+      if (better < 0) m.set(k, r);
+    }
+    return m;
+  }, [invoiceMerged]);
+
   // Apply year filter, then category filter. Events filter against the year
   // component of the ISO event_date, not a dedicated year column.
   const filtered = useMemo(() => {
@@ -3530,13 +3825,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       // Invoice is a rolling multi-year window now — no per-year filter.
       // mergeInvoiceYears folds each project's per-year rows into one merged
       // row carrying a `byYear` map; the window slice happens in InvoiceTable.
-      invoice:   mergeInvoiceYears(invoice),
+      // billing_state splits the merged projects across the Invoice page's
+      // sub-tabs: Invoices (active) vs In-Between (paused); closed rows are
+      // archived (the Closed Out sub-tab lists projects, not invoice rows).
+      invoice:   invoiceMerged.filter(r => (r.billingState || "active") === "active"),
+      between:   invoiceMerged.filter(r => r.billingState === "between"),
       events:    apply("events",    events),
       hotleads:  apply("hotleads",  hotLeads),
       openbids:  apply("openbids",  openBids),
       directory: apply("directory", [...clients, ...companies]),
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoice, events, hotLeads, openBids, clients, companies]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, clients, companies]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -3595,10 +3894,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const pot = potential.reduce((a,r) => a + (r.msmm || 0), 0);
     const awa = awaiting.reduce((a,r) => a + (r.msmm || 0), 0);
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
-    const ytd = invoice.reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
+    // Closed-out projects' archived rows don't count toward YTD (parity with
+    // the pre-billing_state era, when close-out deleted them). Paused
+    // (In-Between) projects DO count — those dollars were really billed.
+    const ytd = invoice
+      .filter(r => (r.billingState || "active") !== "closed")
+      .reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
       { label: "Pipeline MSMM",       val: pot, sub: `${potential.length} potential`, spark: [3,4,3,5,4,6,7,8,7,9] },
-      { label: "Awaiting verdict",    val: awa, sub: `${awaiting.length} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
+      { label: "Proposals",           val: awa, sub: `${awaiting.length} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
       { label: "Active backlog",      val: awd, sub: `${awarded.length} awarded`,     spark: [5,5,6,7,6,7,8,9,10,11] },
       { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
@@ -3608,7 +3912,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     openbids: openBids.length,
     potential: potential.length, awaiting: awaiting.length,
     awarded: awarded.length, closed: closed.length,
-    invoice: invoice.length, events: events.length,
+    // Invoice counts are per merged PROJECT (not per year-row), split by
+    // billing state to feed the Invoices / In-Between sub-tab badges.
+    invoice: invoiceMerged.filter(r => (r.billingState || "active") === "active").length,
+    between: invoiceMerged.filter(r => r.billingState === "between").length,
+    events: events.length,
     hotleads: hotLeads.length,
     directory: clients.length + companies.length,
     timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
@@ -3616,10 +3924,35 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "team-cal":   null,
   };
 
+  // Navbar group of the active tab; multi-tab groups render the group label
+  // as the H1 (the sub-tab strip below it names the section) and sum member
+  // counts on the rail pill.
+  const currentGroup = navGroupOf(tab) || null;
+  const groupCount = (g) => {
+    const vals = g.tabs.map(k => tabCounts[k]).filter(v => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+  };
   const currentMeta = PAGE_META[tab];
+  const pageTitle = currentGroup && currentGroup.tabs.length > 1
+    ? currentGroup.label
+    : (currentMeta?.title || "");
 
-  // Does the current tab support "New X"? Awaiting Verdict is a first-class
-  // entry point (projects can start here without a prior Potential row).
+  // Remember the last sub-tab used inside each group so clicking the group
+  // pill returns you where you left off (falls back to the first member).
+  const lastSubTabRef = useRef({});
+  useEffect(() => {
+    const g = navGroupOf(tab);
+    if (g) lastSubTabRef.current[g.key] = tab;
+  }, [tab]);
+  const gotoGroup = (g) => setTab(
+    (lastSubTabRef.current[g.key] && g.tabs.includes(lastSubTabRef.current[g.key]))
+      ? lastSubTabRef.current[g.key]
+      : g.tabs[0]
+  );
+
+  // Does the current tab support "New X"? Proposals (awaiting) is a
+  // first-class entry point (projects can start here without a prior
+  // Potential row).
   // Potential is ALSO an entry (opportunities scoped directly / billing
   // candidates added without going through the proposal stage). Awarded /
   // Closed Out / Invoice are only reached via Move Forward from an earlier
@@ -3632,7 +3965,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const newLabel = tab === "events" ? "New event"
                  : tab === "hotleads" ? "New hot lead"
                  : tab === "directory" ? "New client"
-                 : tab === "awaiting" ? "New awaiting verdict"
+                 : tab === "awaiting" ? "New proposal"
                  : tab === "awarded" ? "New awarded project"
                  : tab === "openbids" ? "New open bid"
                  : "New project";
@@ -3703,40 +4036,33 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
       <div className="tabwrap">
         <div className="pipeline" role="tablist" ref={pipelineRef}>
-          {TAB_META.filter(t => t.group === "head").map(t => (
-            <button key={t.key}
-              className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}
-              onClick={() => setTab(t.key)} role="tab">
-              <span className="dot"/>
-              {t.label}
-            </button>
-          ))}
-          {TAB_META.some(t => t.group === "head") && <div style={{ width: 14 }}/>}
-          {TAB_META.filter(t => t.group === "pipeline").map((t, i, arr) => (
-            <React.Fragment key={t.key}>
+          {NAV_GROUPS.filter(g => g.group === "pipeline").map((g, i, arr) => (
+            <React.Fragment key={g.key}>
               <button
-                className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}
-                onClick={() => setTab(t.key)}
+                className={`tab ${g.stage} ${g.tabs.includes(tab) ? "active" : ""}`}
+                onClick={() => gotoGroup(g)}
                 role="tab"
+                aria-selected={g.tabs.includes(tab)}
               >
                 <span className="dot"/>
-                {t.label}
-                {tabCounts[t.key] != null && (
-                  <span className="count">{tabCounts[t.key]}</span>
+                {g.label}
+                {groupCount(g) != null && (
+                  <span className="count">{groupCount(g)}</span>
                 )}
               </button>
               {i < arr.length - 1 && <span className="tab-sep">→</span>}
             </React.Fragment>
           ))}
           <div style={{ width: 14 }}/>
-          {TAB_META.filter(t => t.group === "side" && (!t.adminOnly || isAdmin)).map(t => (
-            <button key={t.key}
-              className={`tab ${t.stage} ${tab === t.key ? "active" : ""}`}
-              onClick={() => setTab(t.key)} role="tab">
+          {NAV_GROUPS.filter(g => g.group === "side" && (!g.adminOnly || isAdmin)).map(g => (
+            <button key={g.key}
+              className={`tab ${g.stage} ${g.tabs.includes(tab) ? "active" : ""}`}
+              onClick={() => gotoGroup(g)} role="tab"
+              aria-selected={g.tabs.includes(tab)}>
               <span className="dot"/>
-              {t.label}
-              {tabCounts[t.key] != null && (
-                <span className="count">{tabCounts[t.key]}</span>
+              {g.label}
+              {groupCount(g) != null && (
+                <span className="count">{groupCount(g)}</span>
               )}
             </button>
           ))}
@@ -3746,7 +4072,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       <div className="page">
         <div className="page-head">
           <div>
-            <h1 className="page-title">{currentMeta.title}</h1>
+            <h1 className="page-title">{pageTitle}</h1>
             <p className="page-desc">{currentMeta.desc}</p>
           </div>
           <div className="page-actions">
@@ -3784,7 +4110,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </div>
         </div>
 
-        {["potential","awaiting","awarded","invoice"].includes(tab) && (
+        {currentGroup && currentGroup.tabs.length > 1 && (
+          <div className="subtabs" role="tablist" aria-label={`${currentGroup.label} sections`}>
+            {(SUB_TABS[currentGroup.key] || []).map(st => (
+              <button key={st.key}
+                role="tab"
+                aria-selected={tab === st.key}
+                className={"subtab" + (tab === st.key ? " active" : "")}
+                onClick={() => setTab(st.key)}>
+                {st.icon && <Icon name={st.icon} size={13}/>}
+                {st.label}
+                {tabCounts[st.key] != null && (
+                  <span className="subtab-count">{tabCounts[st.key]}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {["potential","awaiting","awarded","invoice","between","closed"].includes(tab) && (
           <div className="stats">
             {stats.map((s, i) => (
               <div key={i} className="stat">
@@ -3842,57 +4186,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             yearValue={yearFilter.awaiting}
             onYearChange={(y) => setYear("awaiting", y)}/>
         )}
-        {tab === "awarded" && (() => {
-          const bucketed = { single: [], multi: [], others: [] };
-          for (const r of filtered.awarded) bucketed[awardedBucketOf(r.stage)].push(r);
-          const awardedRows = bucketed[awardedViewMode] || bucketed.single;
-          return (
-            <>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                <div className="events-view-toggle" role="tablist" aria-label="Awarded view">
-                  <button
-                    className={awardedViewMode === "single" ? "active" : ""}
-                    onClick={() => setAwardedViewMode("single")}
-                    role="tab"
-                    aria-selected={awardedViewMode === "single"}
-                  >
-                    <Icon name="flag" size={12}/> Single-Use
-                    <span className="view-toggle-count">{bucketed.single.length}</span>
-                  </button>
-                  <button
-                    className={awardedViewMode === "multi" ? "active" : ""}
-                    onClick={() => setAwardedViewMode("multi")}
-                    role="tab"
-                    aria-selected={awardedViewMode === "multi"}
-                  >
-                    <Icon name="columns" size={12}/> Multi/List
-                    <span className="view-toggle-count">{bucketed.multi.length}</span>
-                  </button>
-                  <button
-                    className={awardedViewMode === "others" ? "active" : ""}
-                    onClick={() => setAwardedViewMode("others")}
-                    role="tab"
-                    aria-selected={awardedViewMode === "others"}
-                  >
-                    <Icon name="more" size={12}/> Others
-                    <span className="view-toggle-count">{bucketed.others.length}</span>
-                  </button>
-                </div>
-              </div>
-              <AwardedTable rows={awardedRows} updateRow={updateAwarded}
-                onOpenDrawer={r => openDrawer(r, "awarded")}
-                onForward={r => triggerForward(r, "awarded", "invoice")}
-                onMoveToPotential={r => triggerForward(r, "awarded", "potential")}
-                onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
-                flashId={flashId}
-                filters={chipsFor("awarded")}
-                tab="awarded"
-                yearOptions={availableYears.awarded}
-                yearValue={yearFilter.awarded}
-                onYearChange={(y) => setYear("awarded", y)}/>
-            </>
-          );
-        })()}
+        {tab === "awarded" && (
+          <AwardedTable rows={filtered.awarded} updateRow={updateAwarded}
+            onOpenDrawer={r => openDrawer(r, "awarded")}
+            onForward={r => triggerForward(r, "awarded", "invoice")}
+            onMoveToPotential={r => triggerForward(r, "awarded", "potential")}
+            onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
+            flashId={flashId}
+            filters={chipsFor("awarded")}
+            tab="awarded"
+            yearOptions={availableYears.awarded}
+            yearValue={yearFilter.awarded}
+            onYearChange={(y) => setYear("awarded", y)}
+            invoiceIndex={invoiceByNumber}
+            actualThru={actualThru}
+            onAddInvoiceLink={addInvoiceLink}
+            onRemoveInvoiceLink={removeInvoiceLink}
+            onOpenInvoiceProject={openInvoiceProject}/>
+        )}
         {tab === "closed" && (
           <ClosedTable rows={filtered.closed}
             updateRow={updateClosed}
@@ -3952,7 +4263,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
                 canEditMsmm={isAdmin}
                 onBlockedMsmmEdit={() => showToast("MSMM values are auto-calculated — only an admin can edit them. Edit the Total (or a sub) instead.", "lock")}
-                onNew={() => setCreateTable("invoice")}/>
+                onNew={() => setCreateTable("invoice")}
+                billingMode="active"
+                onPause={pauseInvoiceProject}/>
               <SubsReceivablesPanel
                 subInvoices={subInvoices}
                 projectsById={projectsById}
@@ -3971,6 +4284,44 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             </>
           );
         })()}
+        {tab === "between" && (
+          // Paused projects — the same InvoiceTable surface (months, files,
+          // subs, notes all live), minus the charts/receivables chrome. Rows
+          // resume to Invoices or close out from here.
+          <InvoiceTable rows={filtered.between}
+            windowMonths={invWindowMonths}
+            onWindowBack={() => setInvWindowStart(s => s - 1)}
+            onWindowFwd={() => setInvWindowStart(s => s + 1)}
+            onWindowToday={() => setInvWindowStart(defaultWindowStartAbs())}
+            windowAtDefault={invWindowAtDefault}
+            cutoverDay={appSettings.invoiceActualCutoverDay}
+            cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
+            updateInvoice={editInvoiceTotalMonth}
+            updateInvoiceMsmm={editInvoiceMsmmMonth}
+            updateRow={updateInvoice}
+            onOpenDrawer={r => openDrawer(r, "invoice")}
+            onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
+            flashId={flashId}
+            tab="between"
+            orangeSourceIds={orangeSourceIds}
+            subInvoices={subInvoices}
+            onUpdateSubAmount={updateSubInvoiceCell}
+            onTogglePaid={setSubInvoicePaidStatus}
+            onTogglePrimePaid={editInvoicePrimePaidMonth}
+            canUntickPaid={isAdmin}
+            onOpenFiles={openInvoiceFiles}
+            onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
+            onUpdateSubMeta={updateSubMeta}
+            onRemoveSub={removeSub}
+            onChangeRole={setInvoiceRoleHandler}
+            onNotesChanged={(id, log) =>
+              setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
+            canEditMsmm={isAdmin}
+            onBlockedMsmmEdit={() => showToast("MSMM values are auto-calculated — only an admin can edit them. Edit the Total (or a sub) instead.", "lock")}
+            billingMode="between"
+            onResume={resumeInvoiceProject}
+            onCloseOutRow={r => triggerForward(r, "invoice", "closed")}/>
+        )}
         {tab === "events" && (
           <>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>

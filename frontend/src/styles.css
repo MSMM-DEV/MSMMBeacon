@@ -15449,3 +15449,344 @@ html, body { overflow-x: clip; }
   .lic-field-row { grid-template-columns: 1fr; }
   .lic-head-actions { width: 100%; }
 }
+
+/* ======================================================================
+   2026-06 IA restructure — page sub-tabs, invoice billing states, and the
+   Awarded ↔ Invoice link chips + live project card.
+   ====================================================================== */
+
+/* ---- Page sub-tab strip ----------------------------------------------
+   Sections WITHIN a navbar page (Hot Leads | Open Bids · Proposals |
+   Awarded · Invoices | In-Between | Closed Out). Quieter than the folder
+   tabs in the rail, stronger than the pill view-toggles: an editorial
+   underline strip on the page's own baseline. */
+.subtabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 16px;
+}
+.subtab {
+  appearance: none;
+  border: 0;
+  background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px 11px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-muted);
+  cursor: pointer;
+  position: relative;
+  border-radius: 8px 8px 0 0;
+  transition: color .14s ease, background .14s ease;
+}
+.subtab svg { opacity: .65; }
+.subtab:hover { color: var(--text); background: var(--surface-2); }
+.subtab.active { color: var(--text); }
+.subtab.active svg { opacity: 1; color: var(--accent); }
+.subtab.active::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+.subtab-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+}
+.subtab.active .subtab-count {
+  background: var(--accent-softer);
+  border-color: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* ---- Invoice row transition buttons (pause / resume / close out) ---- */
+.inv-act-btns { display: inline-flex; align-items: center; gap: 2px; }
+
+/* ---- Awarded "Proj #" link chips ------------------------------------ */
+.inv-link-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  overflow: visible;
+  white-space: normal;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.inv-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.inv-link-chip:hover { border-color: var(--accent); background: var(--accent-softer); }
+.inv-link-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--sage);
+  flex: none;
+}
+.inv-link-chip.between .inv-link-dot { background: var(--accent); }
+.inv-link-chip.closed  .inv-link-dot { background: var(--rose); }
+.inv-link-chip.missing { border-style: dashed; color: var(--text-soft); }
+.inv-link-chip.missing .inv-link-dot { background: var(--border-strong); }
+.inv-link-x {
+  appearance: none;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  margin: 0 -3px 0 -1px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.inv-link-chip:hover .inv-link-x { opacity: 1; }
+.inv-link-x:hover { background: var(--rose-soft); color: var(--rose); }
+.inv-link-bare { font-size: 12px; color: var(--text-soft); }
+.inv-link-add {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px; height: 20px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  flex: none;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.inv-link-add:hover {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+
+/* ---- Anchored popover shell (card + add-search) --------------------- */
+.inv-pop {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: pop .18s cubic-bezier(.2,.8,.2,1);
+}
+
+/* ---- The invoice project card --------------------------------------- */
+.inv-card { padding: 12px 14px; }
+.inv-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.inv-card-num {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inv-card-type { flex: none; }
+.inv-state {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.inv-state.active  { background: var(--sage-soft);    color: #3F4D30; }
+.inv-state.between { background: var(--accent-softer); color: var(--accent-ink); }
+.inv-state.closed  { background: var(--rose-soft);     color: #6F302C; }
+.inv-state.missing {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-soft);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+[data-theme="dark"] .inv-state.active { color: var(--text); }
+[data-theme="dark"] .inv-state.closed { color: var(--text); }
+.inv-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  margin: 7px 0 10px;
+  color: var(--text);
+}
+.inv-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.inv-card-stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.inv-card-statlabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.inv-card-statval {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+.inv-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 11px;
+}
+.inv-card-meta { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.inv-card-years {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+.inv-card-foot-btns { display: inline-flex; gap: 6px; flex: none; }
+.inv-card-empty {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 8px 0 2px;
+}
+
+/* ---- The "+" add-link popover --------------------------------------- */
+.inv-add-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+}
+.inv-add-search input {
+  flex: 1;
+  border: 0;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--text);
+  outline: none;
+}
+.inv-add-search input::placeholder { color: var(--text-soft); }
+.inv-add-list { max-height: 232px; overflow-y: auto; padding: 4px; }
+.inv-add-item {
+  appearance: none;
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .1s ease;
+}
+.inv-add-item.hi { background: var(--surface-2); }
+.inv-add-item.linked { opacity: .5; cursor: default; }
+.inv-add-num {
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+.inv-add-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inv-add-flag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--sage);
+}
+.inv-add-none {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.inv-add-preview {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.inv-add-preview .inv-card { padding: 11px 14px 12px; }
+
+/* ---- Responsive ------------------------------------------------------ */
+@media (max-width: 640px) {
+  .subtabs {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .subtab { flex: none; padding: 8px 8px 11px; }
+}
+
+/* Action column widens with the per-mode transition buttons: active = pause
+   + bell; between = resume + close-out + bell. */
+.invoice-table.inv-mode-active  { --inv-act-w: 62px; }
+.invoice-table.inv-mode-between { --inv-act-w: 86px; }

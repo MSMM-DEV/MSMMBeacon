@@ -77,7 +77,7 @@ export const LoginPage = ({ onSignedIn }) => {
             <em>One</em> source of truth.
           </h1>
           <p className="hero-copy">
-            A shared ledger for Potential, Awaiting Verdict, Awarded, SOQ, Closed-out,
+            A shared ledger for Leads & Bids, Proposals, Awarded, Potential,
             and the Anticipated Invoice. Board-ready at a glance; row-level when you need it.
           </p>
           <ul className="hero-list">

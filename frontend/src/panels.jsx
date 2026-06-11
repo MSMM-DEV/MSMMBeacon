@@ -573,7 +573,7 @@ export const DetailDrawer = ({
 
   const titleMap = {
     potential: "Potential Project",
-    awaiting:  "Awaiting Verdict",
+    awaiting:  "Proposal",
     awarded:   "Awarded Project",
     closed:    "Closed Out Project",
     invoice:   "Anticipated Invoice",
@@ -604,8 +604,8 @@ export const DetailDrawer = ({
             {onMoveBack && (
               <span className="move-back-group" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                 <span style={{ fontSize: 11.5, color: "var(--text-soft)" }}>Move back:</span>
-                <button className="btn sm" onClick={() => onMoveBack("awaiting")} title="Reopen as Awaiting Verdict">
-                  <Icon name="back" size={12}/>Awaiting
+                <button className="btn sm" onClick={() => onMoveBack("awaiting")} title="Reopen as Proposal">
+                  <Icon name="back" size={12}/>Proposal
                 </button>
                 <button className="btn sm" onClick={() => onMoveBack("awarded")} title="Reopen as Awarded">
                   <Icon name="back" size={12}/>Awarded
@@ -764,7 +764,7 @@ export const DetailDrawer = ({
                     </div>
                     <div className="chip accent" style={{ fontSize: 12 }}>
                       <Icon name="forward" size={11}/>
-                      Linked to Awaiting Verdict project · {row.movedToProjectId.slice(0, 8)}
+                      Linked to Proposals project · {row.movedToProjectId.slice(0, 8)}
                     </div>
                   </>
                 )}
@@ -890,13 +890,15 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
           hint: "Determines how billing is categorized in Anticipated Invoice." },
       ]
     },
-    // Invoice → Closed Out: the invoice row is removed and the upstream
-    // project flips to status='closed_out'. If no upstream project exists, a
-    // new closed_out project is minted from the invoice fields. See the
-    // confirmMove handler in App.jsx for persistence details.
+    // Invoice → Closed Out: the invoice rows flip to billing_state='closed'
+    // (every month amount, attachment, and note is KEPT — just hidden from
+    // the Invoices / In-Between tabs) and the upstream project flips to
+    // status='closed_out'. If no upstream project exists, a new closed_out
+    // project is minted from the invoice fields. See the confirmMove handler
+    // in App.jsx for persistence details.
     "invoice→closed": {
       title: "Close out project",
-      subtitle: "Invoice row is removed · project moves to Closed Out",
+      subtitle: "Billing history is kept · project moves to Closed Out",
       carried: ["year","name","projectNumber","pmIds"],
       newFields: [
         { k: "status", label: "Status", type: "pill", value: "Closed Out" },
@@ -911,11 +913,11 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
     // what's needed for the destination. closed→invoice also spawns a fresh
     // anticipated_invoice row.
     "closed→awaiting": {
-      title: "Reopen as Awaiting Verdict",
-      subtitle: "Removes from Closed Out · returns to Awaiting Verdict",
+      title: "Reopen as Proposal",
+      subtitle: "Removes from Closed Out · returns to Proposals",
       carried: ["year","name","projectNumber","pmIds","dateSubmitted"],
       newFields: [
-        { k: "status", label: "Status", type: "pill", value: "Awaiting Verdict" },
+        { k: "status", label: "Status", type: "pill", value: "Proposal" },
         { k: "anticipatedResultDate", label: "Anticipated Result Date", type: "date" },
         { k: "notes", label: "Notes", type: "textarea", placeholder: "Reopen reason / next steps…" },
       ]
@@ -934,7 +936,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
     },
     "closed→invoice": {
       title: "Reopen as Active Project (Invoice)",
-      subtitle: "Removes from Closed Out · status flips to Awarded · spawns Invoice row",
+      subtitle: "Removes from Closed Out · status flips to Awarded · revives the project's Invoice rows (or spawns one)",
       carried: ["year","name","projectNumber","pmIds"],
       newFields: [
         { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
@@ -943,14 +945,14 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "_remaining", label: "MSMM Remaining (optional)", type: "money", value: 0 },
       ]
     },
-    // Open Bid → Awaiting Verdict. The bid's RFQ #, service description,
-    // and due date carry into the Awaiting row's `notes` (handled in
+    // Open Bid → Proposals (awaiting). The bid's RFQ #, service description,
+    // and due date carry into the Proposals row's `notes` (handled in
     // confirmMove); everything else is captured here. clientId carries
     // straight through. Bid row stays as historical breadcrumb linked via
     // moved_to_project_id.
     "openbids→awaiting": {
-      title: "Move to Awaiting Verdict",
-      subtitle: "Carries to Awaiting Verdict · Open Bid stays as historical record",
+      title: "Move to Proposals",
+      subtitle: "Carries to Proposals · Open Bid stays as historical record",
       carried: ["clientId"],
       newFields: [
         { k: "projectName",      label: "Project Name *",                placeholder: "Working title for the submitted proposal" },

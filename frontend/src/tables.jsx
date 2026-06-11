@@ -17,6 +17,7 @@ import {
 import { LinkedProjectsSection } from "./panels.jsx";
 import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
 import { DescriptionGeneratorModal } from "./description-generator.jsx";
+import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { setCurrentTableSnapshot } from "./table-state.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
@@ -1243,8 +1244,8 @@ export const PotentialTable = ({
   );
 };
 
-// ---------- Awaiting Verdict ----------
-// Org-type ordering used as the primary sort for Awaiting Verdict AND Awarded.
+// ---------- Proposals (status key: awaiting) ----------
+// Org-type ordering used as the primary sort for Proposals AND Awarded.
 // Matches the customer's xlsx grouping convention in both sheets:
 //   Federal → State → Regional → Parish → City → Local → Other → unassigned
 // (In the source files, rows were hand-ordered Federal first, City last with
@@ -1350,8 +1351,8 @@ export const AwaitingTable = ({
       primarySort={primarySort}
       postProcess={injectOrgHeaders("submittal")}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
-      emptyTitle="No projects awaiting verdict"
-      emptyHint="Projects you submit move here until awarded or closed out."
+      emptyTitle="No proposals"
+      emptyHint="Submitted proposals live here until awarded or closed out."
       emptyIcon="clock"
       renderRow={(r, _i, gridCols, visibleColumns) => {
         if (r._orgHeader) {
@@ -1454,7 +1455,7 @@ export const AwaitingTable = ({
             </div>
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
-          "Status": <div className="td"><span className="chip accent">Awaiting Verdict</span></div>,
+          "Status": <div className="td"><span className="chip accent">Proposal</span></div>,
           "MSMM Used": (
             <div className="td mono subtle">
               <EditableCell value={r.msmmUsed} type="number"
@@ -1503,6 +1504,14 @@ export const AwaitingTable = ({
 export const AwardedTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onMoveToPotential, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
+  // Awarded ↔ Invoice links (project_invoice_links). The Proj # column
+  // renders each row's linked invoice projects as chips backed by the live
+  // merged Invoice rows; see invoice-links.jsx.
+  invoiceIndex,            // Map<normInvoiceNumber, merged invoice row>
+  actualThru = -1,         // last Actual month index (billed-to-date math)
+  onAddInvoiceLink,        // (row, number) => void
+  onRemoveInvoiceLink,     // (row, number) => void
+  onOpenInvoiceProject,    // (mergedInvoiceRow) => void — jump to Invoice tab
 }) => {
   // Column order mirrors Scott's Proposals workbook header row:
   // Proposal Year · Title · Client Name · Prime · Sub · Status · Stage · Details ·
@@ -1535,7 +1544,8 @@ export const AwardedTable = ({
       sortValue: r => orgRank(r.clientId) },
     { label: "PM", w: "130px", sortKey: "pm",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "110px", sortKey: "projectNumber" },
+    { label: "Proj #", w: "minmax(170px, 1.2fr)", sortKey: "projectNumber",
+      sortValue: r => (r.invoiceLinks || [])[0] || r.projectNumber || "" },
     { label: "__actions", w: "90px", locked: true },
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
@@ -1664,10 +1674,17 @@ export const AwardedTable = ({
             </div>
           ),
           "Proj #": (
-            <div className="td mono subtle">
-              <EditableCell value={r.projectNumber}
-                onChange={v => updateRow(r.id, { projectNumber: v })}/>
-            </div>
+            // Linked invoice projects, keyed on project number. Chips open
+            // the live project card; "+" links more. The awarded row's own
+            // project_number text stays editable from the drawer.
+            <InvoiceLinkCell
+              row={r}
+              invoiceIndex={invoiceIndex}
+              actualThru={actualThru}
+              onAdd={onAddInvoiceLink}
+              onRemove={onRemoveInvoiceLink}
+              onOpenInvoice={onOpenInvoiceProject}
+            />
           ),
           "Role": (
             <div className="td">
@@ -1781,7 +1798,7 @@ export const ClosedTable = ({
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No closed-out projects yet"
-      emptyHint="Rows appear here when an Awaiting Verdict project is marked Closed Out."
+      emptyHint="Rows appear here when a Proposal or Invoice project is closed out."
       emptyIcon="x"
       renderRow={(r, _i, gridCols, visibleColumns) => {
         const cells = {
@@ -1942,6 +1959,14 @@ export const InvoiceTable = ({
   onNotesChanged,    // (invoiceId, notesLog) => void  — sync the threaded Notes count back to App state
   canEditMsmm = true,   // Admin? The MSMM/parent-row dollar cells are auto-calc; non-admins can't edit them.
   onBlockedMsmmEdit,    // () => void  — fired when a non-admin clicks a locked MSMM cell (shows a toast)
+  // Billing-state surface: 'active' (Invoices tab) or 'between' (In-Between
+  // tab). Drives which transition actions render on each row — pause on the
+  // Invoices tab; resume + close-out on In-Between. All three handlers get
+  // the merged row (groupIds carries every underlying year-row id).
+  billingMode = "active",
+  onPause,           // (row) => void  — Invoices → In-Between
+  onResume,          // (row) => void  — In-Between → Invoices
+  onCloseOutRow,     // (row) => void  — In-Between → Closed Out (MoveForwardPanel)
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -2468,13 +2493,15 @@ export const InvoiceTable = ({
             {maximized ? "Exit" : "Fullscreen"}
           </button>
           <button className="btn sm"><Icon name="export" size={13}/>Export</button>
-          <button
-            type="button"
-            className="btn primary sm"
-            onClick={() => onNew?.()}
-          >
-            <Icon name="plus" size={13}/>New invoice row
-          </button>
+          {onNew && (
+            <button
+              type="button"
+              className="btn primary sm"
+              onClick={() => onNew()}
+            >
+              <Icon name="plus" size={13}/>New invoice row
+            </button>
+          )}
         </div>
 
         {typeMenuOpen && (
@@ -2515,11 +2542,19 @@ export const InvoiceTable = ({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState
-          title="No invoice rows"
-          hint="Invoice rows appear here automatically for each awarded project. Use New invoice row to add one manually."
-          iconName="trend"
-        />
+        billingMode === "between" ? (
+          <EmptyState
+            title="Nothing in between"
+            hint="Pause an active project from the Invoices tab and it lands here — billing data intact — until you resume it or close it out."
+            iconName="pause"
+          />
+        ) : (
+          <EmptyState
+            title="No invoice rows"
+            hint="Invoice rows appear here automatically for each awarded project. Use New invoice row to add one manually."
+            iconName="trend"
+          />
+        )
       ) : (
         <>
           {hasSearch && (
@@ -2543,7 +2578,7 @@ export const InvoiceTable = ({
             />
           </div>
           <div className="invoice-wrap" ref={invoiceWrapRef} onScroll={onInvoiceBodyScroll}>
-            <table className="invoice-table" ref={invoiceTableRef}>
+            <table className={`invoice-table inv-mode-${billingMode}`} ref={invoiceTableRef}>
               <thead>
                 <tr>
                   <th className="invoice-expand-col"/>
@@ -2789,9 +2824,30 @@ export const InvoiceTable = ({
                       })()}
                     </td>
                     <td className="inv-pin-act" style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
-                      <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
-                        <Icon name="bell" size={14}/>
-                      </button>
+                      <span className="inv-act-btns">
+                        {billingMode === "active" && onPause && (
+                          <button className="row-btn" title="Pause — move to In-Between"
+                                  onClick={() => onPause(r)}>
+                            <Icon name="pause" size={13}/>
+                          </button>
+                        )}
+                        {billingMode === "between" && onResume && (
+                          <button className="row-btn forward" title="Resume — move back to Invoices"
+                                  onClick={() => onResume(r)}>
+                            <Icon name="play" size={13}/>
+                          </button>
+                        )}
+                        {billingMode === "between" && onCloseOutRow && (
+                          <button className="row-btn" title="Close out project"
+                                  style={{ color: "var(--rose)" }}
+                                  onClick={() => onCloseOutRow(r)}>
+                            <Icon name="x" size={13}/>
+                          </button>
+                        )}
+                        <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+                          <Icon name="bell" size={14}/>
+                        </button>
+                      </span>
                     </td>
                   </tr>
                   {isExpanded && subList.length === 0 && (
@@ -4015,7 +4071,7 @@ export const OpenBidsTable = ({
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No open bids yet"
-      emptyHint="Add an RFQ/RFP to track it through review. Admins approve a bid before it can be moved to Awaiting Verdict."
+      emptyHint="Add an RFQ/RFP to track it through review. Admins approve a bid before it can be moved to Proposals."
       emptyIcon="briefcase"
       renderRow={(r, _i, gridCols, visibleColumns) => {
         const approver = r.approvedBy ? userById(r.approvedBy) : null;
@@ -4170,7 +4226,7 @@ export const OpenBidsTable = ({
                 <button
                   className="row-btn forward"
                   title={isApproved
-                    ? "Move to Awaiting Verdict"
+                    ? "Move to Proposals"
                     : "Approve this bid before moving forward"}
                   disabled={!isApproved}
                   onClick={() => isApproved && onForward?.(r)}>
