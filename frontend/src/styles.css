@@ -1431,6 +1431,22 @@ html, body { overflow-x: clip; }
 }
 [data-theme="dark"] .overlay { background: rgba(0,0,0,0.55); }
 
+/* Scrim for the timekeeping `.modal` family (UserDayModal, LeaveRequestModal,
+   CorrectionModal, WeekApprovalModal, PunchPromptModal, IntervalReclassify).
+   These wrap their card in `<div className="modal-backdrop" onClick=close>` —
+   without this rule the wrapper collapsed to 0 height, so the page never
+   dimmed and outside-tap-to-close silently did nothing. The scrim sits just
+   below `.modal` (z-60); on mobile the bottom-sheet `.modal` rules layer on
+   top of it for a proper dimmed sheet. */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(30,25,18,0.35);
+  backdrop-filter: blur(3px);
+  z-index: 58;
+  animation: fadeIn .18s ease;
+}
+[data-theme="dark"] .modal-backdrop { background: rgba(0,0,0,0.55); }
+
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0;
   width: 520px; max-width: 92vw;
@@ -9639,6 +9655,21 @@ html, body { overflow-x: clip; }
 .leave-warn .icon { flex: none; margin-top: 1px; color: var(--accent); }
 .leave-warn-inline { margin-top: 6px; }
 
+/* Leave modal — mobile. The base .modal bottom-sheet rules (≤840) already
+   make it a full-width dimmed sheet; these make the segmented controls
+   thumb-friendly (full width, taller) and stack the date range on the
+   narrowest phones. */
+@media (max-width: 640px) {
+  .leave-modal .leave-seg { display: flex; width: 100%; }
+  .leave-modal .leave-seg-btn { flex: 1; justify-content: center; padding: 9px 8px; }
+  .leave-modal .leave-custom-hrs { margin-top: 10px; }
+  .leave-modal .leave-custom-hrs .form-input { width: 112px; }
+  .leave-modal .form-input { font-size: 16px; }   /* ≥16px stops iOS input zoom */
+}
+@media (max-width: 400px) {
+  .leave-modal .leave-date-row { grid-template-columns: 1fr; }
+}
+
 /* --- admin Leaves panel --- */
 .leave-panel { display: grid; gap: 22px; max-width: 1100px; }
 .leave-panel-sec { display: grid; gap: 10px; }
@@ -14823,12 +14854,19 @@ html, body { overflow-x: clip; }
 }
 
 /* main: canvas + inspector */
+/* Desktop: transparent — the header / stats / hero / main lay out directly in
+   the modal's flex column exactly as before. On mobile this becomes the single
+   scroll region between the pinned header and footer (see Responsive block). */
+.tk-de-scroll { display: contents; }
 .tk-de-main {
   flex: 1 1 auto; min-height: 0;
   display: grid; grid-template-columns: 1fr 348px; gap: 14px;
   padding: 0 18px 14px;
 }
 .tk-de-canvas { min-width: 0; min-height: 0; }
+/* The mobile-only bottom-sheet scrim + footer Add button are hidden on desktop. */
+.tk-de-insp-scrim { display: none; }
+.tk-de-foot-add { display: none; }
 .tk-de-inspector {
   min-height: 0; overflow-y: auto;
   background: var(--surface-2); border: 1px solid var(--border);
@@ -15058,6 +15096,13 @@ html, body { overflow-x: clip; }
 /* ---------------------------------------------------------------- Responsive */
 @media (max-width: 980px) {
   .modal.tk-de { width: 96vw; max-height: 94vh; }
+  /* The middle region scrolls so the canvas + stacked inspector are reachable
+     and the footer stays pinned (header is the flex column's first child,
+     footer the last). */
+  .tk-de-scroll {
+    display: flex; flex-direction: column;
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  }
   .tk-de-main { grid-template-columns: 1fr; }
   .tk-de-canvas { height: 56vh; }
   .tk-de-inspector { max-height: none; }
@@ -15066,20 +15111,79 @@ html, body { overflow-x: clip; }
 }
 @media (max-width: 640px) {
   .modal.tk-de {
-    width: 100vw; height: 100vh; max-height: 100vh; max-width: 100vw;
+    width: 100vw; height: 100vh; height: 100dvh;
+    max-height: 100vh; max-height: 100dvh; max-width: 100vw;
     border-radius: 0;
   }
-  .tk-de-head { flex-wrap: wrap; }
-  .tk-de-nav { order: 3; width: 100%; margin-left: 0; }
-  .tk-de-stats { grid-template-columns: repeat(2, 1fr); }
+  .tk-de-head { flex-wrap: wrap; padding: 12px 14px 10px; }
+  .tk-de-nav { order: 3; width: 100%; margin-left: 0; justify-content: space-between; }
+  .tk-de-stats { grid-template-columns: repeat(2, 1fr); padding: 10px 14px; }
   .tk-de-stat.is-big { grid-column: 1 / -1; }
-  .tk-de-canvas { height: 64vh; }
   .tk-rr-cards { grid-template-columns: 1fr; }
-  .tk-de-toast { bottom: 88px; }
+
+  /* Canvas: a usable fixed height inside the scroller (not 100vh, so the
+     stats/hero above it and the footer below stay reachable). */
+  .tk-de-main { display: block; padding: 0 14px 14px; }
+  .tk-de-canvas { height: 58vh; min-height: 320px; }
+
+  /* Inspector → slide-up bottom sheet. Pulled out of the canvas flow; the
+     scrim dims the rest and taps to dismiss. Always reachable, with a clear
+     grabber + the form's own close / Cancel as the "back" affordance. */
+  .tk-de-inspector {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 64;
+    width: 100%; max-height: 84vh; max-height: 84dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-left: 0; border-right: 0; border-bottom: 0;
+    box-shadow: var(--shadow-lg);
+    transform: translateY(110%);
+    transition: transform .26s cubic-bezier(.2, .8, .2, 1);
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+  }
+  .tk-de-inspector.is-active { transform: none; }
+  /* Grabber pinned to the top of the sheet as it scrolls. */
+  .tk-de-inspector.is-active::before {
+    content: ""; position: sticky; top: 0; z-index: 1;
+    display: block; flex: none;
+    width: 38px; height: 4px; margin: 0 auto 12px;
+    border-radius: 99px; background: var(--border-strong);
+  }
+  .tk-de-insp-scrim {
+    display: block; position: fixed; inset: 0; z-index: 63;
+    background: rgba(20, 16, 10, .34);
+    opacity: 0; visibility: hidden; transition: opacity .2s ease, visibility .2s;
+  }
+  .tk-de-insp-scrim.is-active { opacity: 1; visibility: visible; }
+
+  /* Footer: surface "Add block" (the idle inspector's add button is in the
+     off-screen sheet) and drop the wordy note to keep Add + Done thumbable. */
+  .tk-de-foot { padding: 10px 14px max(10px, env(safe-area-inset-bottom)); gap: 8px; }
+  .tk-de-foot-add { display: inline-flex; }
+  .tk-de-foot-note { display: none; }
+  .tk-de-foot .btn { min-height: 42px; }
+  .tk-de-toast { bottom: 96px; }
+  /* ≥16px font stops iOS from auto-zooming when an input/textarea focuses. */
+  .tk-de .form-input, .tk-de textarea.form-input { font-size: 16px; }
+  /* Inspector time inputs sit comfortably side by side at sheet width. */
+  .tk-de-time-row .form-input { flex: 1; min-width: 0; }
+}
+@media (hover: none) and (pointer: coarse) {
+  /* Touch has no hover to reveal the resize handles, so show them on the
+     selected block and give them a fat hit area. Card drag-move + tap-select
+     already work (touch-action:none on the card); precise time changes use
+     the inspector's time inputs, and new blocks use "Add block". */
+  .tk-edit-card.is-selected .tk-edit-handle { opacity: 1; height: 24px; }
+  .tk-edit-card.is-selected .tk-edit-handle-grip { width: 36px; height: 4px; }
+  /* Roomier day-nav + close targets on the editor header. */
+  .tk-de .tk-icon-btn { width: 38px; height: 38px; }
+  .tk-de .modal-close { width: 40px; height: 40px; }
+  /* Any centered timekeeping modal's close is finger-sized. */
+  .modal-close { width: 38px; height: 38px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tk-edit-card-livedot { animation: none; }
   .tk-de-toast { animation: none; }
+  .tk-de-inspector { transition: none; }
 }
 
 

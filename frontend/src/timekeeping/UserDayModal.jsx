@@ -104,6 +104,9 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
   const editingBlocked = locked && !allowLockedEdit;
   const selected = day.intervals.find((iv) => iv.id === selectedId) || null;
   const isToday = date === todayInCT();
+  // The inspector has actionable content (edit or create) — drives the mobile
+  // bottom-sheet reveal + its scrim.
+  const inspectorActive = (mode === "create" && !!createDraft) || !!selected;
 
   const minutesWork = day.day?.minutesWork || 0;
   const minutesMeeting = day.day?.minutesMeeting || 0;
@@ -235,6 +238,11 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><Icon name="x" size={16} /></button>
         </header>
 
+        {/* Everything between the pinned header and footer scrolls as one
+            column on mobile (display:contents on desktop, so the desktop
+            grid layout is untouched). This is what keeps the footer's "Done"
+            and the canvas reachable instead of clipped under 100vh. */}
+        <div className="tk-de-scroll">
         <div className="tk-de-subhead">
           <span className="tk-de-date">{fmtLong(date)}</span>
           {loading && <span className="tk-de-loading">refreshing…</span>}
@@ -313,7 +321,11 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
             />
           </div>
 
-          <aside className="tk-de-inspector">
+          {/* On mobile the inspector is a slide-up bottom sheet (see CSS).
+              `is-active` reveals it when there's something to edit; the scrim
+              below dims the canvas and taps-to-dismiss. On desktop it's the
+              right-hand column and these classes are inert. */}
+          <aside className={`tk-de-inspector ${inspectorActive ? "is-active" : "is-idle"}`}>
             {mode === "create" && createDraft ? (
               <CreateForm
                 draft={createDraft}
@@ -337,8 +349,21 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
             {actionErr && <div className="tk-de-inspector-err"><Icon name="ban" size={12} /> {actionErr}</div>}
           </aside>
         </div>
+        </div>
+
+        {/* Mobile-only scrim behind the bottom-sheet inspector. */}
+        <div
+          className={`tk-de-insp-scrim ${inspectorActive ? "is-active" : ""}`}
+          onClick={() => { setMode("idle"); setSelectedId(null); setCreateDraft(null); }}
+          aria-hidden="true"
+        />
 
         <footer className="tk-de-foot">
+          {/* Mobile-only: the idle inspector (with its Add button) lives in the
+              off-screen sheet, so surface "Add block" here on phones. */}
+          <button type="button" className="btn btn-ghost tk-de-foot-add" onClick={() => openCreate(null)} disabled={editingBlocked}>
+            <Icon name="plus" size={14} /> Add block
+          </button>
           <span className="tk-de-foot-note">
             <Icon name="bolt" size={12} /> Edits apply immediately to {selfMode ? "your" : `${user?.name?.split(" ")[0] || "this user"}’s`} timesheet.
           </span>
@@ -451,6 +476,7 @@ function CreateForm({ draft, setDraft, saving, onSubmit, onCancel }) {
           <div className="tk-de-insp-eyebrow">Add a block</div>
           <div className="tk-de-insp-title">New time</div>
         </div>
+        <button type="button" className="tk-icon-btn tk-de-insp-x" onClick={onCancel} aria-label="Cancel"><Icon name="x" size={13} /></button>
       </header>
 
       <div className="tk-de-field">
