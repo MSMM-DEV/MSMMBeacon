@@ -151,6 +151,74 @@ export function MyLeaveSection({ reloadKey = 0 }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// ApprovedLeaveBanners — the prominent confirmation strip at the TOP of the
+// Timesheet tab. One banner per APPROVED leave request whose end date hasn't
+// passed yet (upcoming OR in-progress); each names the approving admin and the
+// date it runs until, and stays put until that end date is in the past.
+// Self-loading; `reloadKey` (bumped by the parent) forces a refetch.
+// ---------------------------------------------------------------------------
+export function ApprovedLeaveBanners({ reloadKey = 0 }) {
+  const me = getCurrentBeaconUser();
+  const [reqs, setReqs] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!me?.id) return undefined;
+    loadMyLeaveRequests()
+      .then(rs => { if (!cancelled) setReqs(rs); })
+      .catch(() => { /* banner is best-effort — never blocks the page */ });
+    return () => { cancelled = true; };
+  }, [me?.id, reloadKey]);
+
+  const today = todayInCT();
+  // Approved + not yet ended, soonest start first.
+  const active = useMemo(() =>
+    reqs
+      .filter(r => r.status === "approved" && r.dateEnd >= today)
+      .sort((a, b) => (a.dateStart || "").localeCompare(b.dateStart || "")),
+  [reqs, today]);
+
+  if (active.length === 0) return null;
+
+  return (
+    <div className="tk-approved-leave" role="status" aria-live="polite">
+      {active.map((r, i) => {
+        const admin = userById(r.reviewedBy);
+        const kind  = r.leaveType === "sick" ? "Sick leave" : "Vacation";
+        const tone  = r.leaveType === "sick" ? "blue" : "sage";
+        const onNow = r.dateStart <= today && today <= r.dateEnd;
+        const range = (r.dateEnd && r.dateEnd !== r.dateStart)
+          ? `${fmtDate(r.dateStart)} – ${fmtDate(r.dateEnd)}`
+          : fmtDate(r.dateStart);
+        return (
+          <div key={r.id} className={`tk-approved-banner tone-${tone}`} style={{ "--i": i }}>
+            <span className="tk-approved-seal" aria-hidden="true"><Icon name="check" size={16}/></span>
+            <div className="tk-approved-copy">
+              <span className="tk-approved-title">
+                {kind} approved{admin ? <> by <strong>{admin.name}</strong></> : null}
+              </span>
+              <span className="tk-approved-meta">
+                <span className={`tk-approved-state${onNow ? " is-now" : ""}`}>
+                  {onNow ? "On leave now" : "Upcoming"}
+                </span>
+                <span className="tk-approved-dot" aria-hidden="true">·</span>
+                <span>{range}</span>
+                <span className="tk-approved-dot" aria-hidden="true">·</span>
+                <span>{hrs(r.totalHours)}</span>
+              </span>
+            </div>
+            <span className="tk-approved-until">
+              <span className="tk-approved-until-label">until</span>
+              <span className="tk-approved-until-date">{fmtDate(r.dateEnd)}</span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function LeaveStatusChip({ status }) {
   const map = {
     pending:   { tone: "warn",  label: "Pending" },

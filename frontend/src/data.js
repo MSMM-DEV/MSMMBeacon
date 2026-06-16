@@ -1207,8 +1207,28 @@ export async function loadAllLeaveRequests() {
   return (data || []).map(adaptLeaveRequest);
 }
 
+// Email-body helpers (shared by submit + decision notifications).
+const _hrsTxt = (n) => `${Math.round((Number(n) || 0) * 100) / 100}h`;
+const _leaveKind = (t) => (t === "sick" ? "sick leave" : "vacation");
+const _leaveRangeLabel = (s, e) => (e && e !== s) ? `${fmtDate(s)} – ${fmtDate(e)}` : fmtDate(s);
+
+// Current available balance for one user + leave type (null if untracked).
+// loadLeaveBalances() is RLS-scoped: the submitter gets their own row, an
+// admin gets everyone — so callers filter by user id.
+async function _leaveAvailableFor(userId, leaveType) {
+  try {
+    const bals = await loadLeaveBalances();
+    const lb = bals.find(b => b.userId === userId);
+    if (!lb) return null;
+    const c = computeLeaveAvailable(lb);
+    return leaveType === "sick" ? c.sickAvailable : c.vacationAvailable;
+  } catch { return null; }
+}
+
 // Submit a new leave request for the signed-in user. Computes the eligible-day
-// snapshot, then best-effort emails admins (never blocks the insert).
+// snapshot, then best-effort emails (a) the requester a confirmation with the
+// before/after balance and (b) every admin a review request. Email failures
+// never block the insert — each send is wrapped independently.
 export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursPerDay, reason }) {
   const u = getCurrentBeaconUser();
   if (!u) throw new Error("not signed in");
@@ -1227,13 +1247,49 @@ export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursP
     .select("*").single();
   if (error) throw error;
   const req = adaptLeaveRequest(data);
+
+  // Shared body pieces.
+  const who     = userById(u.id)?.name || u.name || "A teammate";
+  const kind    = _leaveKind(leaveType);
+  const range   = _leaveRangeLabel(dateStart, dateEnd);
+  const dayWord = businessDays === 1 ? "weekday" : "weekdays";
+  const before  = await _leaveAvailableFor(u.id, leaveType);
+  const after   = before == null ? null : Math.round((before - totalHours) * 100) / 100;
+
+  // (a) Confirmation to the requester.
   try {
-    const admins = getUsers().filter(x => x.role === "Admin").map(x => x.id);
-    const who = userById(u.id)?.name || "A teammate";
-    const kind = leaveType === "sick" ? "sick leave" : "vacation";
-    const msg = `Leave request — ${who}: ${totalHours}h ${kind}, ${dateStart} to ${dateEnd}.${reason ? ` Reason: ${reason}` : ""} Review in Time Admin → Leaves.`;
-    await createOneShotAlert({ subjectRowId: u.id, message: msg, recipientUserIds: admins });
+    const lines = [
+      `Your ${kind} request has been submitted for review.`,
+      ``,
+      `• Dates: ${range} (${businessDays} ${dayWord})`,
+      `• Each day: ${_hrsTxt(hpd)} · ${_hrsTxt(totalHours)} total`,
+      before == null ? null : `• Balance: ${_hrsTxt(before)} now → ${_hrsTxt(after)} after approval`,
+      reason ? `• Reason: ${reason}` : null,
+      ``,
+      `You'll get another email once an admin approves or declines it.`,
+    ].filter(v => v !== null);
+    await createOneShotAlert({ subjectRowId: u.id, message: lines.join("\n"), recipientUserIds: [u.id] });
+  } catch (e) { console.warn("[leave] requester submit-confirm skipped:", e.message); }
+
+  // (b) Review request to every admin.
+  try {
+    // All admins except the submitter (a self-submitting admin already got the
+    // personal confirmation above — no need to also ask them to review it).
+    const admins  = getUsers().filter(x => x.role === "Admin" && x.id !== u.id).map(x => x.id);
+    const overTxt = (before != null && totalHours > before) ? " (over balance — would go negative)" : "";
+    const lines = [
+      `${who} submitted a ${kind} request and it's awaiting your review.`,
+      ``,
+      `• Dates: ${range} (${businessDays} ${dayWord})`,
+      `• Each day: ${_hrsTxt(hpd)} · ${_hrsTxt(totalHours)} total`,
+      before == null ? null : `• Their balance: ${_hrsTxt(before)} now → ${_hrsTxt(after)} if approved${overTxt}`,
+      reason ? `• Reason: ${reason}` : null,
+      ``,
+      `Open Beacon → Time Admin → Leaves to approve or decline.`,
+    ].filter(v => v !== null);
+    await createOneShotAlert({ subjectRowId: u.id, message: lines.join("\n"), recipientUserIds: admins });
   } catch (e) { console.warn("[leave] admin notify skipped:", e.message); }
+
   return req;
 }
 
@@ -1251,13 +1307,45 @@ async function _decideLeaveRequest(rpc, args, outcomeWord) {
   if (error) throw error;
   const req = adaptLeaveRequest(Array.isArray(data) ? data[0] : data);
   if (outcomeWord) {
-    try {
-      const kind = req.leaveType === "sick" ? "sick leave" : "vacation";
-      const msg = `Your ${kind} request ${req.dateStart} to ${req.dateEnd} (${req.totalHours}h) was ${outcomeWord}.`;
-      await createOneShotAlert({ subjectRowId: req.userId, message: msg, recipientUserIds: [req.userId] });
-    } catch (e) { console.warn("[leave] requester notify skipped:", e.message); }
+    try { await _notifyLeaveDecision(req, outcomeWord); }
+    catch (e) { console.warn("[leave] requester notify skipped:", e.message); }
   }
   return req;
+}
+
+// Build + send the approve/reject email to the requester. The approving admin
+// is the caller, so loadLeaveBalances() (admin → everyone) lets us read the
+// requester's POST-decision balance for the body.
+async function _notifyLeaveDecision(req, outcomeWord) {
+  const kind     = _leaveKind(req.leaveType);
+  const range    = _leaveRangeLabel(req.dateStart, req.dateEnd);
+  const dayWord  = req.businessDays === 1 ? "weekday" : "weekdays";
+  const approver = userById(req.reviewedBy)?.name || getCurrentBeaconUser()?.name || "An administrator";
+
+  let lines;
+  if (outcomeWord === "approved") {
+    const remain = await _leaveAvailableFor(req.userId, req.leaveType);
+    lines = [
+      `Good news — ${approver} approved your ${kind} request.`,
+      ``,
+      `• Dates: ${range} (${req.businessDays} ${dayWord})`,
+      `• Each day: ${_hrsTxt(req.hoursPerDay)} · ${_hrsTxt(req.totalHours)} total`,
+      remain == null ? null : `• Remaining ${kind} balance: ${_hrsTxt(remain)}`,
+      req.reviewNote ? `• Note from ${approver}: ${req.reviewNote}` : null,
+      ``,
+      `It now shows on your Timesheet in Beacon, marked until ${fmtDate(req.dateEnd)}.`,
+    ].filter(v => v !== null);
+  } else {
+    lines = [
+      `${approver} declined your ${kind} request for ${range}.`,
+      ``,
+      `• Requested: ${_hrsTxt(req.totalHours)} (${req.businessDays} ${dayWord})`,
+      req.reviewNote ? `• Note from ${approver}: ${req.reviewNote}` : null,
+      ``,
+      `Your balance was not changed. Reach out to your manager if you have questions.`,
+    ].filter(v => v !== null);
+  }
+  await createOneShotAlert({ subjectRowId: req.userId, message: lines.join("\n"), recipientUserIds: [req.userId] });
 }
 
 export function approveLeaveRequest(id, note = null) {

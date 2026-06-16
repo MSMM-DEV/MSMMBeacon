@@ -9726,6 +9726,80 @@ html, body { overflow-x: clip; }
 .tk-leave-band-label { flex: 1; }
 .tk-leave-band-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
 
+/* --- approved-leave announcement banners (top of the Timesheet tab) ---
+   A refined "approval seal": tinted gradient card, colored left rail, a
+   circular check seal, and an "until <date>" pill. One per active approved
+   leave; staggered entrance keyed off the inline --i index. */
+.tk-approved-leave { display: grid; gap: 8px; }
+.tk-approved-banner {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px 11px 17px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  animation: tkApprovedIn .42s cubic-bezier(.22,.61,.36,1) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+.tk-approved-banner::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+}
+.tk-approved-banner.tone-sage {
+  background: linear-gradient(100deg, var(--sage-soft), color-mix(in srgb, var(--sage-soft) 50%, var(--surface)));
+  border-color: color-mix(in srgb, var(--sage) 30%, transparent);
+}
+.tk-approved-banner.tone-sage::before,
+.tk-approved-banner.tone-sage .tk-approved-seal { background: var(--sage); }
+.tk-approved-banner.tone-blue {
+  background: linear-gradient(100deg, var(--blue-soft), color-mix(in srgb, var(--blue-soft) 50%, var(--surface)));
+  border-color: color-mix(in srgb, var(--blue) 30%, transparent);
+}
+.tk-approved-banner.tone-blue::before,
+.tk-approved-banner.tone-blue .tk-approved-seal { background: var(--blue); }
+
+.tk-approved-seal {
+  flex: none; display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 50%; color: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.14);
+}
+.tk-approved-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.tk-approved-title {
+  font-size: 13.5px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-approved-title strong { font-weight: 700; }
+.tk-approved-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.tk-approved-dot { color: var(--text-soft); }
+.tk-approved-state {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-soft);
+}
+.tk-approved-banner.tone-sage .tk-approved-state.is-now { color: var(--sage); }
+.tk-approved-banner.tone-blue .tk-approved-state.is-now { color: var(--blue); }
+
+.tk-approved-until {
+  flex: none; display: grid; justify-items: center; gap: 0;
+  padding: 5px 13px; border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+.tk-approved-until-label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: var(--text-soft);
+}
+.tk-approved-until-date { font-size: 12.5px; font-weight: 700; color: var(--text); white-space: nowrap; }
+
+@keyframes tkApprovedIn {
+  from { opacity: 0; transform: translateY(-7px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-approved-banner { animation: none; }
+}
+
 /* --- team timeline leave band (full-width overlay) --- */
 .tk-day-leave-band {
   position: absolute; inset: 0;
@@ -10054,7 +10128,7 @@ html, body { overflow-x: clip; }
   }
   .tk-timesheet-side {
     position: static;
-    order: -1;
+    order: 1;            /* mobile/tablet: team presence drops to the BOTTOM */
   }
 }
 
@@ -10078,7 +10152,7 @@ html, body { overflow-x: clip; }
   .tk-timesheet-side { gap: 12px; }
   .tk-timesheet-side {
     position: static;
-    order: -1;
+    order: 1;            /* mobile/tablet: team presence drops to the BOTTOM */
   }
 
   /* Day picker bar: full-width date input, controls don't crowd. */
@@ -10104,6 +10178,21 @@ html, body { overflow-x: clip; }
   .tk-punch-btn  { min-height: 220px; }
   .tk-punch-label { font-size: 24px; }
   .tk-hero-warn-banner { font-size: 12px; padding: 8px 10px; }
+
+  /* Approved-leave banners: let the "until" pill wrap below the copy on
+     narrow screens, aligned past the seal so it still reads as one unit. */
+  .tk-approved-banner {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 10px 12px 10px 14px;
+  }
+  .tk-approved-copy { flex: 1 1 60%; }
+  .tk-approved-title { white-space: normal; }
+  .tk-approved-until {
+    order: 3;
+    margin-left: 42px;            /* align under the copy (seal 30 + gap 12) */
+    padding: 4px 11px;
+  }
 
   /* Day card calendar — no card chrome, just the calendar. */
   .tk-day-card-cal {

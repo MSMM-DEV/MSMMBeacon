@@ -21,7 +21,7 @@ import { PunchPromptModal } from "./PunchPromptModal";
 import { IntervalReclassifyPopover } from "./IntervalReclassifyPopover";
 import { TeamPresenceView } from "./TeamPresenceView";
 import { LeaveRequestModal } from "./LeaveRequestModal";
-import { MyLeaveSection } from "../leave.jsx";
+import { MyLeaveSection, ApprovedLeaveBanners } from "../leave.jsx";
 
 export function TimesheetTab({ focusDate = null }) {
   const me        = getCurrentBeaconUser();
@@ -162,6 +162,9 @@ export function TimesheetTab({ focusDate = null }) {
           )}
         </div>
       </header>
+
+      {/* Approved-leave announcements — shown on every date, until each ends */}
+      <ApprovedLeaveBanners reloadKey={leaveReloadKey}/>
 
       {/* Hero punch panel — only on today */}
       {isToday && (
