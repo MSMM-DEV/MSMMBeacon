@@ -12,6 +12,16 @@
 
 import { registerSW } from "virtual:pwa-register";
 
+// How often (ms) an *open* app re-asks the server whether a newer service
+// worker has shipped. A registered SW is otherwise only re-checked by the
+// browser on a hard navigation (which a standalone installed PWA basically
+// never does) or its own ~24h background timer — that's why a freshly deployed
+// build used to take *hours* to surface the "New version available" toast.
+// Combined with the focus / visibility / online checks in initPwa(), this caps
+// the wait at ~1 min while you're staring at the app, and makes it ~instant
+// the moment you switch back to a backgrounded window.
+const SW_UPDATE_POLL_MS = 60_000;
+
 // ----------------------------------------------------------------------
 // Minimal subscribable store
 // ----------------------------------------------------------------------
@@ -61,6 +71,14 @@ export function initPwa() {
       onNeedRefresh() {
         state.needRefresh = true;
         emit();
+        // If the update lands while the app is backgrounded, apply it silently
+        // now: the reload happens off-screen and the user returns to the fresh
+        // build + fresh data (loadBeacon re-runs on reload) with zero clicks.
+        // While the app is VISIBLE we leave the toast up instead, so an active
+        // editor isn't yanked mid-task — they click Refresh when ready.
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          applyUpdate();
+        }
       },
       onOfflineReady() {
         state.offlineReady = true;
@@ -98,6 +116,31 @@ export function initPwa() {
   const onOffline = () => { state.online = false; emit(); };
   window.addEventListener("online",  onOnline);
   window.addEventListener("offline", onOffline);
+
+  // 4. Active update detection. Without this the browser only re-checks sw.js
+  //    on a hard navigation or its own ~24h timer, so an installed desktop PWA
+  //    that just stays open can lag a deploy by hours. Force the check:
+  //    poll on an interval AND whenever the user comes back to the app (window
+  //    focus / tab becomes visible) or the network returns. Each reg.update()
+  //    re-fetches sw.js (Vercel serves it must-revalidate); a byte change
+  //    installs the new worker and fires onNeedRefresh above.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.ready.then((reg) => {
+      if (!reg) return;
+      const check = () => {
+        if (reg.installing) return;              // an update is already landing
+        if (navigator.onLine === false) return;  // offline → update() just errors
+        reg.update().catch(() => { /* transient; the next tick retries */ });
+      };
+      check();                                   // catch a build shipped before this launch
+      setInterval(check, SW_UPDATE_POLL_MS);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") check();
+      });
+      window.addEventListener("focus",  check);
+      window.addEventListener("online", check);
+    }).catch(() => { /* SW never became ready (unsupported / blocked) */ });
+  }
 }
 
 // ----------------------------------------------------------------------
