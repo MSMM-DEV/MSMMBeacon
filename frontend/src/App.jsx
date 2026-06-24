@@ -4,6 +4,7 @@ import { Sparkline } from "./primitives.jsx";
 import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
   InvoiceTable, EventsTable, HotLeadsTable, HotLeadsQuickView, DirectoryTable, OpenBidsTable,
+  ProjectsTable,
 } from "./tables.jsx";
 // Note: SoqTable was removed — SOQ is no longer surfaced in v2.
 // ClientsTable + CompaniesTable were merged into DirectoryTable.
@@ -41,6 +42,10 @@ import {
   setOpenBidApproval, markOpenBidMovedForward,
   uploadOpenBidPdf, deleteOpenBidPdf, getOpenBidPdfSignedUrl,
   normInvoiceNumber, addProjectInvoiceLink, removeProjectInvoiceLink,
+  createProjectItem, updateProjectItem, deleteProjectItem,
+  addProjectItemSub, updateProjectItemSub, removeProjectItemSub,
+  validateProjectItemContract, projectItemDescendantIds,
+  contractTypeLabel, projectItemTypeLabel, projectItemStatusLabel,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -73,6 +78,7 @@ const TAB_META = [
   { key: "invoice",   label: "Invoices",      stage: "stage-invoice"   },
   { key: "between",   label: "In-Between",    stage: "stage-invoice"   },
   { key: "closed",    label: "Closed Out",    stage: "stage-closed"    },
+  { key: "projects",  label: "Projects",      stage: "stage-awarded"   },
   { key: "events",    label: "Events & Other",stage: "stage-events"    },
   { key: "directory", label: "Directory",     stage: "stage-clients"   },
   { key: "licenses",  label: "Licenses",      stage: "stage-events"    },
@@ -92,6 +98,7 @@ const NAV_GROUPS = [
   { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids"] },
   { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded"] },
   { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "pipeline", tabs: ["invoice", "between", "closed"] },
+  { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "side", tabs: ["projects"] },
   { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "side", tabs: ["events"] },
   { key: "directory", label: "Directory",           stage: "stage-clients",   group: "side", tabs: ["directory"] },
   { key: "licenses",  label: "Licenses",            stage: "stage-events",    group: "side", tabs: ["licenses"] },
@@ -126,6 +133,7 @@ const PAGE_META = {
   closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements — billing history is kept." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
   between:   { title: "In-Between", desc: "Paused projects. Every dollar, sub, attachment, and note stays intact — resume to Invoices or close out." },
+  projects:  { title: "Projects", desc: "Tree-structured work breakdown — projects, phases, and subphases. Main items are containers; Standard items are where time & expenses get logged. Child contract totals can't exceed the parent." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
@@ -195,6 +203,18 @@ const FILTERS = {
     upcoming: r => r.dateTime && new Date(r.dateTime) >= new Date(),
     past:     r => r.dateTime && new Date(r.dateTime) <  new Date(),
   },
+  // Projects is a tree — filtering is applied inside ProjectsTable (which keeps
+  // a matching node's ancestors visible so the branch doesn't orphan). These
+  // predicates exist so chipsFor()/the toolbar don't choke; the table reads the
+  // active chip key directly and does the ancestor-aware filtering itself.
+  projects: {
+    all:      () => true,
+    main:     r => r.itemType === "main",
+    standard: r => r.itemType === "standard",
+    active:   r => r.status === "active",
+    between:  r => r.status === "between",
+    closed:   r => r.status === "closed_out",
+  },
   // The Directory merges Clients + Companies. Filter chips cover both
   // the kind axis (clients vs companies) and the sub-attribute axis
   // (Federal/State for clients; Prime/Sub/Multiple for companies).
@@ -246,6 +266,14 @@ const FILTER_CHIPS = {
     { key: "all",      label: "All" },
     { key: "upcoming", label: "Upcoming", icon: "clock" },
     { key: "past",     label: "Past" },
+  ],
+  projects: [
+    { key: "all",      label: "All" },
+    { key: "main",     label: "Main",     icon: "briefcase" },
+    { key: "standard", label: "Standard", icon: "flag" },
+    { key: "active",   label: "Active" },
+    { key: "between",  label: "In Between", icon: "pause" },
+    { key: "closed",   label: "Closed Out", icon: "x" },
   ],
   // Two visual groupings on the Directory: kind (clients vs companies)
   // then sub-attribute (org-type for clients; company-type for companies).
@@ -448,6 +476,25 @@ const EXPORT_COLUMNS = {
     { label: "Location",                    get: r => r.address || "" },
     { label: "Notes",                       get: r => r.notes || "" },
     { label: "Projects",          wMm: 20,  get: r => countRefs(r.id) },
+  ],
+  // Projects export: the rows are the flattened tree (depth carried on
+  // r._depth, prefixed onto the name so the hierarchy reads on paper).
+  projects: [
+    { label: "Project ID",        wMm: 28,  get: r => r.projectId || "" },
+    { label: "Name",              wrap: true, get: r => `${"  ".repeat(r._depth || 0)}${r.name || ""}` },
+    { label: "Type",              wMm: 18,  get: r => projectItemTypeLabel(r.itemType) },
+    { label: "Client / Prime",              get: r => companyById(r.clientId)?.name || "" },
+    { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
+    { label: "Contract Type",     wMm: 30,  get: r => contractTypeLabel(r.contractType) },
+    { label: "Contract",          wMm: 26, halign: "right", get: r => r.contractAmount != null ? fmtMoney(r.contractAmount) : "" },
+    { label: "Start",             wMm: 22,  get: r => fmtDate(r.startDate) },
+    { label: "Due",               wMm: 22,  get: r => fmtDate(r.dueDate) },
+    { label: "% Complete",        wMm: 18, halign: "right", get: r => r.percentComplete != null ? `${r.percentComplete}%` : "" },
+    { label: "Manager",           wMm: 24,  get: r => userById(r.managerId)?.name || "" },
+    { label: "Additional PMs",              get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
+    { label: "Status",            wMm: 22,  get: r => projectItemStatusLabel(r.status) },
+    { label: "Address",                     get: r => [r.addressLine1, r.addressLine2, r.city, r.state, r.pinCode].filter(Boolean).join(", ") },
+    { label: "Notes",                       get: r => r.notes || "" },
   ],
 };
 // The In-Between tab is the same table shape as Invoices — share its defs.
@@ -919,6 +966,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [events,    setEvents]    = useState(initial.events);
   const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
   const [openBids,  setOpenBids]  = useState(initial.openBids || []);
+  // Projects (tree-structured work breakdown — beacon_v2.project_items). One
+  // flat array; ProjectsTable builds the parent/child tree from parentId.
+  const [projectItems, setProjectItems] = useState(initial.projectItems || []);
   const [clients,   setClients]   = useState(() => getClientsOnly());
   const [companies, setCompanies] = useState(() => getCompaniesOnly());
   // Workspace-wide settings (singleton). Today: monthlyInvoiceBenchmark drives
@@ -939,6 +989,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [filterKey, setFilterKey] = useState({
     potential: "all", awaiting: "all", awarded: "all", closed: "all",
     events: "all", hotleads: "all", directory: "all", openbids: "all",
+    projects: "all",
   });
 
   // Year filter state. null = All years; number = filter to that year.
@@ -1444,6 +1495,128 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setOpenBids(prev);
       showToast(`Delete failed: ${e.message || e}`, "x");
     }
+  };
+
+  // -------------------- Projects (tree work breakdown) --------------------
+  // Optimistic local update + a guarded scalar PATCH. The contract roll-up
+  // rule + the re-parent cycle guard are checked client-side here (instant
+  // feedback) AND enforced by the DB trigger (the backstop — a rejected write
+  // reverts the optimistic change). Additional PMs sync through the shared
+  // join-table differ; the single Manager is a scalar column.
+  const updateProjectItemRow = (id, patch) => {
+    const existing = projectItems.find(r => r.id === id);
+    if (!existing) return;
+
+    // item_type / status are NOT NULL enums. The inline select auto-injects a
+    // "—" option that commits null — ignore an attempt to clear them (the DB
+    // would reject it anyway).
+    if ("itemType" in patch && !patch.itemType) return;
+    if ("status"   in patch && !patch.status)   return;
+
+    // Re-parent guard: can't move a node under itself or its own descendant.
+    if ("parentId" in patch && patch.parentId) {
+      if (patch.parentId === id || projectItemDescendantIds(projectItems, id).includes(patch.parentId)) {
+        showToast("Can't move an item under itself or one of its own children.", "x");
+        return;
+      }
+    }
+    // Contract roll-up guard (mirror of fn_project_item_validate).
+    if ("contractAmount" in patch || "parentId" in patch) {
+      const amount   = "contractAmount" in patch ? patch.contractAmount : existing.contractAmount;
+      const parentId = "parentId" in patch ? patch.parentId : existing.parentId;
+      const v = validateProjectItemContract(projectItems, { projectId: id, parentId, amount });
+      if (!v.ok) { showToast(v.message, "x"); return; }
+    }
+
+    setProjectItems(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+
+    if ("pmIds" in patch) {
+      syncJoinUsers(id, existing.pmIds, patch.pmIds, "project_item_pms", "project_id");
+    }
+
+    const scalarPatch = { ...patch };
+    delete scalarPatch.pmIds;
+    delete scalarPatch.subs;
+    if (Object.keys(scalarPatch).length > 0) {
+      updateProjectItem(id, scalarPatch).catch(e => {
+        // Revert the optimistic change (covers a DB-trigger reject, e.g. the
+        // roll-up constraint catching something the client check missed).
+        setProjectItems(rs => rs.map(r => r.id === id ? existing : r));
+        showToast(e.message || String(e), "x");
+      });
+    }
+  };
+
+  const deleteProjectItemRow = (id) => {
+    const existing = projectItems.find(r => r.id === id);
+    if (!existing) return;
+    const descendants = projectItemDescendantIds(projectItems, id);
+    const n = descendants.length;
+    const doDelete = async () => {
+      const removeIds = new Set([id, ...descendants]);
+      const prev = projectItems;
+      setProjectItems(rs => rs.filter(r => !removeIds.has(r.id)));
+      try {
+        await deleteProjectItem(id); // parent_id FK is ON DELETE CASCADE
+        showToast(n
+          ? `Deleted "${existing.name}" + ${n} child item${n === 1 ? "" : "s"}`
+          : `Deleted "${existing.name}"`, "check");
+      } catch (e) {
+        setProjectItems(prev);
+        showToast(`Delete failed: ${e.message || e}`, "x");
+      }
+    };
+    setConfirmState({
+      title: n > 0 ? "Delete this project and its children?" : "Delete this project?",
+      message: n > 0
+        ? `"${existing.name}" has ${n} item${n === 1 ? "" : "s"} nested under it. Deleting it removes the whole subtree — this can't be undone.`
+        : `"${existing.name}" will be permanently deleted.`,
+      confirmLabel: n > 0 ? `Delete ${n + 1} items` : "Delete",
+      tone: "danger", icon: "trash",
+      onConfirm: doDelete,
+    });
+  };
+
+  // Subs on a project item (companies). Optimistic; the join key is
+  // (project_id, company_id).
+  const addProjectItemSubRow = async (projectId, companyId) => {
+    const existing = projectItems.find(r => r.id === projectId);
+    if (!existing || !companyId) return;
+    try {
+      const res = await addProjectItemSub({
+        projectId, companyId, ord: (existing.subs?.length || 0) + 1,
+      });
+      if (res.existed) { showToast("Already a sub on this item", "x"); return; }
+      setProjectItems(rs => rs.map(r => r.id === projectId
+        ? { ...r, subs: [...(r.subs || []), { cId: companyId, desc: "", amt: 0 }] }
+        : r));
+    } catch (e) { showToast(`Add sub failed: ${e.message || e}`, "x"); }
+  };
+  const updateProjectItemSubRow = (projectId, companyId, patch) => {
+    const prev = projectItems;
+    setProjectItems(rs => rs.map(r => r.id === projectId
+      ? { ...r, subs: (r.subs || []).map(s => s.cId === companyId ? { ...s, ...patch } : s) }
+      : r));
+    updateProjectItemSub({
+      projectId, companyId,
+      amount:     "amt"  in patch ? patch.amt  : undefined,
+      discipline: "desc" in patch ? patch.desc : undefined,
+    }).catch(e => { setProjectItems(prev); showToast(`Save failed: ${e.message || e}`, "x"); });
+  };
+  const removeProjectItemSubRow = async (projectId, companyId) => {
+    const prev = projectItems;
+    setProjectItems(rs => rs.map(r => r.id === projectId
+      ? { ...r, subs: (r.subs || []).filter(s => s.cId !== companyId) }
+      : r));
+    try { await removeProjectItemSub({ projectId, companyId }); }
+    catch (e) { setProjectItems(prev); showToast(`Remove failed: ${e.message || e}`, "x"); }
+  };
+
+  // Open the New-Project modal. When adding a child, pre-seed the parent (and
+  // default the new item to Standard — children are usually work items).
+  const openNewProject = (parentId = null) => {
+    setCreateSeed(parentId ? { parent_id: parentId } : null);
+    setCreateTable("projects");
   };
 
   const updateClients = (id, patch) => {
@@ -3285,6 +3458,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   };
 
   const handleCreated = (table, dbRow, extras = {}) => {
+    // Projects (tree items) are created entirely in the modal via the data-layer
+    // helpers (text PK + routed client + subs/PMs), so `dbRow` is ALREADY the
+    // adapted UI row — just prepend it, no adaptInsertedRow pass.
+    if (table === "projects" || extras._projectItem) {
+      setProjectItems(rs => [dbRow, ...rs]);
+      setFlashId(dbRow.id);
+      setTimeout(() => setFlashId(null), 1500);
+      showToast("Project created");
+      return;
+    }
     const uiRow = adaptInsertedRow(table, dbRow, extras);
     if (table === "potential")  setPotential(rs => [uiRow, ...rs]);
     if (table === "awaiting")   setAwaiting(rs => [uiRow, ...rs]);
@@ -3934,8 +4117,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       hotleads:  apply("hotleads",  hotLeads),
       openbids:  apply("openbids",  openBids),
       directory: apply("directory", [...clients, ...companies]),
+      // Projects is a tree — ProjectsTable does its own ancestor-aware
+      // filtering, so pass the full flat list through unfiltered (the export
+      // fallback + currentRows still get something sensible).
+      projects:  projectItems,
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, clients, companies]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, clients, companies, projectItems]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -4025,6 +4212,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     events: events.length,
     hotleads: hotLeads.length,
     directory: clients.length + companies.length,
+    projects: projectItems.length,
     timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
     "time-admin": null,
     "team-cal":   null,
@@ -4066,7 +4254,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Directory's primary "New X" defaults to client (the more common entry).
   // Companies are typically created via the sub-picker on a project rather
   // than from this tab.
-  const newForTab = { openbids: "openbids", awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients" };
+  const newForTab = { openbids: "openbids", awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients", projects: "projects" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
                  : tab === "hotleads" ? "New hot lead"
@@ -4430,6 +4618,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onResume={resumeInvoiceProject}
             onCloseOutRow={r => triggerForward(r, "invoice", "closed")}/>
         )}
+        {tab === "projects" && (
+          <ProjectsTable
+            items={projectItems}
+            updateRow={updateProjectItemRow}
+            onOpenDrawer={r => openDrawer(r, "projects")}
+            onAddChild={(parentId) => openNewProject(parentId)}
+            onDelete={deleteProjectItemRow}
+            companies={companies}
+            users={getUsers()}
+            activeFilter={filterKey.projects}
+            onFilterChange={(k) => setFilterKey(f => ({ ...f, projects: k }))}
+            filterChips={FILTER_CHIPS.projects}
+            flashId={flashId}
+            tab="projects"/>
+        )}
         {tab === "events" && (
           <>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -4568,6 +4771,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           drawer.table === "events"    ? events    :
           drawer.table === "hotleads"  ? hotLeads  :
           drawer.table === "directory" ? [...clients, ...companies] :
+          drawer.table === "projects"  ? projectItems :
           []
         );
         const liveRow = pool.find(r => r.id === drawer.row.id) || drawer.row;
@@ -4606,6 +4810,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             drawer.table === "events"    ? updateEvents    :
             drawer.table === "hotleads"  ? updateHotLeads  :
             drawer.table === "openbids"  ? updateOpenBids  :
+            drawer.table === "projects"  ? updateProjectItemRow :
             drawer.table === "directory"
               ? (id, patch) => {
                   const inClients = clients.some(c => c.id === id);
@@ -4623,7 +4828,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               ? () => { triggerForward(liveRow, "openbids", "awaiting"); setDrawer(null); } :
             null
           }
-          onAlert={drawer.table === "openbids" ? null : () => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          onAlert={(drawer.table === "openbids" || drawer.table === "projects") ? null : () => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
           isAdmin={isAdmin}
           onApproveBid={
             drawer.table === "openbids" && isAdmin
@@ -4714,8 +4919,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   deleteOpenBidRow(liveRow.id);
                   setDrawer(null);
                 }
+              : drawer.table === "projects"
+              ? () => { deleteProjectItemRow(liveRow.id); setDrawer(null); }
               : null
           }
+          projectItems={drawer.table === "projects" ? projectItems : undefined}
+          onAddProjectSub={drawer.table === "projects"
+            ? (companyId) => addProjectItemSubRow(liveRow.id, companyId) : undefined}
+          onUpdateProjectSub={drawer.table === "projects"
+            ? (companyId, patch) => updateProjectItemSubRow(liveRow.id, companyId, patch) : undefined}
+          onRemoveProjectSub={drawer.table === "projects"
+            ? (companyId) => removeProjectItemSubRow(liveRow.id, companyId) : undefined}
+          onAddChild={drawer.table === "projects"
+            ? () => { openNewProject(liveRow.id); setDrawer(null); } : undefined}
           linkedSubs={linkedSubs}
           onAddSub={drawer.table === "invoice"
             ? () => { setAddSubModal({ projectRow: liveRow }); }
@@ -4763,6 +4979,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           clients={clients}
           companies={companies}
           users={getUsers()}
+          projectItems={projectItems}
           onClose={() => { setCreateTable(null); setCreateSeed(null); }}
           onCreated={(dbRow, extras) => handleCreated(createTable, dbRow, extras)}/>
       )}

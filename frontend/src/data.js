@@ -324,6 +324,100 @@ export const BID_SERVICE_OPTIONS = [
   "On-Call Engineering Services",
 ];
 
+// ----------------------------------------------------------------------
+// Projects (tree-structured work breakdown — beacon_v2.project_items).
+// Distinct from the pipeline `projects` table. See 20260624130000.
+// ----------------------------------------------------------------------
+// Contract structure dropdown. value = the stable enum key stored in the DB
+// (beacon_v2.project_item_contract_type_enum); label = the human form.
+export const CONTRACT_TYPE_OPTIONS = [
+  { value: "hourly",                label: "Hourly" },
+  { value: "fixed",                 label: "Fixed" },
+  { value: "hourly_nte",            label: "Hourly Not to Exceed" },
+  { value: "overhead",              label: "Overhead" },
+  { value: "percentage",            label: "Percentage" },
+  { value: "recurring",             label: "Recurring" },
+  { value: "cost_plus_percentage",  label: "Cost + Percentage" },
+  { value: "cost_plus_recurring",   label: "Cost + Recurring" },
+  { value: "recurring_plus_hourly", label: "Recurring + Hourly" },
+];
+export const contractTypeLabel = (v) =>
+  CONTRACT_TYPE_OPTIONS.find(o => o.value === v)?.label || "";
+
+// Main = parent-level container (no time/expense logging); Standard = active
+// work item (time/expense can be logged). The Main/Standard distinction is
+// stored as a property — actual time/expense entry is a future feature.
+export const PROJECT_ITEM_TYPE_OPTIONS = [
+  { value: "main",     label: "Main" },
+  { value: "standard", label: "Standard" },
+];
+export const projectItemTypeLabel = (v) =>
+  PROJECT_ITEM_TYPE_OPTIONS.find(o => o.value === v)?.label || "Standard";
+
+export const PROJECT_ITEM_STATUS_OPTIONS = [
+  { value: "active",     label: "Active" },
+  { value: "between",    label: "In Between" },
+  { value: "closed_out", label: "Closed Out" },
+];
+export const projectItemStatusLabel = (v) =>
+  PROJECT_ITEM_STATUS_OPTIONS.find(o => o.value === v)?.label || "Active";
+
+// Only Standard items can take time + expenses (Main is a container). The DB
+// doesn't block time/expense yet (no such feature), so this is the single
+// source of truth for any caller that needs to know.
+export const canLogTimeExpense = (item) => (item?.itemType || "standard") === "standard";
+
+// Direct children of a node (parentId === null → roots).
+export const projectItemChildren = (items, parentId) =>
+  (items || []).filter(it => (it.parentId || null) === (parentId || null));
+
+// All descendant project_ids of a node (depth-first), excluding the node
+// itself. Used to size the delete confirm + to block re-parenting under a
+// descendant client-side.
+export function projectItemDescendantIds(items, projectId) {
+  const out = [];
+  const stack = [projectId];
+  while (stack.length) {
+    const pid = stack.pop();
+    for (const it of (items || [])) {
+      if (it.parentId === pid) { out.push(it.projectId); stack.push(it.projectId); }
+    }
+  }
+  return out;
+}
+
+// Client-side mirror of the DB roll-up trigger (fn_project_item_validate) for
+// instant feedback. `items` is the current in-memory slice; the row being
+// edited is excluded by projectId so its own old amount doesn't double-count.
+// Returns { ok:true } or { ok:false, message }.
+export function validateProjectItemContract(items, { projectId, parentId, amount }) {
+  const amt = amount == null || amount === "" ? null : Number(amount);
+  const EPS = 0.005;
+  // Floor: a node can't drop below the total already allocated to its children.
+  if (amt != null && projectId) {
+    const childSum = (items || [])
+      .filter(it => it.parentId === projectId)
+      .reduce((a, it) => a + (Number(it.contractAmount) || 0), 0);
+    if (childSum > amt + EPS) {
+      return { ok: false, message: `Contract ${fmtMoney(amt, false)} is below the ${fmtMoney(childSum, false)} already allocated to child items.` };
+    }
+  }
+  // Cap: siblings + this node must fit inside the parent's contract amount.
+  if (parentId && amt != null) {
+    const parent = (items || []).find(it => it.projectId === parentId);
+    const parentAmt = parent && parent.contractAmount != null ? Number(parent.contractAmount) : null;
+    if (parentAmt != null) {
+      const sibSum = (items || [])
+        .filter(it => it.parentId === parentId && it.projectId !== projectId)
+        .reduce((a, it) => a + (Number(it.contractAmount) || 0), 0);
+      if (sibSum + amt > parentAmt + EPS) {
+        return { ok: false, message: `Children would total ${fmtMoney(sibSum + amt, false)}, over the parent's ${fmtMoney(parentAmt, false)} contract.` };
+      }
+    }
+  }
+  return { ok: true };
+}
+
 export const mkId = () => "r_" + Math.random().toString(36).slice(2, 10);
 
 export const fmtMoney = (n, showCents = true) => {
@@ -975,6 +1069,50 @@ function adaptOpenBid(r) {
     createdBy:          r.created_by || null,
     createdAt:          r.created_at || null,
     anticipatedAmount:  r.anticipated_amount == null ? null : Number(r.anticipated_amount),
+  };
+}
+
+// project_item_subs → UI sub chips. Same { cId, desc, amt } shape the pipeline
+// SubsCell already renders, so the existing primitive works unchanged.
+const adaptItemSubs = (arr) =>
+  (arr || [])
+    .slice()
+    .sort((a, b) => (a.ord || 0) - (b.ord || 0))
+    .map(s => ({ cId: s.company_id, desc: s.discipline || "", amt: s.amount || 0 }));
+
+// A tree node (Project / Phase / Subphase / …). `id` mirrors `projectId` (the
+// text PK) so the generic table/drawer/flash machinery — which keys on r.id —
+// works without special-casing. `clientId` is the merged Client/Prime value
+// (a client OR a company), exactly like adaptPotential; routeClientPick splits
+// it back into client_id / prime_company_id on write.
+// NOTE: project_items has NO `id` uuid column — `id` here is the text PK. Do
+// NOT route writes through the generic patchTable() (it keys on .eq("id", …));
+// use updateProjectItem(), which keys on .eq("project_id", …).
+function adaptProjectItem(r) {
+  return {
+    id:              r.project_id,
+    projectId:       r.project_id,
+    parentId:        r.parent_id || null,
+    name:            r.name || "",
+    clientId:        r.client_id || r.prime_company_id || null,
+    itemType:        r.item_type || "standard",
+    addressLine1:    r.address_line1 || "",
+    addressLine2:    r.address_line2 || "",
+    city:            r.city || "",
+    state:           r.state || "",
+    pinCode:         r.pin_code || "",
+    contractType:    r.contract_type || "",
+    contractAmount:  r.contract_amount == null ? null : Number(r.contract_amount),
+    startDate:       r.start_date || "",
+    dueDate:         r.due_date || "",
+    percentComplete: r.percent_complete == null ? null : Number(r.percent_complete),
+    managerId:       r.manager_user_id || null,
+    pmIds:           allPms(r.pms),
+    subs:            adaptItemSubs(r.subs),
+    status:          r.status || "active",
+    notes:           r.notes || "",
+    sortOrd:         r.sort_ord ?? null,
+    createdAt:       r.created_at || null,
   };
 }
 
@@ -1655,7 +1793,7 @@ export async function loadBeacon() {
   const [
     users, clients, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
-    openBidRows, invoiceNoteRows, invoiceLinkRows,
+    openBidRows, invoiceNoteRows, invoiceLinkRows, projectItemRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -1757,6 +1895,16 @@ export async function loadBeacon() {
       .select("*")
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] project_invoice_links fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    // Projects (tree-structured work breakdown — beacon_v2.project_items).
+    // Own graceful-degrade query so an un-migrated DB just shows an empty
+    // Projects tab. Subs + additional PMs ride along via the join embeds.
+    supabase.from("project_items")
+      .select("*, subs:project_item_subs(*), pms:project_item_pms(user_id)")
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] project_items fetch skipped:", error.message); return []; }
         return data || [];
       }),
   ]);
@@ -2000,6 +2148,7 @@ export async function loadBeacon() {
     events:    events.map(adaptEvent),
     hotLeads:  hotLeads.map(adaptHotLead),
     openBids:  (openBidRows || []).map(adaptOpenBid),
+    projectItems: (projectItemRows || []).map(adaptProjectItem),
     clients:   _companies,
     users:     _users,
     subInvoices: subInvoicesMatrix,
@@ -3962,6 +4111,137 @@ export async function markOpenBidMovedForward(id, projectId) {
     .update({ moved_to_project_id: projectId })
     .eq("id", id);
   if (error) throw new Error(`open_bids forward-link: ${error.message}`);
+}
+
+// ----------------------------------------------------------------------
+// Projects (tree-structured work breakdown — beacon_v2.project_items).
+// project_id is the IMMUTABLE text PK; clientId routes via routeClientPick;
+// additional PMs ride the project_item_pms join (synced in App.jsx via the
+// shared syncJoinUsers); subs ride project_item_subs.
+// ----------------------------------------------------------------------
+const PROJECT_ITEM_COL_MAP = {
+  parentId:        "parent_id",
+  name:            "name",
+  itemType:        "item_type",
+  addressLine1:    "address_line1",
+  addressLine2:    "address_line2",
+  city:            "city",
+  state:           "state",
+  pinCode:         "pin_code",
+  contractType:    "contract_type",
+  contractAmount:  "contract_amount",
+  startDate:       "start_date",
+  dueDate:         "due_date",
+  percentComplete: "percent_complete",
+  managerId:       "manager_user_id",
+  status:          "status",
+  notes:           "notes",
+  sortOrd:         "sort_ord",
+  // project_id is set on create only (immutable PK). clientId is routed via
+  // routeClientPick. pmIds + subs are join tables, handled separately.
+};
+
+// Columns where "" / undefined should become NULL. item_type + status are
+// NOT NULL with defaults and the UI always supplies a value, so they're
+// deliberately excluded (sending null would violate the constraint).
+const PROJECT_ITEM_NULL_IF_EMPTY = new Set([
+  "parent_id", "contract_type", "contract_amount", "start_date", "due_date",
+  "percent_complete", "manager_user_id", "address_line1", "address_line2",
+  "city", "state", "pin_code", "notes", "sort_ord",
+]);
+
+function buildProjectItemDbPatch(patch) {
+  const out = {};
+  for (const [k, dbCol] of Object.entries(PROJECT_ITEM_COL_MAP)) {
+    if (!(k in patch)) continue;
+    let v = patch[k];
+    if ((v === "" || v === undefined) && PROJECT_ITEM_NULL_IF_EMPTY.has(dbCol)) v = null;
+    out[dbCol] = v;
+  }
+  return out;
+}
+
+// Translate the trigger / FK errors into friendly text for the toast. The
+// roll-up trigger raises 23514 with an already-human message; surface it.
+function rewriteProjectItemError(error) {
+  if (!error) return "project_items error";
+  if (error.code === "23505") return "That Project ID already exists";
+  if (error.code === "23514") return error.message || "Contract validation failed";
+  if (error.code === "23503") return "A linked parent, client, or user no longer exists";
+  return `project_items: ${error.message}`;
+}
+
+const PROJECT_ITEM_SELECT = "*, subs:project_item_subs(*), pms:project_item_pms(user_id)";
+
+export async function createProjectItem(payload) {
+  const me = getCurrentBeaconUser();
+  const pid = String(payload.projectId ?? "").trim();
+  if (!pid) throw new Error("Project ID is required");
+  const dbPatch = buildProjectItemDbPatch(payload);
+  if (!dbPatch.name) throw new Error("Project Name is required");
+  dbPatch.project_id = pid;
+  if (payload.clientId !== undefined) Object.assign(dbPatch, routeClientPick(payload.clientId));
+  if (me?.id) dbPatch.created_by = me.id;
+  const { data, error } = await supabase
+    .from("project_items").insert(dbPatch).select(PROJECT_ITEM_SELECT).single();
+  if (error) throw new Error(rewriteProjectItemError(error));
+  return adaptProjectItem(data);
+}
+
+export async function updateProjectItem(id, patch) {
+  const dbPatch = buildProjectItemDbPatch(patch);
+  if (patch.clientId !== undefined) Object.assign(dbPatch, routeClientPick(patch.clientId));
+  if (Object.keys(dbPatch).length === 0) return null;
+  const { data, error } = await supabase
+    .from("project_items").update(dbPatch).eq("project_id", id).select(PROJECT_ITEM_SELECT).single();
+  if (error) throw new Error(rewriteProjectItemError(error));
+  return adaptProjectItem(data);
+}
+
+// parent_id FK is ON DELETE CASCADE, so deleting a node removes its whole
+// subtree (and the subs/pms join rows). The caller confirms with a count.
+export async function deleteProjectItem(id) {
+  const { error } = await supabase.from("project_items").delete().eq("project_id", id);
+  if (error) throw new Error(`project_items delete: ${error.message}`);
+}
+
+export async function addProjectItemSub({ projectId, companyId, discipline, amount, ord }) {
+  if (!companyId) throw new Error("Pick a sub firm");
+  const payload = {
+    project_id: projectId,
+    company_id: companyId,
+    discipline: discipline || null,
+    amount: amount == null || amount === "" ? null : Number(amount),
+    ord: ord ?? null,
+  };
+  const { data: existing } = await supabase.from("project_item_subs")
+    .select("*").eq("project_id", projectId).eq("company_id", companyId).limit(1).maybeSingle();
+  if (existing) return { row: existing, existed: true };
+  const { data, error } = await supabase.from("project_item_subs").insert(payload).select("*").single();
+  if (error?.code === "23505") {
+    const { data: raced } = await supabase.from("project_item_subs")
+      .select("*").eq("project_id", projectId).eq("company_id", companyId).limit(1).maybeSingle();
+    if (raced) return { row: raced, existed: true };
+  }
+  if (error) throw new Error(`project_item_subs insert: ${error.message}`);
+  return { row: data, existed: false };
+}
+
+export async function updateProjectItemSub({ projectId, companyId, amount, discipline }) {
+  const patch = {};
+  if (amount !== undefined) patch.amount = amount == null || amount === "" ? null : Number(amount);
+  if (discipline !== undefined) patch.discipline = String(discipline) || null;
+  if (Object.keys(patch).length === 0) return null;
+  const { error } = await supabase.from("project_item_subs").update(patch)
+    .eq("project_id", projectId).eq("company_id", companyId);
+  if (error) throw new Error(`project_item_subs update: ${error.message}`);
+  return patch;
+}
+
+export async function removeProjectItemSub({ projectId, companyId }) {
+  const { error } = await supabase.from("project_item_subs").delete()
+    .eq("project_id", projectId).eq("company_id", companyId);
+  if (error) throw new Error(`project_item_subs delete: ${error.message}`);
 }
 
 // ----------------------------------------------------------------------

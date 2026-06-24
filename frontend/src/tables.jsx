@@ -13,6 +13,8 @@ import {
   MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL,
   linkedProjectsFor,
   BID_SERVICE_OPTIONS,
+  CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS,
+  contractTypeLabel, projectItemTypeLabel, projectItemStatusLabel,
 } from "./data.js";
 import { LinkedProjectsSection } from "./panels.jsx";
 import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
@@ -4579,3 +4581,295 @@ function countRefsFor(id, projectsByType) {
   ];
   return all.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
 }
+
+// ======================================================================
+// ProjectsTable — the tree-structured work-breakdown view (beacon_v2.project_items).
+// Self-contained (does NOT use TableView, which is flat): builds the
+// project → phase → subphase tree from `parentId`, renders an indented
+// outline grid with expand/collapse, inline edits, and per-row actions
+// (add child / open / delete). Search + the Main/Standard/status filter run
+// inside here with ancestor-preservation so a matching node's parents stay
+// visible. Publishes the flattened visible rows to the table snapshot so the
+// page-head "Export PDF" button works.
+// ======================================================================
+const PTREE_COLS =
+  "minmax(240px,2fr) 132px 112px minmax(150px,1.1fr) minmax(130px,1fr) 150px 120px 96px 152px 84px 126px 96px";
+const PTREE_HEADS = [
+  "Project", "Project ID", "Type", "Client / Prime", "Subs", "Contract Type",
+  "Contract", "% Done", "Manager", "+PMs", "Status", "",
+];
+
+export const ProjectsTable = ({
+  items = [], updateRow = () => {}, onOpenDrawer, onAddChild, onDelete,
+  companies = [], users = [],
+  activeFilter = "all", onFilterChange, filterChips = [], flashId, tab = "projects",
+}) => {
+  const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState(() => new Set());
+
+  // parent_id → sorted children (a dangling/missing parent is treated as a root).
+  const byParent = useMemo(() => {
+    const ids = new Set(items.map(it => it.projectId));
+    const m = new Map();
+    for (const it of items) {
+      const pid = (it.parentId && ids.has(it.parentId)) ? it.parentId : null;
+      (m.get(pid) || m.set(pid, []).get(pid)).push(it);
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) =>
+        (a.sortOrd ?? 1e9) - (b.sortOrd ?? 1e9) ||
+        String(a.projectId).localeCompare(String(b.projectId), undefined, { numeric: true }));
+    }
+    return m;
+  }, [items]);
+
+  const matchesFilter = (it) => {
+    switch (activeFilter) {
+      case "main":     return it.itemType === "main";
+      case "standard": return it.itemType === "standard";
+      case "active":   return it.status === "active";
+      case "between":  return it.status === "between";
+      case "closed":   return it.status === "closed_out";
+      default:         return true;
+    }
+  };
+  const matchesQuery = (it) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const client = companyById(it.clientId)?.name || "";
+    const mgr = userById(it.managerId)?.name || "";
+    return [it.name, it.projectId, client, mgr]
+      .some(s => String(s || "").toLowerCase().includes(q));
+  };
+  const isFiltering = !!query.trim() || activeFilter !== "all";
+
+  // Keep set: a node survives if it matches OR any descendant matches, so a
+  // matching leaf keeps its whole ancestor chain visible.
+  const keep = useMemo(() => {
+    if (!isFiltering) return null;
+    const set = new Set();
+    const visit = (it) => {
+      let anyChild = false;
+      for (const c of (byParent.get(it.projectId) || [])) if (visit(c)) anyChild = true;
+      if ((matchesFilter(it) && matchesQuery(it)) || anyChild) { set.add(it.projectId); return true; }
+      return false;
+    };
+    for (const r of (byParent.get(null) || [])) visit(r);
+    return set;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [byParent, isFiltering, query, activeFilter]);
+
+  // Flatten the tree depth-first into render rows (honoring collapse; when
+  // filtering, everything is force-expanded so matches are visible).
+  const flat = useMemo(() => {
+    const out = [];
+    const walk = (pid, depth) => {
+      for (const it of (byParent.get(pid) || [])) {
+        if (keep && !keep.has(it.projectId)) continue;
+        const kids = (byParent.get(it.projectId) || []).filter(c => !keep || keep.has(c.projectId));
+        const isCollapsed = !isFiltering && collapsed.has(it.projectId);
+        out.push({ ...it, _depth: depth, _hasKids: kids.length > 0, _collapsed: isCollapsed });
+        if (kids.length > 0 && !isCollapsed) walk(it.projectId, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return out;
+  }, [byParent, keep, collapsed, isFiltering]);
+
+  // Publish flattened rows for the page-head Export PDF (tab-guarded reader).
+  useEffect(() => {
+    setCurrentTableSnapshot({ tab, processedRows: flat, visibleColumns: null });
+  }, [flat, tab]);
+
+  const toggle = (pid) => setCollapsed(s => {
+    const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n;
+  });
+  const parentIds = useMemo(
+    () => items.filter(it => (byParent.get(it.projectId) || []).length > 0).map(it => it.projectId),
+    [items, byParent]);
+  const expandAll   = () => setCollapsed(new Set());
+  const collapseAll = () => setCollapsed(new Set(parentIds));
+
+  // Chip counts (ignore the search box; count against the type/status axis).
+  const chipCount = (key) => {
+    if (key === "all") return items.length;
+    return items.filter(it => {
+      switch (key) {
+        case "main": return it.itemType === "main";
+        case "standard": return it.itemType === "standard";
+        case "active": return it.status === "active";
+        case "between": return it.status === "between";
+        case "closed": return it.status === "closed_out";
+        default: return true;
+      }
+    }).length;
+  };
+
+  if (items.length === 0) {
+    return (
+      <div className="ptree-wrap">
+        <EmptyState
+          title="No projects yet"
+          hint='Click "New project" to create your first top-level project, then add phases and subphases under it.'
+          iconName="briefcase"
+        />
+      </div>
+    );
+  }
+
+  const typeChip = (it) => (
+    <span className={"chip " + (it.itemType === "main" ? "accent" : "sage")} title={
+      it.itemType === "main"
+        ? "Main — container; time & expenses can't be logged here"
+        : "Standard — time & expenses can be logged here"}>
+      <span className="chip-dot"/>{projectItemTypeLabel(it.itemType)}
+    </span>
+  );
+  const statusChip = (it) => {
+    const tone = it.status === "active" ? "sage" : it.status === "between" ? "blue" : "muted";
+    return <span className={"chip " + tone}><span className="chip-dot"/>{projectItemStatusLabel(it.status)}</span>;
+  };
+
+  return (
+    <div className="ptree-wrap">
+      <div className="ptree-toolbar">
+        <div className="ptree-search">
+          <Icon name="search" size={14}/>
+          <input
+            placeholder="Search projects, IDs, clients, managers…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {query && (
+            <button className="ptree-search-clear" onClick={() => setQuery("")} title="Clear">
+              <Icon name="x" size={12}/>
+            </button>
+          )}
+        </div>
+        <div className="ptree-chips">
+          {filterChips.map(chip => (
+            <button
+              key={chip.key}
+              className={"tool-chip" + (activeFilter === chip.key ? " on" : "")}
+              onClick={() => onFilterChange?.(chip.key)}
+            >
+              {chip.icon && <Icon name={chip.icon} size={13}/>}
+              {chip.label}
+              <span style={{ opacity: .6, marginLeft: 2 }}>· {chipCount(chip.key)}</span>
+            </button>
+          ))}
+        </div>
+        <div className="ptree-tools">
+          <button className="tool-chip" onClick={expandAll} title="Expand every project">
+            <Icon name="chevronDown" size={12}/>Expand all
+          </button>
+          <button className="tool-chip" onClick={collapseAll} title="Collapse to top-level">
+            <Icon name="chevronRight" size={12}/>Collapse all
+          </button>
+        </div>
+      </div>
+
+      <div className="table-scroll">
+        <div className="table-scroll-body" style={{ minWidth: "min-content" }}>
+          <div className="ptree-head" style={{ gridTemplateColumns: PTREE_COLS }}>
+            {PTREE_HEADS.map((h, i) => (
+              <div key={i} className={"ptree-h" + (["Contract", "% Done"].includes(h) ? " right" : "")}>{h}</div>
+            ))}
+          </div>
+
+          {flat.length === 0 && (
+            <div className="ptree-noresults">No projects match your search / filter.</div>
+          )}
+
+          {flat.map(it => (
+            <div
+              key={it.projectId}
+              className={"ptree-row" + (flashId === it.projectId ? " flash" : "") + (it.itemType === "main" ? " is-main" : "")}
+              style={{ gridTemplateColumns: PTREE_COLS }}
+              onDoubleClick={() => onOpenDrawer?.(it)}
+            >
+              {/* Name — indented by depth, with expand chevron */}
+              <div className="ptree-cell ptree-name" style={{ paddingLeft: 8 + it._depth * 20 }}>
+                {it._hasKids ? (
+                  <button className="ptree-toggle" onClick={(e) => { e.stopPropagation(); toggle(it.projectId); }}
+                          title={it._collapsed ? "Expand" : "Collapse"}>
+                    <Icon name={it._collapsed ? "chevronRight" : "chevronDown"} size={13}/>
+                  </button>
+                ) : (
+                  <span className="ptree-toggle-spacer"/>
+                )}
+                <span className={"ptree-dot " + (it.itemType === "main" ? "main" : "standard")}/>
+                <span className="ptree-name-text">
+                  <EditableCell value={it.name} type="text"
+                    onChange={(v) => updateRow(it.projectId, { name: v })}/>
+                </span>
+              </div>
+
+              <div className="ptree-cell mono soft">{it.projectId}</div>
+              <div className="ptree-cell">
+                <EditableCell value={it.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
+                  render={() => typeChip(it)}
+                  onChange={(v) => updateRow(it.projectId, { itemType: v })}/>
+              </div>
+              <div className="ptree-cell soft">
+                {companyById(it.clientId)?.name || <span className="empty-cell">—</span>}
+              </div>
+              <div className="ptree-cell">
+                <SubsCell subs={it.subs}/>
+              </div>
+              <div className="ptree-cell soft">
+                <EditableCell value={it.contractType} type="select" options={CONTRACT_TYPE_OPTIONS}
+                  render={(v) => v ? contractTypeLabel(v) : <span className="empty-cell">—</span>}
+                  onChange={(v) => updateRow(it.projectId, { contractType: v })}/>
+              </div>
+              <div className="ptree-cell right mono">
+                <EditableCell value={it.contractAmount} type="number" align="right"
+                  render={(v) => v == null ? <span className="empty-cell">—</span> : fmtMoney(v, false)}
+                  onChange={(v) => updateRow(it.projectId, { contractAmount: v })}/>
+              </div>
+              <div className="ptree-cell right">
+                <EditableCell value={it.percentComplete} type="number" align="right"
+                  render={(v) => (
+                    <span className="ptree-pct">
+                      <span className="ptree-pct-bar"><span style={{ width: `${Math.max(0, Math.min(100, Number(v) || 0))}%` }}/></span>
+                      <span className="ptree-pct-num">{v == null ? "—" : `${v}%`}</span>
+                    </span>
+                  )}
+                  onChange={(v) => updateRow(it.projectId, { percentComplete: v })}/>
+              </div>
+              <div className="ptree-cell">
+                {it.managerId
+                  ? <UserTag userId={it.managerId} size="xs"/>
+                  : <span className="empty-cell">—</span>}
+              </div>
+              <div className="ptree-cell">
+                {(it.pmIds && it.pmIds.length)
+                  ? <UserStack ids={it.pmIds} max={3}/>
+                  : <span className="empty-cell">—</span>}
+              </div>
+              <div className="ptree-cell">
+                <EditableCell value={it.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
+                  render={() => statusChip(it)}
+                  onChange={(v) => updateRow(it.projectId, { status: v })}/>
+              </div>
+              <div className="ptree-cell ptree-actions">
+                <button className="row-btn" title="Add child (phase / subphase)"
+                        onClick={(e) => { e.stopPropagation(); onAddChild?.(it.projectId); }}>
+                  <Icon name="plus" size={13}/>
+                </button>
+                <button className="row-btn" title="Open details"
+                        onClick={(e) => { e.stopPropagation(); onOpenDrawer?.(it); }}>
+                  <Icon name="eye" size={13}/>
+                </button>
+                <button className="row-btn" title="Delete" style={{ color: "var(--rose)" }}
+                        onClick={(e) => { e.stopPropagation(); onDelete?.(it.projectId); }}>
+                  <Icon name="trash" size={13}/>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};

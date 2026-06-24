@@ -10,6 +10,7 @@ import {
   linkInvoiceToProject, findOrCreateProjectForInvoice,
   setSubInvoicePaid, setProjectPrimeCompany,
   mergeRefSummary,
+  CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -194,6 +195,8 @@ export const DetailDrawer = ({
   isAdmin = false,
   onApproveBid, onRejectBid, onClearBidApproval,
   onUploadBidPdf, onRemoveBidPdf, onOpenBidPdf,
+  // Projects (tree item) extras — only the `projects` table passes them.
+  projectItems = [], onAddProjectSub, onUpdateProjectSub, onRemoveProjectSub, onAddChild,
 }) => {
   if (!row) return null;
 
@@ -377,6 +380,28 @@ export const DetailDrawer = ({
       // Approval fields render via the dedicated approval panel below, NOT
       // as generic editable fields — admins flip status through the panel,
       // and the DB trigger gates writes anyway.
+    ],
+    projects: [
+      { k: "projectId",       label: "Project ID",        type: "mono", readOnlyIf: () => true, readOnlyHint: "Permanent ID — can't be changed" },
+      { k: "name",            label: "Project Name" },
+      { k: "parentId",        label: "Parent project",    type: "projectParent" },
+      { k: "itemType",        label: "Type",              type: "kvselect", options: PROJECT_ITEM_TYPE_OPTIONS },
+      { k: "clientId",        label: "Client / Prime",    type: "clientOrFirm" },
+      { k: "subs",            label: "Subs",              type: "projectSubs" },
+      { k: "contractType",    label: "Contract Type",     type: "kvselect", options: CONTRACT_TYPE_OPTIONS, allowEmpty: true },
+      { k: "contractAmount",  label: "Contract Amount",   type: "money" },
+      { k: "startDate",       label: "Start Date",        type: "date" },
+      { k: "dueDate",         label: "Due Date",          type: "date" },
+      { k: "percentComplete", label: "Percent Complete",  type: "number" },
+      { k: "managerId",       label: "Manager",           type: "user" },
+      { k: "pmIds",           label: "Additional Project Managers", type: "users" },
+      { k: "status",          label: "Status",            type: "kvselect", options: PROJECT_ITEM_STATUS_OPTIONS },
+      { k: "addressLine1",    label: "Address Line 1" },
+      { k: "addressLine2",    label: "Address Line 2" },
+      { k: "city",            label: "City" },
+      { k: "state",           label: "State" },
+      { k: "pinCode",         label: "PIN Code" },
+      { k: "notes",           label: "Notes",             type: "textarea" },
     ],
   }[fieldsKey] || [];
 
@@ -569,6 +594,75 @@ export const DetailDrawer = ({
         </div>
       );
     }
+    // Value≠label select (machine enum keys → human labels), e.g. Type /
+    // Status / Contract Type on a project item.
+    if (f.type === "kvselect") return (
+      <select className="select" value={val || ""} onChange={e => set(e.target.value || null)}>
+        {f.allowEmpty && <option value="">—</option>}
+        {(f.options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+    // Parent-project picker (tree). Exclude self; the updater + DB trigger
+    // block deeper cycles (can't parent under a descendant).
+    if (f.type === "projectParent") {
+      const opts = (projectItems || [])
+        .filter(it => it.projectId !== row.id)
+        .map(it => ({ value: it.projectId, label: `${it.projectId} · ${it.name}` }));
+      return (
+        <SearchableSelect
+          value={val || ""}
+          options={opts}
+          placeholder="None — top-level project"
+          onChange={v => set(v || null)}
+        />
+      );
+    }
+    // Subs on a project item — persisted through the dedicated handlers
+    // (add/update/remove keyed on company_id), NOT the generic {subs} patch.
+    if (f.type === "projectSubs") {
+      const subs = val || [];
+      const avail = SUB_OPTIONS.filter(o => !subs.some(s => s.cId === o.value));
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {subs.length === 0 && (
+            <div style={{
+              fontSize: 12.5, color: "var(--text-soft)", fontStyle: "italic",
+              padding: "6px 10px", background: "var(--surface-2)",
+              border: "1px dashed var(--border)", borderRadius: 8,
+            }}>
+              No subs yet — pick a firm below to add one.
+            </div>
+          )}
+          {subs.map((s, i) => (
+            <div key={s.cId || i} className="subrow"
+                 style={{ gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) 110px 30px" }}>
+              <div className="field-readonly" style={{ fontSize: 12.5, alignSelf: "center" }}>
+                {companyById(s.cId)?.name || "—"}
+              </div>
+              <input className="input" placeholder="Discipline (e.g. Survey)"
+                     defaultValue={s.desc || ""}
+                     onBlur={e => onUpdateProjectSub?.(s.cId, { desc: e.target.value })}/>
+              <input className="input mono" type="number" placeholder="$" min="0"
+                     defaultValue={s.amt ?? ""}
+                     onBlur={e => onUpdateProjectSub?.(s.cId, { amt: e.target.value === "" ? 0 : Number(e.target.value) })}
+                     style={{ fontFamily: "var(--font-mono)", textAlign: "right" }}/>
+              <button className="row-btn" title="Remove sub"
+                      onClick={() => onRemoveProjectSub?.(s.cId)} style={{ color: "var(--rose)" }}>
+                <Icon name="trash" size={12}/>
+              </button>
+            </div>
+          ))}
+          <div style={{ marginTop: subs.length ? 4 : 2 }}>
+            <SearchableSelect
+              value=""
+              options={avail}
+              placeholder="Add a sub firm…"
+              onChange={v => { if (v) onAddProjectSub?.(v); }}
+            />
+          </div>
+        </div>
+      );
+    }
     return <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
   };
 
@@ -582,6 +676,7 @@ export const DetailDrawer = ({
     clients:   "Client",
     companies: "Company",
     openbids:  "Open Bid",
+    projects:  "Project",
   };
   const titleLabel = table === "directory"
     ? (row.type === "Client" ? "Client" : "Company")
@@ -635,7 +730,12 @@ export const DetailDrawer = ({
                 <Icon name="x" size={13}/>Close out
               </button>
             )}
-            <button className="btn sm" onClick={onAlert}><Icon name="bell" size={13}/>Alert</button>
+            {onAddChild && (
+              <button className="btn sm" onClick={onAddChild} title="Add a phase / subphase under this item">
+                <Icon name="plus" size={13}/>Add child
+              </button>
+            )}
+            {onAlert && <button className="btn sm" onClick={onAlert}><Icon name="bell" size={13}/>Alert</button>}
             <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
           </div>
         </div>
@@ -663,7 +763,7 @@ export const DetailDrawer = ({
           {fields.filter(f => !f.showIf || f.showIf(row)).map(f => (
             <div key={f.k} className="field">
               <div className="field-label">{f.label}</div>
-              <div className={"field-value" + (f.type === "textarea" || f.type === "subs" ? " multiline" : "")}>
+              <div className={"field-value" + (f.type === "textarea" || f.type === "subs" || f.type === "projectSubs" ? " multiline" : "")}>
                 {renderInput(f)}
               </div>
             </div>

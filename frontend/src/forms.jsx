@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Icon } from "./icons.jsx";
-import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf, dedupeSubsByCompanyKind } from "./data.js";
+import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf, dedupeSubsByCompanyKind,
+  createProjectItem, addProjectItemSub, validateProjectItemContract,
+  CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS } from "./data.js";
 import { SearchableSelect, StarRating } from "./primitives.jsx";
 
 // ============ CREATE MODAL ============
@@ -29,6 +31,11 @@ const DB_TABLES = {
   companies: "companies",
   invoice:   "anticipated_invoice",
   openbids:  "open_bids",
+  // Projects (tree work breakdown). The whole insert is custom (text PK +
+  // routed client + subs/PMs) — handled at the top of onSubmit, not via the
+  // generic buildPayload/insert path — but DB_TABLES must be non-empty so the
+  // modal renders (the `if (!dbTable) return null` guard).
+  projects:  "project_items",
 };
 
 const TITLES = {
@@ -41,6 +48,7 @@ const TITLES = {
   companies: { title: "New company",             icon: "briefcase" },
   invoice:   { title: "New invoice row",         icon: "trend"     },
   openbids:  { title: "New open bid",            icon: "flag"      },
+  projects:  { title: "New project",             icon: "briefcase" },
 };
 
 // Columns that the DB accepts directly. Anything NOT in this list is
@@ -221,6 +229,30 @@ const INITIAL = {
     notes: "",
     _pdf_file: null,        // staged File object; uploaded after row insert
   },
+  // Projects (tree item). Keys are the form-local names; the projects submit
+  // branch maps them to the createProjectItem payload (camelCase).
+  projects: {
+    project_id: "",
+    name: "",
+    parent_id: "",            // seeded when "Add child" — see openNewProject
+    client_id: "",            // merged Client/Prime pick — routed at insert
+    item_type: "standard",
+    address_line1: "",
+    address_line2: "",
+    city: "",
+    state: "",
+    pin_code: "",
+    contract_type: "",
+    contract_amount: "",
+    start_date: "",
+    due_date: "",
+    percent_complete: "",
+    manager_user_id: "",
+    status: "active",
+    notes: "",
+    pm_user_ids: [],
+    subs: [],
+  },
 };
 
 const REQUIRED = {
@@ -233,6 +265,7 @@ const REQUIRED = {
   companies: ["name"],
   invoice:   ["project_name", "year"],
   openbids:  ["rfq_rfp_number"],
+  projects:  ["project_id", "name"],
 };
 
 // --------------------- shared sub-editor ---------------------
@@ -342,7 +375,7 @@ function UserMultiPicker({ value, users, onChange, placeholder = "Pick users…"
 }
 
 // --------------------- main component ---------------------
-export const CreateModal = ({ table, seed = null, clients, companies, users, onClose, onCreated }) => {
+export const CreateModal = ({ table, seed = null, clients, companies, users, projectItems = [], onClose, onCreated }) => {
   const dbTable = DB_TABLES[table];
   const titleCfg = TITLES[table];
   const required = REQUIRED[table] || [];
@@ -401,6 +434,70 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
     if (!requiredOk || pending) return;
     setError("");
     setPending(true);
+
+    // Projects (tree item) — fully custom path. createProjectItem handles the
+    // text PK, the merged Client/Prime routing, and the roll-up validation
+    // trigger; subs + additional PMs are written after. dbRow returned to
+    // handleCreated is ALREADY the adapted UI row.
+    if (table === "projects") {
+      try {
+        // Client-side roll-up check for instant feedback (the DB trigger is
+        // the backstop).
+        const v = validateProjectItemContract(projectItems, {
+          projectId: String(form.project_id || "").trim(),
+          parentId: form.parent_id || null,
+          amount: form.contract_amount,
+        });
+        if (!v.ok) { setError(v.message); setPending(false); return; }
+
+        const adapted = await createProjectItem({
+          projectId:       form.project_id,
+          name:            form.name,
+          parentId:        form.parent_id || null,
+          clientId:        form.client_id || "",
+          itemType:        form.item_type || "standard",
+          addressLine1:    form.address_line1,
+          addressLine2:    form.address_line2,
+          city:            form.city,
+          state:           form.state,
+          pinCode:         form.pin_code,
+          contractType:    form.contract_type || "",
+          contractAmount:  form.contract_amount === "" ? null : form.contract_amount,
+          startDate:       form.start_date || "",
+          dueDate:         form.due_date || "",
+          percentComplete: form.percent_complete === "" ? null : form.percent_complete,
+          managerId:       form.manager_user_id || null,
+          status:          form.status || "active",
+          notes:           form.notes,
+        });
+
+        const pmIds = (form.pm_user_ids || []).filter(Boolean);
+        if (pmIds.length > 0) {
+          const { error: ePm } = await supabase.from("project_item_pms")
+            .insert(pmIds.map(uid => ({ project_id: adapted.projectId, user_id: uid })));
+          if (ePm) throw ePm;
+          adapted.pmIds = pmIds;
+        }
+
+        const subs = (form.subs || []).filter(s => s.cId);
+        const savedSubs = [];
+        for (const [i, s] of subs.entries()) {
+          await addProjectItemSub({
+            projectId: adapted.projectId, companyId: s.cId,
+            discipline: s.desc, amount: s.amt, ord: i + 1,
+          });
+          savedSubs.push({ cId: s.cId, desc: s.desc || "", amt: Number(s.amt) || 0 });
+        }
+        adapted.subs = savedSubs;
+
+        onCreated(adapted, { _projectItem: true });
+        onClose();
+      } catch (e) {
+        setError(e.message || String(e));
+        setPending(false);
+      }
+      return;
+    }
 
     // Step 1 — insert the main row.
     const payload = buildPayload();
@@ -599,6 +696,130 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
   };
 
   const renderFields = () => {
+    if (table === "projects") {
+      const parentOptions = (projectItems || [])
+        .map(it => ({ value: it.projectId, label: `${it.projectId} · ${it.name}` }));
+      const userOptions = (users || []).map(u => ({ value: u.id, label: u.name }));
+      const parentItem = (projectItems || []).find(it => it.projectId === form.parent_id);
+      return (
+        <>
+          <Field label="Project ID *">
+            <input className="input mono" autoFocus value={form.project_id}
+                   onChange={e => set("project_id", e.target.value)}
+                   placeholder="e.g. 24-100 or 24-100.1"
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Project Name *">
+            <input className="input" value={form.name}
+                   onChange={e => set("name", e.target.value)}/>
+          </Field>
+          <Field label="Parent project">
+            <SearchableSelect
+              value={form.parent_id || ""}
+              options={parentOptions}
+              placeholder="None — top-level project"
+              onChange={v => set("parent_id", v || "")}
+            />
+            {parentItem && parentItem.contractAmount != null && (
+              <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>
+                Parent contract: {fmtMoney(parentItem.contractAmount, false)} — children can't exceed this in total.
+              </div>
+            )}
+          </Field>
+          <Field label="Type">
+            <select className="select" value={form.item_type}
+                    onChange={e => set("item_type", e.target.value)}>
+              {PROJECT_ITEM_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>
+              {form.item_type === "main"
+                ? "Main — a container. Time & expenses can't be logged against it."
+                : "Standard — an active work item. Time & expenses can be logged here."}
+            </div>
+          </Field>
+          <Field label="Client / Prime">
+            <SearchableSelect
+              value={form.client_id || ""}
+              options={clientOrFirmOptions}
+              placeholder="Search clients or firms…"
+              onChange={v => set("client_id", v || "")}
+            />
+          </Field>
+          <Field label="Subs" multiline>
+            <SubsEditor value={form.subs} companies={companies}
+                        onChange={next => set("subs", next)}/>
+          </Field>
+          <Field label="Contract Type">
+            <select className="select" value={form.contract_type}
+                    onChange={e => set("contract_type", e.target.value)}>
+              <option value="">—</option>
+              {CONTRACT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Contract Amount">
+            <input className="input mono" type="number" value={form.contract_amount}
+                   onChange={e => set("contract_amount", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
+          </Field>
+          <Field label="Start Date">
+            <input className="input" type="date" value={form.start_date}
+                   onChange={e => set("start_date", e.target.value)}/>
+          </Field>
+          <Field label="Due Date">
+            <input className="input" type="date" value={form.due_date}
+                   onChange={e => set("due_date", e.target.value)}/>
+          </Field>
+          <Field label="Percent Complete">
+            <input className="input mono" type="number" min="0" max="100" value={form.percent_complete}
+                   onChange={e => set("percent_complete", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
+          </Field>
+          <Field label="Manager">
+            <SearchableSelect
+              value={form.manager_user_id || ""}
+              options={userOptions}
+              placeholder="Pick a manager…"
+              onChange={v => set("manager_user_id", v || "")}
+            />
+          </Field>
+          <Field label="Additional Project Managers" multiline>
+            <UserMultiPicker value={form.pm_user_ids} users={users}
+                             onChange={next => set("pm_user_ids", next)}
+                             placeholder="Pick MSMM users…"/>
+          </Field>
+          <Field label="Status">
+            <select className="select" value={form.status}
+                    onChange={e => set("status", e.target.value)}>
+              {PROJECT_ITEM_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Address Line 1">
+            <input className="input" value={form.address_line1}
+                   onChange={e => set("address_line1", e.target.value)}/>
+          </Field>
+          <Field label="Address Line 2">
+            <input className="input" value={form.address_line2}
+                   onChange={e => set("address_line2", e.target.value)}/>
+          </Field>
+          <Field label="City">
+            <input className="input" value={form.city}
+                   onChange={e => set("city", e.target.value)}/>
+          </Field>
+          <Field label="State">
+            <input className="input" value={form.state}
+                   onChange={e => set("state", e.target.value)}/>
+          </Field>
+          <Field label="PIN Code">
+            <input className="input" value={form.pin_code}
+                   onChange={e => set("pin_code", e.target.value)}/>
+          </Field>
+          <Field label="Notes" multiline>
+            <textarea className="input" rows={3} value={form.notes}
+                      onChange={e => set("notes", e.target.value)}/>
+          </Field>
+        </>
+      );
+    }
     if (table === "potential") {
       return (
         <>

@@ -1,160 +1,92 @@
 # MSMM Beacon
 
-Project-lifecycle dashboard for an engineering firm. Projects flow through staged tables (Potential → Awaiting Verdict → Awarded / SOQ / Closed Out → Anticipated Invoice), with Events, Clients, Companies, and a read-only Quad Sheet as sibling views. See [`PLAN.md`](./PLAN.md) for the product spec.
+Project-lifecycle dashboard for an engineering firm. Opportunities flow through a staged pipeline — **Leads & Bids** (Hot Leads · Open Bids) → **Proposals & Awarded** (Proposals · Awarded) → **Invoice** (Invoices · In-Between · Closed Out) — with carry-forward between stages. Alongside the pipeline it runs an invoice/cash-flow tracker, an Events calendar (with Outlook sync), a Directory of clients & companies, a Licenses & Certifications tracker, NFC/web **timekeeping**, and **vacation/sick leave**. Installable as a PWA on desktop and mobile.
+
+> **Source of truth for behavior:** [`PLAN.md`](./PLAN.md) (product spec) and [`CLAUDE.md`](./CLAUDE.md) (engineering context, conventions, per-migration gotchas — the current, detailed reference). This README is the high-level overview.
 
 ## Stack
 
-- **Database**: Supabase Postgres, `beacon` schema. Schema + seed in [`supabase/migrations/`](./supabase/migrations).
-- **Frontend**: Vite + React (ES modules), `@supabase/supabase-js`. Responsive across phone / tablet / desktop. See [`frontend/`](./frontend).
-- **Auth**: Supabase Auth (email + password). Every request after login uses the `authenticated` role; there are two app-level roles (`Admin`, `User`) stored on `beacon.users.role`.
-- **Edge Functions** (Deno, deployed to Supabase): `admin-users` (privileged user CRUD) and `send-alert` (picks up due `alert_fires` rows, ships email via Resend). See [`supabase/functions/`](./supabase/functions).
-- **Scheduler**: GitHub Actions workflow [`alert-tick.yml`](./.github/workflows/alert-tick.yml) POSTs to `send-alert` every minute.
-- **Data ingest**: Python scripts in [`scripts/`](./scripts) parse the customer's original CSV/xlsx exports and write to `beacon.*` via PostgREST.
+- **Database** — Supabase Postgres + PostgREST. The **live schema is `beacon_v2`** (`supabase/migrations_v2/`); the legacy `beacon` schema (`supabase/migrations/`) is kept only as a cold backup. The frontend reads/writes exclusively from `beacon_v2`.
+- **Frontend** — Vite + React (ES modules), `@supabase/supabase-js`. Responsive phone → tablet → desktop, installable PWA. Lives in [`frontend/`](./frontend).
+- **Auth** — Supabase Auth (email + password). Two app roles (`Admin`, `User`) on `beacon_v2.users.role`, enforced in-app and via RLS.
+- **Edge Functions** (Deno, on Supabase) — `admin-users`, `send-alert`, `outlook-sync`, `timeclock-punch`, `timeclock-classify`, `timeclock-admin`, `generate-description`, `license-reminders`. See [`supabase/functions/`](./supabase/functions).
+- **Scheduler** — GitHub Actions crons in [`.github/workflows/`](./.github/workflows): `alert-tick` (1 min), `outlook-sync-tick` (15 min), `timekeeping-classify-tick` (5 min), `license-reminders-tick` (daily).
+- **Integrations** — Resend (email), Microsoft Graph (Outlook calendar sync), OpenAI (AI invoice-description generator). All keys are server-side Edge Function secrets, never in the browser.
+- **Office hardware** — a Raspberry Pi NFC reader (7" kiosk or headless OLED) posts punches to `timeclock-punch`. See [`pi/`](./pi).
 
 ## Layout
 
 ```
 MSMMBeacon/
-├── PLAN.md                      product spec (carry-forward rules, fields per table, alerts, etc.)
-├── CLAUDE.md                    engineering context for Claude Code sessions
-├── Data/                        customer's CSV/xlsx exports (gitignored — contains PII)
+├── PLAN.md                      product spec (carry-forward rules, fields per stage, alerts)
+├── CLAUDE.md / AGENTS.md        engineering context for AI coding sessions (kept in sync)
+├── Data/                        customer CSV/xlsx exports (gitignored — PII)
 ├── supabase/
-│   ├── migrations/
-│   │   ├── 20260420120000_initial_schema.sql          beacon schema, enums, FKs, RLS, seed MSMM + 30 users
-│   │   ├── 20260420140000_allow_anon_read.sql         anon SELECT grant (used before login was wired)
-│   │   ├── 20260421120000_allow_anon_write.sql        anon INSERT/UPDATE/DELETE — prototype-only, drop pre-prod
-│   │   ├── 20260422120000_orange_potential.sql        Orange probability bucket → auto-creates Invoice row
-│   │   ├── 20260422140000_soq_and_boards.sql          beacon.soq table, anticipated_result_date, Board Meetings
-│   │   ├── 20260423120000_user_roles.sql              beacon.users.role ∈ {Admin, User}; Raj = Admin
-│   │   ├── 20260423130000_orange_probability_enum.sql codifies 'Orange' on probability_enum
-│   │   ├── 20260423140000_invoice_overrides.sql       anticipated_invoice.ytd_actual_override + rollforward_override
-│   │   ├── 20260424120000_alerts_wiring.sql           alerts anchor/timezone/attempts cols, claim_pending_fires + complete_fire RPCs, row-delete triggers
-│   │   └── 20260424120000_admin_only_user_writes.sql  Admin-only RLS on beacon.users writes (is_current_user_admin() helper)
-│   └── functions/
-│       ├── admin-users/           privileged user CRUD (create / change-password / delete / ban / set-role)
-│       └── send-alert/            reads due alert_fires, renders email per subject_table, dispatches via Resend
-├── .github/workflows/
-│   └── alert-tick.yml             1-min cron that POSTs to send-alert
-├── scripts/
-│   ├── ingest_seed_data.py        parses Data/ → beacon.* (idempotent; --wipe to reseed)
-│   ├── seed_auth_users.py         mirrors beacon.users into auth.users with password {first_name}123$
-│   └── backfill_pms.py            extracts PMs from Potential + Invoice CSVs → *_pms join tables
-└── frontend/                      the app (see frontend/README.md for dev details)
+│   ├── migrations_v2/           THE LIVE SCHEMA (beacon_v2). Apply in timestamp order via Studio.
+│   ├── migrations/              legacy v1 schema (beacon) — cold backup, not used by the app
+│   └── functions/               8 Edge Functions (see Stack above)
+├── .github/workflows/           4 cron ticks (alerts / outlook / timekeeping / licenses)
+├── scripts/                     Python ingest/seed + maintenance + setup_outlook_rbac.ps1
+├── pi/                          Raspberry Pi NFC tap reader (kiosk + headless)
+└── frontend/                    the app (see frontend/README.md for the .env quick-start)
 ```
 
-## Quick start
-
-### 1. Apply the Supabase migrations
-
-Paste each SQL file into **Dashboard → SQL Editor → Run**, in timestamp order (they're listed above). Then add `beacon` to **Dashboard → Settings → API → Exposed schemas**.
-
-### 2. Ingest the seed data
-
-```sh
-pip install requests openpyxl python-dotenv
-python3 scripts/ingest_seed_data.py           # seed beacon.*
-python3 scripts/backfill_pms.py               # populate *_pms join rows from CSVs
-```
-
-Both use `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` from `.env`. Add `--wipe` to the ingest to nuke + reseed; both scripts take `--dry-run`.
-
-### 3. Seed auth users (passwords)
-
-```sh
-python3 scripts/seed_auth_users.py --dry-run  # review
-python3 scripts/seed_auth_users.py            # create/update auth.users for every roster entry
-```
-
-Passwords follow a predictable pattern: **`{first_name}123$`** (e.g. `Raj123$`, `Stuart123$`). Emails are lowercased. `rmehta@msmmeng.com` is seeded with `role=Admin`; everyone else is `User`.
-
-### 4. Run the frontend
+## Local development
 
 ```sh
 cd frontend
 npm install
-npm run dev
+npm run dev          # http://localhost:5173  (Node ≥ 20)
+npm run build        # prod bundle → dist/
 ```
 
-Open http://localhost:5173, sign in with your email + `{first_name}123$`. Requires `frontend/.env.local` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (template in `frontend/.env.example`).
+Requires `frontend/.env.local` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the `anon public` key from Supabase → Settings → API). Sign in with your email + `{first_name}123$` (the seeded password pattern, e.g. `Raj123$`).
 
-### 5. Turn on email alerts (one-time deploy)
+There is **no local Supabase stack** — the app always talks to the cloud project. Don't run `supabase start` / `db reset` / `db push`.
 
-Scheduling + sending alerts needs three moving pieces stood up once. Skip if you just want the local app running against existing data — alert rows still persist to `beacon.alerts`, they just won't dispatch.
+## Database & migrations
 
-1. **Apply the `20260424120000_alerts_wiring.sql` migration** (adds anchor columns, `claim_pending_fires` / `complete_fire` RPCs, and row-delete triggers).
-2. **Deploy the `send-alert` Edge Function** and set its secrets:
-   ```sh
-   supabase functions deploy send-alert --project-ref <your-ref>
-   supabase secrets set RESEND_API_KEY=re_... \
-                       ALERT_FROM_EMAIL="Beacon <alerts@yourdomain.com>" \
-                       APP_URL="https://<deployed-app-url>" \
-                       ALERTS_ENABLED=true \
-                       --project-ref <your-ref>
-   ```
-   `ALERT_FROM_EMAIL` must be on a domain verified in your Resend dashboard. `ALERTS_ENABLED=false` is the kill switch — safe to flip without redeploying.
-3. **Wire the GitHub Actions tick** by adding two repo secrets:
-   - `SEND_ALERT_URL` = `https://<your-ref>.supabase.co/functions/v1/send-alert`
-   - `SEND_ALERT_AUTH` = the Supabase service-role key
+Apply each file in `supabase/migrations_v2/` **in timestamp order** by pasting it into **Supabase Studio → SQL Editor → Run** (every migration is idempotent). Then add **`beacon_v2`** to **Settings → API → Exposed schemas** so PostgREST serves it.
 
-   The workflow runs `*/1 * * * *`; GitHub's public-runner cron slips 1–10 min, acceptable for reminders. `gh workflow run alert-tick.yml` triggers a manual smoke test.
+Most recent work uses the same pattern — e.g. `20260624120000_leads_openbids_anticipated_amount.sql` adds the "Anticipated Amount" field to Hot Leads + Open Bids. CLAUDE.md documents every migration and the gotcha each one creates.
 
-Admin users also get a **"Run tick now"** button in the gear-icon Alerts tab that POSTs to the same endpoint using their session — handy for testing without waiting for the next cron beat.
+## Edge Functions & crons
+
+Deploy whichever function you touched (all eight deploy the same way):
+
+```sh
+supabase functions deploy <name> --project-ref ggqlcsppojypgaiyhods
+```
+
+Secrets are set with `supabase secrets set KEY=value --project-ref ...` (Resend, Microsoft Graph, OpenAI, `TIMECLOCK_DEVICE_KEY`, `APP_URL`, kill switches, etc. — full list in CLAUDE.md → Hosting topology). The four GitHub Actions ticks each need a repo secret pair (`*_URL` + `*_AUTH`).
 
 ## Deployment (Vercel)
 
-Hosting split:
-- **Vercel** — serves `frontend/` as a static Vite build.
-- **Supabase** — hosts Postgres + PostgREST + both Edge Functions (`admin-users`, `send-alert`).
-- **GitHub Actions** — runs the 1-min `alert-tick` cron that pokes `send-alert`.
+- **Import the repo** in Vercel → set **Root Directory = `frontend`** (Vite auto-detected). `frontend/vercel.json` handles SPA rewrites, security headers, and the no-cache headers for `/sw.js` + `/workbox-*.js`.
+- **Env vars** (Production + Preview): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Never add server-only keys (service role, Resend, OpenAI, Graph) here.
+- **After first deploy**, point alert email deep-links at the live URL: `supabase secrets set APP_URL="https://<your-url>" --project-ref ggqlcsppojypgaiyhods`.
+- **Preview deploys** share the production Supabase — data written on a preview hits the real DB.
 
-### First-time setup
+### Custom domain through Cloudflare — important caching caveat
 
-1. **Import the repo** in the Vercel dashboard → New Project → pick this repo.
-2. **Set Root Directory to `frontend`** in Project Settings → General. Vercel then auto-detects Vite and sets `npm run build` + output dir `dist/` correctly. `frontend/vercel.json` handles SPA rewrites (`?tab=X&rowId=Y` deep links work on reload) and security headers.
-3. **Add Environment Variables** (Project Settings → Environment Variables), for both **Production** and **Preview** scopes:
-   - `VITE_SUPABASE_URL` — e.g. `https://ggqlcsppojypgaiyhods.supabase.co`
-   - `VITE_SUPABASE_ANON_KEY` — the `anon public` key from Supabase → Settings → API
-   
-   Do **not** add `SUPABASE_SERVICE_KEY`, `RESEND_API_KEY`, `OPENAI_API_KEY`, or `PASSWORD` — those are server-side only and live as Supabase Edge Function secrets.
-4. **Deploy.** Vercel builds from `main`; PRs get preview deploys automatically.
+Production is reachable on the Vercel domain (`beacon-msmm.vercel.app`) and on a Cloudflare-proxied custom domain (`beacon.msmm-ai.com`). **Cloudflare caches `.js` at its edge by default — including the stable-named `sw.js` / `workbox-*.js`** — so the service worker on the Cloudflare domain keeps re-fetching the *old* worker and the installed PWA **stops receiving deploys on that domain** (the Vercel domain updates fine). To fix it in the Cloudflare zone:
 
-### Post-deploy glue (one-time)
+1. **Caching → Browser Cache TTL → "Respect Existing Headers."**
+2. **Caching → Cache Rules → Bypass cache** for `"/sw.js"`, `"/"`, `"/index.html"`, `"/manifest.webmanifest"`, and paths starting `"/workbox-"`. Leave `/assets/*` cached (those are content-hashed + immutable).
+3. **Purge Everything** once to evict the stale worker.
 
-Grab your Vercel URL (e.g. `https://beacon-xyz.vercel.app`, or your custom domain) and point the alerts pipeline at it:
+Verify with `curl -sI https://beacon.msmm-ai.com/sw.js` — you want `cf-cache-status: BYPASS`/`DYNAMIC` and an `etag` matching the Vercel domain.
 
-```sh
-supabase secrets set APP_URL="https://<your-vercel-url>" --project-ref ggqlcsppojypgaiyhods
-```
+## PWA update behavior
 
-`APP_URL` is what `send-alert` uses to build deep links in outgoing emails. Without this, links in alert emails will point to `http://localhost:5173`.
+The app is an installable PWA. It actively checks for new builds (on launch, every ~60 s, and whenever you return to the window or reconnect), applies updates **silently when the app is backgrounded**, and shows an "Update available" prompt when you're actively using it. The first time you deploy the build that contains this logic, fully quit + reopen the installed app once to bootstrap the new worker; every later deploy is then automatic — provided the Cloudflare caching caveat above is handled on the custom domain.
 
-### Custom domain (optional)
+## Scripts
 
-Add the domain in Vercel → Project Settings → Domains, create the DNS record Vercel tells you to, then re-run the `APP_URL` secret update to point at the custom domain. No Supabase-side changes needed — we use password auth, not magic links, so no redirect URL allowlist is involved.
-
-### Preview deploys
-
-Preview deploys work for the frontend. Two caveats:
-- They share the same Supabase instance as production. Creating/editing data on a preview writes to the real DB.
-- Alert emails triggered from a preview still contain `APP_URL`-based links that point at the production URL, not the preview. If you're testing the email-link flow, do it on production or temporarily flip `APP_URL` while iterating.
-
-## What's in the DB after ingest
-
-| Table | Rows |
-|---|---|
-| `users` | 30 (Replicon roster; `rmehta@msmmeng.com` is Admin, rest are User) |
-| `companies` | ~95 |
-| `clients` | ~32 |
-| `potential_projects` (+subs, +pms) | 67 (+55, +60) |
-| `awaiting_verdict` | 10 |
-| `awarded_projects` (+subs) | 49 (+164) |
-| `anticipated_invoice` (+pms, current year) | ~42 (+96) |
-| `soq`, `closed_out_projects`, `events` | empty (no source data; created via the UI) |
-
-PM counts reflect `backfill_pms.py`. Awaiting / Awarded / Closed get 0 rows because their source files have no PM column — tag PMs in the UI instead.
+Python ingest/seed + maintenance live in [`scripts/`](./scripts) (use `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` from `.env`; most take `--dry-run`). The legacy ingest tools target the v1 `beacon` schema; the newer leave/licenses/MSMM-maintenance scripts target `beacon_v2`. See CLAUDE.md for what each one does.
 
 ## Where to look
 
-- **Product behavior / fields**: [`PLAN.md`](./PLAN.md)
-- **Frontend features, commands, config**: [`frontend/README.md`](./frontend/README.md)
-- **Engineering context, conventions, gotchas**: [`CLAUDE.md`](./CLAUDE.md)
+- **Product behavior / fields** → [`PLAN.md`](./PLAN.md)
+- **Engineering context, conventions, every migration & gotcha** → [`CLAUDE.md`](./CLAUDE.md)
+- **Frontend dev details / `.env`** → [`frontend/README.md`](./frontend/README.md) *(note: parts of that file are v1-era; this README + CLAUDE.md are current)*
