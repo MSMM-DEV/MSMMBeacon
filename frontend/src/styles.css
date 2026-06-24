@@ -16308,32 +16308,65 @@ html, body { overflow-x: clip; }
 .pd-fact span { font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--text-soft); }
 .pd-fact strong { font-size: 15px; font-weight: 700; color: var(--text); }
 
-/* Structure tree */
-.pd-tree {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  padding: 6px; display: flex; flex-direction: column;
+/* Structure — grouped, inline-editable financial grid */
+.pds-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pds-avail { font-size: 12.5px; color: var(--text-muted); }
+.pds-avail strong { color: var(--text); font-weight: 700; }
+.pds-over { color: var(--rose); font-weight: 700; }
+.pds-scroll {
+  overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface);
 }
-.pd-tree-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px 9px calc(12px + var(--pd-depth, 0) * 22px);
-  border-radius: var(--radius-sm); position: relative;
+.pds-grid { display: flex; flex-direction: column; }
+.pds-grouprow, .pds-labelrow, .pds-row { display: grid; align-items: stretch; }
+.pds-grouprow { background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.pds-gcell {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-soft); padding: 7px 12px; border-left: 1px solid var(--border);
+  display: flex; align-items: center;
 }
-.pd-tree-row:hover { background: var(--surface-2); }
-.pd-tree-rail {
-  position: absolute; left: calc(var(--pd-depth, 0) * 22px); top: 0; bottom: 0; width: 2px;
-  background: var(--border); opacity: .6;
+.pds-gcell.empty { border-left: 0; }
+.pds-labelrow {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface); border-bottom: 1px solid var(--border-strong);
 }
-.pd-tree-row.depth-0 .pd-tree-rail { display: none; }
-.pd-tree-id { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); min-width: 46px; }
-.pd-tree-name { font-weight: 600; font-size: 13.5px; color: var(--text); }
-.pd-tree-row.depth-0 .pd-tree-name { font-weight: 700; }
-.pd-tree-spacer { flex: 1; }
-.pd-tree-amt { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); }
-.pd-tree-mgr {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 999px; font-size: 9.5px; font-weight: 700;
-  background: var(--surface-2); color: var(--text-muted);
+.pds-lcell {
+  font-size: 11px; font-weight: 600; color: var(--text-soft);
+  padding: 8px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.pds-lcell.right { text-align: right; }
+.pds-row { border-bottom: 1px solid var(--border); }
+.pds-row:last-child { border-bottom: 0; }
+.pds-row:hover { background: var(--surface-2); }
+.pds-row.is-root { background: var(--surface-2); font-weight: 600; }
+.pds-row.is-root:hover { background: var(--surface-hover); }
+.pds-cell {
+  padding: 6px 12px; font-size: 13px; color: var(--text);
+  display: flex; align-items: center; min-width: 0;
+}
+.pds-cell.right { justify-content: flex-end; text-align: right; }
+.pds-cell.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.pds-cell.soft { color: var(--text-soft); }
+.pds-cell.right .editable-cell, .pds-cell.right span { text-align: right; }
+.pds-tree { gap: 7px; }
+.pds-toggle {
+  background: none; border: 0; cursor: pointer; color: var(--text-soft);
+  padding: 1px; display: inline-flex; flex-shrink: 0; border-radius: 4px;
+}
+.pds-toggle:hover { background: var(--surface-hover); color: var(--text); }
+.pds-toggle-spacer { width: 16px; flex-shrink: 0; }
+.pd-tree-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; }
+.pd-tree-dot.main { background: var(--blue); }
+.pd-tree-dot.standard { background: var(--sage); }
+.pds-tree-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-soft); flex-shrink: 0; }
+.pds-tree-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pds-row.is-root .pds-tree-name { font-weight: 700; }
+.pds-addkid {
+  margin-left: auto; background: none; border: 0; cursor: pointer; color: var(--text-soft);
+  padding: 2px; border-radius: 4px; display: inline-flex; opacity: 0; flex-shrink: 0; transition: opacity .12s;
+}
+.pds-row:hover .pds-addkid { opacity: 1; }
+.pds-addkid:hover { background: var(--surface-hover); color: var(--accent); }
 
 /* Invoices */
 .pd-inv-note {

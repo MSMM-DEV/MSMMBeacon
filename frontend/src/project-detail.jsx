@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Icon } from "./icons.jsx";
-import { SearchableSelect } from "./primitives.jsx";
+import { SearchableSelect, EditableCell } from "./primitives.jsx";
 import { InvoiceTable } from "./tables.jsx";
 import { noteStamp, noteTimeAgo } from "./invoice-notes-thread.jsx";
 import {
@@ -106,7 +106,7 @@ export function ProjectDetailPage({
 
       <div className="pd-body">
         {tab === "overview"  && <OverviewTab project={project} subtree={subtree}/>}
-        {tab === "structure" && <StructureTab subtree={subtree}/>}
+        {tab === "structure" && <StructureTab subtree={subtree} project={project} updateItem={updateItem} onAddChild={onAddChild}/>}
         {tab === "invoices"  && <InvoicesTab project={project} invoiceTableProps={invoiceTableProps}/>}
         {tab === "documents" && <DocumentsTab/>}
         {tab === "todos"     && <TodosTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>}
@@ -143,29 +143,151 @@ function OverviewTab({ project, subtree }) {
   );
 }
 
-// ── Structure (read-only tree of just this project) ─────────────────────────
-function StructureTab({ subtree }) {
+// ── Structure (grouped, inline-editable financial grid for one project) ─────
+// A spreadsheet-style breakdown: root + phases + subphases, every money/percent
+// cell click-to-edit (persists via updateItem → the same roll-up validation).
+// Columns mirror the imported accounting figures (contract, billed, cost).
+const STRUCT_COLS = [
+  { key: "tree",      label: "Project / Phase", group: "",         w: "minmax(240px, 1.6fr)" },
+  { key: "type",      label: "Contract Type",   group: "Project",  w: "128px" },
+  { key: "status",    label: "Status",          group: "Project",  w: "118px" },
+  { key: "pct",       label: "% Complete",      group: "Project",  w: "104px" },
+  { key: "amount",    label: "Amount",          group: "Contract", w: "124px" },
+  { key: "pctproj",   label: "% of Project",    group: "Contract", w: "100px" },
+  { key: "billed",    label: "Billed",          group: "Contract", w: "124px" },
+  { key: "billedpct", label: "Billed %",        group: "Contract", w: "92px" },
+  { key: "svc",       label: "Services",        group: "Billed",   w: "116px" },
+  { key: "exp",       label: "Expenses",        group: "Billed",   w: "116px" },
+  { key: "tax",       label: "Taxes",           group: "Billed",   w: "104px" },
+  { key: "labor",     label: "Labor",           group: "Cost",     w: "116px" },
+  { key: "expcost",   label: "Expense",         group: "Cost",     w: "116px" },
+  { key: "totalcost", label: "Total Cost",      group: "Cost",     w: "120px" },
+];
+const STRUCT_GROUPS = [
+  { label: "", span: 1 },
+  { label: "Project", span: 3 },
+  { label: "Contract", span: 4 },
+  { label: "Billed", span: 3 },
+  { label: "Cost", span: 3 },
+];
+
+function StructureTab({ subtree, project, updateItem, onAddChild }) {
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const gridCols = STRUCT_COLS.map(c => c.w).join(" ");
+
+  const parentIds = useMemo(
+    () => new Set(subtree.filter(n => n.parentId).map(n => n.parentId)), [subtree]);
+
+  // Depth-first list honoring collapse (subtree is already depth-ordered).
+  const rows = useMemo(() => {
+    const out = []; let skipDepth = null;
+    for (const n of subtree) {
+      if (skipDepth != null) { if (n._depth > skipDepth) continue; skipDepth = null; }
+      out.push(n);
+      if (collapsed.has(n.id)) skipDepth = n._depth;
+    }
+    return out;
+  }, [subtree, collapsed]);
+
+  const toggle = (id) => setCollapsed(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const rootContract = Number(project.contractAmount || 0);
+  const allocated = subtree.filter(n => n.parentId === project.id)
+    .reduce((a, n) => a + Number(n.contractAmount || 0), 0);
+  const available = rootContract - allocated;
+
+  const pctText = (v) => (v == null ? "—" : `${v.toFixed(1)}%`);
+  const pctOfProject = (n) => (rootContract && n.contractAmount != null ? Number(n.contractAmount) / rootContract * 100 : null);
+  const billedPct = (n) => { const c = Number(n.contractAmount || 0); return c && n.totalBilled != null ? Number(n.totalBilled) / c * 100 : null; };
+
+  // Inline-editable money cell → persists via updateItem (roll-up validated).
+  const money = (n, key) => (
+    <div className="pds-cell right mono">
+      <EditableCell value={n[key]} type="number" align="right"
+        render={(v) => (v == null || v === "") ? <span className="empty-cell">—</span> : fmtMoney(v, false)}
+        onChange={(v) => updateItem(n.id, { [key]: v })}/>
+    </div>
+  );
+  const calc = (txt) => <div className="pds-cell right mono soft">{txt}</div>;
+
   return (
-    <div className="pd-pane">
-      <div className="pd-tree">
-        {subtree.map(n => (
-          <div key={n.id} className={"pd-tree-row depth-" + Math.min(n._depth, 5)}
-            style={{ "--pd-depth": n._depth }}>
-            <span className="pd-tree-rail" aria-hidden="true"/>
-            <span className="pd-tree-id">{n.localId}</span>
-            <span className="pd-tree-name">{n.name}</span>
-            <span className={"pd-type-badge sm " + (n.itemType === "main" ? "is-main" : "is-standard")}>
-              {projectItemTypeLabel(n.itemType)}
-            </span>
-            <span className="pd-tree-spacer"/>
-            {n.contractAmount != null && (
-              <span className="pd-tree-amt">{fmtMoney(n.contractAmount, false)}</span>)}
-            {n.managerId && <span className="pd-tree-mgr" title="Manager">{userById(n.managerId)?.initials || ""}</span>}
-            <span className={"pd-status-badge sm st-" + (n.status || "active")}>
-              {projectItemStatusLabel(n.status)}
-            </span>
+    <div className="pd-pane pd-pane-flush">
+      <div className="pds-toolbar">
+        <div className="pds-avail">
+          <strong>{fmtMoney(available, false)}</strong> available of{" "}
+          <strong>{fmtMoney(rootContract, false)}</strong> main project contract
+          {available < -0.005 && <span className="pds-over"> · over-allocated</span>}
+        </div>
+        <button className="btn sm" onClick={() => onAddChild?.(project.id)}>
+          <Icon name="plus" size={12}/> Add phase
+        </button>
+      </div>
+
+      <div className="pds-scroll">
+        <div className="pds-grid" style={{ minWidth: "max-content" }}>
+          {/* Group header row */}
+          <div className="pds-grouprow" style={{ gridTemplateColumns: gridCols }}>
+            {STRUCT_GROUPS.map((g, i) => (
+              <div key={i} className={"pds-gcell" + (g.label ? "" : " empty")} style={{ gridColumn: `span ${g.span}` }}>
+                {g.label}
+              </div>
+            ))}
           </div>
-        ))}
+          {/* Column header row */}
+          <div className="pds-labelrow" style={{ gridTemplateColumns: gridCols }}>
+            {STRUCT_COLS.map(c => (
+              <div key={c.key} className={"pds-lcell" + (c.key === "tree" ? "" : " right")}>{c.label}</div>
+            ))}
+          </div>
+          {/* Body */}
+          {rows.map(n => {
+            const hasKids = parentIds.has(n.id);
+            const isRoot = n._depth === 0;
+            return (
+              <div key={n.id} className={"pds-row" + (isRoot ? " is-root" : "")} style={{ gridTemplateColumns: gridCols }}>
+                <div className="pds-cell pds-tree" style={{ paddingLeft: 8 + n._depth * 20 }}>
+                  {hasKids ? (
+                    <button className="pds-toggle" onClick={() => toggle(n.id)} title={collapsed.has(n.id) ? "Expand" : "Collapse"}>
+                      <Icon name={collapsed.has(n.id) ? "chevronRight" : "chevronDown"} size={12}/>
+                    </button>
+                  ) : <span className="pds-toggle-spacer"/>}
+                  <span className={"pd-tree-dot " + (n.itemType === "main" ? "main" : "standard")}/>
+                  <span className="pds-tree-id">{n.localId}</span>
+                  <span className="pds-tree-name" title={n.name}>{n.name}</span>
+                  <button className="pds-addkid" title="Add subphase" onClick={() => onAddChild?.(n.id)}>
+                    <Icon name="plus" size={11}/>
+                  </button>
+                </div>
+                <div className="pds-cell">
+                  <EditableCell value={n.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
+                    render={(v) => <span className={"pd-type-badge sm " + (v === "main" ? "is-main" : "is-standard")}>{projectItemTypeLabel(v)}</span>}
+                    onChange={(v) => updateItem(n.id, { itemType: v })}/>
+                </div>
+                <div className="pds-cell">
+                  <EditableCell value={n.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
+                    render={(v) => <span className={"pd-status-badge sm st-" + (v || "active")}>{projectItemStatusLabel(v)}</span>}
+                    onChange={(v) => updateItem(n.id, { status: v })}/>
+                </div>
+                <div className="pds-cell right mono">
+                  <EditableCell value={n.percentComplete} type="number" align="right"
+                    render={(v) => (v == null || v === "") ? <span className="empty-cell">—</span> : `${v}%`}
+                    onChange={(v) => updateItem(n.id, { percentComplete: v })}/>
+                </div>
+                {money(n, "contractAmount")}
+                {calc(pctText(pctOfProject(n)))}
+                {money(n, "totalBilled")}
+                {calc(pctText(billedPct(n)))}
+                {money(n, "billedServices")}
+                {money(n, "billedExpenses")}
+                {money(n, "billedTaxes")}
+                {money(n, "laborCost")}
+                {money(n, "expenseCost")}
+                {calc((n.laborCost == null && n.expenseCost == null)
+                  ? "—" : fmtMoney(Number(n.laborCost || 0) + Number(n.expenseCost || 0), false))}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
