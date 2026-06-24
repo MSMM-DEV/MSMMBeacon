@@ -952,6 +952,7 @@ function adaptHotLead(r) {
     clientId: r.client_id || r.prime_company_id || null,
     notes: r.notes || "",
     stars: r.stars == null ? null : Number(r.stars),
+    anticipatedAmount: r.anticipated_amount == null ? null : Number(r.anticipated_amount),
     attendees: (r.attendees || []).map(a => a.user_id),
   };
 }
@@ -973,6 +974,7 @@ function adaptOpenBid(r) {
     movedToProjectId:   r.moved_to_project_id || null,
     createdBy:          r.created_by || null,
     createdAt:          r.created_at || null,
+    anticipatedAmount:  r.anticipated_amount == null ? null : Number(r.anticipated_amount),
   };
 }
 
@@ -3880,6 +3882,7 @@ const OPEN_BID_COL_MAP = {
   dueAt:              "due_at",
   webLink:            "web_link",
   notes:              "notes",
+  anticipatedAmount:  "anticipated_amount",
   // pdfPath / pdfName are written by upload/delete helpers below, not via
   // generic updateOpenBid — keeps file lifecycle paired with storage ops.
 };

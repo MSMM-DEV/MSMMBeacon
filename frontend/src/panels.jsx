@@ -314,7 +314,6 @@ export const DetailDrawer = ({
     ],
     hotleads: [
       { k: "title",          label: "Title" },
-      { k: "status",         label: "Status",                  type: "select", options: ["Scheduled","Happened"] },
       { k: "type",           label: "Type",                    type: "select", options: ["Engineering","AI"] },
       { k: "stars",          label: "Rating",                  type: "stars" },
       // `company` field type feeds from the Clients list. For Hot Leads we
@@ -322,6 +321,7 @@ export const DetailDrawer = ({
       // the merged list via the `hotleadsCompany` custom type below.
       { k: "clientId",       label: "Client / Firm",           type: "clientOrFirm" },
       { k: "dateTime",       label: "Date & Time",             type: "datetime" },
+      { k: "anticipatedAmount", label: "Anticipated Amount",   type: "money" },
       { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
@@ -372,6 +372,7 @@ export const DetailDrawer = ({
         ] },
       { k: "dueAt",              label: "Due Date",                 type: "datetime" },
       { k: "webLink",            label: "Web Link" },
+      { k: "anticipatedAmount",  label: "Anticipated Amount",       type: "money" },
       { k: "notes",              label: "Notes",                    type: "textarea" },
       // Approval fields render via the dedicated approval panel below, NOT
       // as generic editable fields — admins flip status through the panel,
@@ -964,6 +965,8 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "projectNumber",    label: "Project Number",               placeholder: "e.g. 26-101" },
         { k: "dateSubmitted",    label: "Date Submitted",               type: "date", value: new Date().toISOString().substr(0, 10) },
         { k: "anticipatedResultDate", label: "Anticipated Result Date", type: "date" },
+        { k: "clientContract",   label: "Client Contract",              placeholder: "$ amount or contract #",
+          value: row.anticipatedAmount != null ? fmtMoney(row.anticipatedAmount, false) : "" },
         { k: "msmmRemaining",    label: "MSMM Remaining",               type: "money", value: 0 },
         { k: "notes",            label: "Notes",                        type: "textarea", value: row.notes || "",
           placeholder: "Lead notes carry over — edit freely." },
@@ -979,7 +982,8 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         { k: "projectNumber",    label: "Project Number",                placeholder: "e.g. 24-101" },
         { k: "dateSubmitted",    label: "Date Submitted",                type: "date", value: new Date().toISOString().substr(0, 10) },
         { k: "anticipatedResultDate", label: "Anticipated Result Date",  type: "date" },
-        { k: "clientContract",   label: "Client Contract #",             placeholder: "e.g. POSL-2026-045" },
+        { k: "clientContract",   label: "Client Contract",               placeholder: "$ amount or contract #",
+          value: row.anticipatedAmount != null ? fmtMoney(row.anticipatedAmount, false) : "" },
         { k: "msmmContract",     label: "MSMM Contract #",               placeholder: "e.g. MSMM-2026-045" },
         { k: "msmmUsed",         label: "MSMM Used",                     type: "money", value: 0 },
         { k: "msmmRemaining",    label: "MSMM Remaining",                type: "money", value: 0 },

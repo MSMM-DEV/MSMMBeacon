@@ -78,7 +78,7 @@ const DB_COLUMNS = {
     "title", "status", "type", "event_datetime", "notes", "stars",
   ],
   hotleads: [
-    "title", "status", "type", "client_id", "date_time", "notes", "stars",
+    "title", "type", "client_id", "date_time", "anticipated_amount", "notes", "stars",
   ],
   clients: [
     "name", "district", "org_type",
@@ -101,7 +101,7 @@ const DB_COLUMNS = {
   // approval_status='pending' (the DB default) and an admin promotes it later.
   openbids: [
     "rfq_rfp_number", "client_id", "service_description",
-    "due_at", "web_link", "notes",
+    "due_at", "web_link", "anticipated_amount", "notes",
   ],
 };
 
@@ -109,7 +109,7 @@ const NUMERIC_COLS = new Set([
   "year", "total_contract_amount", "msmm_amount", "anticipated_invoice_start_month",
   "msmm_used", "msmm_remaining",
   "contract_amount", "msmm_remaining_to_bill_year_start",
-  "stars",
+  "stars", "anticipated_amount",
 ]);
 
 const INITIAL = {
@@ -175,10 +175,10 @@ const INITIAL = {
   },
   hotleads: {
     title: "",
-    status: "Scheduled",
     type: "",
     client_id: "",
     date_time: "",
+    anticipated_amount: "",
     notes: "",
     attendees: [],
     stars: "",
@@ -217,6 +217,7 @@ const INITIAL = {
     service_description: "",
     due_at: "",
     web_link: "",
+    anticipated_amount: "",
     notes: "",
     _pdf_file: null,        // staged File object; uploaded after row insert
   },
@@ -932,13 +933,6 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             <input className="input" autoFocus value={form.title}
                    onChange={e => set("title", e.target.value)}/>
           </Field>
-          <Field label="Status">
-            <select className="input" value={form.status || "Scheduled"}
-                    onChange={e => set("status", e.target.value)}>
-              <option value="Scheduled">Scheduled</option>
-              <option value="Happened">Happened</option>
-            </select>
-          </Field>
           <Field label="Type">
             <select className="select" value={form.type || ""}
                     onChange={e => set("type", e.target.value)}>
@@ -958,6 +952,12 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
           <Field label="Date & Time">
             <input className="input" type="datetime-local" value={form.date_time}
                    onChange={e => set("date_time", e.target.value)}
+                   style={{ fontFamily: "var(--font-mono)" }}/>
+          </Field>
+          <Field label="Anticipated Amount">
+            <input className="input" type="number" value={form.anticipated_amount}
+                   onChange={e => set("anticipated_amount", e.target.value)}
+                   placeholder="Expected contract value"
                    style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
           <Field label="Rating">
@@ -1225,6 +1225,12 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, onC
             <input className="input" type="text" value={form.web_link}
                    onChange={e => set("web_link", e.target.value)}
                    placeholder="https://…"/>
+          </Field>
+          <Field label="Anticipated Amount (optional)">
+            <input className="input" type="number" value={form.anticipated_amount}
+                   onChange={e => set("anticipated_amount", e.target.value)}
+                   placeholder="Expected contract value"
+                   style={{ fontFamily: "var(--font-mono)" }}/>
           </Field>
           <Field label="Notes (optional)" multiline>
             <textarea className="textarea" value={form.notes}

@@ -399,6 +399,16 @@ const EXPORT_COLUMNS = {
           : (r.values || []).reduce((a,b) => a+(b||0), 0);
         return fmtMoney(total);
       } },
+    // Total Remaining = Contract (Total CV) − Total Billed, mirroring the
+    // project-total scope used by the Contract + Total Billed export columns.
+    { label: "Total Remaining",   wMm: 24, wrap: true, halign: "right",
+      get: r => {
+        const sumYr = (yr) => (yr?.values || []).reduce((a,b) => a+(b||0), 0);
+        const billed = r.byYear
+          ? Object.values(r.byYear).reduce((a, yr) => a + sumYr(yr), 0)
+          : (r.values || []).reduce((a,b) => a+(b||0), 0);
+        return fmtMoney((r.amount || 0) - billed);
+      } },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
@@ -543,6 +553,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       notes: dbRow.notes || "",
       attendees: extras.attendees || [],
       stars: dbRow.stars == null ? null : Number(dbRow.stars),
+      anticipatedAmount: dbRow.anticipated_amount == null ? null : Number(dbRow.anticipated_amount),
     };
   }
   if (table === "clients" || table === "directory-client") {
@@ -615,6 +626,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       movedToProjectId:   dbRow.moved_to_project_id || null,
       createdBy:          dbRow.created_by || null,
       createdAt:          dbRow.created_at || null,
+      anticipatedAmount:  dbRow.anticipated_amount == null ? null : Number(dbRow.anticipated_amount),
     };
   }
   return dbRow;
@@ -1060,9 +1072,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // based on which pool the UUID belongs to).
   const HOT_LEADS_COLS = {
     title: "title",
-    status: "status",
     type: "type",
     dateTime: "date_time",
+    anticipatedAmount: "anticipated_amount",
     notes: "notes",
     stars: "stars",
   };
@@ -1089,7 +1101,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "anticipated_invoice_start_month", "msmm_used", "msmm_remaining",
     "client_id",
     "role", "probability", "org_type", "status", "type",
-    "stars",
+    "stars", "anticipated_amount",
   ]);
 
   const buildDbPatch = (patch, colMap) => {
@@ -3124,7 +3136,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         status: "Proposal",
         dateSubmitted: newData.dateSubmitted || new Date().toISOString().substr(0, 10),
         anticipatedResultDate: newData.anticipatedResultDate || "",
-        clientContract: "",
+        // Anticipated Amount carries into the Proposal's Client Contract field
+        // (pre-filled in the MoveForwardPanel as formatted money; editable).
+        clientContract: newData.clientContract || "",
         msmmContract: "",
         msmmUsed: 0,
         msmmRemaining: Number(newData.msmmRemaining) || 0,
@@ -3146,6 +3160,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             ...routeClientPick(row.clientId || null),
             date_submitted: awaitingRow.dateSubmitted || null,
             anticipated_result_date: awaitingRow.anticipatedResultDate || null,
+            client_contract_number: awaitingRow.clientContract || null,
             msmm_remaining: awaitingRow.msmmRemaining || null,
             project_number: awaitingRow.projectNumber || null,
             notes: awaitingRow.notes || null,
@@ -3976,7 +3991,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   }));
 
   const stats = useMemo(() => {
-    const awa = awaiting.reduce((a,r) => a + (r.msmm || 0), 0);
+    // Proposals card = the INCOMING pipeline: anticipated $ + entry count
+    // across Open Bids + Hot Leads (the two pre-Proposal trackers).
+    const propAmt = openBids.reduce((a,r) => a + (r.anticipatedAmount || 0), 0)
+                  + hotLeads.reduce((a,r) => a + (r.anticipatedAmount || 0), 0);
+    const propCount = openBids.length + hotLeads.length;
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
     // In-Between: paused projects (merged) — contract value sitting on hold.
     const paused = invoiceMerged.filter(r => r.billingState === "between");
@@ -3988,12 +4007,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .filter(r => (r.billingState || "active") !== "closed")
       .reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
-      { label: "Proposals",           val: awa, sub: `${awaiting.length} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
+      { label: "Proposals",           val: propAmt, sub: `${propCount} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
       { label: "Active backlog",      val: awd, sub: `${awarded.length} awarded`,     spark: [5,5,6,7,6,7,8,9,10,11] },
       { label: "In-Between",          val: btw, sub: `${paused.length} paused`,       spark: [4,4,3,4,3,3,4,3,3,4] },
       { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
-  }, [awaiting, awarded, invoice, invoiceMerged, actualThru]);
+  }, [awarded, invoice, invoiceMerged, actualThru, openBids, hotLeads]);
 
   const tabCounts = {
     openbids: openBids.length,

@@ -2600,6 +2600,8 @@ export const InvoiceTable = ({
                     </th>
                   ))}
                   <th className="total-cell inv-pin-ytd" style={{ minWidth: 96 }}>Total Billed</th>
+                  <th className="total-cell inv-pin-rem" style={{ minWidth: 96 }}
+                      title="Auto-calculated · Contract − Total Billed">Total Remaining</th>
                   <th className="inv-pin-act" aria-label="Actions"></th>
                 </tr>
               </thead>
@@ -2820,6 +2822,13 @@ export const InvoiceTable = ({
                         return v ? fmtMoney(v) : <span className="empty-cell">—</span>;
                       })()}
                     </td>
+                    <td className="total-cell inv-pin-rem"
+                        title="Auto-calculated · MSMM Portion − Total Billed">
+                      {(() => {
+                        const c = msmmContractShown(r), b = msmmYtdAll(r);
+                        return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
+                      })()}
+                    </td>
                     <td className="inv-pin-act" style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
                       <span className="inv-act-btns">
                         {billingMode === "active" && onPause && (
@@ -2860,6 +2869,7 @@ export const InvoiceTable = ({
                       </td>
                       <td colSpan={windowMonths.length + 2}/>
                       <td className="inv-pin-ytd"/>
+                      <td className="inv-pin-rem"/>
                       <td className="inv-pin-act"/>
                     </tr>
                   )}
@@ -3084,6 +3094,13 @@ export const InvoiceTable = ({
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
+                      <td className="total-cell mono inv-pin-rem"
+                          title="Auto-calculated · sub contract − billed">
+                        {(() => {
+                          const c = Number(s.contractAmount || 0), b = subYtdAll(s);
+                          return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
+                        })()}
+                      </td>
                       <td className="inv-pin-act"/>
                     </tr>
                     );
@@ -3124,6 +3141,7 @@ export const InvoiceTable = ({
                         </div>
                       </td>
                       <td className="inv-pin-ytd"/>
+                      <td className="inv-pin-rem"/>
                       <td className="inv-pin-act"/>
                     </tr>
                     );
@@ -3241,6 +3259,13 @@ export const InvoiceTable = ({
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
+                      <td className="total-cell mono inv-pin-rem"
+                          title="Auto-calculated · Total Contract Value − billed">
+                        {(() => {
+                          const c = Number(r.amount || 0), b = projectYtdAll(r);
+                          return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
+                        })()}
+                      </td>
                       <td className="inv-pin-act"/>
                     </tr>
                   )}
@@ -3271,6 +3296,9 @@ export const InvoiceTable = ({
                       <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}>
                         {fmtMoney(sumBy(searchedNonOrange, msmmYtdAll))}
                       </td>
+                      <td className="total-cell inv-pin-rem" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(searchedNonOrange, r => msmmContractShown(r) - msmmYtdAll(r)))}
+                      </td>
                       <td className="total-cell inv-pin-act"></td>
                     </tr>
                     {/* Total including orange (everything in the searched set) */}
@@ -3292,6 +3320,9 @@ export const InvoiceTable = ({
                       ))}
                       <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}>
                         {fmtMoney(sumBy(searchedRows, msmmYtdAll))}
+                      </td>
+                      <td className="total-cell inv-pin-rem" style={{ color: "var(--accent-ink)" }}>
+                        {fmtMoney(sumBy(searchedRows, r => msmmContractShown(r) - msmmYtdAll(r)))}
                       </td>
                       <td className="total-cell inv-pin-act"></td>
                     </tr>
@@ -3840,12 +3871,13 @@ export const HotLeadsTable = ({
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "Status",      w: "120px", sortKey: "status" },
     { label: "Type",        w: "130px", sortKey: "type" },
     { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
     { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Date & Time", w: "170px", sortKey: "dateTime" },
+    { label: "Anticipated Amount", w: "150px", sortKey: "anticipatedAmount",
+      sortValue: r => r.anticipatedAmount || 0 },
     { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating",      w: "150px", sortKey: "stars",
@@ -3925,13 +3957,6 @@ export const HotLeadsTable = ({
               <input type="checkbox"/>
             </div>
           ),
-          "Status": (
-            <div className="td">
-              <EditableCell value={r.status} type="select" options={hotLeadStatusOptions}
-                onChange={v => updateRow(r.id, { status: v })}
-                render={v => <StatusChip status={v}/>}/>
-            </div>
-          ),
           "Type": (
             <div className="td">
               <EditableCell value={r.type} type="select" options={hotLeadTypeOptions}
@@ -3965,6 +3990,13 @@ export const HotLeadsTable = ({
               <EditableCell value={r.dateTime} type="datetime-local"
                 onChange={v => updateRow(r.id, { dateTime: v })}
                 format={v => fmtDateTime(v)}/>
+            </div>
+          ),
+          "Anticipated Amount": (
+            <div className="td mono">
+              <EditableCell value={r.anticipatedAmount} type="number"
+                onChange={v => updateRow(r.id, { anticipatedAmount: v })}
+                format={v => v != null && v !== "" ? fmtMoney(v, false) : <span className="empty-cell">—</span>}/>
             </div>
           ),
           "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,
@@ -4033,6 +4065,8 @@ export const OpenBidsTable = ({
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Service", w: "minmax(220px, 1.6fr)", sortKey: "serviceDescription" },
     { label: "Due Date", w: "170px", sortKey: "dueAt" },
+    { label: "Anticipated Amount", w: "150px", sortKey: "anticipatedAmount",
+      sortValue: r => r.anticipatedAmount || 0 },
     { label: "PDF", w: "150px" },
     { label: "Web Link", w: "minmax(160px, 1.2fr)", sortKey: "webLink" },
     { label: "Approval", w: "200px", sortKey: "approvalStatus" },
@@ -4115,6 +4149,13 @@ export const OpenBidsTable = ({
               <EditableCell value={r.dueAt ? String(r.dueAt).slice(0, 16) : ""} type="datetime-local"
                 onChange={v => updateRow(r.id, { dueAt: v ? new Date(v).toISOString() : null })}
                 format={v => v ? fmtDateTime(v) : <span className="empty-cell">—</span>}/>
+            </div>
+          ),
+          "Anticipated Amount": (
+            <div className="td mono">
+              <EditableCell value={r.anticipatedAmount} type="number"
+                onChange={v => updateRow(r.id, { anticipatedAmount: v })}
+                format={v => v != null && v !== "" ? fmtMoney(v, false) : <span className="empty-cell">—</span>}/>
             </div>
           ),
           "PDF": (

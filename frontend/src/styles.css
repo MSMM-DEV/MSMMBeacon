@@ -2093,8 +2093,9 @@ html, body { overflow-x: clip; }
    edge while the month window scrolls / navigates. Mirrors the sticky-left
    treatment. The action column is fixed-width so the YTD column's right-offset
    lands flush against it (box-sizing: border-box is global, so widths are exact). */
-.invoice-table { --inv-act-w: 54px; }
+.invoice-table { --inv-act-w: 54px; --inv-rem-w: 104px; }
 .invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd,
+.invoice-table th.inv-pin-rem, .invoice-table td.inv-pin-rem,
 .invoice-table th.inv-pin-act, .invoice-table td.inv-pin-act {
   position: sticky;
   background: var(--bg-elev);
@@ -2108,8 +2109,17 @@ html, body { overflow-x: clip; }
   text-align: center;
   border-right: none;
 }
-.invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd {
+/* Total Remaining is pinned just left of the Actions rail; Total Billed pins
+   left of Total Remaining. Both widths are fixed so the sticky right-offsets
+   chain cleanly (act → rem → ytd). */
+.invoice-table th.inv-pin-rem, .invoice-table td.inv-pin-rem {
   right: var(--inv-act-w);
+  width: var(--inv-rem-w);
+  min-width: var(--inv-rem-w);
+  max-width: var(--inv-rem-w);
+}
+.invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd {
+  right: calc(var(--inv-act-w) + var(--inv-rem-w));
 }
 /* The YTD cell is the rail's leading edge — cast a soft shadow leftward so the
    months visibly slide *under* the frozen column (echoes the sticky-left seam). */
@@ -2124,6 +2134,7 @@ html, body { overflow-x: clip; }
     -11px 0 13px -11px color-mix(in srgb, var(--accent-ink) 30%, transparent);
 }
 .invoice-table thead th.inv-pin-ytd,
+.invoice-table thead th.inv-pin-rem,
 .invoice-table thead th.inv-pin-act { z-index: 4; }
 
 /* Sortable headers — pointer cursor + a fixed-width caret slot so clicking
@@ -2318,11 +2329,11 @@ html, body { overflow-x: clip; }
   background: var(--accent);
   box-shadow: 0 0 0 1.5px var(--bg-elev);
 }
-.invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2):not(.inv-pin-ytd):not(.inv-pin-act) { filter: brightness(0.98); }
+.invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2):not(.inv-pin-ytd):not(.inv-pin-rem):not(.inv-pin-act) { filter: brightness(0.98); }
 /* Tame the dark-mode hover lift — brightness(1.1) on the warm month-actual
    color produced the "aggressive orange wash" the user reported in the
    screenshot. 1.04 keeps the hover signal without blowing the saturation. */
-[data-theme="dark"] .invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2):not(.inv-pin-ytd):not(.inv-pin-act) { filter: brightness(1.04); }
+[data-theme="dark"] .invoice-table tr:hover td:not(.sticky-left):not(.sticky-1):not(.sticky-2):not(.inv-pin-ytd):not(.inv-pin-rem):not(.inv-pin-act) { filter: brightness(1.04); }
 .invoice-legend {
   display: flex; gap: 16px; font-size: 12px; color: var(--text-muted);
   padding: 10px 14px;
