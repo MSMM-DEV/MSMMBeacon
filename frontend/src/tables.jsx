@@ -4691,6 +4691,15 @@ export const ProjectsTable = ({
   const expandAll   = () => setCollapsed(new Set());
   const collapseAll = () => setCollapsed(new Set(parentIds));
 
+  // Start fully collapsed: once items first load, collapse every parent so only
+  // the top-level projects show. Runs once — later expand/collapse choices stick.
+  const didInitCollapse = useRef(false);
+  useEffect(() => {
+    if (didInitCollapse.current || items.length === 0) return;
+    didInitCollapse.current = true;
+    setCollapsed(new Set(parentIds));
+  }, [items.length, parentIds]);
+
   // Chip counts (ignore the search box; count against the type/status axis).
   const chipCount = (key) => {
     if (key === "all") return items.length;
