@@ -11,6 +11,7 @@ import {
   setSubInvoicePaid, setProjectPrimeCompany,
   mergeRefSummary,
   CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS,
+  projectItemDescendantIds,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 
@@ -382,7 +383,7 @@ export const DetailDrawer = ({
       // and the DB trigger gates writes anyway.
     ],
     projects: [
-      { k: "projectId",       label: "Project ID",        type: "mono", readOnlyIf: () => true, readOnlyHint: "Permanent ID — can't be changed" },
+      { k: "localId",         label: row.parentId ? "Phase / Subphase ID" : "Project ID", type: "mono" },
       { k: "name",            label: "Project Name" },
       { k: "parentId",        label: "Parent project",    type: "projectParent" },
       { k: "itemType",        label: "Type",              type: "kvselect", options: PROJECT_ITEM_TYPE_OPTIONS },
@@ -396,6 +397,12 @@ export const DetailDrawer = ({
       { k: "managerId",       label: "Manager",           type: "user" },
       { k: "pmIds",           label: "Additional Project Managers", type: "users" },
       { k: "status",          label: "Status",            type: "kvselect", options: PROJECT_ITEM_STATUS_OPTIONS },
+      { k: "laborCost",       label: "Total Labor Cost",     type: "money" },
+      { k: "expenseCost",     label: "Total Expense Cost",   type: "money" },
+      { k: "billedServices",  label: "Billed — Services",    type: "money" },
+      { k: "billedExpenses",  label: "Billed — Expenses",    type: "money" },
+      { k: "billedTaxes",     label: "Billed — Taxes",       type: "money" },
+      { k: "totalBilled",     label: "Total Billed / Paid",  type: "money" },
       { k: "addressLine1",    label: "Address Line 1" },
       { k: "addressLine2",    label: "Address Line 2" },
       { k: "city",            label: "City" },
@@ -605,9 +612,12 @@ export const DetailDrawer = ({
     // Parent-project picker (tree). Exclude self; the updater + DB trigger
     // block deeper cycles (can't parent under a descendant).
     if (f.type === "projectParent") {
+      // Exclude self + own descendants — re-parenting under those would be a
+      // cycle (the App guard + DB trigger also block it, but don't offer it).
+      const blocked = new Set([row.id, ...projectItemDescendantIds(projectItems || [], row.id)]);
       const opts = (projectItems || [])
-        .filter(it => it.projectId !== row.id)
-        .map(it => ({ value: it.projectId, label: `${it.projectId} · ${it.name}` }));
+        .filter(it => !blocked.has(it.id))
+        .map(it => ({ value: it.id, label: `${it.localId} · ${it.name}` }));
       return (
         <SearchableSelect
           value={val || ""}

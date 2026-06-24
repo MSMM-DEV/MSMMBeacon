@@ -480,7 +480,7 @@ const EXPORT_COLUMNS = {
   // Projects export: the rows are the flattened tree (depth carried on
   // r._depth, prefixed onto the name so the hierarchy reads on paper).
   projects: [
-    { label: "Project ID",        wMm: 28,  get: r => r.projectId || "" },
+    { label: "Project ID",        wMm: 28,  get: r => r.localId || "" },
     { label: "Name",              wrap: true, get: r => `${"  ".repeat(r._depth || 0)}${r.name || ""}` },
     { label: "Type",              wMm: 18,  get: r => projectItemTypeLabel(r.itemType) },
     { label: "Client / Prime",              get: r => companyById(r.clientId)?.name || "" },
@@ -1509,9 +1509,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
     // item_type / status are NOT NULL enums. The inline select auto-injects a
     // "—" option that commits null — ignore an attempt to clear them (the DB
-    // would reject it anyway).
+    // would reject it anyway). local_id is NOT NULL too — never blank it.
     if ("itemType" in patch && !patch.itemType) return;
     if ("status"   in patch && !patch.status)   return;
+    if ("localId"  in patch && !String(patch.localId).trim()) {
+      showToast("ID can't be empty.", "x");
+      return;
+    }
 
     // Re-parent guard: can't move a node under itself or its own descendant.
     if ("parentId" in patch && patch.parentId) {
@@ -1524,14 +1528,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if ("contractAmount" in patch || "parentId" in patch) {
       const amount   = "contractAmount" in patch ? patch.contractAmount : existing.contractAmount;
       const parentId = "parentId" in patch ? patch.parentId : existing.parentId;
-      const v = validateProjectItemContract(projectItems, { projectId: id, parentId, amount });
+      const v = validateProjectItemContract(projectItems, { itemId: id, parentId, amount });
       if (!v.ok) { showToast(v.message, "x"); return; }
     }
 
     setProjectItems(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
 
     if ("pmIds" in patch) {
-      syncJoinUsers(id, existing.pmIds, patch.pmIds, "project_item_pms", "project_id");
+      syncJoinUsers(id, existing.pmIds, patch.pmIds, "project_item_pms", "item_id");
     }
 
     const scalarPatch = { ...patch };
@@ -1578,37 +1582,37 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   };
 
   // Subs on a project item (companies). Optimistic; the join key is
-  // (project_id, company_id).
-  const addProjectItemSubRow = async (projectId, companyId) => {
-    const existing = projectItems.find(r => r.id === projectId);
+  // (item_id, company_id) — itemId is the node's uuid.
+  const addProjectItemSubRow = async (itemId, companyId) => {
+    const existing = projectItems.find(r => r.id === itemId);
     if (!existing || !companyId) return;
     try {
       const res = await addProjectItemSub({
-        projectId, companyId, ord: (existing.subs?.length || 0) + 1,
+        itemId, companyId, ord: (existing.subs?.length || 0) + 1,
       });
       if (res.existed) { showToast("Already a sub on this item", "x"); return; }
-      setProjectItems(rs => rs.map(r => r.id === projectId
+      setProjectItems(rs => rs.map(r => r.id === itemId
         ? { ...r, subs: [...(r.subs || []), { cId: companyId, desc: "", amt: 0 }] }
         : r));
     } catch (e) { showToast(`Add sub failed: ${e.message || e}`, "x"); }
   };
-  const updateProjectItemSubRow = (projectId, companyId, patch) => {
+  const updateProjectItemSubRow = (itemId, companyId, patch) => {
     const prev = projectItems;
-    setProjectItems(rs => rs.map(r => r.id === projectId
+    setProjectItems(rs => rs.map(r => r.id === itemId
       ? { ...r, subs: (r.subs || []).map(s => s.cId === companyId ? { ...s, ...patch } : s) }
       : r));
     updateProjectItemSub({
-      projectId, companyId,
+      itemId, companyId,
       amount:     "amt"  in patch ? patch.amt  : undefined,
       discipline: "desc" in patch ? patch.desc : undefined,
     }).catch(e => { setProjectItems(prev); showToast(`Save failed: ${e.message || e}`, "x"); });
   };
-  const removeProjectItemSubRow = async (projectId, companyId) => {
+  const removeProjectItemSubRow = async (itemId, companyId) => {
     const prev = projectItems;
-    setProjectItems(rs => rs.map(r => r.id === projectId
+    setProjectItems(rs => rs.map(r => r.id === itemId
       ? { ...r, subs: (r.subs || []).filter(s => s.cId !== companyId) }
       : r));
-    try { await removeProjectItemSub({ projectId, companyId }); }
+    try { await removeProjectItemSub({ itemId, companyId }); }
     catch (e) { setProjectItems(prev); showToast(`Remove failed: ${e.message || e}`, "x"); }
   };
 

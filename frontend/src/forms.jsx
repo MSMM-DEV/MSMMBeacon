@@ -230,11 +230,12 @@ const INITIAL = {
     _pdf_file: null,        // staged File object; uploaded after row insert
   },
   // Projects (tree item). Keys are the form-local names; the projects submit
-  // branch maps them to the createProjectItem payload (camelCase).
+  // branch maps them to the createProjectItem payload (camelCase). parent_id
+  // holds the PARENT'S uuid (seeded when "Add child").
   projects: {
-    project_id: "",
+    local_id: "",             // scoped ID (root = global, phase = within project)
     name: "",
-    parent_id: "",            // seeded when "Add child" — see openNewProject
+    parent_id: "",            // parent uuid — seeded when "Add child"
     client_id: "",            // merged Client/Prime pick — routed at insert
     item_type: "standard",
     address_line1: "",
@@ -265,7 +266,7 @@ const REQUIRED = {
   companies: ["name"],
   invoice:   ["project_name", "year"],
   openbids:  ["rfq_rfp_number"],
-  projects:  ["project_id", "name"],
+  projects:  ["local_id", "name"],
 };
 
 // --------------------- shared sub-editor ---------------------
@@ -442,16 +443,17 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "projects") {
       try {
         // Client-side roll-up check for instant feedback (the DB trigger is
-        // the backstop).
+        // the backstop). itemId is undefined (new row) so the floor check is a
+        // no-op; the cap check runs against the chosen parent.
         const v = validateProjectItemContract(projectItems, {
-          projectId: String(form.project_id || "").trim(),
+          itemId: undefined,
           parentId: form.parent_id || null,
           amount: form.contract_amount,
         });
         if (!v.ok) { setError(v.message); setPending(false); return; }
 
         const adapted = await createProjectItem({
-          projectId:       form.project_id,
+          localId:         form.local_id,
           name:            form.name,
           parentId:        form.parent_id || null,
           clientId:        form.client_id || "",
@@ -474,7 +476,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
         const pmIds = (form.pm_user_ids || []).filter(Boolean);
         if (pmIds.length > 0) {
           const { error: ePm } = await supabase.from("project_item_pms")
-            .insert(pmIds.map(uid => ({ project_id: adapted.projectId, user_id: uid })));
+            .insert(pmIds.map(uid => ({ item_id: adapted.id, user_id: uid })));
           if (ePm) throw ePm;
           adapted.pmIds = pmIds;
         }
@@ -483,7 +485,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
         const savedSubs = [];
         for (const [i, s] of subs.entries()) {
           await addProjectItemSub({
-            projectId: adapted.projectId, companyId: s.cId,
+            itemId: adapted.id, companyId: s.cId,
             discipline: s.desc, amount: s.amt, ord: i + 1,
           });
           savedSubs.push({ cId: s.cId, desc: s.desc || "", amt: Number(s.amt) || 0 });
@@ -698,16 +700,22 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
   const renderFields = () => {
     if (table === "projects") {
       const parentOptions = (projectItems || [])
-        .map(it => ({ value: it.projectId, label: `${it.projectId} · ${it.name}` }));
+        .map(it => ({ value: it.id, label: `${it.localId} · ${it.name}` }));
       const userOptions = (users || []).map(u => ({ value: u.id, label: u.name }));
-      const parentItem = (projectItems || []).find(it => it.projectId === form.parent_id);
+      const parentItem = (projectItems || []).find(it => it.id === form.parent_id);
+      const idLabel = form.parent_id ? "Phase / Subphase ID *" : "Project ID *";
       return (
         <>
-          <Field label="Project ID *">
-            <input className="input mono" autoFocus value={form.project_id}
-                   onChange={e => set("project_id", e.target.value)}
-                   placeholder="e.g. 24-100 or 24-100.1"
+          <Field label={idLabel}>
+            <input className="input mono" autoFocus value={form.local_id}
+                   onChange={e => set("local_id", e.target.value)}
+                   placeholder={form.parent_id ? "e.g. 1, 2, 2.1, 0" : "e.g. 202311"}
                    style={{ fontFamily: "var(--font-mono)" }}/>
+            <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>
+              {form.parent_id
+                ? "Unique within its parent only — another project can reuse the same phase ID."
+                : "Unique across all projects."}
+            </div>
           </Field>
           <Field label="Project Name *">
             <input className="input" value={form.name}

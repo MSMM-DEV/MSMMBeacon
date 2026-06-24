@@ -4607,9 +4607,10 @@ export const ProjectsTable = ({
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(() => new Set());
 
-  // parent_id → sorted children (a dangling/missing parent is treated as a root).
+  // parent uuid → sorted children (a dangling/missing parent is treated as a
+  // root). Keyed on the surrogate `id`; display order is by the scoped local_id.
   const byParent = useMemo(() => {
-    const ids = new Set(items.map(it => it.projectId));
+    const ids = new Set(items.map(it => it.id));
     const m = new Map();
     for (const it of items) {
       const pid = (it.parentId && ids.has(it.parentId)) ? it.parentId : null;
@@ -4618,7 +4619,7 @@ export const ProjectsTable = ({
     for (const arr of m.values()) {
       arr.sort((a, b) =>
         (a.sortOrd ?? 1e9) - (b.sortOrd ?? 1e9) ||
-        String(a.projectId).localeCompare(String(b.projectId), undefined, { numeric: true }));
+        String(a.localId).localeCompare(String(b.localId), undefined, { numeric: true }));
     }
     return m;
   }, [items]);
@@ -4638,20 +4639,20 @@ export const ProjectsTable = ({
     if (!q) return true;
     const client = companyById(it.clientId)?.name || "";
     const mgr = userById(it.managerId)?.name || "";
-    return [it.name, it.projectId, client, mgr]
+    return [it.name, it.localId, client, mgr]
       .some(s => String(s || "").toLowerCase().includes(q));
   };
   const isFiltering = !!query.trim() || activeFilter !== "all";
 
-  // Keep set: a node survives if it matches OR any descendant matches, so a
-  // matching leaf keeps its whole ancestor chain visible.
+  // Keep set (of uuids): a node survives if it matches OR any descendant
+  // matches, so a matching leaf keeps its whole ancestor chain visible.
   const keep = useMemo(() => {
     if (!isFiltering) return null;
     const set = new Set();
     const visit = (it) => {
       let anyChild = false;
-      for (const c of (byParent.get(it.projectId) || [])) if (visit(c)) anyChild = true;
-      if ((matchesFilter(it) && matchesQuery(it)) || anyChild) { set.add(it.projectId); return true; }
+      for (const c of (byParent.get(it.id) || [])) if (visit(c)) anyChild = true;
+      if ((matchesFilter(it) && matchesQuery(it)) || anyChild) { set.add(it.id); return true; }
       return false;
     };
     for (const r of (byParent.get(null) || [])) visit(r);
@@ -4665,11 +4666,11 @@ export const ProjectsTable = ({
     const out = [];
     const walk = (pid, depth) => {
       for (const it of (byParent.get(pid) || [])) {
-        if (keep && !keep.has(it.projectId)) continue;
-        const kids = (byParent.get(it.projectId) || []).filter(c => !keep || keep.has(c.projectId));
-        const isCollapsed = !isFiltering && collapsed.has(it.projectId);
+        if (keep && !keep.has(it.id)) continue;
+        const kids = (byParent.get(it.id) || []).filter(c => !keep || keep.has(c.id));
+        const isCollapsed = !isFiltering && collapsed.has(it.id);
         out.push({ ...it, _depth: depth, _hasKids: kids.length > 0, _collapsed: isCollapsed });
-        if (kids.length > 0 && !isCollapsed) walk(it.projectId, depth + 1);
+        if (kids.length > 0 && !isCollapsed) walk(it.id, depth + 1);
       }
     };
     walk(null, 0);
@@ -4685,7 +4686,7 @@ export const ProjectsTable = ({
     const n = new Set(s); n.has(pid) ? n.delete(pid) : n.add(pid); return n;
   });
   const parentIds = useMemo(
-    () => items.filter(it => (byParent.get(it.projectId) || []).length > 0).map(it => it.projectId),
+    () => items.filter(it => (byParent.get(it.id) || []).length > 0).map(it => it.id),
     [items, byParent]);
   const expandAll   = () => setCollapsed(new Set());
   const collapseAll = () => setCollapsed(new Set(parentIds));
@@ -4783,15 +4784,15 @@ export const ProjectsTable = ({
 
           {flat.map(it => (
             <div
-              key={it.projectId}
-              className={"ptree-row" + (flashId === it.projectId ? " flash" : "") + (it.itemType === "main" ? " is-main" : "")}
+              key={it.id}
+              className={"ptree-row" + (flashId === it.id ? " flash" : "") + (it.itemType === "main" ? " is-main" : "")}
               style={{ gridTemplateColumns: PTREE_COLS }}
               onDoubleClick={() => onOpenDrawer?.(it)}
             >
               {/* Name — indented by depth, with expand chevron */}
               <div className="ptree-cell ptree-name" style={{ paddingLeft: 8 + it._depth * 20 }}>
                 {it._hasKids ? (
-                  <button className="ptree-toggle" onClick={(e) => { e.stopPropagation(); toggle(it.projectId); }}
+                  <button className="ptree-toggle" onClick={(e) => { e.stopPropagation(); toggle(it.id); }}
                           title={it._collapsed ? "Expand" : "Collapse"}>
                     <Icon name={it._collapsed ? "chevronRight" : "chevronDown"} size={13}/>
                   </button>
@@ -4801,15 +4802,18 @@ export const ProjectsTable = ({
                 <span className={"ptree-dot " + (it.itemType === "main" ? "main" : "standard")}/>
                 <span className="ptree-name-text">
                   <EditableCell value={it.name} type="text"
-                    onChange={(v) => updateRow(it.projectId, { name: v })}/>
+                    onChange={(v) => updateRow(it.id, { name: v })}/>
                 </span>
               </div>
 
-              <div className="ptree-cell mono soft">{it.projectId}</div>
+              <div className="ptree-cell mono soft">
+                <EditableCell value={it.localId} type="text"
+                  onChange={(v) => updateRow(it.id, { localId: v })}/>
+              </div>
               <div className="ptree-cell">
                 <EditableCell value={it.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
                   render={() => typeChip(it)}
-                  onChange={(v) => updateRow(it.projectId, { itemType: v })}/>
+                  onChange={(v) => updateRow(it.id, { itemType: v })}/>
               </div>
               <div className="ptree-cell soft">
                 {companyById(it.clientId)?.name || <span className="empty-cell">—</span>}
@@ -4820,12 +4824,12 @@ export const ProjectsTable = ({
               <div className="ptree-cell soft">
                 <EditableCell value={it.contractType} type="select" options={CONTRACT_TYPE_OPTIONS}
                   render={(v) => v ? contractTypeLabel(v) : <span className="empty-cell">—</span>}
-                  onChange={(v) => updateRow(it.projectId, { contractType: v })}/>
+                  onChange={(v) => updateRow(it.id, { contractType: v })}/>
               </div>
               <div className="ptree-cell right mono">
                 <EditableCell value={it.contractAmount} type="number" align="right"
                   render={(v) => v == null ? <span className="empty-cell">—</span> : fmtMoney(v, false)}
-                  onChange={(v) => updateRow(it.projectId, { contractAmount: v })}/>
+                  onChange={(v) => updateRow(it.id, { contractAmount: v })}/>
               </div>
               <div className="ptree-cell right">
                 <EditableCell value={it.percentComplete} type="number" align="right"
@@ -4835,7 +4839,7 @@ export const ProjectsTable = ({
                       <span className="ptree-pct-num">{v == null ? "—" : `${v}%`}</span>
                     </span>
                   )}
-                  onChange={(v) => updateRow(it.projectId, { percentComplete: v })}/>
+                  onChange={(v) => updateRow(it.id, { percentComplete: v })}/>
               </div>
               <div className="ptree-cell">
                 {it.managerId
@@ -4850,11 +4854,11 @@ export const ProjectsTable = ({
               <div className="ptree-cell">
                 <EditableCell value={it.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
                   render={() => statusChip(it)}
-                  onChange={(v) => updateRow(it.projectId, { status: v })}/>
+                  onChange={(v) => updateRow(it.id, { status: v })}/>
               </div>
               <div className="ptree-cell ptree-actions">
                 <button className="row-btn" title="Add child (phase / subphase)"
-                        onClick={(e) => { e.stopPropagation(); onAddChild?.(it.projectId); }}>
+                        onClick={(e) => { e.stopPropagation(); onAddChild?.(it.id); }}>
                   <Icon name="plus" size={13}/>
                 </button>
                 <button className="row-btn" title="Open details"
@@ -4862,7 +4866,7 @@ export const ProjectsTable = ({
                   <Icon name="eye" size={13}/>
                 </button>
                 <button className="row-btn" title="Delete" style={{ color: "var(--rose)" }}
-                        onClick={(e) => { e.stopPropagation(); onDelete?.(it.projectId); }}>
+                        onClick={(e) => { e.stopPropagation(); onDelete?.(it.id); }}>
                   <Icon name="trash" size={13}/>
                 </button>
               </div>
