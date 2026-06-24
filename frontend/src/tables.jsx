@@ -4600,7 +4600,7 @@ const PTREE_HEADS = [
 ];
 
 export const ProjectsTable = ({
-  items = [], updateRow = () => {}, onOpenDrawer, onAddChild, onDelete,
+  items = [], updateRow = () => {}, onOpenDrawer, onOpenProject, onAddChild, onDelete,
   companies = [], users = [],
   activeFilter = "all", onFilterChange, filterChips = [], flashId, tab = "projects",
 }) => {
@@ -4796,9 +4796,11 @@ export const ProjectsTable = ({
               key={it.id}
               className={"ptree-row" + (flashId === it.id ? " flash" : "") + (it.itemType === "main" ? " is-main" : "")}
               style={{ gridTemplateColumns: PTREE_COLS }}
-              onDoubleClick={() => onOpenDrawer?.(it)}
+              onDoubleClick={() => it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it)}
             >
-              {/* Name — indented by depth, with expand chevron */}
+              {/* Name — indented by depth, with expand chevron. A ROOT project's
+                  name is a link that opens its detail page; phases/subphases
+                  keep the inline name editor. */}
               <div className="ptree-cell ptree-name" style={{ paddingLeft: 8 + it._depth * 20 }}>
                 {it._hasKids ? (
                   <button className="ptree-toggle" onClick={(e) => { e.stopPropagation(); toggle(it.id); }}
@@ -4810,8 +4812,15 @@ export const ProjectsTable = ({
                 )}
                 <span className={"ptree-dot " + (it.itemType === "main" ? "main" : "standard")}/>
                 <span className="ptree-name-text">
-                  <EditableCell value={it.name} type="text"
-                    onChange={(v) => updateRow(it.id, { name: v })}/>
+                  {it._depth === 0 ? (
+                    <button className="ptree-open-link" title="Open project detail"
+                            onClick={(e) => { e.stopPropagation(); onOpenProject?.(it); }}>
+                      {it.name}
+                    </button>
+                  ) : (
+                    <EditableCell value={it.name} type="text"
+                      onChange={(v) => updateRow(it.id, { name: v })}/>
+                  )}
                 </span>
               </div>
 
@@ -4870,9 +4879,9 @@ export const ProjectsTable = ({
                         onClick={(e) => { e.stopPropagation(); onAddChild?.(it.id); }}>
                   <Icon name="plus" size={13}/>
                 </button>
-                <button className="row-btn" title="Open details"
-                        onClick={(e) => { e.stopPropagation(); onOpenDrawer?.(it); }}>
-                  <Icon name="eye" size={13}/>
+                <button className="row-btn" title={it._depth === 0 ? "Open project detail" : "Open details"}
+                        onClick={(e) => { e.stopPropagation(); it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it); }}>
+                  <Icon name={it._depth === 0 ? "maximize" : "eye"} size={13}/>
                 </button>
                 <button className="row-btn" title="Delete" style={{ color: "var(--rose)" }}
                         onClick={(e) => { e.stopPropagation(); onDelete?.(it.id); }}>

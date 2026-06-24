@@ -20,6 +20,7 @@ import { TimesheetTab } from "./timekeeping/TimesheetTab.jsx";
 import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
+import { ProjectDetailPage } from "./project-detail.jsx";
 import { exportPDF } from "./utils/pdf.js";
 import { exportManishWorkbook } from "./utils/manish-xlsx.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
@@ -912,6 +913,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [pendingFocusRowId, setPendingFocusRowId] = useState(null);
 
   useEffect(() => { localStorage.setItem("beacon-tab", tab); }, [tab]);
+  // Leaving the Projects section closes any open project detail page.
+  useEffect(() => { setDetailProject(null); }, [tab]);
   useEffect(() => { localStorage.setItem("beacon-tweaks", JSON.stringify(tweaks)); }, [tweaks]);
   useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
 
@@ -969,6 +972,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Projects (tree-structured work breakdown — beacon_v2.project_items). One
   // flat array; ProjectsTable builds the parent/child tree from parentId.
   const [projectItems, setProjectItems] = useState(initial.projectItems || []);
+  // The root project_item whose dedicated detail page is open (null = the
+  // normal Projects tree table). Set by clicking a root on the Projects page.
+  const [detailProject, setDetailProject] = useState(null);
   const [clients,   setClients]   = useState(() => getClientsOnly());
   const [companies, setCompanies] = useState(() => getCompaniesOnly());
   // Workspace-wide settings (singleton). Today: monthlyInvoiceBenchmark drives
@@ -4074,6 +4080,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     return m;
   }, [invoiceMerged]);
 
+  // Project Detail page — the LIVE root row (re-read from projectItems so header
+  // + structure reflect edits; null if the project was deleted while open) and
+  // its invoice rows. Invoices link by project NUMBER (project_items has no FK
+  // to anticipated_invoice), so match the root's local_id to invoice
+  // projectNumber — the same merge key the Invoice tab uses. All billing states
+  // are shown (the detail view is the project's complete billing).
+  const detailLive = useMemo(
+    () => detailProject ? projectItems.find(p => p.id === detailProject.id) || null : null,
+    [detailProject, projectItems]);
+  const detailInvoiceRows = useMemo(() => {
+    if (!detailLive) return [];
+    const key = normInvoiceNumber(detailLive.localId);
+    if (!key) return [];
+    return invoiceMerged.filter(r => normInvoiceNumber(r.projectNumber) === key);
+  }, [detailLive, invoiceMerged]);
+
   // Apply year filter, then category filter. Events filter against the year
   // component of the ISO event_date, not a dedicated year column.
   const filtered = useMemo(() => {
@@ -4370,6 +4392,57 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       </div>
 
       <div className="page">
+        {detailLive && (
+          <ProjectDetailPage
+            project={detailLive}
+            items={projectItems}
+            onClose={() => setDetailProject(null)}
+            updateItem={updateProjectItemRow}
+            onAddItemSub={addProjectItemSubRow}
+            onUpdateItemSub={updateProjectItemSubRow}
+            onRemoveItemSub={removeProjectItemSubRow}
+            onDeleteItem={deleteProjectItemRow}
+            onAddChild={openNewProject}
+            invoiceTableProps={{
+              rows: detailInvoiceRows,
+              windowMonths: invWindowMonths,
+              onWindowBack: () => setInvWindowStart(s => s - 1),
+              onWindowFwd: () => setInvWindowStart(s => s + 1),
+              onWindowToday: () => setInvWindowStart(defaultWindowStartAbs()),
+              windowAtDefault: invWindowAtDefault,
+              cutoverDay: appSettings.invoiceActualCutoverDay,
+              cutoverNextMonth: appSettings.invoiceActualCutoverNextMonth,
+              updateInvoice: editInvoiceTotalMonth,
+              updateInvoiceMsmm: editInvoiceMsmmMonth,
+              updateRow: updateInvoice,
+              onOpenDrawer: r => openDrawer(r, "invoice"),
+              onAlert: r => setAlertObj({ row: r, tab: "invoice" }),
+              flashId,
+              orangeSourceIds,
+              subInvoices,
+              onUpdateSubAmount: updateSubInvoiceCell,
+              onTogglePaid: setSubInvoicePaidStatus,
+              onTogglePrimePaid: editInvoicePrimePaidMonth,
+              canUntickPaid: isAdmin,
+              onOpenFiles: openInvoiceFiles,
+              onAddSub: (projectRow, kind = "sub") => setAddSubModal({ projectRow, kind }),
+              onUpdateSubMeta: updateSubMeta,
+              onRemoveSub: removeSub,
+              onChangeRole: setInvoiceRoleHandler,
+              onNotesChanged: (id, log) => setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r)),
+              canEditMsmm: isAdmin,
+              onBlockedMsmmEdit: () => showToast("MSMM values are auto-calculated — only an admin can edit them. Edit the Total (or a sub) instead.", "lock"),
+              onNew: () => setCreateTable("invoice"),
+              // No pause/resume/close-out from the detail view — it shows the
+              // project's invoice rows across ALL billing states, so a single
+              // billingMode can't be right for every row. Transitions stay on
+              // the main Invoice page. This keeps the detail tab a pure
+              // filtered view (omitting onPause hides the action).
+              billingMode: "active",
+            }}
+          />
+        )}
+        {!detailLive && (<>
         <div className="page-head">
           <div>
             <h1 className="page-title">{pageTitle}</h1>
@@ -4626,6 +4699,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <ProjectsTable
             items={projectItems}
             updateRow={updateProjectItemRow}
+            onOpenProject={(row) => setDetailProject(row)}
             onOpenDrawer={r => openDrawer(r, "projects")}
             onAddChild={(parentId) => openNewProject(parentId)}
             onDelete={deleteProjectItemRow}
@@ -4760,6 +4834,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {tab === "team-cal" && (
           <TeamCalendarTab />
         )}
+        </>)}
       </div>
 
       {drawer && (() => {

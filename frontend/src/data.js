@@ -418,6 +418,37 @@ export function validateProjectItemContract(items, { itemId, parentId, amount })
   return { ok: true };
 }
 
+// ── Project Detail — To-Do + Note option lists ────────────────────────────
+// Priority on a project to-do. Rank drives the default sort (most urgent first).
+export const TODO_PRIORITY_OPTIONS = [
+  { value: "urgent", label: "Urgent" },
+  { value: "high",   label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low",    label: "Low" },
+];
+export const todoPriorityLabel = (v) =>
+  TODO_PRIORITY_OPTIONS.find(o => o.value === v)?.label || "Medium";
+export const todoPriorityRank = (v) =>
+  ({ urgent: 0, high: 1, medium: 2, low: 3 })[v] ?? 2;
+
+// Categories for a project note (fixed list per product spec).
+export const NOTE_CATEGORY_OPTIONS = [
+  { value: "billing",            label: "Billing" },
+  { value: "project_management", label: "Project Management" },
+  { value: "invoice",            label: "Invoice" },
+  { value: "client",             label: "Client" },
+  { value: "management",         label: "Management" },
+  { value: "contract",           label: "Contract" },
+  { value: "expense",            label: "Expense" },
+  { value: "general",            label: "General" },
+  { value: "purchase_order",     label: "Purchase Order" },
+  { value: "time_entry",         label: "Time Entry" },
+  { value: "vendor_bill",        label: "Vendor Bill" },
+  { value: "vendor_contract",    label: "Vendor Contract" },
+];
+export const noteCategoryLabel = (v) =>
+  NOTE_CATEGORY_OPTIONS.find(o => o.value === v)?.label || "General";
+
 export const mkId = () => "r_" + Math.random().toString(36).slice(2, 10);
 
 export const fmtMoney = (n, showCents = true) => {
@@ -889,6 +920,181 @@ export async function reloadInvoiceNotes(invoiceId) {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data || []).map(adaptNote);
+}
+
+// ── Project Detail — To-Dos + Notes (CRUD) ────────────────────────────────
+// Both hang off a project_items NODE (root project OR any phase/subphase), so
+// the detail page loads everything for a project by passing the tree's node
+// ids. All loaders graceful-degrade to [] before the migration is applied.
+
+export function adaptTodo(r) {
+  return {
+    id:          r.id,
+    itemId:      r.item_id,
+    description: r.description || "",
+    startDate:   r.start_date || "",
+    endDate:     r.end_date || "",
+    priority:    r.priority || "medium",
+    done:        !!r.done,
+    assignedTo:  r.assigned_to || null,
+    assignedBy:  r.assigned_by || null,
+    createdAt:   r.created_at || null,
+  };
+}
+
+export function adaptProjectNoteFile(r) {
+  return {
+    id:         r.id,
+    noteId:     r.note_id,
+    path:       r.file_path,
+    name:       r.file_name || "file",
+    uploadedBy: r.uploaded_by || null,
+    uploadedAt: r.uploaded_at || null,
+  };
+}
+
+export function adaptProjectNote(r) {
+  return {
+    id:        r.id,
+    itemId:    r.item_id,
+    authorId:  r.author_user_id || null,
+    category:  r.category || "general",
+    body:      r.body || "",
+    createdAt: r.created_at || null,
+    editedAt:  r.edited_at  || null,
+    files:     (r.files || []).map(adaptProjectNoteFile),
+  };
+}
+
+// Load every to-do across a set of node ids (a project's whole tree),
+// newest-first. Empty input or an un-migrated DB → [].
+export async function loadProjectTodos(itemIds) {
+  const ids = (itemIds || []).filter(Boolean);
+  if (!ids.length) return [];
+  try {
+    const { data, error } = await supabase
+      .from("project_todos").select("*")
+      .in("item_id", ids)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(adaptTodo);
+  } catch (e) { console.warn("loadProjectTodos failed (un-migrated?)", e?.message); return []; }
+}
+
+export async function createTodo(payload) {
+  const me = getCurrentBeaconUser();
+  const text = (payload.description || "").trim();
+  if (!text) throw new Error("Description can't be empty");
+  const db = {
+    item_id:     payload.itemId,
+    description: text,
+    start_date:  payload.startDate || null,
+    end_date:    payload.endDate || null,
+    priority:    payload.priority || "medium",
+    done:        !!payload.done,
+    assigned_to: payload.assignedTo || null,
+    assigned_by: me?.id || null,
+  };
+  const { data, error } = await supabase.from("project_todos").insert(db).select("*").single();
+  if (error) throw error;
+  return adaptTodo(data);
+}
+
+export async function updateTodo(id, patch) {
+  const map = {
+    itemId: "item_id", description: "description", startDate: "start_date",
+    endDate: "end_date", priority: "priority", done: "done", assignedTo: "assigned_to",
+  };
+  const nullable = new Set(["start_date", "end_date", "assigned_to"]);
+  const db = {};
+  for (const [k, v] of Object.entries(patch)) {
+    const col = map[k]; if (!col) continue;
+    db[col] = (nullable.has(col) && (v === "" || v == null)) ? null : v;
+  }
+  if (!Object.keys(db).length) return null;
+  const { data, error } = await supabase.from("project_todos").update(db).eq("id", id).select("*").single();
+  if (error) throw error;
+  return adaptTodo(data);
+}
+
+export async function deleteTodo(id) {
+  const { error } = await supabase.from("project_todos").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Load every note (with attachments) across a set of node ids, newest-first.
+export async function loadProjectNotes(itemIds) {
+  const ids = (itemIds || []).filter(Boolean);
+  if (!ids.length) return [];
+  try {
+    const { data, error } = await supabase
+      .from("project_notes").select("*, files:project_note_files(*)")
+      .in("item_id", ids)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(adaptProjectNote);
+  } catch (e) { console.warn("loadProjectNotes failed (un-migrated?)", e?.message); return []; }
+}
+
+export async function createProjectNote({ itemId, category, body }) {
+  const me = getCurrentBeaconUser();
+  const text = (body || "").trim();
+  if (!text) throw new Error("Note can't be empty");
+  const { data, error } = await supabase.from("project_notes")
+    .insert({ item_id: itemId, author_user_id: me?.id || null, category: category || "general", body: text })
+    .select("*, files:project_note_files(*)").single();
+  if (error) throw error;
+  return adaptProjectNote(data);
+}
+
+export async function editProjectNote(id, { category, body }) {
+  const db = { edited_at: new Date().toISOString() };
+  if (category != null) db.category = category;
+  if (body != null) {
+    const text = body.trim();
+    if (!text) throw new Error("Note can't be empty");
+    db.body = text;
+  }
+  const { data, error } = await supabase.from("project_notes")
+    .update(db).eq("id", id).select("*, files:project_note_files(*)").single();
+  if (error) throw error;
+  return adaptProjectNote(data);
+}
+
+export async function deleteProjectNote(id) {
+  // Remove attached binaries first so nothing is orphaned (the row cascade
+  // wipes project_note_files metadata, but not the bucket objects).
+  const { data: files } = await supabase.from("project_note_files").select("file_path").eq("note_id", id);
+  const paths = (files || []).map(f => f.file_path).filter(Boolean);
+  if (paths.length) await supabase.storage.from("project-files").remove(paths);
+  const { error } = await supabase.from("project_notes").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Upload one attachment to a note → { adapted file row }. Binary lands first
+// (path `{itemId}/notes/{noteId}/{stamp-name}`), then the metadata row.
+export async function uploadProjectNoteFile(itemId, noteId, file) {
+  const me = getCurrentBeaconUser();
+  const path = `${itemId}/notes/${noteId}/${uploadFilename(file?.name)}`;
+  const { error: upErr } = await supabase.storage.from("project-files").upload(path, file, { upsert: false });
+  if (upErr) throw upErr;
+  const { data, error } = await supabase.from("project_note_files")
+    .insert({ note_id: noteId, file_path: path, file_name: file?.name || "file", uploaded_by: me?.id || null })
+    .select("*").single();
+  if (error) throw error;
+  return adaptProjectNoteFile(data);
+}
+
+export async function deleteProjectNoteFile(fileRow) {
+  if (fileRow?.path) await supabase.storage.from("project-files").remove([fileRow.path]);
+  const { error } = await supabase.from("project_note_files").delete().eq("id", fileRow.id);
+  if (error) throw error;
+}
+
+export async function projectFileUrl(path) {
+  const { data, error } = await supabase.storage.from("project-files").createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data?.signedUrl || null;
 }
 
 // Count of months that carry a billed amount on a flat invoice row — used to
