@@ -1901,20 +1901,66 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   };
 
   const saveInvoiceProjectEgnyteFolder = async (row, egnyteFolderPath) => {
-    const projectId = row?.sourceId;
-    if (!projectId) throw new Error("This invoice row is not linked to a project yet.");
+    let projectId = row?.sourceId;
+    let autoLinked = null;
+    if (!projectId) {
+      autoLinked = await findOrCreateProjectForInvoice({
+        name: row?.name,
+        projectNumber: row?.projectNumber,
+        year: row?.year,
+      });
+      projectId = autoLinked.projectId;
+      await linkInvoiceToProject(row.id, projectId);
+    }
     const result = await saveProjectEgnyteFolder(projectId, egnyteFolderPath);
     const cleanPath = result.egnyteFolderPath || "";
+    if (autoLinked?.matchType === "created" && autoLinked.projectStub) {
+      const stub = autoLinked.projectStub;
+      const stubUiRow = {
+        id: stub.id,
+        year: stub.year,
+        name: stub.project_name,
+        role: null,
+        clientId: null,
+        amount: null,
+        msmm: 0,
+        subs: [],
+        pmIds: [],
+        notes: "",
+        dates: "",
+        projectNumber: stub.project_number || "",
+        status: "Awarded",
+        dateSubmitted: "",
+        clientContract: "",
+        msmmContract: "",
+        msmmUsed: 0,
+        msmmRemaining: 0,
+        stage: "",
+        details: "",
+        pools: "",
+        contractExpiry: "",
+        egnyteFolderPath: cleanPath,
+      };
+      setAwarded(rows => rows.some(r => r.id === projectId)
+        ? rows.map(r => r.id === projectId ? { ...r, egnyteFolderPath: cleanPath } : r)
+        : [stubUiRow, ...rows]);
+    }
     const patchProjectSlice = setter => setter(rows => rows.map(r =>
       r.id === projectId ? { ...r, egnyteFolderPath: cleanPath } : r
     ));
     setInvoice(rows => rows.map(r =>
-      r.sourceId === projectId ? { ...r, egnyteFolderPath: cleanPath } : r
+      r.sourceId === projectId || r.id === row?.id
+        ? { ...r, sourceId: projectId, egnyteFolderPath: cleanPath }
+        : r
     ));
     patchProjectSlice(setPotential);
     patchProjectSlice(setAwaiting);
     patchProjectSlice(setAwarded);
     patchProjectSlice(setClosed);
+    if (autoLinked?.matchType === "matched") {
+      showToast(`Linked to ${autoLinked.projectName} · Egnyte folder saved`, "link");
+      return cleanPath;
+    }
     showToast(cleanPath ? "Egnyte folder linked" : "Egnyte folder link cleared", "link");
     return cleanPath;
   };

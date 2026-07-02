@@ -23,6 +23,7 @@ import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
+import { egnyteFolderOpenTarget } from "./egnyte-links.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
 // Actual/Projection legend to phrase the configurable cutover day.
@@ -31,14 +32,15 @@ const ordinal = (n) => {
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 };
 
-const EGNYTE_LOGO_URL = "https://img.logokit.com/egnyte.com";
+const EGNYTE_LOGO_LINKED = "/egnyte/Egnyte-Logo-Linked.svg";
+const EGNYTE_LOGO_NOT_LINKED = "/egnyte/Egnyte-Logo-NotLinked.svg";
 
-function EgnyteLogoMark({ size = 14 }) {
+function EgnyteLogoMark({ size = 14, linked = false }) {
   return (
     <span className="egnyte-logo-mark" style={{ "--egnyte-logo-size": `${size}px` }} aria-hidden="true">
       <span className="egnyte-logo-fallback">E</span>
       <img
-        src={EGNYTE_LOGO_URL}
+        src={linked ? EGNYTE_LOGO_LINKED : EGNYTE_LOGO_NOT_LINKED}
         alt=""
         loading="lazy"
         decoding="async"
@@ -2097,8 +2099,10 @@ export const InvoiceTable = ({
   const [noteModal, setNoteModal] = useState(null);
   // Open threaded Notes log: { id, name, log } | null
   const [notesThread, setNotesThread] = useState(null);
-  // Open Egnyte folder selector for a linked source project.
-  const [egnyteModal, setEgnyteModal] = useState(null);
+  // Egnyte linking surface. Linked rows get an action chooser; unlinked rows
+  // jump straight to the folder browser.
+  const [egnytePicker, setEgnytePicker] = useState(null);
+  const [egnyteAction, setEgnyteAction] = useState(null);
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2681,18 +2685,15 @@ export const InvoiceTable = ({
                         <button
                           type="button"
                           className={"invoice-egnyte-link" + (r.egnyteFolderPath ? " has-link" : "")}
-                          title={r.sourceId
-                            ? (r.egnyteFolderPath
-                                ? `Egnyte folder linked: ${r.egnyteFolderPath}`
-                                : "Link an Egnyte folder to this project")
-                            : "Link this invoice to a project before adding an Egnyte folder"}
-                          disabled={!r.sourceId || !onSaveEgnyteFolder}
+                          title={r.egnyteFolderPath
+                            ? `Egnyte folder linked: ${r.egnyteFolderPath}`
+                            : "Link an Egnyte folder to this project"}
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!r.sourceId || !onSaveEgnyteFolder) return;
-                            setEgnyteModal({ row: r });
+                            if (r.egnyteFolderPath) setEgnyteAction({ row: r });
+                            else setEgnytePicker({ row: r });
                           }}>
-                          <EgnyteLogoMark size={14}/>
+                          <EgnyteLogoMark size={16} linked={!!r.egnyteFolderPath}/>
                         </button>
                         {(() => {
                           const msmmFiles = r.partyFiles?.msmm || [];
@@ -3406,13 +3407,24 @@ export const InvoiceTable = ({
           onChange={(log) => onNotesChanged?.(notesThread.id, log)}
         />
       )}
-      {egnyteModal && (
+      {egnyteAction && (
+        <EgnyteLinkedFolderModal
+          row={egnyteAction.row}
+          onClose={() => setEgnyteAction(null)}
+          onChangePath={() => {
+            setEgnytePicker({ row: egnyteAction.row });
+            setEgnyteAction(null);
+          }}
+        />
+      )}
+      {egnytePicker && (
         <EgnyteFolderModal
-          row={egnyteModal.row}
-          onClose={() => setEgnyteModal(null)}
+          row={egnytePicker.row}
+          onClose={() => setEgnytePicker(null)}
           onSave={async (path) => {
-            const saved = await onSaveEgnyteFolder?.(egnyteModal.row, path);
-            setEgnyteModal(null);
+            if (!onSaveEgnyteFolder) throw new Error("Egnyte folder saving is not available.");
+            const saved = await onSaveEgnyteFolder(egnytePicker.row, path);
+            setEgnytePicker(null);
             return saved;
           }}
         />
@@ -3425,6 +3437,7 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
   const [currentPath, setCurrentPath] = useState(null);
   const [folders, setFolders] = useState([]);
   const [selected, setSelected] = useState(row?.egnyteFolderPath || "");
+  const [viewMode, setViewMode] = useState("list");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -3452,6 +3465,7 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
     path: `/${parts.slice(0, i + 1).join("/")}`,
   }));
   const parentPath = parts.length > 1 ? `/${parts.slice(0, -1).join("/")}` : null;
+  const selectedIsCurrent = !!currentPath && selected === currentPath;
 
   const save = async (path = selected) => {
     setSaving(true);
@@ -3464,12 +3478,30 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
     }
   };
 
+  const renderFolder = (folder) => {
+    const active = selected === folder.path;
+    return (
+      <div className={"egnyte-folder-card" + (active ? " selected" : "")} role="listitem" key={folder.path}>
+        <button className="egnyte-folder-open" type="button" onClick={() => load(folder.path)}>
+          <span className="egnyte-folder-glyph"><Icon name="chevronRight" size={13}/></span>
+          <span className="egnyte-folder-main">
+            <strong>{folder.name}</strong>
+            <span className="mono">{folder.path}</span>
+          </span>
+        </button>
+        <button className="btn sm egnyte-select-btn" type="button" onClick={() => setSelected(folder.path)}>
+          {active ? <><Icon name="check" size={12}/>Selected</> : "Select"}
+        </button>
+      </div>
+    );
+  };
+
   return createPortal(
     <>
       <div className="overlay" onClick={onClose}/>
       <div className="modal modal-wide egnyte-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-title">
         <div className="modal-head">
-          <div className="icon-badge egnyte-badge"><EgnyteLogoMark size={18}/></div>
+          <div className="icon-badge egnyte-badge"><EgnyteLogoMark size={20} linked={!!row?.egnyteFolderPath}/></div>
           <div>
             <div className="modal-eyebrow">Egnyte folder</div>
             <h2 className="modal-title" id="egnyte-title">{row?.name || "Project"}</h2>
@@ -3479,14 +3511,31 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
           </button>
         </div>
         <div className="modal-body egnyte-body">
-          <div className="egnyte-current">
-            <span className="mono">{row?.egnyteFolderPath || "No folder linked"}</span>
+          <div className="egnyte-current-panel">
+            <div>
+              <span>Current link</span>
+              <strong className="mono">{row?.egnyteFolderPath || "No folder linked"}</strong>
+            </div>
+            {currentPath && (
+              <button
+                className={"btn sm" + (selectedIsCurrent ? " primary" : "")}
+                type="button"
+                onClick={() => setSelected(currentPath)}
+                disabled={loading}>
+                {selectedIsCurrent ? <><Icon name="check" size={12}/>Current selected</> : "Select current folder"}
+              </button>
+            )}
           </div>
           <div className="egnyte-browser">
             <div className="egnyte-toolbar">
-              <button className="btn sm" type="button" disabled={!parentPath || loading} onClick={() => load(parentPath)}>
-                <Icon name="back" size={12}/>Up
-              </button>
+              <div className="egnyte-nav-actions">
+                <button className="btn sm" type="button" disabled={!parentPath || loading} onClick={() => load(parentPath)}>
+                  <Icon name="back" size={12}/>Up
+                </button>
+                <button className="btn sm" type="button" disabled={loading} onClick={() => load(currentPath)}>
+                  <Icon name="refresh" size={12}/>Refresh
+                </button>
+              </div>
               <div className="egnyte-crumbs" aria-label="Current Egnyte path">
                 {crumbs.length === 0 ? (
                   <span className="mono subtle">Loading PData…</span>
@@ -3497,41 +3546,50 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
                   </React.Fragment>
                 ))}
               </div>
+              <div className="egnyte-view-toggle" role="tablist" aria-label="Egnyte folder view">
+                <button
+                  type="button"
+                  className={viewMode === "list" ? "active" : ""}
+                  onClick={() => setViewMode("list")}
+                  aria-selected={viewMode === "list"}
+                  title="List view">
+                  <Icon name="alignLeft" size={14}/>
+                </button>
+                <button
+                  type="button"
+                  className={viewMode === "grid" ? "active" : ""}
+                  onClick={() => setViewMode("grid")}
+                  aria-selected={viewMode === "grid"}
+                  title="Grid view">
+                  <Icon name="columns" size={14}/>
+                </button>
+              </div>
             </div>
             {error && (
               <div className="egnyte-error">
                 <Icon name="warn" size={14}/>
                 <span>{error}</span>
-                <button className="link-btn" type="button" onClick={() => load(currentPath)}>Retry</button>
+                <button className="link-btn" type="button" onClick={() => load(currentPath || undefined)}>Retry</button>
               </div>
             )}
             {loading ? (
-              <div className="egnyte-state">Loading folders…</div>
+              <div className="egnyte-state">
+                <span className="egnyte-spinner" aria-hidden="true"/>
+                <span>Loading folders…</span>
+              </div>
             ) : folders.length === 0 && !error ? (
               <div className="egnyte-state">No subfolders found.</div>
             ) : (
-              <div className="egnyte-list" role="list">
-                {folders.map(folder => {
-                  const active = selected === folder.path;
-                  return (
-                    <div className={"egnyte-row" + (active ? " selected" : "")} role="listitem" key={folder.path}>
-                      <button className="egnyte-open" type="button" onClick={() => load(folder.path)}>
-                        <Icon name="chevronRight" size={12}/>
-                        <span>{folder.name}</span>
-                        <span className="mono subtle">{folder.path}</span>
-                      </button>
-                      <button className="btn sm" type="button" onClick={() => setSelected(folder.path)}>
-                        {active ? <><Icon name="check" size={12}/>Selected</> : "Select"}
-                      </button>
-                    </div>
-                  );
-                })}
+              <div className={`egnyte-folder-results ${viewMode}`} role="list">
+                {folders.map(renderFolder)}
               </div>
             )}
           </div>
-          <div className={"egnyte-selected" + (selected ? " has-selection" : "")}>
-            <span>Selected</span>
-            <strong className="mono">{selected || "Choose a folder from the list"}</strong>
+          <div className={"egnyte-selected-panel" + (selected ? " has-selection" : "")}>
+            <div>
+              <span>Selected folder</span>
+              <strong className="mono">{selected || "Choose a folder from the browser"}</strong>
+            </div>
           </div>
         </div>
         <div className="modal-foot">
@@ -3546,6 +3604,70 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
               {saving ? "Saving…" : "Save folder"}
             </button>
           </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
+  const [message, setMessage] = useState("");
+
+  const openLinkedFolder = () => {
+    const target = egnyteFolderOpenTarget({
+      path: row?.egnyteFolderPath || "",
+      platform: navigator?.platform || "",
+      userAgent: navigator?.userAgent || "",
+    });
+    if (target.mobile) {
+      setMessage("Egnyte is not available on mobile.");
+      return;
+    }
+    setMessage(`Opening ${target.localPath}`);
+    const opened = window.open(target.url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      window.location.href = target.url;
+    }
+  };
+
+  return createPortal(
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="modal egnyte-action-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-action-title">
+        <div className="modal-head">
+          <div className="icon-badge egnyte-badge"><EgnyteLogoMark size={20} linked/></div>
+          <div>
+            <div className="modal-eyebrow">Linked Egnyte folder</div>
+            <h2 className="modal-title" id="egnyte-action-title">{row?.name || "Project"}</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close">
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+        <div className="modal-body egnyte-action-body">
+          <div className="egnyte-linked-path">
+            <span>Linked path</span>
+            <strong className="mono">{row?.egnyteFolderPath}</strong>
+          </div>
+          <div className="egnyte-action-grid">
+            <button type="button" className="egnyte-action-card primary" onClick={openLinkedFolder}>
+              <span className="egnyte-action-icon"><Icon name="export" size={18}/></span>
+              <strong>Open Egnyte Folder</strong>
+              <span>Open the synced folder on this device.</span>
+            </button>
+            <button type="button" className="egnyte-action-card" onClick={onChangePath}>
+              <span className="egnyte-action-icon"><Icon name="edit" size={18}/></span>
+              <strong>Change Egnyte Path</strong>
+              <span>Choose another folder from PData.</span>
+            </button>
+          </div>
+          {message && (
+            <div className="egnyte-action-message">
+              <Icon name="warn" size={14}/>
+              <span>{message}</span>
+            </div>
+          )}
         </div>
       </div>
     </>,
