@@ -26,6 +26,7 @@ import { exportManishWorkbook } from "./utils/manish-xlsx.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
+import { invoiceIsOrange } from "./invoice-orange.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth,
@@ -1839,6 +1840,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       });
   };
 
+  // Resolve EVERY anticipated_invoice row id in a project's merged group.
+  // Merged rows carry groupIds; raw year-rows (e.g. the DetailDrawer's
+  // liveRow, which is looked up in the unmerged invoice slice) don't - for
+  // those, re-derive the group by lineage / normalized number + type so a
+  // transition never strands a sibling year-row in the old state.
+  const invoiceGroupIdsFor = (row) => {
+    if (row.groupIds && row.groupIds.length) return row.groupIds;
+    const key = normInvoiceNumber(row.projectNumber);
+    const t = row.type || "ENG";
+    const matches = invoice.filter(r =>
+      r.id === row.id ||
+      ((r.type || "ENG") === t && (
+        (row.sourceId && r.sourceId === row.sourceId) ||
+        (key && normInvoiceNumber(r.projectNumber) === key)
+      )));
+    return matches.length ? matches.map(r => r.id) : [row.id];
+  };
+
   // UI-field → DB-column whitelist for other editable Invoice cells. Any
   // key not in this map updates local state only. PMs are mirrored below
   // through anticipated_invoice_pms, not patched onto anticipated_invoice.
@@ -1855,17 +1874,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     year:                "year",
     notes:               "notes",
     description:         "description",
+    invoiceOrange:       "invoice_orange",
   };
   const updateInvoice = (id, patch) => {
     const existing = invoice.find(r => r.id === id);
     if (!existing) return;
-    setInvoice(rows => rows.map(r => r.id === id ? { ...r, ...patch } : r));
+    const ids = "invoiceOrange" in patch ? invoiceGroupIdsFor(existing) : [id];
+    setInvoice(rows => rows.map(r => ids.includes(r.id) ? { ...r, ...patch } : r));
     const dbPatch = {};
     for (const [uiKey, dbCol] of Object.entries(INVOICE_COL_MAP)) {
       if (uiKey in patch) dbPatch[dbCol] = patch[uiKey];
     }
     if (Object.keys(dbPatch).length > 0) {
-      supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
+      const query = supabase.from("anticipated_invoice").update(dbPatch);
+      const save = ids.length === 1 && ids[0] === id ? query.eq("id", id) : query.in("id", ids);
+      save
         .then(({ error }) => {
           if (error) showToast(`Save failed: ${error.message}`, "x");
         });
@@ -2473,24 +2496,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // state on EVERY row in the merged group (groupIds — all years + dupes);
   // close-out keeps the rows (state='closed') instead of deleting them.
   // ----------------------------------------------------------------------
-  // Resolve EVERY anticipated_invoice row id in a project's merged group.
-  // Merged rows carry groupIds; raw year-rows (e.g. the DetailDrawer's
-  // liveRow, which is looked up in the unmerged invoice slice) don't — for
-  // those, re-derive the group by lineage / normalized number + type so a
-  // transition never strands a sibling year-row in the old state.
-  const invoiceGroupIdsFor = (row) => {
-    if (row.groupIds && row.groupIds.length) return row.groupIds;
-    const key = normInvoiceNumber(row.projectNumber);
-    const t = row.type || "ENG";
-    const matches = invoice.filter(r =>
-      r.id === row.id ||
-      ((r.type || "ENG") === t && (
-        (row.sourceId && r.sourceId === row.sourceId) ||
-        (key && normInvoiceNumber(r.projectNumber) === key)
-      )));
-    return matches.length ? matches.map(r => r.id) : [row.id];
-  };
-
   const setInvoiceBillingState = async (row, state, successMsg, successIcon = "check") => {
     const ids = invoiceGroupIdsFor(row);
     const prevState = row.billingState || "active";
@@ -3574,7 +3579,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     };
     const invoiceCellStyle = (tab === "invoice" || tab === "between")
       ? (row, _colIndex, col) => {
-          const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
+          const isOrangeRow = invoiceIsOrange(row, orangeSourceIds);
           const label = col?.label;
           const monthIdx = MONTHS.indexOf(label);
           // A projected month with a bill attached is promoted to Actual (same
@@ -3884,7 +3889,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         return { fillColor: PAL.TOTAL_ROW, textColor: PAL.TOTAL_INK, fontStyle: "bold" };
       }
       // Parent project row — same palette as regular Invoice export.
-      const isOrangeRow = row?.sourceId && orangeSourceIds.has(row.sourceId);
+      const isOrangeRow = invoiceIsOrange(row, orangeSourceIds);
       if (isActualMonth) return { fillColor: PAL.PROJ_ACTUAL, textColor: PAL.PROJ_ACCENT };
       if (isProjMonth)   return { fillColor: PAL.PROJ_PROJ,   textColor: PAL.PROJ_DIM };
       if (isTotalCol)    return { fillColor: PAL.PROJ_TOTAL,  fontStyle: "bold" };
@@ -4153,9 +4158,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
 
-  // Set of Potential project ids currently tagged probability=Orange. Invoice
-  // rows whose `sourceId` (= anticipated_invoice.source_project_id) is in
-  // this set are highlighted orange and excluded from the "Total — excl. Orange" row.
+  // Legacy source ids for untoggled rows. Once invoice_orange is explicitly
+  // true/false, the Invoice table uses that row-owned value instead.
   const orangeSourceIds = useMemo(
     () => new Set(potential.filter(p => p.probability === "Orange").map(p => p.id)),
     [potential]
@@ -4950,26 +4954,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               ? (destination) => { triggerForward(liveRow, "closed", destination); setDrawer(null); }
               : null
           }
-          onDemoteFromOrange={
-            drawer.table === "invoice"
-            && liveRow.sourceId
-            && orangeSourceIds.has(liveRow.sourceId)
-              ? () => {
-                  if (!window.confirm(
-                    `Demote "${liveRow.name || ""}" from Orange?\n\n`
-                    + `The Invoice row will be removed and the project will `
-                    + `reappear in Potential as "High" probability. You can `
-                    + `change the probability afterward in the Potential drawer.`
-                  )) return;
-                  updatePotential(liveRow.sourceId, { probability: "High" });
-                  setDrawer(null);
-                  // The Potential page left the navbar (2026-06) — stay put
-                  // and explain where the row went instead of navigating to
-                  // a hidden page.
-                  showToast("Demoted from Orange — tracked as a High-probability Potential (no longer billed).");
-                }
-              : null
-          }
+          onDemoteFromOrange={null}
           onDelete={
             drawer.table === "invoice"
               ? () => {

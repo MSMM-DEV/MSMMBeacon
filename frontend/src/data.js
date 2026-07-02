@@ -836,6 +836,9 @@ function adaptInvoice(r) {
     // sub-tab the project appears on. Missing column (un-migrated DB) reads
     // as undefined → 'active', so everything stays on the Invoices tab.
     billingState: r.billing_state || "active",
+    // NULL = legacy fallback may still infer Orange from the linked project;
+    // true/false = user explicitly moved this invoice row Orange/Normal.
+    invoiceOrange: r.invoice_orange ?? null,
   };
 }
 

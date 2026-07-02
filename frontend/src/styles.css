@@ -2093,7 +2093,7 @@ html, body { overflow-x: clip; }
    edge while the month window scrolls / navigates. Mirrors the sticky-left
    treatment. The action column is fixed-width so the YTD column's right-offset
    lands flush against it (box-sizing: border-box is global, so widths are exact). */
-.invoice-table { --inv-act-w: 54px; --inv-rem-w: 104px; }
+.invoice-table { --inv-act-w: 136px; --inv-rem-w: 104px; }
 .invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd,
 .invoice-table th.inv-pin-rem, .invoice-table td.inv-pin-rem,
 .invoice-table th.inv-pin-act, .invoice-table td.inv-pin-act {
@@ -15831,6 +15831,30 @@ html, body { overflow-x: clip; }
 
 /* ---- Invoice row transition buttons (pause / resume / close out) ---- */
 .inv-act-btns { display: inline-flex; align-items: center; gap: 2px; }
+.invoice-table .inv-act-btns .row-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+.invoice-table .inv-act-btns .row-btn.invoice-orange-toggle {
+  width: 58px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.row-btn.invoice-orange-toggle:hover,
+.row-btn.invoice-orange-toggle.is-orange {
+  background: var(--prob-orange-bg);
+  color: var(--prob-orange);
+}
+.row-btn.invoice-orange-toggle.is-orange:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
 
 /* ---- Awarded "Proj #" link chips ------------------------------------ */
 .inv-link-cell {

@@ -20,6 +20,7 @@ import { LinkedProjectsSection } from "./panels.jsx";
 import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
 import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { InvoiceLinkCell } from "./invoice-links.jsx";
+import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
@@ -2057,10 +2058,9 @@ export const InvoiceTable = ({
   const lastActualWi = windowMonths.reduce(
     (acc, d, wi) => (isActualInvoiceMonth(d.year, d.monthIdx) ? wi : acc), -1);
 
-  // v2 collapsed source_awarded_id + source_potential_id into a single
-  // source_project_id (exposed as r.sourceId). orangeSourceIds is a Set of
-  // Potential project ids tagged probability='Orange'; only those match.
-  const isOrange = (r) => !!(r.sourceId && orangeSourceIds?.has(r.sourceId));
+  // Orange is invoice-owned once a row has been toggled. Untoggled legacy rows
+  // can still fall back to the old Potential-probability source ids.
+  const isOrange = (r) => invoiceIsOrange(r, orangeSourceIds);
   const sumBy = (arr, fn) => arr.reduce((a, r) => a + fn(r), 0);
   const nonOrangeRows = rows.filter(r => !isOrange(r));
   const orangeRows    = rows.filter(isOrange);
@@ -2852,6 +2852,14 @@ export const InvoiceTable = ({
                             <Icon name="x" size={13}/>
                           </button>
                         )}
+                        <button
+                          className={"row-btn invoice-orange-toggle" + (isOrange(r) ? " is-orange" : "")}
+                          title={isOrange(r) ? "Move to Normal / White" : "Move to Orange"}
+                          aria-label={isOrange(r) ? "Move to Normal / White" : "Move to Orange"}
+                          onClick={() => updateRow(r.id, nextInvoiceOrangePatch(r, orangeSourceIds))}>
+                          <Icon name="flag" size={13}/>
+                          <span>{isOrange(r) ? "White" : "Orange"}</span>
+                        </button>
                         <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                           <Icon name="bell" size={14}/>
                         </button>
