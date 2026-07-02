@@ -2086,14 +2086,23 @@ html, body { overflow-x: clip; }
   background: var(--surface);
   z-index: 2;
 }
-.invoice-table th.sticky-1, .invoice-table td.sticky-1 { left: 0; min-width: 110px; max-width: 110px; }
-.invoice-table th.sticky-2, .invoice-table td.sticky-2 { left: 110px; }
+.invoice-table { --inv-expand-w: 30px; --inv-proj-w: 110px; }
+.invoice-table th.sticky-1,
+.invoice-table td.sticky-1 {
+  left: var(--inv-expand-w);
+  min-width: var(--inv-proj-w);
+  max-width: var(--inv-proj-w);
+}
+.invoice-table th.sticky-2,
+.invoice-table td.sticky-2 {
+  left: calc(var(--inv-expand-w) + var(--inv-proj-w));
+}
 
 /* Pinned right rail — YTD Actual + row actions stay frozen against the right
    edge while the month window scrolls / navigates. Mirrors the sticky-left
    treatment. The action column is fixed-width so the YTD column's right-offset
    lands flush against it (box-sizing: border-box is global, so widths are exact). */
-.invoice-table { --inv-act-w: 136px; --inv-rem-w: 104px; }
+.invoice-table { --inv-act-w: 76px; --inv-rem-w: 104px; }
 .invoice-table th.inv-pin-ytd, .invoice-table td.inv-pin-ytd,
 .invoice-table th.inv-pin-rem, .invoice-table td.inv-pin-rem,
 .invoice-table th.inv-pin-act, .invoice-table td.inv-pin-act {
@@ -6049,9 +6058,14 @@ html, body { overflow-x: clip; }
   min-width: 30px;
   padding: 0 4px;
   text-align: center;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--surface);
 }
 .invoice-table th.invoice-expand-col {
   background: var(--bg-elev);
+  z-index: 5;
 }
 
 /* Sub-row treatment — italic name, indented sticky-2, tinted background.
@@ -16031,14 +16045,7 @@ html, body { overflow-x: clip; }
   border-radius: 6px;
 }
 .invoice-table .inv-act-btns .row-btn.invoice-orange-toggle {
-  width: 58px;
-  padding: 0 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 600;
+  width: 22px;
 }
 .row-btn.invoice-orange-toggle:hover,
 .row-btn.invoice-orange-toggle.is-orange {
@@ -16320,10 +16327,11 @@ html, body { overflow-x: clip; }
   .subtab { flex: none; padding: 8px 8px 11px; }
 }
 
-/* Action column widens with the per-mode transition buttons: active = pause
-   + bell; between = resume + close-out + bell. */
-.invoice-table.inv-mode-active  { --inv-act-w: 62px; }
-.invoice-table.inv-mode-between { --inv-act-w: 86px; }
+/* Action column widens with the per-mode transition buttons:
+   active = pause + Orange/White + bell; between = resume + close-out +
+   Orange/White + bell. */
+.invoice-table.inv-mode-active  { --inv-act-w: 76px; }
+.invoice-table.inv-mode-between { --inv-act-w: 100px; }
 
 /* ======================================================================
    Projects — tree-structured work-breakdown table (ProjectsTable).

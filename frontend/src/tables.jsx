@@ -2895,7 +2895,6 @@ export const InvoiceTable = ({
                           aria-label={isOrange(r) ? "Move to Normal / White" : "Move to Orange"}
                           onClick={() => updateRow(r.id, nextInvoiceOrangePatch(r, orangeSourceIds))}>
                           <Icon name="flag" size={13}/>
-                          <span>{isOrange(r) ? "White" : "Orange"}</span>
                         </button>
                         <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
                           <Icon name="bell" size={14}/>
