@@ -13,12 +13,17 @@ export function methodAllowed(req, res, methods) {
   return false;
 }
 
-export function serverSupabase(env = process.env) {
+export function serverSupabase(env = process.env, bearerToken = "") {
   const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
-  const key = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = env.SUPABASE_SERVICE_KEY
+    || env.SUPABASE_SERVICE_ROLE_KEY
+    || env.SUPABASE_ANON_KEY
+    || env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error("Supabase server credentials are not configured");
+  const headers = bearerToken ? { Authorization: `Bearer ${bearerToken}` } : undefined;
   return createClient(url, key, {
     db: { schema: "beacon_v2" },
+    global: headers ? { headers } : undefined,
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -31,7 +36,7 @@ export async function requireBeaconUser(req, env = process.env) {
     err.status = 401;
     throw err;
   }
-  const supabase = serverSupabase(env);
+  const supabase = serverSupabase(env, token);
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data?.user) {
     const err = new Error("Unauthorized");
