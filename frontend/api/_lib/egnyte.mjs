@@ -1,5 +1,27 @@
 const DEFAULT_FOLDER = "/Shared/PData";
 
+function firstEnv(env, names) {
+  for (const name of names) {
+    const value = String(env[name] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function egnyteConfigError(message) {
+  const err = new Error(message);
+  err.status = 500;
+  err.code = "EGNYTE_CONFIG";
+  return err;
+}
+
+function egnyteAuthError(message) {
+  const err = new Error(message);
+  err.status = 502;
+  err.code = "EGNYTE_AUTH";
+  return err;
+}
+
 export function defaultEgnyteFolder(env = process.env) {
   return normalizeEgnytePath(env.EGNYTE_DEFAULT_FOLDER_PATH || DEFAULT_FOLDER);
 }
@@ -52,7 +74,7 @@ export function egnyteDomain(env = process.env) {
   const domain = String(env.EGNYTE_DOMAIN || "").trim()
     .replace(/^https?:\/\//i, "")
     .replace(/\/+$/, "");
-  if (!domain) throw new Error("Egnyte domain is not configured");
+  if (!domain) throw egnyteConfigError("Egnyte domain is not configured. Set EGNYTE_DOMAIN.");
   return domain;
 }
 
@@ -60,17 +82,34 @@ export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetc
   const direct = env.EGNYTE_ACCESS_TOKEN || env.EGNYTE_OAUTH_TOKEN || env.EGNYTE_BEARER_TOKEN;
   if (direct) return direct;
 
-  const clientId = env.EGNYTE_API_KEY;
-  const clientSecret = env.EGNYTE_SECRET_KEY;
+  const clientId = firstEnv(env, [
+    "EGNYTE_API_KEY",
+    "EGNYTE_OAUTH_CLIENT_ID",
+    "EGNYTE_CLIENT_ID",
+  ]);
+  const clientSecret = firstEnv(env, [
+    "EGNYTE_SECRET_KEY",
+    "EGNYTE_API_SECRET",
+    "EGNYTE_OAUTH_CLIENT_SECRET",
+    "EGNYTE_CLIENT_SECRET",
+  ]);
   if (!clientId || !clientSecret) {
-    throw new Error("Egnyte access token is not configured. Set EGNYTE_ACCESS_TOKEN or EGNYTE_USERNAME/EGNYTE_PASSWORD with EGNYTE_API_KEY/EGNYTE_SECRET_KEY.");
+    throw egnyteConfigError("Egnyte OAuth client credentials are not configured. Set EGNYTE_API_KEY/EGNYTE_SECRET_KEY or EGNYTE_CLIENT_ID/EGNYTE_CLIENT_SECRET.");
   }
 
   const url = env.EGNYTE_TOKEN_URL || `https://${egnyteDomain(env)}/puboauth/token`;
-  const username = env.EGNYTE_USERNAME || env.EGNYTE_SERVICE_USERNAME || env.EGNYTE_CLIENT_ID;
-  const password = env.EGNYTE_PASSWORD || env.EGNYTE_SERVICE_PASSWORD || env.EGNYTE_CLIENT_PASSWORD;
+  const username = firstEnv(env, [
+    "EGNYTE_USERNAME",
+    "EGNYTE_SERVICE_USERNAME",
+    "EGNYTE_SERVICE_USER",
+  ]) || (env.EGNYTE_API_KEY ? String(env.EGNYTE_CLIENT_ID || "").trim() : "");
+  const password = firstEnv(env, [
+    "EGNYTE_PASSWORD",
+    "EGNYTE_SERVICE_PASSWORD",
+    "EGNYTE_CLIENT_PASSWORD",
+  ]);
   if (!username || !password) {
-    throw new Error("Egnyte access token is not configured. Set EGNYTE_ACCESS_TOKEN or EGNYTE_USERNAME/EGNYTE_PASSWORD with EGNYTE_API_KEY/EGNYTE_SECRET_KEY.");
+    throw egnyteConfigError("Egnyte service user credentials are not configured. Set EGNYTE_USERNAME/EGNYTE_PASSWORD or EGNYTE_ACCESS_TOKEN.");
   }
   const body = new URLSearchParams({
     grant_type: "password",
@@ -86,7 +125,7 @@ export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetc
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.access_token) {
-    throw new Error(payload?.error_description || payload?.errorMessage || payload?.error || "Egnyte authentication failed");
+    throw egnyteAuthError(payload?.error_description || payload?.errorMessage || payload?.error || "Egnyte authentication failed");
   }
   return payload.access_token;
 }

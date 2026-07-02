@@ -55,7 +55,7 @@ test("getEgnyteAccessToken requires a bearer token or service-user password gran
         throw new Error("fetch should not run");
       },
     }),
-    /EGNYTE_ACCESS_TOKEN or EGNYTE_USERNAME\/EGNYTE_PASSWORD/
+    /EGNYTE_USERNAME\/EGNYTE_PASSWORD or EGNYTE_ACCESS_TOKEN/
   );
 });
 
@@ -80,4 +80,29 @@ test("getEgnyteAccessToken accepts EGNYTE_CLIENT_ID/EGNYTE_CLIENT_PASSWORD as pa
     },
   });
   assert.equal(token, "token-from-egnyte");
+});
+
+test("getEgnyteAccessToken accepts OAuth client id/secret aliases with explicit service credentials", async () => {
+  const token = await getEgnyteAccessToken({
+    env: {
+      EGNYTE_DOMAIN: "example.egnyte.com",
+      EGNYTE_CLIENT_ID: "app-client-id",
+      EGNYTE_CLIENT_SECRET: "app-client-secret",
+      EGNYTE_USERNAME: "service-user",
+      EGNYTE_PASSWORD: "service-password",
+    },
+    fetchImpl: async (_url, options) => {
+      const body = options.body;
+      assert.equal(body.get("grant_type"), "password");
+      assert.equal(body.get("client_id"), "app-client-id");
+      assert.equal(body.get("client_secret"), "app-client-secret");
+      assert.equal(body.get("username"), "service-user");
+      assert.equal(body.get("password"), "service-password");
+      return {
+        ok: true,
+        json: async () => ({ access_token: "token-from-aliases" }),
+      };
+    },
+  });
+  assert.equal(token, "token-from-aliases");
 });
