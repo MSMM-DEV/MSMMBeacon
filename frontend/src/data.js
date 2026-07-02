@@ -60,6 +60,34 @@ export async function getCurrentSession() {
   return data?.session || null;
 }
 
+async function authedApiFetch(url, options = {}) {
+  const session = await getCurrentSession();
+  if (!session?.access_token) throw new Error("Sign in again to continue.");
+  const headers = {
+    ...(options.headers || {}),
+    Authorization: `Bearer ${session.access_token}`,
+  };
+  const response = await fetch(url, { ...options, headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+export async function browseEgnyteFolders(path) {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+  return authedApiFetch(`/api/egnyte/folders${qs}`);
+}
+
+export async function saveProjectEgnyteFolder(projectId, egnyteFolderPath) {
+  return authedApiFetch("/api/projects/egnyte-folder", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId, egnyteFolderPath }),
+  });
+}
+
 export async function changeOwnPassword(email, currentPassword, newPassword) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   if (!normalizedEmail) throw new Error("No email is available for this session.");
@@ -688,6 +716,7 @@ function adaptPotential(r) {
     projectNumber: r.project_number || "",
     probability: r.probability,
     anticipatedInvoiceStartMonth: r.anticipated_invoice_start_month ?? null,
+    egnyteFolderPath: r.egnyte_folder_path || "",
   };
 }
 
@@ -715,6 +744,7 @@ function adaptAwaiting(r) {
     msmmContract: r.msmm_contract_number || "",
     msmmUsed: r.msmm_used || 0,
     msmmRemaining: r.msmm_remaining || 0,
+    egnyteFolderPath: r.egnyte_folder_path || "",
   };
 }
 
@@ -746,6 +776,7 @@ function adaptAwarded(r) {
     details: r.details || "",
     pools: r.pool || "",
     contractExpiry: r.contract_expiry_date || "",
+    egnyteFolderPath: r.egnyte_folder_path || "",
   };
 }
 
@@ -769,6 +800,7 @@ function adaptClosed(r) {
     msmmContract: r.msmm_contract_number || "",
     dateClosed: r.date_closed || "",
     reason: r.reason_for_closure || "",
+    egnyteFolderPath: r.egnyte_folder_path || "",
   };
 }
 
@@ -839,6 +871,7 @@ function adaptInvoice(r) {
     // NULL = legacy fallback may still infer Orange from the linked project;
     // true/false = user explicitly moved this invoice row Orange/Normal.
     invoiceOrange: r.invoice_orange ?? null,
+    egnyteFolderPath: r.egnyte_folder_path || "",
   };
 }
 
@@ -2230,10 +2263,12 @@ export async function loadBeacon() {
   // Prime or Sub on the linked project. role can be explicit (potential
   // rows have it) or derived from prime_company_id (non-Prime if set).
   const projectRoleById = new Map();
+  const projectEgnyteById = new Map();
   for (const p of projects) {
     let role = p.role;
     if (!role) role = p.prime_company_id ? "Sub" : "Prime";
     projectRoleById.set(p.id, role);
+    projectEgnyteById.set(p.id, p.egnyte_folder_path || "");
   }
   // Group the threaded invoice notes by invoice_id, newest-first (the query
   // already orders by created_at desc, so push order is preserved).
@@ -2246,6 +2281,7 @@ export async function loadBeacon() {
   const adaptedInvoices = reconciledInvoices.map(adaptInvoice).map(inv => ({
     ...inv,
     role: inv.sourceId ? (projectRoleById.get(inv.sourceId) || "Prime") : "Prime",
+    egnyteFolderPath: inv.sourceId ? (projectEgnyteById.get(inv.sourceId) || "") : "",
     primeFiles: Array.from({ length: 12 }, (_, i) =>
       primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
     ),

@@ -44,6 +44,7 @@ import {
   setOpenBidApproval, markOpenBidMovedForward,
   uploadOpenBidPdf, deleteOpenBidPdf, getOpenBidPdfSignedUrl,
   normInvoiceNumber, addProjectInvoiceLink, removeProjectInvoiceLink,
+  saveProjectEgnyteFolder,
   createProjectItem, updateProjectItem, deleteProjectItem,
   addProjectItemSub, updateProjectItemSub, removeProjectItemSub,
   validateProjectItemContract, projectItemDescendantIds,
@@ -1842,7 +1843,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
   // Resolve EVERY anticipated_invoice row id in a project's merged group.
   // Merged rows carry groupIds; raw year-rows (e.g. the DetailDrawer's
-  // liveRow, which is looked up in the unmerged invoice slice) don't - for
+  // liveRow, which is looked up in the unmerged invoice slice) don't — for
   // those, re-derive the group by lineage / normalized number + type so a
   // transition never strands a sibling year-row in the old state.
   const invoiceGroupIdsFor = (row) => {
@@ -1897,6 +1898,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
         "anticipated_invoice_pms", "anticipated_invoice_id");
     }
+  };
+
+  const saveInvoiceProjectEgnyteFolder = async (row, egnyteFolderPath) => {
+    const projectId = row?.sourceId;
+    if (!projectId) throw new Error("This invoice row is not linked to a project yet.");
+    const result = await saveProjectEgnyteFolder(projectId, egnyteFolderPath);
+    const cleanPath = result.egnyteFolderPath || "";
+    const patchProjectSlice = setter => setter(rows => rows.map(r =>
+      r.id === projectId ? { ...r, egnyteFolderPath: cleanPath } : r
+    ));
+    setInvoice(rows => rows.map(r =>
+      r.sourceId === projectId ? { ...r, egnyteFolderPath: cleanPath } : r
+    ));
+    patchProjectSlice(setPotential);
+    patchProjectSlice(setAwaiting);
+    patchProjectSlice(setAwarded);
+    patchProjectSlice(setClosed);
+    showToast(cleanPath ? "Egnyte folder linked" : "Egnyte folder link cleared", "link");
+    return cleanPath;
   };
 
   // ---- Rolling-window year-aware month edits ---------------------------------
@@ -4433,6 +4453,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               onUpdateSubMeta: updateSubMeta,
               onRemoveSub: removeSub,
               onChangeRole: setInvoiceRoleHandler,
+              onSaveEgnyteFolder: saveInvoiceProjectEgnyteFolder,
               onNotesChanged: (id, log) => setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r)),
               canEditMsmm: isAdmin,
               onBlockedMsmmEdit: () => showToast("MSMM values are auto-calculated — only an admin can edit them. Edit the Total (or a sub) instead.", "lock"),
@@ -4636,6 +4657,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 onUpdateSubMeta={updateSubMeta}
                 onRemoveSub={removeSub}
                 onChangeRole={setInvoiceRoleHandler}
+                onSaveEgnyteFolder={saveInvoiceProjectEgnyteFolder}
                 onNotesChanged={(id, log) =>
                   setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
                 canEditMsmm={isAdmin}
@@ -4691,6 +4713,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onUpdateSubMeta={updateSubMeta}
             onRemoveSub={removeSub}
             onChangeRole={setInvoiceRoleHandler}
+            onSaveEgnyteFolder={saveInvoiceProjectEgnyteFolder}
             onNotesChanged={(id, log) =>
               setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
             canEditMsmm={isAdmin}

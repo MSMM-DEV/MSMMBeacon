@@ -11,6 +11,7 @@ import {
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
   MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL,
+  browseEgnyteFolders,
   linkedProjectsFor,
   BID_SERVICE_OPTIONS,
   CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS,
@@ -29,6 +30,23 @@ const ordinal = (n) => {
   const s = ["th", "st", "nd", "rd"], v = n % 100;
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 };
+
+const EGNYTE_LOGO_URL = "https://img.logokit.com/egnyte.com";
+
+function EgnyteLogoMark({ size = 14 }) {
+  return (
+    <span className="egnyte-logo-mark" style={{ "--egnyte-logo-size": `${size}px` }} aria-hidden="true">
+      <span className="egnyte-logo-fallback">E</span>
+      <img
+        src={EGNYTE_LOGO_URL}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onError={(e) => { e.currentTarget.remove(); }}
+      />
+    </span>
+  );
+}
 
 // ---------- Shared empty state ----------
 export const EmptyState = ({ title, hint, iconName }) => (
@@ -1964,6 +1982,7 @@ export const InvoiceTable = ({
   onPause,           // (row) => void  — Invoices → In-Between
   onResume,          // (row) => void  — In-Between → Invoices
   onCloseOutRow,     // (row) => void  — In-Between → Closed Out (MoveForwardPanel)
+  onSaveEgnyteFolder, // (row, egnyteFolderPath) => Promise<string>
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = ["ENG", "PM"];
@@ -2078,6 +2097,8 @@ export const InvoiceTable = ({
   const [noteModal, setNoteModal] = useState(null);
   // Open threaded Notes log: { id, name, log } | null
   const [notesThread, setNotesThread] = useState(null);
+  // Open Egnyte folder selector for a linked source project.
+  const [egnyteModal, setEgnyteModal] = useState(null);
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2657,6 +2678,22 @@ export const InvoiceTable = ({
                       <div className="inv-name-wrap">
                         <EditableCell value={r.name}
                           onChange={v => updateRow(r.id, { name: v })}/>
+                        <button
+                          type="button"
+                          className={"invoice-egnyte-link" + (r.egnyteFolderPath ? " has-link" : "")}
+                          title={r.sourceId
+                            ? (r.egnyteFolderPath
+                                ? `Egnyte folder linked: ${r.egnyteFolderPath}`
+                                : "Link an Egnyte folder to this project")
+                            : "Link this invoice to a project before adding an Egnyte folder"}
+                          disabled={!r.sourceId || !onSaveEgnyteFolder}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!r.sourceId || !onSaveEgnyteFolder) return;
+                            setEgnyteModal({ row: r });
+                          }}>
+                          <EgnyteLogoMark size={14}/>
+                        </button>
                         {(() => {
                           const msmmFiles = r.partyFiles?.msmm || [];
                           const hasFiles  = msmmFiles.length > 0;
@@ -3370,9 +3407,152 @@ export const InvoiceTable = ({
           onChange={(log) => onNotesChanged?.(notesThread.id, log)}
         />
       )}
+      {egnyteModal && (
+        <EgnyteFolderModal
+          row={egnyteModal.row}
+          onClose={() => setEgnyteModal(null)}
+          onSave={async (path) => {
+            const saved = await onSaveEgnyteFolder?.(egnyteModal.row, path);
+            setEgnyteModal(null);
+            return saved;
+          }}
+        />
+      )}
     </div>
   );
 };
+
+function EgnyteFolderModal({ row, onClose, onSave }) {
+  const [currentPath, setCurrentPath] = useState(null);
+  const [folders, setFolders] = useState([]);
+  const [selected, setSelected] = useState(row?.egnyteFolderPath || "");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = async (path) => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await browseEgnyteFolders(path);
+      setCurrentPath(result.path);
+      setFolders(result.folders || []);
+    } catch (e) {
+      setError(e?.message || "Egnyte folders could not be loaded.");
+      setFolders([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const parts = (currentPath || "").split("/").filter(Boolean);
+  const crumbs = parts.map((part, i) => ({
+    label: part,
+    path: `/${parts.slice(0, i + 1).join("/")}`,
+  }));
+  const parentPath = parts.length > 1 ? `/${parts.slice(0, -1).join("/")}` : null;
+
+  const save = async (path = selected) => {
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(path);
+    } catch (e) {
+      setError(e?.message || "Egnyte folder could not be saved.");
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <>
+      <div className="overlay" onClick={onClose}/>
+      <div className="modal modal-wide egnyte-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-title">
+        <div className="modal-head">
+          <div className="icon-badge egnyte-badge"><EgnyteLogoMark size={18}/></div>
+          <div>
+            <div className="modal-eyebrow">Egnyte folder</div>
+            <h2 className="modal-title" id="egnyte-title">{row?.name || "Project"}</h2>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close">
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+        <div className="modal-body egnyte-body">
+          <div className="egnyte-current">
+            <span className="mono">{row?.egnyteFolderPath || "No folder linked"}</span>
+          </div>
+          <div className="egnyte-browser">
+            <div className="egnyte-toolbar">
+              <button className="btn sm" type="button" disabled={!parentPath || loading} onClick={() => load(parentPath)}>
+                <Icon name="back" size={12}/>Up
+              </button>
+              <div className="egnyte-crumbs" aria-label="Current Egnyte path">
+                {crumbs.length === 0 ? (
+                  <span className="mono subtle">Loading PData…</span>
+                ) : crumbs.map((c, i) => (
+                  <React.Fragment key={c.path}>
+                    {i > 0 && <span className="egnyte-sep">/</span>}
+                    <button type="button" onClick={() => load(c.path)} disabled={loading}>{c.label}</button>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+            {error && (
+              <div className="egnyte-error">
+                <Icon name="warn" size={14}/>
+                <span>{error}</span>
+                <button className="link-btn" type="button" onClick={() => load(currentPath)}>Retry</button>
+              </div>
+            )}
+            {loading ? (
+              <div className="egnyte-state">Loading folders…</div>
+            ) : folders.length === 0 && !error ? (
+              <div className="egnyte-state">No subfolders found.</div>
+            ) : (
+              <div className="egnyte-list" role="list">
+                {folders.map(folder => {
+                  const active = selected === folder.path;
+                  return (
+                    <div className={"egnyte-row" + (active ? " selected" : "")} role="listitem" key={folder.path}>
+                      <button className="egnyte-open" type="button" onClick={() => load(folder.path)}>
+                        <Icon name="chevronRight" size={12}/>
+                        <span>{folder.name}</span>
+                        <span className="mono subtle">{folder.path}</span>
+                      </button>
+                      <button className="btn sm" type="button" onClick={() => setSelected(folder.path)}>
+                        {active ? <><Icon name="check" size={12}/>Selected</> : "Select"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className={"egnyte-selected" + (selected ? " has-selection" : "")}>
+            <span>Selected</span>
+            <strong className="mono">{selected || "Choose a folder from the list"}</strong>
+          </div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <div className="egnyte-foot-actions">
+            {row?.egnyteFolderPath && (
+              <button className="btn" type="button" onClick={() => save("")} disabled={saving}>
+                Remove link
+              </button>
+            )}
+            <button className="btn primary" type="button" onClick={() => save()} disabled={!selected || saving}>
+              {saving ? "Saving…" : "Save folder"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
 
 // InvoiceNoteModal — lightweight editor for a project's Notes / Description
 // (the two chips under the project name in InvoiceTable). Centered modal,
