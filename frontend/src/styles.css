@@ -6556,6 +6556,48 @@ html, body { overflow-x: clip; }
   background: var(--accent-softer);
   color: var(--accent-ink);
 }
+.egnyte-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-soft);
+}
+.egnyte-search:focus-within,
+.egnyte-search.active {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+.egnyte-search input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.egnyte-search input::placeholder { color: var(--text-soft); }
+.egnyte-search button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+.egnyte-search button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .egnyte-error {
   display: flex;
   align-items: center;
@@ -6682,6 +6724,51 @@ html, body { overflow-x: clip; }
 .egnyte-action-body {
   display: grid;
   gap: 14px;
+}
+.egnyte-local-root {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+.egnyte-local-root label {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.egnyte-local-root-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.egnyte-local-root input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+}
+.egnyte-local-root input:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+.egnyte-local-root > .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-soft);
+  font-size: 11px;
 }
 .egnyte-action-grid {
   display: grid;

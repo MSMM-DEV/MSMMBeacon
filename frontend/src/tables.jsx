@@ -23,7 +23,12 @@ import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
-import { egnyteFolderOpenTarget } from "./egnyte-links.js";
+import {
+  defaultEgnyteLocalRoot,
+  egnyteFolderOpenTarget,
+  filterEgnyteFolders,
+  EGNYTE_LOCAL_ROOT_STORAGE_KEY,
+} from "./egnyte-links.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
 // Actual/Projection legend to phrase the configurable cutover day.
@@ -3438,6 +3443,7 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
   const [folders, setFolders] = useState([]);
   const [selected, setSelected] = useState(row?.egnyteFolderPath || "");
   const [viewMode, setViewMode] = useState("list");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -3466,6 +3472,8 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
   }));
   const parentPath = parts.length > 1 ? `/${parts.slice(0, -1).join("/")}` : null;
   const selectedIsCurrent = !!currentPath && selected === currentPath;
+  const searchText = search.trim();
+  const visibleFolders = useMemo(() => filterEgnyteFolders(folders, search), [folders, search]);
 
   const save = async (path = selected) => {
     setSaving(true);
@@ -3565,6 +3573,21 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
                 </button>
               </div>
             </div>
+            <label className={"egnyte-search" + (searchText ? " active" : "")}>
+              <Icon name="search" size={14}/>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search folders"
+                aria-label="Search Egnyte folders"
+              />
+              {searchText && (
+                <button type="button" onClick={() => setSearch("")} aria-label="Clear folder search">
+                  <Icon name="x" size={12}/>
+                </button>
+              )}
+            </label>
             {error && (
               <div className="egnyte-error">
                 <Icon name="warn" size={14}/>
@@ -3579,9 +3602,11 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
               </div>
             ) : folders.length === 0 && !error ? (
               <div className="egnyte-state">No subfolders found.</div>
+            ) : visibleFolders.length === 0 && !error ? (
+              <div className="egnyte-state">No folders match <span className="mono">"{searchText}"</span>.</div>
             ) : (
               <div className={`egnyte-folder-results ${viewMode}`} role="list">
-                {folders.map(renderFolder)}
+                {visibleFolders.map(renderFolder)}
               </div>
             )}
           </div>
@@ -3612,22 +3637,65 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
 }
 
 function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
+  const platform = typeof navigator !== "undefined" ? navigator.platform || "" : "";
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  const defaultLocalRoot = defaultEgnyteLocalRoot(platform);
+  const [localRoot, setLocalRoot] = useState(() => {
+    if (typeof window === "undefined") return defaultLocalRoot;
+    try {
+      return window.localStorage.getItem(EGNYTE_LOCAL_ROOT_STORAGE_KEY) || defaultLocalRoot;
+    } catch {
+      return defaultLocalRoot;
+    }
+  });
   const [message, setMessage] = useState("");
 
-  const openLinkedFolder = () => {
-    const target = egnyteFolderOpenTarget({
+  const target = useMemo(() => egnyteFolderOpenTarget({
+    path: row?.egnyteFolderPath || "",
+    platform,
+    userAgent,
+    localRoot,
+  }), [row?.egnyteFolderPath, platform, userAgent, localRoot]);
+
+  const persistLocalRoot = (value) => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(EGNYTE_LOCAL_ROOT_STORAGE_KEY, value);
+    } catch {
+      // Local storage can be disabled; opening still works from current state.
+    }
+  };
+
+  const resetLocalRoot = () => {
+    setLocalRoot(defaultLocalRoot);
+    persistLocalRoot(defaultLocalRoot);
+  };
+
+  const openLinkedFolder = async () => {
+    const nextRoot = localRoot.trim() || defaultLocalRoot;
+    const nextTarget = egnyteFolderOpenTarget({
       path: row?.egnyteFolderPath || "",
-      platform: navigator?.platform || "",
-      userAgent: navigator?.userAgent || "",
+      platform,
+      userAgent,
+      localRoot: nextRoot,
     });
-    if (target.mobile) {
+    if (nextTarget.mobile) {
       setMessage("Egnyte is not available on mobile.");
       return;
     }
-    setMessage(`Opening ${target.localPath}`);
-    const opened = window.open(target.url, "_blank", "noopener,noreferrer");
+    setLocalRoot(nextRoot);
+    persistLocalRoot(nextRoot);
+    try {
+      if (typeof navigator !== "undefined") {
+        await navigator.clipboard?.writeText(nextTarget.localPath);
+      }
+    } catch {
+      // Best-effort convenience only; browser clipboard permission varies.
+    }
+    setMessage(`Opening ${nextTarget.localPath}`);
+    const opened = window.open(nextTarget.url, "_blank", "noopener,noreferrer");
     if (!opened) {
-      window.location.href = target.url;
+      window.location.href = nextTarget.url;
     }
   };
 
@@ -3649,6 +3717,19 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
           <div className="egnyte-linked-path">
             <span>Linked path</span>
             <strong className="mono">{row?.egnyteFolderPath}</strong>
+          </div>
+          <div className="egnyte-local-root">
+            <label htmlFor="egnyte-local-root">Local Egnyte root</label>
+            <div className="egnyte-local-root-control">
+              <input
+                id="egnyte-local-root"
+                value={localRoot}
+                onChange={(e) => setLocalRoot(e.target.value)}
+                onBlur={() => persistLocalRoot(localRoot.trim() || defaultLocalRoot)}
+              />
+              <button className="btn sm" type="button" onClick={resetLocalRoot}>Reset</button>
+            </div>
+            <span className="mono">{target.mobile ? "Unavailable on mobile" : target.localPath}</span>
           </div>
           <div className="egnyte-action-grid">
             <button type="button" className="egnyte-action-card primary" onClick={openLinkedFolder}>
