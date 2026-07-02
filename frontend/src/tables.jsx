@@ -38,7 +38,7 @@ const ordinal = (n) => {
 };
 
 const EGNYTE_LOGO_LINKED = "/egnyte/Egnyte-Logo-Linked.svg";
-const EGNYTE_LOGO_NOT_LINKED = "/egnyte/Egnyte-Logo-NotLinked.svg";
+const EGNYTE_LOGO_NOT_LINKED = "/egnyte/Egnyte-Logo--Streamline-Logos-Block.svg";
 
 function EgnyteLogoMark({ size = 14, linked = false }) {
   return (
