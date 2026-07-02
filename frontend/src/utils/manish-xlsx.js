@@ -36,6 +36,7 @@ const LEGEND = [
   ["Red = Unpaid", RED],
   ["Yellow = Submitted", YELLOW],
 ];
+const MIN_EXPORT_YEAR = 2020;
 
 // Fixed-position columns (exceljs 1-based numbers). Subs start at FIRST_SUB_COL
 // and occupy 2 columns each (Name, Amount). MSMM is the first amount column, so
@@ -141,6 +142,106 @@ function computeColWidths(data) {
 function byProjectNumber(a, b) {
   return String(a.projectNumber || "").localeCompare(
     String(b.projectNumber || ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+const monthTitle = (d) => `${MONTH_FULL[d.monthIdx]} ${d.year}`;
+const monthLabel = (year, monthIdx) =>
+  `${MONTH_FULL[monthIdx].slice(0, 1)}${MONTH_FULL[monthIdx].slice(1, 3).toLowerCase()} ${year}`;
+const ymAbs = (year, monthIdx) => Number(year) * 12 + Number(monthIdx);
+const absToDesc = (abs) => {
+  const year = Math.floor(abs / 12);
+  const monthIdx = abs - year * 12;
+  return { year, monthIdx, label: monthLabel(year, monthIdx) };
+};
+
+export function manishMonthDescsBetween(startYear, startMonthIdx, endYear, endMonthIdx) {
+  const start = ymAbs(startYear, startMonthIdx);
+  const end = ymAbs(endYear, endMonthIdx);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+  return Array.from({ length: end - start + 1 }, (_, i) => absToDesc(start + i));
+}
+
+export function manishAvailableYears(rows = [], currentYear = new Date().getFullYear()) {
+  let maxYear = Math.max(MIN_EXPORT_YEAR, Number(currentYear) || MIN_EXPORT_YEAR);
+  for (const r of rows || []) {
+    for (const y of Object.keys(r?.byYear || {})) {
+      const n = Number(y);
+      if (Number.isFinite(n) && n >= MIN_EXPORT_YEAR) maxYear = Math.max(maxYear, n);
+    }
+  }
+  return Array.from({ length: maxYear - MIN_EXPORT_YEAR + 1 }, (_, i) => MIN_EXPORT_YEAR + i);
+}
+
+export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [] } = {}) {
+  const subListFor = (r) =>
+    (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
+
+  const msmmAtDesc = (r, d) => {
+    const yr = r.byYear?.[d.year];
+    if (!yr) return 0;
+    const override = yr.msmmValues?.[d.monthIdx];
+    if (override != null) return Number(override);
+    const total = Number(yr.values?.[d.monthIdx] || 0);
+    const subSum = subListFor(r).reduce(
+      (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);
+    return total - subSum;
+  };
+
+  const included = (baseRows || []).filter(r =>
+    r.role === "Prime" && subListFor(r).length > 0);
+
+  const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
+  const rows = included.map(r => {
+    const subs = subListFor(r);
+    const subNames = Array.from({ length: maxSubs }, (_, j) => subs[j]?.companyName || "");
+    const months = monthDescs.map((d) => {
+      const yr = r.byYear?.[d.year] || {};
+      return {
+        msmmAmount: msmmAtDesc(r, d),
+        invoiceNumber: (yr.invoiceNumbers && yr.invoiceNumbers[d.monthIdx]) || null,
+        primePaid: !!(yr.primePaid && yr.primePaid[d.monthIdx]),
+        primeHasFile: ((yr.primeFiles && yr.primeFiles[d.monthIdx]) || []).length > 0,
+        subs: Array.from({ length: maxSubs }, (_, j) => {
+          const s = subs[j];
+          const sy = s?.byYear?.[d.year];
+          if (!s) return { amount: null, paid: false, hasFile: false };
+          return {
+            amount: (sy?.amounts && sy.amounts[d.monthIdx]) ?? null,
+            paid: !!(sy?.paid && sy.paid[d.monthIdx]),
+            hasFile: ((sy?.files && sy.files[d.monthIdx]) || []).length > 0,
+          };
+        }),
+      };
+    });
+    return { projectNumber: r.projectNumber, name: r.name, subNames, months };
+  });
+
+  return {
+    monthTitles: monthDescs.map(monthTitle),
+    maxSubs,
+    rows,
+    includedCount: included.length,
+  };
+}
+
+export function buildManishYearSheets({ years = [], baseRows = [], subInvoices = new Map() } = {}) {
+  const sheets = (years || []).map(year => ({
+    name: String(year),
+    ...buildManishExportData({
+      baseRows,
+      subInvoices,
+      monthDescs: manishMonthDescsBetween(Number(year), 0, Number(year), 11),
+    }),
+  }));
+  return {
+    sheets,
+    includedCount: Math.max(0, ...sheets.map(s => s.includedCount || 0)),
+  };
+}
+
+function safeSheetName(name, fallback = "Invoices") {
+  const cleaned = String(name || fallback).replace(/[:\\/?*[\]]/g, "-").slice(0, 31);
+  return cleaned || fallback;
 }
 
 function buildConsolidatedSheet(ws, data, colWidths) {
@@ -260,9 +361,14 @@ export async function buildManishWorkbookObject(data) {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.creator = "MSMM Beacon";
-  const colWidths = computeColWidths(data);
-  const ws = wb.addWorksheet("Invoices");
-  buildConsolidatedSheet(ws, data, colWidths);
+  const sheets = Array.isArray(data?.sheets) && data.sheets.length > 0
+    ? data.sheets
+    : [{ name: "Invoices", ...data }];
+  for (const sheet of sheets) {
+    const colWidths = computeColWidths(sheet);
+    const ws = wb.addWorksheet(safeSheetName(sheet.name));
+    buildConsolidatedSheet(ws, sheet, colWidths);
+  }
   return wb;
 }
 

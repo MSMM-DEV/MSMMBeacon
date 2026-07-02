@@ -29,6 +29,7 @@ import {
   filterEgnyteFolders,
   EGNYTE_LOCAL_ROOT_STORAGE_KEY,
 } from "./egnyte-links.js";
+import { HOT_LEAD_STAR_MAX, starLabel, starsRank } from "./star-rating.js";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
 // Actual/Projection legend to phrase the configurable cutover day.
@@ -200,10 +201,6 @@ const probChipClass = (p) => {
 };
 const PROB_RANK = { High: 1, Medium: 2, Low: 3, Orange: 4 };
 const probRank = (p) => PROB_RANK[p] ?? 5;
-
-// Stars sort key: 5★ first, 1★ last, NULL/Unrated last of all. Pure-int
-// comparison maps to the desired display order with one expression.
-const starsRank = (s) => (s == null ? 99 : 6 - Number(s));
 
 // Events grouping rank — Board Meetings first (highest-value stakeholder
 // touchpoint), then partner-facing, then internal.
@@ -4196,7 +4193,7 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
                     )}
                   </div>
                   {r.stars > 0 && (
-                    <div className="hl-quick-card-stars" aria-label={`${r.stars} of 5 stars`}>
+                    <div className="hl-quick-card-stars" aria-label={starLabel(r.stars, HOT_LEAD_STAR_MAX)}>
                       {"★".repeat(r.stars)}
                     </div>
                   )}
@@ -4273,7 +4270,7 @@ export const HotLeadsTable = ({
     { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating",      w: "150px", sortKey: "stars",
-      sortValue: r => starsRank(r.stars) },
+      sortValue: r => starsRank(r.stars, HOT_LEAD_STAR_MAX) },
     { label: "__actions",   w: "80px", locked: true },
   ];
 
@@ -4287,7 +4284,7 @@ export const HotLeadsTable = ({
 
   const { clientOrFirmOpts, hotLeadStatusOptions, hotLeadTypeOptions } = buildOptions();
 
-  // Group-by-stars (5★ → 1★ → Unrated). Inside each bucket the user's
+  // Group-by-stars (3★ → 1★ → Unrated). Inside each bucket the user's
   // column sort applies — defaults to dateTime desc via buildEffectiveSort.
   const primarySort = [
     { key: "stars",    dir: "asc"  },
@@ -4332,7 +4329,7 @@ export const HotLeadsTable = ({
           const isUnrated = r._starsHeader === "Unrated";
           const label = isUnrated
             ? `Unrated · ${r._count} ${r._count === 1 ? "lead" : "leads"}`
-            : `${"★".repeat(r._starsHeader)}${"☆".repeat(5 - r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`;
+            : `${"★".repeat(r._starsHeader)}${"☆".repeat(HOT_LEAD_STAR_MAX - r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`;
           return (
             <div key={r.id} className="trow stars-header"
                  data-stars={isUnrated ? "0" : String(r._starsHeader)}
@@ -4372,8 +4369,9 @@ export const HotLeadsTable = ({
             </div>
           ),
           "Rating": (
-            <div className="td">
+            <div className="td hotlead-rating">
               <StarRating value={r.stars}
+                max={HOT_LEAD_STAR_MAX}
                 onChange={v => updateRow(r.id, { stars: v })}/>
             </div>
           ),

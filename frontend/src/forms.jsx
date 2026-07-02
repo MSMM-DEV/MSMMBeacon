@@ -4,6 +4,7 @@ import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenB
   createProjectItem, addProjectItemSub, validateProjectItemContract,
   CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS } from "./data.js";
 import { SearchableSelect, StarRating } from "./primitives.jsx";
+import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
 
 // ============ CREATE MODAL ============
 // "New X" flow for potential / events / clients / companies.
@@ -1192,6 +1193,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
           <Field label="Rating">
             <StarRating
               value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
+              max={HOT_LEAD_STAR_MAX}
               onChange={v => set("stars", v == null ? "" : v)}
             />
           </Field>

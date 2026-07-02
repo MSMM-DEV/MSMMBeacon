@@ -22,7 +22,13 @@ import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { ProjectDetailPage } from "./project-detail.jsx";
 import { exportPDF } from "./utils/pdf.js";
-import { exportManishWorkbook } from "./utils/manish-xlsx.js";
+import {
+  buildManishExportData,
+  buildManishYearSheets,
+  exportManishWorkbook,
+  manishAvailableYears,
+  manishMonthDescsBetween,
+} from "./utils/manish-xlsx.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
@@ -860,6 +866,157 @@ const OwnPasswordModal = ({ user, onClose, onSubmit }) => {
   );
 };
 
+const ManishExportModal = ({
+  years = [],
+  defaultStart,
+  defaultEnd,
+  onClose,
+  onExport,
+}) => {
+  const yearChoices = years.length ? years : [THIS_YEAR];
+  const preferredYear = yearChoices.includes(THIS_YEAR) ? THIS_YEAR : yearChoices[yearChoices.length - 1];
+  const [mode, setMode] = useState("default");
+  const [selectedYears, setSelectedYears] = useState(() => new Set([preferredYear]));
+  const [startYear, setStartYear] = useState(defaultStart?.year || preferredYear);
+  const [startMonth, setStartMonth] = useState(defaultStart?.monthIdx ?? 0);
+  const [endYear, setEndYear] = useState(defaultEnd?.year || preferredYear);
+  const [endMonth, setEndMonth] = useState(defaultEnd?.monthIdx ?? 11);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
+  const customInvalid = (Number(endYear) * 12 + Number(endMonth)) < (Number(startYear) * 12 + Number(startMonth));
+  const yearsInvalid = selectedYears.size === 0;
+  const exportDisabled = pending || (mode === "years" && yearsInvalid) || (mode === "custom" && customInvalid);
+
+  const toggleYear = (year) => {
+    setSelectedYears(prev => {
+      const next = new Set(prev);
+      if (next.has(year)) next.delete(year);
+      else next.add(year);
+      return next;
+    });
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (exportDisabled) return;
+    setPending(true);
+    setError("");
+    try {
+      await onExport({
+        mode,
+        years: [...selectedYears].sort((a, b) => a - b),
+        startYear: Number(startYear),
+        startMonth: Number(startMonth),
+        endYear: Number(endYear),
+        endMonth: Number(endMonth),
+      });
+      onClose();
+    } catch (err) {
+      setError(err?.message || "Export failed.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const option = (value, title, body) => (
+    <label className={`manish-export-option${mode === value ? " selected" : ""}`}>
+      <input type="radio" name="manish-export-mode" value={value}
+             checked={mode === value} onChange={() => setMode(value)}/>
+      <span>
+        <strong>{title}</strong>
+        <small>{body}</small>
+      </span>
+    </label>
+  );
+
+  return (
+    <>
+      <div className="overlay" onClick={pending ? undefined : onClose}/>
+      <form className="modal manish-export-modal" onSubmit={submit}>
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="export" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <div className="modal-eyebrow">Invoice</div>
+            <h3 className="modal-title">Print for Manish</h3>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} disabled={pending}>
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="manish-export-options">
+            {option("default", "Default Export", "Use the current rolling month window.")}
+            {option("years", "Years", "Create one Excel tab for each selected year.")}
+            {option("custom", "Custom Dates", "Choose an inclusive start and end month.")}
+          </div>
+
+          {mode === "years" && (
+            <div className="manish-export-panel">
+              <div className="field-label">Years</div>
+              <div className="manish-year-grid">
+                {yearChoices.map(year => (
+                  <label key={year} className="manish-year-chip">
+                    <input type="checkbox" checked={selectedYears.has(year)} onChange={() => toggleYear(year)}/>
+                    <span>{year}</span>
+                  </label>
+                ))}
+              </div>
+              {yearsInvalid && <div className="form-hint danger">Select at least one year.</div>}
+            </div>
+          )}
+
+          {mode === "custom" && (
+            <div className="manish-export-panel">
+              <div className="manish-date-grid">
+                <label>
+                  <span>Start month</span>
+                  <select className="select" value={startMonth} onChange={e => setStartMonth(Number(e.target.value))}>
+                    {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Start year</span>
+                  <select className="select" value={startYear} onChange={e => setStartYear(Number(e.target.value))}>
+                    {yearChoices.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>End month</span>
+                  <select className="select" value={endMonth} onChange={e => setEndMonth(Number(e.target.value))}>
+                    {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>End year</span>
+                  <select className="select" value={endYear} onChange={e => setEndYear(Number(e.target.value))}>
+                    {yearChoices.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </label>
+              </div>
+              {customInvalid && <div className="form-hint danger">End date must be after the start date.</div>}
+            </div>
+          )}
+
+          {error && (
+            <div className="admin-error" role="alert">
+              <Icon name="x" size={12}/>
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn sm" onClick={onClose} disabled={pending}>Cancel</button>
+          <button className="btn primary sm" disabled={exportDisabled}>
+            <Icon name="export" size={13}/>
+            {pending ? "Exporting…" : "Export Excel"}
+          </button>
+        </div>
+      </form>
+    </>
+  );
+};
+
 // ======================================================================
 // Main App
 // ======================================================================
@@ -1025,6 +1182,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Generic confirm prompt — { title, message, confirmLabel, tone, icon, onConfirm } or null.
   // Currently drives the "unmark a paid invoice" gate; reusable for other guards.
   const [confirmState, setConfirmState] = useState(null);
+  const [manishExportOpen, setManishExportOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -4015,88 +4173,50 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
-  // "Print for Manish" — Invoice-only. One .xlsx sheet per month (JAN–DEC),
-  // each listing every Prime-role project that has at least one sub. Row =
-  // Project No. | Invoice No. (blank) | Total Invoice (=SUM) | MSMM | Sub N
-  // Name/Amount pairs. Per-cell color mirrors the in-app paid/attachment
-  // signal: paid tick → green · PDF attached → yellow · amount only → red
-  // (MSMM + Total follow the prime invoice status; each sub follows its own).
-  // Sub columns extend past 3 when a project carries more subs.
-  const handleExportManish = async () => {
+  // "Print for Manish" — Invoice-only Excel export. Default keeps the current
+  // rolling-window workbook; the options modal can instead pass full-year
+  // sheets or one custom inclusive month range.
+  const handleExportManish = async (options = { mode: "default" }) => {
     if (tab !== "invoice") return;
     const date = new Date().toISOString().slice(0, 10);
-    // One section per month in the current rolling window (spans calendar
-    // years). The xlsx stacks the 16 months vertically; each section title
-    // carries its own year.
-    const MONTH_FULL = [
-      "JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE",
-      "JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER",
-    ];
-    const win = invWindowMonths;
-    const monthTitles = win.map(d => `${MONTH_FULL[d.monthIdx]} ${d.year}`);
-    const filename = `msmm-invoice-manish-${win[0].label.replace(/\s/g, "")}-${win[win.length - 1].label.replace(/\s/g, "")}-${date}.xlsx`;
+    const label = (d) => d?.label?.replace(/\s/g, "") || `${d?.year || ""}${MONTHS[d?.monthIdx || 0] || ""}`;
+    const baseRows = currentRows; // filtered.invoice = merged rows (one per project, byYear)
+    const mode = options?.mode || "default";
+    let payload;
+    let filename;
+    let includedCount = 0;
 
-    // currentRows = filtered.invoice = MERGED rows (one per project, byYear).
-    const baseRows = currentRows;
-
-    const subListFor = (r) =>
-      (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
-    // MSMM portion for a (merged row, window-month descriptor): the right
-    // year's total minus its subs, honoring a per-month MSMM override.
-    const msmmAtDesc = (r, d) => {
-      const yr = r.byYear?.[d.year];
-      if (!yr) return 0;
-      const override = yr.msmmValues?.[d.monthIdx];
-      if (override != null) return Number(override);
-      const total = Number(yr.values?.[d.monthIdx] || 0);
-      const subSum = subListFor(r).reduce(
-        (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);
-      return total - subSum;
-    };
-
-    const included = baseRows.filter(r =>
-      r.role === "Prime" && subListFor(r).length > 0);
-
-    if (included.length === 0) {
-      showToast("No Prime projects with subs in this window", "x");
-      return;
+    if (mode === "years") {
+      const years = options.years || [];
+      if (years.length === 0) throw new Error("Select at least one year.");
+      const built = buildManishYearSheets({ years, baseRows, subInvoices });
+      payload = { sheets: built.sheets };
+      includedCount = built.includedCount;
+      filename = `msmm-invoice-manish-years-${years[0]}-${years[years.length - 1]}-${date}.xlsx`;
+    } else if (mode === "custom") {
+      const win = manishMonthDescsBetween(options.startYear, options.startMonth, options.endYear, options.endMonth);
+      if (win.length === 0) throw new Error("End date must be after the start date.");
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win });
+      payload = data;
+      includedCount = data.includedCount;
+      filename = `msmm-invoice-manish-${label(win[0])}-${label(win[win.length - 1])}-${date}.xlsx`;
+    } else {
+      const win = invWindowMonths;
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win });
+      payload = data;
+      includedCount = data.includedCount;
+      filename = `msmm-invoice-manish-${label(win[0])}-${label(win[win.length - 1])}-${date}.xlsx`;
     }
 
-    // Same column count on every sheet (subs are project-level, not monthly);
-    // never fewer than the template's 3 slots.
-    const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
-
-    const rows = included.map(r => {
-      const subs = subListFor(r);
-      const subNames = Array.from({ length: maxSubs }, (_, j) => subs[j]?.companyName || "");
-      const months = win.map((d) => {
-        const yr = r.byYear?.[d.year] || {};
-        return {
-          msmmAmount: msmmAtDesc(r, d),
-          invoiceNumber: (yr.invoiceNumbers && yr.invoiceNumbers[d.monthIdx]) || null,
-          primePaid: !!(yr.primePaid && yr.primePaid[d.monthIdx]),
-          primeHasFile: ((yr.primeFiles && yr.primeFiles[d.monthIdx]) || []).length > 0,
-          subs: Array.from({ length: maxSubs }, (_, j) => {
-            const s = subs[j];
-            const sy = s?.byYear?.[d.year];
-            if (!s) return { amount: null, paid: false, hasFile: false };
-            return {
-              amount: (sy?.amounts && sy.amounts[d.monthIdx]) ?? null,
-              paid: !!(sy?.paid && sy.paid[d.monthIdx]),
-              hasFile: ((sy?.files && sy.files[d.monthIdx]) || []).length > 0,
-            };
-          }),
-        };
-      });
-      return { projectNumber: r.projectNumber, name: r.name, subNames, months };
-    });
+    if (includedCount === 0) throw new Error("No Prime projects with subs for this export.");
 
     try {
       showToast("Preparing Excel…", "export");
-      await exportManishWorkbook({ monthTitles, maxSubs, rows }, filename);
-      showToast(`Exported ${included.length} project${included.length === 1 ? "" : "s"} → Excel`, "export");
+      await exportManishWorkbook(payload, filename);
+      showToast(`Exported ${includedCount} project${includedCount === 1 ? "" : "s"} → Excel`, "export");
     } catch (err) {
       showToast(`Export failed: ${err.message || err}`, "x");
+      throw err;
     }
   };
 
@@ -4249,6 +4369,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   }, [invWindowStart]);
   const invWindowMonths = useMemo(() => monthDescsForWindow(invWindowStart), [invWindowStart]);
   const invWindowAtDefault = invWindowStart === defaultWindowStartAbs();
+  const manishYears = useMemo(() => manishAvailableYears(invoiceMerged, THIS_YEAR), [invoiceMerged]);
 
   // Expose the projects-by-type snapshot to EXPORT_COLUMNS' countRefs helper.
   useEffect(() => {
@@ -4528,7 +4649,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 <button className="btn sm" onClick={handleExportInvoiceSubs}>
                   <Icon name="export" size={13}/>Print for Mark - Subs
                 </button>
-                <button className="btn sm" onClick={handleExportManish}>
+                <button className="btn sm" onClick={() => setManishExportOpen(true)}>
                   <Icon name="export" size={13}/>Print for Manish
                 </button>
               </>
@@ -5238,6 +5359,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           />
         );
       })()}
+
+      {manishExportOpen && (
+        <ManishExportModal
+          years={manishYears}
+          defaultStart={invWindowMonths[0]}
+          defaultEnd={invWindowMonths[invWindowMonths.length - 1]}
+          onClose={() => setManishExportOpen(false)}
+          onExport={handleExportManish}
+        />
+      )}
 
       {confirmState && (
         <ConfirmDialog

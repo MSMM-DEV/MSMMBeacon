@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons.jsx";
 import { companyById, userById, fmtMoney } from "./data.js";
+import { DEFAULT_STAR_MAX, starLabel, starOptions } from "./star-rating.js";
 
 // ----------------------------------------------------------------------
 // Module-level single-cell edit debounce.
@@ -93,14 +94,14 @@ export const Money = ({ value, muted, cents }) => (
   </span>
 );
 
-// 5-star rating: hover previews, click commits, click the active star to clear.
-// `value` is 1-5 or null. `onChange` receives a number 1-5 or null. Read-only
-// mode (no onChange) renders just the glyphs.
-export const StarRating = ({ value, onChange, size = "md", title }) => {
+// Star rating: hover previews, click commits, click the active star to clear.
+// `value` is 1-max or null. `onChange` receives a number 1-max or null.
+// Read-only mode (no onChange) renders just the glyphs.
+export const StarRating = ({ value, onChange, size = "md", title, max = DEFAULT_STAR_MAX }) => {
   const [hover, setHover] = useState(null);
   const editable = typeof onChange === "function";
   const active = hover != null ? hover : (value || 0);
-  const stars = [1, 2, 3, 4, 5];
+  const stars = starOptions(max);
   const click = (n) => {
     if (!editable) return;
     onChange(n === value ? null : n);
@@ -109,7 +110,7 @@ export const StarRating = ({ value, onChange, size = "md", title }) => {
     <span
       className={`stars stars-${size}${editable ? " stars-editable" : ""}${value ? ` stars-set stars-set-${value}` : " stars-unset"}`}
       role={editable ? "radiogroup" : undefined}
-      aria-label={title || (value ? `${value} of 5 stars` : "Unrated")}
+      aria-label={title || starLabel(value, max)}
       onMouseLeave={editable ? () => setHover(null) : undefined}
       onClick={editable ? (e) => e.stopPropagation() : undefined}
     >
@@ -122,7 +123,7 @@ export const StarRating = ({ value, onChange, size = "md", title }) => {
           onFocus={editable ? () => setHover(n) : undefined}
           onClick={editable ? () => click(n) : undefined}
           tabIndex={editable ? 0 : -1}
-          aria-label={`${n} star${n > 1 ? "s" : ""}`}
+          aria-label={starLabel(n, max)}
           aria-pressed={value === n}
           disabled={!editable}
         >

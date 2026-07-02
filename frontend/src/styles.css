@@ -1130,6 +1130,7 @@ html, body { overflow-x: clip; }
 .stars.stars-editable .star-btn:focus-visible { color: var(--accent); }
 .stars.stars-sm .star-btn { font-size: 12px; }
 .stars.stars-lg .star-btn { font-size: 19px; }
+.hotlead-rating .star-btn:nth-of-type(n+4) { display: none; }
 .stars-clear {
   appearance: none;
   margin-left: 4px;
@@ -1616,6 +1617,81 @@ html, body { overflow-x: clip; }
   border-top: 1px solid var(--border);
   display: flex; gap: 8px; justify-content: space-between;
   align-items: center;
+}
+.manish-export-modal { width: min(620px, 94vw); }
+.manish-export-options {
+  display: grid;
+  gap: 8px;
+}
+.manish-export-option {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.manish-export-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+.manish-export-option input { margin-top: 2px; }
+.manish-export-option strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.manish-export-option small {
+  display: block;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+.manish-export-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.manish-year-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.manish-year-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.manish-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.manish-date-grid label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+.form-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+.form-hint.danger { color: var(--rose); }
+@media (max-width: 560px) {
+  .manish-date-grid { grid-template-columns: 1fr; }
 }
 .password-modal .field {
   grid-template-columns: 150px minmax(0, 1fr);

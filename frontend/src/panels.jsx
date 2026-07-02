@@ -14,6 +14,7 @@ import {
   projectItemDescendantIds,
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
+import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
 
 // Multi-user picker used by both the PMs field and Events attendees.
 // Search-as-you-type dropdown; selected users render as chips with remove-x.
@@ -319,7 +320,7 @@ export const DetailDrawer = ({
     hotleads: [
       { k: "title",          label: "Title" },
       { k: "type",           label: "Type",                    type: "select", options: ["Engineering","AI"] },
-      { k: "stars",          label: "Rating",                  type: "stars" },
+      { k: "stars",          label: "Rating",                  type: "stars", max: HOT_LEAD_STAR_MAX },
       // `company` field type feeds from the Clients list. For Hot Leads we
       // want BOTH clients AND companies available, so this drawer swaps in
       // the merged list via the `hotleadsCompany` custom type below.
@@ -461,7 +462,7 @@ export const DetailDrawer = ({
     }
     if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} placeholder={f.placeholder} onBlur={e => set(e.target.value)}/>;
     if (f.type === "stars") return (
-      <StarRating value={val == null ? null : Number(val)} onChange={v => set(v)}/>
+      <StarRating value={val == null ? null : Number(val)} max={f.max} onChange={v => set(v)}/>
     );
     if (f.type === "select") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
