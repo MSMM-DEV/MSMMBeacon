@@ -24,8 +24,10 @@ import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
 import {
+  canAttemptLocalFileOpen,
   defaultEgnyteLocalRoot,
   egnyteFolderOpenTarget,
+  egnyteFolderWebUrl,
   filterEgnyteFolders,
   EGNYTE_LOCAL_ROOT_STORAGE_KEY,
 } from "./egnyte-links.js";
@@ -3689,6 +3691,14 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
     } catch {
       // Best-effort convenience only; browser clipboard permission varies.
     }
+    const pageProtocol = typeof window !== "undefined" ? window.location.protocol : "";
+    const webUrl = egnyteFolderWebUrl({ path: row?.egnyteFolderPath || "" });
+    if (!canAttemptLocalFileOpen(pageProtocol)) {
+      setMessage(`Local path copied. Opened Egnyte Web for ${nextTarget.localPath}`);
+      const webOpened = window.open(webUrl, "_blank", "noopener,noreferrer");
+      if (!webOpened) window.location.href = webUrl;
+      return;
+    }
     setMessage(`Opening ${nextTarget.localPath}`);
     const opened = window.open(nextTarget.url, "_blank", "noopener,noreferrer");
     if (!opened) {
@@ -3732,7 +3742,7 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
             <button type="button" className="egnyte-action-card primary" onClick={openLinkedFolder}>
               <span className="egnyte-action-icon"><Icon name="export" size={18}/></span>
               <strong>Open Egnyte Folder</strong>
-              <span>Open the synced folder on this device.</span>
+              <span>Open Egnyte Web and copy the local folder path.</span>
             </button>
             <button type="button" className="egnyte-action-card" onClick={onChangePath}>
               <span className="egnyte-action-icon"><Icon name="edit" size={18}/></span>

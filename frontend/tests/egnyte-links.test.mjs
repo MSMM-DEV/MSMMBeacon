@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canAttemptLocalFileOpen,
   defaultEgnyteLocalRoot,
   egnyteFolderOpenTarget,
+  egnyteFolderWebUrl,
   filterEgnyteFolders,
   isMobileUserAgent,
 } from "../src/egnyte-links.js";
@@ -63,6 +65,19 @@ test("egnyteFolderOpenTarget marks mobile as unavailable", () => {
   });
   assert.equal(target.mobile, true);
   assert.equal(target.url, "");
+});
+
+test("egnyteFolderWebUrl returns an Egnyte web navigation URL", () => {
+  assert.equal(
+    egnyteFolderWebUrl({ path: "/Shared/PData/ACME & Sons", domain: "msmm.egnyte.com" }),
+    "https://msmm.egnyte.com/navigate/folder/Shared/PData/ACME%2520%2526%2520Sons",
+  );
+});
+
+test("canAttemptLocalFileOpen only allows file-origin pages", () => {
+  assert.equal(canAttemptLocalFileOpen("https:"), false);
+  assert.equal(canAttemptLocalFileOpen("http:"), false);
+  assert.equal(canAttemptLocalFileOpen("file:"), true);
 });
 
 test("filterEgnyteFolders matches folder names and paths case-insensitively", () => {

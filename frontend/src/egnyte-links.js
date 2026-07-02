@@ -2,6 +2,7 @@ const MOBILE_RE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini
 export const EGNYTE_LOCAL_ROOT_STORAGE_KEY = "beacon.egnyteLocalRoot";
 export const DEFAULT_MAC_EGNYTE_ROOT = "/Users/rajmehta/Library/CloudStorage/Egnyte-msmm";
 export const DEFAULT_WINDOWS_EGNYTE_ROOT = "E:\\";
+export const DEFAULT_EGNYTE_WEB_DOMAIN = "msmm.egnyte.com";
 
 function cleanEgnytePath(path) {
   const raw = String(path || "").trim();
@@ -14,6 +15,16 @@ function encodePathSegments(path) {
   const clean = cleanEgnytePath(path);
   if (!clean || clean === "/") return "";
   return clean.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+}
+
+function encodeNavigationPathSegments(path) {
+  const clean = cleanEgnytePath(path);
+  if (!clean || clean === "/") return "";
+  return clean
+    .split("/")
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(encodeURIComponent(part)))
+    .join("/");
 }
 
 function pathParts(path) {
@@ -58,6 +69,19 @@ export function filterEgnyteFolders(folders = [], query = "") {
     const path = String(folder?.path || "").toLowerCase();
     return name.includes(q) || path.includes(q);
   });
+}
+
+export function egnyteFolderWebUrl({ path, domain = DEFAULT_EGNYTE_WEB_DOMAIN } = {}) {
+  const host = String(domain || DEFAULT_EGNYTE_WEB_DOMAIN)
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+  const encoded = encodeNavigationPathSegments(path);
+  return `https://${host}/navigate/folder${encoded ? `/${encoded}` : ""}`;
+}
+
+export function canAttemptLocalFileOpen(pageProtocol = "") {
+  return String(pageProtocol || "").toLowerCase() === "file:";
 }
 
 export function egnyteFolderOpenTarget({
