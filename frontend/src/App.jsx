@@ -2082,18 +2082,39 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     };
     const dbPatch = buildInvoiceDbPatch(patch);
     const siblingDbPatch = buildInvoiceDbPatch(syncedPatch);
-    if (Object.keys(dbPatch).length > 0) {
-      supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
-        .then(({ error }) => {
-          if (error) showToast(`Save failed: ${error.message}`, "x");
+    const invoiceOrangeSchemaMissing = (error) =>
+      error && "invoice_orange" in (dbPatch || {}) || error && "invoice_orange" in (siblingDbPatch || {})
+        ? String(error.message || "").includes("invoice_orange")
+        : false;
+    const saveInvoicePatch = (dbPatchToSave, makeQuery, failureLabel) => {
+      if (Object.keys(dbPatchToSave).length === 0) return;
+      makeQuery(dbPatchToSave)
+        .then(async ({ error }) => {
+          if (error && invoiceOrangeSchemaMissing(error) && "invoice_orange" in dbPatchToSave) {
+            const retryPatch = { ...dbPatchToSave };
+            delete retryPatch.invoice_orange;
+            if (Object.keys(retryPatch).length === 0) return;
+            const { error: retryError } = await makeQuery(retryPatch);
+            if (retryError) showToast(`${failureLabel}: ${retryError.message}`, "x");
+            return;
+          }
+          if (error) showToast(`${failureLabel}: ${error.message}`, "x");
         });
+    };
+    if (Object.keys(dbPatch).length > 0) {
+      saveInvoicePatch(
+        dbPatch,
+        patchToSave => supabase.from("anticipated_invoice").update(patchToSave).eq("id", id),
+        "Save failed"
+      );
     }
     const siblingIds = ids.filter(rowId => rowId !== id);
     if (siblingIds.length > 0 && Object.keys(siblingDbPatch).length > 0) {
-      supabase.from("anticipated_invoice").update(siblingDbPatch).in("id", siblingIds)
-        .then(({ error }) => {
-          if (error) showToast(`Linked MHZ/ENG sync failed: ${error.message}`, "x");
-        });
+      saveInvoicePatch(
+        siblingDbPatch,
+        patchToSave => supabase.from("anticipated_invoice").update(patchToSave).in("id", siblingIds),
+        "Linked MHZ/ENG sync failed"
+      );
     }
     if ("pmIds" in patch) {
       for (const rowId of ids) {
