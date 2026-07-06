@@ -2,7 +2,7 @@ const MOBILE_RE = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini
 export const EGNYTE_LOCAL_ROOT_STORAGE_KEY = "beacon.egnyteLocalRoot";
 export const DEFAULT_MAC_EGNYTE_ROOT = "/Users/rajmehta/Library/CloudStorage/Egnyte-msmm";
 export const DEFAULT_WINDOWS_EGNYTE_ROOT = "E:\\";
-export const DEFAULT_EGNYTE_WEB_DOMAIN = "msmm.egnyte.com";
+export const DEFAULT_EGNYTE_LOCAL_OPENER_URL = "http://127.0.0.1:17654/open";
 
 function cleanEgnytePath(path) {
   const raw = String(path || "").trim();
@@ -15,16 +15,6 @@ function encodePathSegments(path) {
   const clean = cleanEgnytePath(path);
   if (!clean || clean === "/") return "";
   return clean.split("/").filter(Boolean).map(encodeURIComponent).join("/");
-}
-
-function encodeNavigationPathSegments(path) {
-  const clean = cleanEgnytePath(path);
-  if (!clean || clean === "/") return "";
-  return clean
-    .split("/")
-    .filter(Boolean)
-    .map((part) => encodeURIComponent(encodeURIComponent(part)))
-    .join("/");
 }
 
 function pathParts(path) {
@@ -71,17 +61,34 @@ export function filterEgnyteFolders(folders = [], query = "") {
   });
 }
 
-export function egnyteFolderWebUrl({ path, domain = DEFAULT_EGNYTE_WEB_DOMAIN } = {}) {
-  const host = String(domain || DEFAULT_EGNYTE_WEB_DOMAIN)
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/+$/, "");
-  const encoded = encodeNavigationPathSegments(path);
-  return `https://${host}/navigate/folder${encoded ? `/${encoded}` : ""}`;
+export function canAttemptLocalFileOpen(pageProtocol = "") {
+  const protocol = String(pageProtocol || "").toLowerCase();
+  return protocol === "file:" || protocol === "https:";
 }
 
-export function canAttemptLocalFileOpen(pageProtocol = "") {
-  return String(pageProtocol || "").toLowerCase() === "file:";
+export async function openLocalFolderWithHelper({
+  localPath,
+  openerUrl = DEFAULT_EGNYTE_LOCAL_OPENER_URL,
+  fetchImpl = typeof fetch !== "undefined" ? fetch : null,
+  timeoutMs = 900,
+} = {}) {
+  const cleanPath = String(localPath || "").trim();
+  if (!cleanPath || !fetchImpl) return false;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetchImpl(openerUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: cleanPath }),
+      signal: controller?.signal,
+    });
+    return !!response?.ok;
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function egnyteFolderOpenTarget({

@@ -33,9 +33,9 @@ import {
   canAttemptLocalFileOpen,
   defaultEgnyteLocalRoot,
   egnyteFolderOpenTarget,
-  egnyteFolderWebUrl,
   filterEgnyteFolders,
   EGNYTE_LOCAL_ROOT_STORAGE_KEY,
+  openLocalFolderWithHelper,
 } from "./egnyte-links.js";
 import { HOT_LEAD_STAR_MAX, starLabel, starsRank } from "./star-rating.js";
 
@@ -3812,12 +3812,14 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
     } catch {
       // Best-effort convenience only; browser clipboard permission varies.
     }
+    const helperOpened = await openLocalFolderWithHelper({ localPath: nextTarget.localPath });
+    if (helperOpened) {
+      setMessage(`Opened ${nextTarget.localPath}`);
+      return;
+    }
     const pageProtocol = typeof window !== "undefined" ? window.location.protocol : "";
-    const webUrl = egnyteFolderWebUrl({ path: row?.egnyteFolderPath || "" });
     if (!canAttemptLocalFileOpen(pageProtocol)) {
-      setMessage(`Local path copied. Opened Egnyte Web for ${nextTarget.localPath}`);
-      const webOpened = window.open(webUrl, "_blank", "noopener,noreferrer");
-      if (!webOpened) window.location.href = webUrl;
+      setMessage(`Local path copied: ${nextTarget.localPath}`);
       return;
     }
     setMessage(`Opening ${nextTarget.localPath}`);
@@ -3863,7 +3865,7 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
             <button type="button" className="egnyte-action-card primary" onClick={openLinkedFolder}>
               <span className="egnyte-action-icon"><Icon name="export" size={18}/></span>
               <strong>Open Egnyte Folder</strong>
-              <span>Open Egnyte Web and copy the local folder path.</span>
+              <span>Open the local synced folder path in Finder or File Explorer.</span>
             </button>
             <button type="button" className="egnyte-action-card" onClick={onChangePath}>
               <span className="egnyte-action-icon"><Icon name="edit" size={18}/></span>

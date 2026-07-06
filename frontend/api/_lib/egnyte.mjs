@@ -47,6 +47,51 @@ function tokenExpiresAt(payload) {
   return Date.now() + DEFAULT_TOKEN_TTL_MS;
 }
 
+function tokenExpiryFromEnv(env) {
+  const raw = firstEnv(env, [
+    "EGNYTE_ACCESS_TOKEN_EXPIRES_AT",
+    "EGNYTE_TOKEN_EXPIRES_AT",
+  ]);
+  if (!raw) return 0;
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function tokenIsFresh(expiresAt) {
+  return !expiresAt || expiresAt > Date.now() + TOKEN_EXPIRY_SKEW_MS;
+}
+
+async function requestEgnyteOAuthToken({ url, cacheKey, body, fetchImpl }) {
+  const cached = oauthTokenCache.get(cacheKey);
+  if (cached?.token && cached.expiresAt > Date.now()) return cached.token;
+  if (oauthTokenRequests.has(cacheKey)) return oauthTokenRequests.get(cacheKey);
+
+  const request = (async () => {
+    const response = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.access_token) {
+      const status = response.status === 429 ? 429 : 502;
+      throw egnyteAuthError(egnyteAuthMessage(payload), {
+        status,
+        code: status === 429 ? "EGNYTE_RATE_LIMIT" : "EGNYTE_AUTH",
+      });
+    }
+    oauthTokenCache.set(cacheKey, {
+      token: payload.access_token,
+      expiresAt: tokenExpiresAt(payload),
+    });
+    return payload.access_token;
+  })().finally(() => {
+    oauthTokenRequests.delete(cacheKey);
+  });
+  oauthTokenRequests.set(cacheKey, request);
+  return request;
+}
+
 export function defaultEgnyteFolder(env = process.env) {
   return normalizeEgnytePath(env.EGNYTE_DEFAULT_FOLDER_PATH || DEFAULT_FOLDER);
 }
@@ -104,8 +149,12 @@ export function egnyteDomain(env = process.env) {
 }
 
 export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetch } = {}) {
-  const direct = env.EGNYTE_ACCESS_TOKEN || env.EGNYTE_OAUTH_TOKEN || env.EGNYTE_BEARER_TOKEN;
-  if (direct) return direct;
+  const direct = firstEnv(env, [
+    "EGNYTE_ACCESS_TOKEN",
+    "EGNYTE_OAUTH_TOKEN",
+    "EGNYTE_BEARER_TOKEN",
+  ]);
+  if (direct && tokenIsFresh(tokenExpiryFromEnv(env))) return direct;
 
   const domain = egnyteDomain(env);
   const clientId = firstEnv(env, [
@@ -124,6 +173,25 @@ export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetc
   }
 
   const url = env.EGNYTE_TOKEN_URL || `https://${domain}/puboauth/token`;
+  const refreshToken = firstEnv(env, [
+    "EGNYTE_REFRESH_TOKEN",
+    "EGNYTE_OAUTH_REFRESH_TOKEN",
+  ]);
+  if (refreshToken) {
+    const refreshBody = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    });
+    return requestEgnyteOAuthToken({
+      url,
+      cacheKey: tokenCacheKey({ domain, tokenUrl: url, clientId, username: `refresh:${refreshToken}` }),
+      body: refreshBody,
+      fetchImpl,
+    });
+  }
+
   const username = firstEnv(env, [
     "EGNYTE_USERNAME",
     "EGNYTE_SERVICE_USERNAME",
@@ -138,10 +206,6 @@ export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetc
     throw egnyteConfigError("Egnyte service user credentials are not configured. Set EGNYTE_USERNAME/EGNYTE_PASSWORD or EGNYTE_ACCESS_TOKEN.");
   }
   const cacheKey = tokenCacheKey({ domain, tokenUrl: url, clientId, username });
-  const cached = oauthTokenCache.get(cacheKey);
-  if (cached?.token && cached.expiresAt > Date.now()) return cached.token;
-  if (oauthTokenRequests.has(cacheKey)) return oauthTokenRequests.get(cacheKey);
-
   const body = new URLSearchParams({
     grant_type: "password",
     username,
@@ -149,30 +213,7 @@ export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetc
     client_id: clientId,
     client_secret: clientSecret,
   });
-  const request = (async () => {
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload?.access_token) {
-      const status = response.status === 429 ? 429 : 502;
-      throw egnyteAuthError(egnyteAuthMessage(payload), {
-        status,
-        code: status === 429 ? "EGNYTE_RATE_LIMIT" : "EGNYTE_AUTH",
-      });
-    }
-    oauthTokenCache.set(cacheKey, {
-      token: payload.access_token,
-      expiresAt: tokenExpiresAt(payload),
-    });
-    return payload.access_token;
-  })().finally(() => {
-    oauthTokenRequests.delete(cacheKey);
-  });
-  oauthTokenRequests.set(cacheKey, request);
-  return request;
+  return requestEgnyteOAuthToken({ url, cacheKey, body, fetchImpl });
 }
 
 export async function browseEgnyteFolders({ path, env = process.env, fetchImpl = fetch } = {}) {

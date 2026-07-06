@@ -107,6 +107,53 @@ test("getEgnyteAccessToken accepts OAuth client id/secret aliases with explicit 
   assert.equal(token, "token-from-aliases");
 });
 
+test("getEgnyteAccessToken uses a refresh token without the password grant", async () => {
+  const token = await getEgnyteAccessToken({
+    env: {
+      EGNYTE_DOMAIN: "example.egnyte.com",
+      EGNYTE_CLIENT_ID: "refresh-client-id",
+      EGNYTE_CLIENT_SECRET: "refresh-client-secret",
+      EGNYTE_REFRESH_TOKEN: "stored-refresh-token",
+    },
+    fetchImpl: async (_url, options) => {
+      const body = options.body;
+      assert.equal(body.get("grant_type"), "refresh_token");
+      assert.equal(body.get("refresh_token"), "stored-refresh-token");
+      assert.equal(body.has("username"), false);
+      assert.equal(body.has("password"), false);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "token-from-refresh", expires_in: 2592000 }),
+      };
+    },
+  });
+  assert.equal(token, "token-from-refresh");
+});
+
+test("getEgnyteAccessToken refreshes an expired static access token", async () => {
+  const token = await getEgnyteAccessToken({
+    env: {
+      EGNYTE_DOMAIN: "example.egnyte.com",
+      EGNYTE_CLIENT_ID: "expired-client-id",
+      EGNYTE_CLIENT_SECRET: "expired-client-secret",
+      EGNYTE_ACCESS_TOKEN: "expired-static-token",
+      EGNYTE_ACCESS_TOKEN_EXPIRES_AT: "2020-01-01T00:00:00.000Z",
+      EGNYTE_REFRESH_TOKEN: "expired-refresh-token",
+    },
+    fetchImpl: async (_url, options) => {
+      const body = options.body;
+      assert.equal(body.get("grant_type"), "refresh_token");
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "fresh-token-from-refresh", expires_in: 2592000 }),
+      };
+    },
+  });
+  assert.equal(token, "fresh-token-from-refresh");
+});
+
 test("getEgnyteAccessToken reuses a valid OAuth token", async () => {
   let calls = 0;
   const env = {
