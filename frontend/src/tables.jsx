@@ -22,7 +22,12 @@ import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
 import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
-import { INVOICE_TYPE_OPTIONS, invoiceTypeTone } from "./invoice-perspectives.js";
+import {
+  INVOICE_TYPE_OPTIONS,
+  invoicePerspectiveRole,
+  invoicePerspectiveRoleIsDerived,
+  invoiceTypeTone,
+} from "./invoice-perspectives.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
 import {
   canAttemptLocalFileOpen,
@@ -2266,7 +2271,7 @@ export const InvoiceTable = ({
     switch (key) {
       case "projectNumber": return (r.projectNumber || "").trim();
       case "name":          return (r.name || "").trim();
-      case "role":          return (r.role || "").trim();
+      case "role":          return invoicePerspectiveRole(r, rows).trim();
       case "pm": {
         // Sort by joined PM short-names so multi-PM rows have a stable key.
         // First-PM-name alone would be unstable when teams differ only in
@@ -2376,7 +2381,7 @@ export const InvoiceTable = ({
   // further subs — so its breakdown is the whole entry list.
   const rowSubList = (r) => {
     const allEntries = subInvoices?.get(r.sourceId) || [];
-    const visible = (r.role || "Prime") === "Prime"
+    const visible = invoicePerspectiveRole(r, rows) === "Prime"
       ? allEntries.filter(s => (s.kind || "sub") === "sub")
       : allEntries;
     return withPerspectiveRows(r, visible);
@@ -2739,7 +2744,8 @@ export const InvoiceTable = ({
                   //                    (kind='sub', unlimited).
                   // Prime entry sorted first so the upstream relationship is
                   // visually prominent above MSMM's own subs.
-                  const role       = r.role || "Prime";
+                  const role       = invoicePerspectiveRole(r, rows);
+                  const roleDerived = invoicePerspectiveRoleIsDerived(r, rows);
                   const isPrimeRow = role === "Prime";
                   const primeEntry = allEntries.find(s => s.kind === "prime");
                   const subEntries = allEntries.filter(s => (s.kind || "sub") === "sub");
@@ -2849,11 +2855,20 @@ export const InvoiceTable = ({
                       </div>
                     </td>
                     <td>
-                      <EditableCell value={role} type="select" options={["Prime","Sub"]}
-                        onChange={v => onChangeRole?.(r, v)}
-                        render={v => v
-                          ? <span className={`chip ${v === "Prime" ? "blue" : "accent"}`} style={{ fontSize: 11 }}>{v}</span>
-                          : <span className="empty-cell">—</span>}/>
+                      {roleDerived ? (
+                        <span
+                          className={`chip ${role === "Prime" ? "blue" : "accent"}`}
+                          style={{ fontSize: 11 }}
+                          title="Role is derived from the selected ENG/MHZ perspective">
+                          {role}
+                        </span>
+                      ) : (
+                        <EditableCell value={role} type="select" options={["Prime","Sub"]}
+                          onChange={v => onChangeRole?.(r, v)}
+                          render={v => v
+                            ? <span className={`chip ${v === "Prime" ? "blue" : "accent"}`} style={{ fontSize: 11 }}>{v}</span>
+                            : <span className="empty-cell">—</span>}/>
+                      )}
                     </td>
                     <td>
                       <EditableCell value={r.type} type="select" options={invoiceTypeOptions}

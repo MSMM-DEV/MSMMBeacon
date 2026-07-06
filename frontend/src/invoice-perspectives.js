@@ -72,3 +72,20 @@ export function linkedInvoiceIdsFor(row, rows = []) {
 
   return ids.includes(row.id) ? ids : [row.id, ...ids];
 }
+
+export function invoicePerspectiveRoleIsDerived(row, rows = []) {
+  const type = row?.type || "ENG";
+  if (type === "MHZ") return true;
+  if (type !== "ENG") return false;
+  return linkedInvoiceIdsFor(row, rows).some(id => {
+    const linked = rows.find(candidate => candidate.id === id);
+    return linked?.id !== row?.id && linked?.type === "MHZ";
+  });
+}
+
+export function invoicePerspectiveRole(row, rows = []) {
+  const type = row?.type || "ENG";
+  if (type === "MHZ") return "Prime";
+  if (type === "ENG" && invoicePerspectiveRoleIsDerived(row, rows)) return "Sub";
+  return row?.role || "Prime";
+}

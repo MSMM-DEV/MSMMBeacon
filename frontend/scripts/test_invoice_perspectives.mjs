@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   HZ_INVOICE_TYPES,
   INVOICE_TYPE_OPTIONS,
+  invoicePerspectiveRole,
+  invoicePerspectiveRoleIsDerived,
   invoiceTypeTone,
   linkedInvoiceIdsFor,
   linkedInvoicePatch,
@@ -52,5 +54,12 @@ assert.deepEqual(
   ["eng-2026", "mhz-2026", "mhz-number-only"].sort()
 );
 assert.deepEqual(linkedInvoiceIdsFor(rows[2], rows), ["pm-2026"]);
+
+assert.equal(invoicePerspectiveRole({ ...rows[0], role: "Sub" }, rows), "Sub");
+assert.equal(invoicePerspectiveRole({ ...rows[1], role: "Sub" }, rows), "Prime");
+assert.equal(invoicePerspectiveRole({ id: "plain-eng", type: "ENG", role: "Prime" }, rows), "Prime");
+assert.equal(invoicePerspectiveRoleIsDerived(rows[0], rows), true);
+assert.equal(invoicePerspectiveRoleIsDerived(rows[1], rows), true);
+assert.equal(invoicePerspectiveRoleIsDerived(rows[2], rows), false);
 
 console.log("invoice perspective helper tests passed");
