@@ -86,18 +86,18 @@ test("getEgnyteAccessToken accepts OAuth client id/secret aliases with explicit 
   const token = await getEgnyteAccessToken({
     env: {
       EGNYTE_DOMAIN: "example.egnyte.com",
-      EGNYTE_CLIENT_ID: "app-client-id",
-      EGNYTE_CLIENT_SECRET: "app-client-secret",
-      EGNYTE_USERNAME: "service-user",
-      EGNYTE_PASSWORD: "service-password",
+      EGNYTE_CLIENT_ID: "alias-app-client-id",
+      EGNYTE_CLIENT_SECRET: "alias-app-client-secret",
+      EGNYTE_USERNAME: "alias-service-user",
+      EGNYTE_PASSWORD: "alias-service-password",
     },
     fetchImpl: async (_url, options) => {
       const body = options.body;
       assert.equal(body.get("grant_type"), "password");
-      assert.equal(body.get("client_id"), "app-client-id");
-      assert.equal(body.get("client_secret"), "app-client-secret");
-      assert.equal(body.get("username"), "service-user");
-      assert.equal(body.get("password"), "service-password");
+      assert.equal(body.get("client_id"), "alias-app-client-id");
+      assert.equal(body.get("client_secret"), "alias-app-client-secret");
+      assert.equal(body.get("username"), "alias-service-user");
+      assert.equal(body.get("password"), "alias-service-password");
       return {
         ok: true,
         json: async () => ({ access_token: "token-from-aliases" }),
@@ -105,4 +105,49 @@ test("getEgnyteAccessToken accepts OAuth client id/secret aliases with explicit 
     },
   });
   assert.equal(token, "token-from-aliases");
+});
+
+test("getEgnyteAccessToken reuses a valid OAuth token", async () => {
+  let calls = 0;
+  const env = {
+    EGNYTE_DOMAIN: "example.egnyte.com",
+    EGNYTE_CLIENT_ID: "cache-client-id",
+    EGNYTE_CLIENT_SECRET: "cache-client-secret",
+    EGNYTE_USERNAME: "service-user",
+    EGNYTE_PASSWORD: "service-password",
+  };
+  const fetchImpl = async () => {
+    calls += 1;
+    return {
+      ok: true,
+      json: async () => ({ access_token: `cached-token-${calls}`, expires_in: 3600 }),
+    };
+  };
+
+  const first = await getEgnyteAccessToken({ env, fetchImpl });
+  const second = await getEgnyteAccessToken({ env, fetchImpl });
+
+  assert.equal(first, "cached-token-1");
+  assert.equal(second, "cached-token-1");
+  assert.equal(calls, 1);
+});
+
+test("getEgnyteAccessToken preserves Egnyte OAuth rate limit failures", async () => {
+  await assert.rejects(
+    () => getEgnyteAccessToken({
+      env: {
+        EGNYTE_DOMAIN: "example.egnyte.com",
+        EGNYTE_CLIENT_ID: "rate-client-id",
+        EGNYTE_CLIENT_SECRET: "rate-client-secret",
+        EGNYTE_USERNAME: "service-user",
+        EGNYTE_PASSWORD: "service-password",
+      },
+      fetchImpl: async () => ({
+        ok: false,
+        status: 429,
+        json: async () => ({ message: "Oauth request from this source has gone over its rate limit quota." }),
+      }),
+    }),
+    error => error.status === 429 && /rate limit/i.test(error.message)
+  );
 });

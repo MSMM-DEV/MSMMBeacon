@@ -12,11 +12,13 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error("[egnyte/folders]", error);
     const rawStatus = Number(error?.status || 0);
-    const status = [400, 401, 403, 404, 500, 502].includes(rawStatus) ? rawStatus : 502;
+    const status = [400, 401, 403, 404, 429, 500, 502].includes(rawStatus) ? rawStatus : 502;
     const message = status === 401
       ? "Sign in again to browse Egnyte folders."
       : error?.code === "EGNYTE_CONFIG"
         ? error.message
+        : status === 429
+          ? "Egnyte OAuth is rate limited right now. Please wait a few minutes and try again."
         : error?.code === "EGNYTE_AUTH"
           ? "Egnyte rejected the configured credentials. Check the Egnyte OAuth app and service-user environment variables."
           : status === 403
@@ -24,6 +26,6 @@ export default async function handler(req, res) {
             : status === 404
               ? "That Egnyte folder was not found."
               : "Egnyte folders could not be loaded.";
-    json(res, status, { error: message });
+    json(res, status, { error: message, code: error?.code || undefined });
   }
 }
