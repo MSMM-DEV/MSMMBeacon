@@ -9,6 +9,7 @@ import {
   starOptions,
   starsRank,
 } from "../src/star-rating.js";
+import { hotLeadStatsBreakdown } from "../src/stats.js";
 
 test("hot leads use a 3-star rating scale while the default stays 5-star", () => {
   assert.equal(DEFAULT_STAR_MAX, 5);
@@ -43,4 +44,27 @@ test("hot leads table rating cell has a 3-star visual guard", async () => {
   assert.match(tableSource, /className="td hotlead-rating"/);
   assert.match(tableSource, /<StarRating value=\{r\.stars\}\s+max=\{HOT_LEAD_STAR_MAX\}/);
   assert.match(css, /\.hotlead-rating\s+\.star-btn:nth-of-type\(n\+4\)/);
+});
+
+test("hot lead stats sum anticipated amounts by rating and leave invalid stars untagged", () => {
+  const leads = [
+    { stars: 3, anticipatedAmount: 1000 },
+    { stars: "3", anticipatedAmount: 2500 },
+    { stars: 2, anticipatedAmount: 800 },
+    { stars: 1, anticipatedAmount: 125 },
+    { stars: null, anticipatedAmount: 400 },
+    {},
+    { stars: 4, anticipatedAmount: 900 },
+    { stars: 0, anticipatedAmount: 75 },
+  ];
+
+  assert.deepEqual(hotLeadStatsBreakdown(leads), {
+    total: 5800,
+    items: [
+      { key: "3", label: "3-star", value: 3500 },
+      { key: "2", label: "2-star", value: 800 },
+      { key: "1", label: "1-star", value: 125 },
+      { key: "untagged", label: "Untagged", value: 1375 },
+    ],
+  });
 });

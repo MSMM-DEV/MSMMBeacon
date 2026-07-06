@@ -5,6 +5,7 @@ import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenB
   CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS } from "./data.js";
 import { SearchableSelect, StarRating } from "./primitives.jsx";
 import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
+import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
 
 // ============ CREATE MODAL ============
 // "New X" flow for potential / events / clients / companies.
@@ -1309,17 +1310,14 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
                    placeholder="e.g. 24-101"/>
           </Field>
           <Field label="Type">
-            <div className="seg" style={{ maxWidth: 220 }}>
-              <button type="button"
-                      className={"seg-btn" + (form.type === "ENG" ? " active" : "")}
-                      onClick={() => set("type", "ENG")}>
-                ENG
-              </button>
-              <button type="button"
-                      className={"seg-btn" + (form.type === "PM" ? " active" : "")}
-                      onClick={() => set("type", "PM")}>
-                PM
-              </button>
+            <div className="seg" style={{ maxWidth: 280 }}>
+              {INVOICE_TYPE_OPTIONS.map(t => (
+                <button key={t} type="button"
+                        className={"seg-btn" + (form.type === t ? " active" : "")}
+                        onClick={() => set("type", t)}>
+                  {t}
+                </button>
+              ))}
             </div>
           </Field>
           <Field label="Total Contract Value">

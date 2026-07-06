@@ -1934,11 +1934,11 @@ export const licenseRunReminders = () =>
 // project (Client / Prime / Sub), and flags rows that have a linked
 // anticipated_invoice.
 //
-// Role resolution: adapters fold prime_company_id into clientId, so
-// `p.clientId === entity.id` covers both "this client is the project's
-// client" and "this company is the project's prime". We disambiguate by
-// entity.type: Client-typed entity → "Client"; otherwise → "Prime".
-// Sub matches always come second.
+// Role resolution: older adapters sometimes fold prime_company_id into
+// clientId, while newer awarded/project-item shapes can expose an explicit
+// primeId. A client_id match is "Client" for client rows and "Prime" for
+// firm rows; an explicit primeId match is always "Prime". Sub matches are
+// the fallback.
 // ----------------------------------------------------------------------
 export function linkedProjectsFor(entity, projectsByType, invoice) {
   if (!entity) return [];
@@ -1953,9 +1953,10 @@ export function linkedProjectsFor(entity, projectsByType, invoice) {
     const list = projectsByType?.[statusKey] || [];
     for (const p of list) {
       const isPrimaryMatch = p.clientId === entity.id;
+      const isPrimeMatch = p.primeId === entity.id;
       const subMatch = (p.subs || []).some(s => s.cId === entity.id);
-      if (!isPrimaryMatch && !subMatch) continue;
-      const role = isPrimaryMatch ? (isClient ? "Client" : "Prime") : "Sub";
+      if (!isPrimaryMatch && !isPrimeMatch && !subMatch) continue;
+      const role = isPrimaryMatch ? (isClient ? "Client" : "Prime") : (isPrimeMatch ? "Prime" : "Sub");
       const inv  = invoiceBySource.get(p.id);
       out.push({
         id: p.id,

@@ -15,6 +15,7 @@ import {
 } from "./data.js";
 import { SearchableSelect } from "./primitives.jsx";
 import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
+import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
 
 // Multi-user picker used by both the PMs field and Events attendees.
 // Search-as-you-type dropdown; selected users render as chips with remove-x.
@@ -298,7 +299,7 @@ export const DetailDrawer = ({
     invoice: [
       { k: "name",           label: "Project Name" },
       { k: "projectNumber",  label: "Project Number",          type: "mono" },
-      { k: "type",           label: "Type",                    type: "select", options: ["ENG","PM"] },
+      { k: "type",           label: "Type",                    type: "select", options: INVOICE_TYPE_OPTIONS },
       { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "amount",         label: "Total Contract Value",    type: "money" },
       { k: "msmmAmount",     label: "MSMM Portion",            type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
@@ -988,7 +989,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
       subtitle: "Carries to Anticipated Invoice · Awarded row stays",
       carried: ["year","name","projectNumber","pmIds","msmmRemaining"],
       newFields: [
-        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: INVOICE_TYPE_OPTIONS, value: "ENG",
           hint: "Determines how billing is categorized in Anticipated Invoice." },
       ]
     },
@@ -998,7 +999,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
       subtitle: "Carries to Anticipated Invoice · Potential row stays",
       carried: ["year","name","projectNumber","pmIds"],
       newFields: [
-        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: INVOICE_TYPE_OPTIONS, value: "ENG",
           hint: "Determines how billing is categorized in Anticipated Invoice." },
       ]
     },
@@ -1051,7 +1052,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
       subtitle: "Removes from Closed Out · status flips to Awarded · revives the project's Invoice rows (or spawns one)",
       carried: ["year","name","projectNumber","pmIds"],
       newFields: [
-        { k: "_invoiceType", label: "Invoice Type", type: "select", options: ["ENG","PM"], value: "ENG",
+        { k: "_invoiceType", label: "Invoice Type", type: "select", options: INVOICE_TYPE_OPTIONS, value: "ENG",
           hint: "Determines how billing is categorized in Anticipated Invoice." },
         { k: "_amount",    label: "Contract Amount (optional)", type: "money", value: 0 },
         { k: "_remaining", label: "MSMM Remaining (optional)", type: "money", value: 0 },

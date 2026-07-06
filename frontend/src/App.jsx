@@ -33,6 +33,13 @@ import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import { invoiceIsOrange } from "./invoice-orange.js";
+import { hotLeadStatsBreakdown } from "./stats.js";
+import {
+  HZ_INVOICE_TYPES,
+  linkedInvoiceIdsFor,
+  linkedInvoicePatch,
+  projectNameSuggestsMhz,
+} from "./invoice-perspectives.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
   MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth,
@@ -1434,6 +1441,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 ytdActualOverride:   invRow.ytd_actual_override   ?? null,
                 rollforwardOverride: invRow.rollforward_override  ?? null,
               }, ...rs]);
+              await maybeCreateHzInvoiceSibling(invRow, {
+                pmIds: existing.pmIds || [],
+                role: existing.role || "Prime",
+              });
               showToast("Orange tagged · Invoice row auto-created", "check");
             } catch (e) {
               showToast(`Orange Invoice creation failed: ${e.message || e}`, "x");
@@ -1878,17 +1889,27 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "may_invoice_number","jun_invoice_number","jul_invoice_number","aug_invoice_number",
     "sep_invoice_number","oct_invoice_number","nov_invoice_number","dec_invoice_number",
   ];
+  const linkedInvoiceIdsForExisting = (row, { sameYear = false } = {}) => {
+    const ids = linkedInvoiceIdsFor(row, invoice);
+    if (!sameYear) return ids;
+    return ids.filter(linkedId => {
+      const linked = invoice.find(r => r.id === linkedId);
+      return linked?.year === row?.year;
+    });
+  };
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
+    const existing = invoice.find(r => r.id === id);
+    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
     setInvoice(rows => rows.map(r => {
-      if (r.id !== id) return r;
+      if (!ids.includes(r.id)) return r;
       const vals = [...r.values];
       vals[monthIdx] = nv;
       return { ...r, values: vals };
     }));
     const col = INVOICE_MONTH_COLS[monthIdx];
     if (!col) return;
-    supabase.from("anticipated_invoice").update({ [col]: nv }).eq("id", id)
+    supabase.from("anticipated_invoice").update({ [col]: nv }).in("id", ids)
       .then(({ error }) => {
         if (error) showToast(`Save failed: ${error.message}`, "x");
       });
@@ -1897,15 +1918,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // numeric → freeze that month's MSMM value at the override.
   const updateInvoiceMsmmCell = (id, monthIdx, v) => {
     const nv = (v == null || v === "") ? null : Number(v);
+    const existing = invoice.find(r => r.id === id);
+    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
     setInvoice(rows => rows.map(r => {
-      if (r.id !== id) return r;
+      if (!ids.includes(r.id)) return r;
       const next = [...(r.msmmValues || Array(12).fill(null))];
       next[monthIdx] = nv;
       return { ...r, msmmValues: next };
     }));
     const col = INVOICE_MSMM_MONTH_COLS[monthIdx];
     if (!col) return;
-    supabase.from("anticipated_invoice").update({ [col]: nv }).eq("id", id)
+    supabase.from("anticipated_invoice").update({ [col]: nv }).in("id", ids)
       .then(({ error }) => {
         if (error) showToast(`Save failed: ${error.message}`, "x");
       });
@@ -1920,18 +1943,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateInvoicePrimePaid = (id, monthIdx, paid) => {
     const col = INVOICE_PAID_MONTH_COLS[monthIdx];
     if (!col) return;
+    const existing = invoice.find(r => r.id === id);
+    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
     const apply = () => {
       setInvoice(rows => rows.map(r => {
-        if (r.id !== id) return r;
+        if (!ids.includes(r.id)) return r;
         const next = [...(r.primePaid || Array(12).fill(false))];
         next[monthIdx] = paid;
         return { ...r, primePaid: next };
       }));
-      supabase.from("anticipated_invoice").update({ [col]: paid }).eq("id", id)
+      supabase.from("anticipated_invoice").update({ [col]: paid }).in("id", ids)
         .then(({ error }) => {
           if (error) {
             setInvoice(rows => rows.map(r => {
-              if (r.id !== id) return r;
+              if (!ids.includes(r.id)) return r;
               const next = [...(r.primePaid || Array(12).fill(false))];
               next[monthIdx] = !paid;
               return { ...r, primePaid: next };
@@ -1977,19 +2002,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!col) return;
     const clean = (value == null || String(value).trim() === "") ? null : String(value).trim();
     const existing = invoice.find(r => r.id === id);
+    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
     const prevVal = existing?.invoiceNumbers?.[monthIdx] ?? null;
     if (prevVal === clean) return;
     setInvoice(rows => rows.map(r => {
-      if (r.id !== id) return r;
+      if (!ids.includes(r.id)) return r;
       const next = [...(r.invoiceNumbers || Array(12).fill(null))];
       next[monthIdx] = clean;
       return { ...r, invoiceNumbers: next };
     }));
-    supabase.from("anticipated_invoice").update({ [col]: clean }).eq("id", id)
+    supabase.from("anticipated_invoice").update({ [col]: clean }).in("id", ids)
       .then(({ error }) => {
         if (error) {
           setInvoice(rows => rows.map(r => {
-            if (r.id !== id) return r;
+            if (!ids.includes(r.id)) return r;
             const next = [...(r.invoiceNumbers || Array(12).fill(null))];
             next[monthIdx] = prevVal;
             return { ...r, invoiceNumbers: next };
@@ -2038,23 +2064,43 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateInvoice = (id, patch) => {
     const existing = invoice.find(r => r.id === id);
     if (!existing) return;
-    const ids = "invoiceOrange" in patch ? invoiceGroupIdsFor(existing) : [id];
-    setInvoice(rows => rows.map(r => ids.includes(r.id) ? { ...r, ...patch } : r));
-    const dbPatch = {};
-    for (const [uiKey, dbCol] of Object.entries(INVOICE_COL_MAP)) {
-      if (uiKey in patch) dbPatch[dbCol] = patch[uiKey];
-    }
+    const syncedPatch = linkedInvoicePatch(patch);
+    const syncLinked = Object.keys(syncedPatch).length > 0;
+    const ids = syncLinked ? linkedInvoiceIdsForExisting(existing, { sameYear: "year" in patch }) : [id];
+    const selfPatch = patch;
+    setInvoice(rows => rows.map(r => {
+      if (r.id === id) return { ...r, ...selfPatch };
+      if (ids.includes(r.id)) return { ...r, ...syncedPatch };
+      return r;
+    }));
+    const buildInvoiceDbPatch = (uiPatch) => {
+      const dbPatch = {};
+      for (const [uiKey, dbCol] of Object.entries(INVOICE_COL_MAP)) {
+        if (uiKey in uiPatch) dbPatch[dbCol] = uiPatch[uiKey];
+      }
+      return dbPatch;
+    };
+    const dbPatch = buildInvoiceDbPatch(patch);
+    const siblingDbPatch = buildInvoiceDbPatch(syncedPatch);
     if (Object.keys(dbPatch).length > 0) {
-      const query = supabase.from("anticipated_invoice").update(dbPatch);
-      const save = ids.length === 1 && ids[0] === id ? query.eq("id", id) : query.in("id", ids);
-      save
+      supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
         .then(({ error }) => {
           if (error) showToast(`Save failed: ${error.message}`, "x");
         });
     }
+    const siblingIds = ids.filter(rowId => rowId !== id);
+    if (siblingIds.length > 0 && Object.keys(siblingDbPatch).length > 0) {
+      supabase.from("anticipated_invoice").update(siblingDbPatch).in("id", siblingIds)
+        .then(({ error }) => {
+          if (error) showToast(`Linked MHZ/ENG sync failed: ${error.message}`, "x");
+        });
+    }
     if ("pmIds" in patch) {
-      syncJoinUsers(id, existing.pmIds, patch.pmIds,
-        "anticipated_invoice_pms", "anticipated_invoice_id");
+      for (const rowId of ids) {
+        const row = invoice.find(r => r.id === rowId);
+        syncJoinUsers(rowId, row?.pmIds || [], patch.pmIds,
+          "anticipated_invoice_pms", "anticipated_invoice_id");
+      }
     }
   };
 
@@ -2123,6 +2169,58 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     return cleanPath;
   };
 
+  const maybeCreateHzInvoiceSibling = async (dbRow, { pmIds = [], role = "Prime", prompt = true } = {}) => {
+    if (!dbRow || !projectNameSuggestsMhz(dbRow.project_name)) return null;
+    const primaryType = dbRow.type || "ENG";
+    if (!HZ_INVOICE_TYPES.includes(primaryType)) return null;
+    const siblingType = primaryType === "MHZ" ? "ENG" : "MHZ";
+    const projectNumber = normInvoiceNumber(dbRow.project_number);
+    const alreadyLocal = invoice.some(r =>
+      (r.type || "ENG") === siblingType &&
+      Number(r.year) === Number(dbRow.year) &&
+      (
+        (dbRow.source_project_id && r.sourceId === dbRow.source_project_id) ||
+        (projectNumber && normInvoiceNumber(r.projectNumber) === projectNumber)
+      )
+    );
+    if (alreadyLocal) return null;
+    if (prompt) {
+      const ok = window.confirm(
+        `${dbRow.project_name} looks like an HZ/MHZ project.\n\nAdd it to both ENG and MHZ invoice categories and keep the two perspectives linked?`
+      );
+      if (!ok) return null;
+    }
+    const payload = Object.fromEntries(Object.entries(dbRow).filter(([key]) =>
+      !["id", "type", "created_at", "updated_at", "pms"].includes(key)
+    ));
+    payload.type = siblingType;
+    try {
+      const { data: sibling, error } = await supabase
+        .from("anticipated_invoice")
+        .insert(payload)
+        .select("*, pms:anticipated_invoice_pms(user_id)")
+        .single();
+      if (error) throw error;
+      if (pmIds.length > 0) {
+        const { error: pmErr } = await supabase
+          .from("anticipated_invoice_pms")
+          .insert(pmIds.map(uid => ({
+            anticipated_invoice_id: sibling.id,
+            user_id: uid,
+          })));
+        if (pmErr) throw pmErr;
+      }
+      setInvoice(rs => rs.some(r => r.id === sibling.id)
+        ? rs
+        : [...rs, { ...adaptInvoiceRow(sibling, { role }), pmIds }]);
+      showToast(`${siblingType} perspective added and linked`, "link");
+      return sibling;
+    } catch (e) {
+      showToast(`Linked ${siblingType} perspective failed: ${e.message || e}`, "x");
+      return null;
+    }
+  };
+
   // ---- Rolling-window year-aware month edits ---------------------------------
   // The InvoiceTable shows a sliding 16-month window that crosses calendar
   // years, but each month's data lives in the anticipated_invoice row for that
@@ -2168,6 +2266,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return null;
     }
     setInvoice(rs => [...rs, adaptInvoiceRow(data, { role: mergedRow.role || "Prime" })]);
+    const siblingType = (mergedRow.type || "ENG") === "MHZ" ? "ENG" : "MHZ";
+    const hasHzSibling = HZ_INVOICE_TYPES.includes(mergedRow.type || "ENG") && invoice.some(r =>
+      (r.type || "ENG") === siblingType &&
+      (
+        (mergedRow.sourceId && r.sourceId === mergedRow.sourceId) ||
+        (mergedRow.projectNumber && normInvoiceNumber(r.projectNumber) === normInvoiceNumber(mergedRow.projectNumber))
+      )
+    );
+    if (hasHzSibling) {
+      await maybeCreateHzInvoiceSibling(data, {
+        pmIds: mergedRow.pmIds || [],
+        role: mergedRow.role || "Prime",
+        prompt: false,
+      });
+    }
     return data.id;
   };
   const editInvoiceTotalMonth = async (mergedRow, year, monthIdx, v) => {
@@ -2945,6 +3058,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             }
             // Replace the temp local id with the DB id so future edits hit it.
             setInvoice(rs => rs.map(r => r.id === invRow.id ? { ...r, id: invData.id } : r));
+            await maybeCreateHzInvoiceSibling(invData, {
+              pmIds: rest.pmIds || [],
+              role: row.role || invRow.role || "Prime",
+            });
             autoLink(rest.projectNumber);
             offerUndo("Invoice row created from Awarded project", snap, async () => {
               const { error: delErr } = await supabase
@@ -3008,6 +3125,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           setInvoice(rs => rs.map(r => r.id === invRow.id
             ? { ...r, id: invData.id }
             : r));
+          await maybeCreateHzInvoiceSibling(invData, {
+            pmIds: rest.pmIds || [],
+            role: row.role || invRow.role || "Prime",
+          });
           // Delete the potential row from the projects table.
           const { error: delErr } = await supabase
             .from("projects").delete().eq("id", row.id);
@@ -3408,6 +3529,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           setInvoice(rs => rs.map(r => r.id === tempInvId
             ? { ...r, id: invData.id }
             : r));
+          await maybeCreateHzInvoiceSibling(invData, {
+            pmIds: row.pmIds || [],
+            role: row.role || invRow.role || "Prime",
+          });
           offerUndo(
             "Reopened as Active · Invoice row spawned",
             snap,
@@ -3715,7 +3840,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (table === "hotleads")   setHotLeads(rs => [uiRow, ...rs]);
     if (table === "clients")    setClients(rs => [uiRow, ...rs]);
     if (table === "companies")  setCompanies(rs => [uiRow, ...rs]);
-    if (table === "invoice")    setInvoice(rs => [uiRow, ...rs]);
+    if (table === "invoice") {
+      setInvoice(rs => [uiRow, ...rs]);
+      maybeCreateHzInvoiceSibling(dbRow, { pmIds: extras.pmIds || [], role: uiRow.role || "Prime" });
+    }
     if (table === "openbids")   setOpenBids(rs => [uiRow, ...rs]);
     // Orange potential auto-creates an Anticipated Invoice row tagged with
     // source_potential_id so the Invoice tab picks up the stripe.
@@ -3737,6 +3865,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         values: Array(12).fill(0),
       };
       setInvoice(rs => [invUiRow, ...rs]);
+      maybeCreateHzInvoiceSibling(ir, { pmIds: uiRow.pmIds || [], role: invUiRow.role || "Prime" });
     }
     setFlashId(uiRow.id);
     setTimeout(() => setFlashId(null), 1500);
@@ -4395,11 +4524,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   }));
 
   const stats = useMemo(() => {
-    // Proposals card = the INCOMING pipeline: anticipated $ + entry count
-    // across Open Bids + Hot Leads (the two pre-Proposal trackers).
-    const propAmt = openBids.reduce((a,r) => a + (r.anticipatedAmount || 0), 0)
-                  + hotLeads.reduce((a,r) => a + (r.anticipatedAmount || 0), 0);
-    const propCount = openBids.length + hotLeads.length;
+    const hotLeadBreakdown = hotLeadStatsBreakdown(hotLeads);
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
     // In-Between: paused projects (merged) — contract value sitting on hold.
     const paused = invoiceMerged.filter(r => r.billingState === "between");
@@ -4411,12 +4536,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .filter(r => (r.billingState || "active") !== "closed")
       .reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
-      { label: "Proposals",           val: propAmt, sub: `${propCount} submittals`, spark: [2,3,3,4,4,5,5,6,7,7] },
-      { label: "Active backlog",      val: awd, sub: `${awarded.length} awarded`,     spark: [5,5,6,7,6,7,8,9,10,11] },
+      { label: "Hot Leads",           breakdown: hotLeadBreakdown },
+      { label: "Total Proposal/Awarded", val: awd, sub: `${awarded.length} awarded`, spark: [5,5,6,7,6,7,8,9,10,11] },
       { label: "In-Between",          val: btw, sub: `${paused.length} paused`,       spark: [4,4,3,4,3,3,4,3,3,4] },
       { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
-  }, [awarded, invoice, invoiceMerged, actualThru, openBids, hotLeads]);
+  }, [awarded, invoice, invoiceMerged, actualThru, hotLeads]);
 
   const tabCounts = {
     openbids: openBids.length,
@@ -4698,9 +4823,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             {stats.map((s, i) => (
               <div key={i} className="stat">
                 <div className="stat-label">{s.label}</div>
-                <div className="stat-val">{fmtMoney(s.val, false)}</div>
-                <div className="stat-delta" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{s.sub}</div>
-                <Sparkline values={s.spark}/>
+                {s.breakdown ? (
+                  <div className="stat-breakdown" aria-label="Hot leads by star rating">
+                    {s.breakdown.items.map(item => (
+                      <div key={item.key} className="stat-breakdown-item">
+                        <span className="stat-breakdown-label">{item.label}</span>
+                        <span className="stat-breakdown-val">{fmtMoney(item.value, false)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="stat-val">{fmtMoney(s.val, false)}</div>
+                )}
+                {s.sub && (
+                  <div className="stat-delta" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{s.sub}</div>
+                )}
+                {s.spark && <Sparkline values={s.spark}/>}
               </div>
             ))}
           </div>

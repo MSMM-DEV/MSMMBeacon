@@ -22,6 +22,7 @@ import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
 import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
+import { INVOICE_TYPE_OPTIONS, invoiceTypeTone } from "./invoice-perspectives.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
 import {
   canAttemptLocalFileOpen,
@@ -1003,7 +1004,7 @@ const buildOptions = () => {
     eventTypeOptions:    ["Partner", "AI", "Project", "Meetings", "Board Meetings", "Event"],
     hotLeadStatusOptions:["Scheduled", "Happened"],
     hotLeadTypeOptions:  ["Engineering", "AI"],
-    invoiceTypeOptions:  ["ENG", "PM"],
+    invoiceTypeOptions:  INVOICE_TYPE_OPTIONS,
     companyTypeOptions:  ["Prime", "Sub", "Multiple"],
     stageOptions:        ["Multi-Use Contract", "Single Use Contract (Project)", "AE Selected List"],
   };
@@ -1991,7 +1992,7 @@ export const InvoiceTable = ({
   onSaveEgnyteFolder, // (row, egnyteFolderPath) => Promise<string>
 }) => {
   const USERS = getUsers();
-  const invoiceTypeOptions = ["ENG", "PM"];
+  const invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
   const pmOptions = USERS.map(u => ({ value: u.id, label: u.name }));
   // A project month counts as "Actual" when the date-driven cutover has reached
   // it OR a bill has been attached to that month on the project's total/prime
@@ -2078,6 +2079,92 @@ export const InvoiceTable = ({
     a + (yrow(r, y)?.values || []).reduce((x, z) => x + (z || 0), 0), 0);
   const subYtdAll     = (s) => Object.values(s?.byYear || {}).reduce((a, yr) =>
     a + (yr.amounts || []).reduce((x, z) => x + (z || 0), 0), 0);
+  const linkedPerspectiveFor = (r, targetType) => {
+    const key = r.sourceId ? "" : String(r.projectNumber || "").trim().toLowerCase();
+    return rows.find(other =>
+      other.id !== r.id &&
+      (other.type || "ENG") === targetType &&
+      (
+        (r.sourceId && other.sourceId === r.sourceId) ||
+        (key && String(other.projectNumber || "").trim().toLowerCase() === key)
+      )
+    ) || null;
+  };
+  const invoiceTotalsAsSubYears = (r) => Object.fromEntries(
+    yearsOf(r).map(year => {
+      const yr = yrow(r, year);
+      return [year, {
+        amounts: [...(yr?.values || Array(12).fill(0))],
+        files: yr?.primeFiles || Array.from({ length: 12 }, () => []),
+        subInvoiceIds: Array(12).fill(null),
+        paid: yr?.primePaid || Array(12).fill(false),
+        paidAt: Array(12).fill(null),
+      }];
+    })
+  );
+  const invoiceMsmmAsSubYears = (r) => Object.fromEntries(
+    yearsOf(r).map(year => [year, {
+      amounts: Array.from({ length: 12 }, (_, m) => msmmAtYM(r, year, m)),
+      files: Array.from({ length: 12 }, () => []),
+      subInvoiceIds: Array(12).fill(null),
+      paid: Array(12).fill(false),
+      paidAt: Array(12).fill(null),
+    }])
+  );
+  const withPerspectiveRows = (r, entries) => {
+    const type = r.type || "ENG";
+    if (type === "ENG") {
+      const mhz = linkedPerspectiveFor(r, "MHZ");
+      if (!mhz) return entries;
+      const byYear = invoiceTotalsAsSubYears(mhz);
+      const next = entries.slice();
+      const idx = next.findIndex(e => (e.kind || "sub") === "prime" && /(^|\s)MHZ($|\s)/i.test(e.companyName || ""));
+      const base = idx >= 0 ? next[idx] : {
+        kind: "prime",
+        companyId: "__mhz_prime__",
+        companyName: "MHZ",
+        discipline: "Prime perspective",
+      };
+      const row = {
+        ...base,
+        contractAmount: mhz.amount || 0,
+        remainingStart: mhz.totalRemainingStart ?? mhz.amount ?? null,
+        amounts: byYear[THIS_YEAR]?.amounts || Array(12).fill(0),
+        files: byYear[THIS_YEAR]?.files || Array.from({ length: 12 }, () => []),
+        subInvoiceIds: Array(12).fill(null),
+        paid: byYear[THIS_YEAR]?.paid || Array(12).fill(false),
+        paidAt: Array(12).fill(null),
+        byYear,
+        syntheticPerspective: true,
+      };
+      if (idx >= 0) next[idx] = row; else next.unshift(row);
+      return next;
+    }
+    if (type === "MHZ") {
+      const eng = linkedPerspectiveFor(r, "ENG");
+      if (!eng) return entries;
+      const msmm = getCompanies().find(c => c.isMsmm) || { id: "__msmm_sub__", name: "MSMM" };
+      const byYear = invoiceMsmmAsSubYears(eng);
+      const already = entries.some(e => (e.kind || "sub") === "sub" && e.companyId === msmm.id);
+      if (already) return entries;
+      return [{
+        kind: "sub",
+        companyId: msmm.id,
+        companyName: msmm.name || "MSMM",
+        contractAmount: msmmContractShown(eng),
+        remainingStart: eng.remainingStart ?? null,
+        discipline: "MSMM perspective",
+        amounts: byYear[THIS_YEAR]?.amounts || Array(12).fill(0),
+        files: Array.from({ length: 12 }, () => []),
+        subInvoiceIds: Array(12).fill(null),
+        paid: Array(12).fill(false),
+        paidAt: Array(12).fill(null),
+        byYear,
+        syntheticPerspective: true,
+      }, ...entries];
+    }
+    return entries;
+  };
   // Index of the last visible month that is "Actual" by the global cutover —
   // drives the amber Actual▸Projection boundary line in the window.
   const lastActualWi = windowMonths.reduce(
@@ -2212,7 +2299,10 @@ export const InvoiceTable = ({
   // Default order (when no column sort is active): Type ENG before PM, then
   // by project name as a stable tiebreaker. Rows with neither type land last.
   // The Orange-at-bottom split is preserved because this runs per-group.
-  const typeRank = (r) => (r.type === "ENG" ? 0 : r.type === "PM" ? 1 : 2);
+  const typeRank = (r) => {
+    const idx = invoiceTypeOptions.indexOf(r.type || "ENG");
+    return idx === -1 ? invoiceTypeOptions.length : idx;
+  };
   const defaultCompare = (a, b) => {
     const t = typeRank(a) - typeRank(b);
     if (t !== 0) return t;
@@ -2286,9 +2376,10 @@ export const InvoiceTable = ({
   // further subs — so its breakdown is the whole entry list.
   const rowSubList = (r) => {
     const allEntries = subInvoices?.get(r.sourceId) || [];
-    return (r.role || "Prime") === "Prime"
+    const visible = (r.role || "Prime") === "Prime"
       ? allEntries.filter(s => (s.kind || "sub") === "sub")
       : allEntries;
+    return withPerspectiveRows(r, visible);
   };
   const idsWithSubs    = searchedRows.filter(r => rowSubList(r).length > 0).map(r => r.id);
   const hasAnySubs     = idsWithSubs.length > 0;
@@ -2652,9 +2743,10 @@ export const InvoiceTable = ({
                   const isPrimeRow = role === "Prime";
                   const primeEntry = allEntries.find(s => s.kind === "prime");
                   const subEntries = allEntries.filter(s => (s.kind || "sub") === "sub");
-                  const subList    = isPrimeRow
+                  const subListBase = isPrimeRow
                     ? subEntries
                     : [...(primeEntry ? [primeEntry] : []), ...subEntries];
+                  const subList = withPerspectiveRows(r, subListBase);
                   const hasPrimeEntry = !!primeEntry;
                   return (
                   <React.Fragment key={r.id}>
@@ -2767,7 +2859,7 @@ export const InvoiceTable = ({
                       <EditableCell value={r.type} type="select" options={invoiceTypeOptions}
                         onChange={v => updateRow(r.id, { type: v })}
                         render={v => v
-                          ? <span className={`chip ${v === "ENG" ? "sage" : "blue"}`} style={{ fontSize: 11 }}>{v}</span>
+                          ? <span className={`chip ${invoiceTypeTone(v)}`} style={{ fontSize: 11 }}>{v}</span>
                           : <span className="empty-cell">—</span>}/>
                     </td>
                     <td>
@@ -2931,7 +3023,7 @@ export const InvoiceTable = ({
                     <tr key={`${r.id}:${entryKind}:${s.companyId}`}
                         className={"invoice-sub-row" + (isPrimeEntry ? " invoice-prime-row" : "")}>
                       <td className="invoice-expand-col">
-                        {onRemoveSub && (
+                        {onRemoveSub && !s.syntheticPerspective && (
                           <button
                             type="button"
                             className="invoice-sub-remove"
@@ -2969,6 +3061,7 @@ export const InvoiceTable = ({
                               ? (r.partyFiles?.prime?.[s.companyId] || [])
                               : (r.partyFiles?.sub?.[s.companyId] || []);
                             const hasFiles = partyBucket.length > 0;
+                            if (s.syntheticPerspective) return null;
                             return (
                               <button
                                 type="button"
@@ -2993,18 +3086,22 @@ export const InvoiceTable = ({
                         </span>
                         <span className="invoice-sub-discipline mono">
                           {s.discipline ? "· " : null}
-                          <EditableCell value={s.discipline || ""}
-                            onChange={v => onUpdateSubMeta?.({
-                              projectId: r.sourceId,
-                              companyId: s.companyId,
-                              kind: entryKind,
-                              patch: { discipline: v },
-                            })}
-                            format={v => v
-                              ? <span>{v}</span>
-                              : <span className="invoice-sub-discipline-empty">+ discipline</span>}/>
+                          {s.syntheticPerspective ? (
+                            <span>{s.discipline}</span>
+                          ) : (
+                            <EditableCell value={s.discipline || ""}
+                              onChange={v => onUpdateSubMeta?.({
+                                projectId: r.sourceId,
+                                companyId: s.companyId,
+                                kind: entryKind,
+                                patch: { discipline: v },
+                              })}
+                              format={v => v
+                                ? <span>{v}</span>
+                                : <span className="invoice-sub-discipline-empty">+ discipline</span>}/>
+                          )}
                         </span>
-                        {entryKind === "sub" && (
+                        {entryKind === "sub" && !s.syntheticPerspective && (
                           <span className="sub-docs" role="group"
                                 aria-label={`Compliance documents for ${s.companyName}`}>
                             {SUB_DOCS.map(doc => {
@@ -3042,27 +3139,35 @@ export const InvoiceTable = ({
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="mono">
-                        <EditableCell value={s.contractAmount} type="number"
-                          onChange={v => onUpdateSubMeta?.({
-                            projectId: r.sourceId,
-                            companyId: s.companyId,
-                            kind: entryKind,
-                            patch: { amount: v },
-                          })}
-                          format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        {s.syntheticPerspective ? (
+                          s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>
+                        ) : (
+                          <EditableCell value={s.contractAmount} type="number"
+                            onChange={v => onUpdateSubMeta?.({
+                              projectId: r.sourceId,
+                              companyId: s.companyId,
+                              kind: entryKind,
+                              patch: { amount: v },
+                            })}
+                            format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        )}
                       </td>
                       {/* Remaining Jan 1 (sub) — editable starting balance;
                           NULL falls back to the sub's contract amount. */}
                       <td className="mono"
                           title="Remaining amount to bill for this sub. Defaults to the contract amount; edit if some was billed previously. Clear to reset.">
-                        <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
-                          onChange={v => onUpdateSubMeta?.({
-                            projectId: r.sourceId,
-                            companyId: s.companyId,
-                            kind: entryKind,
-                            patch: { remaining_to_bill_year_start: v },
-                          })}
-                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        {s.syntheticPerspective ? (
+                          (s.remainingStart != null ? fmtMoney(s.remainingStart) : <span className="empty-cell">—</span>)
+                        ) : (
+                          <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
+                            onChange={v => onUpdateSubMeta?.({
+                              projectId: r.sourceId,
+                              companyId: s.companyId,
+                              kind: entryKind,
+                              patch: { remaining_to_bill_year_start: v },
+                            })}
+                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        )}
                       </td>
                       {windowMonths.map((d, wi) => {
                         const amt = subAmtAtDesc(s, d);
@@ -3077,11 +3182,12 @@ export const InvoiceTable = ({
                             className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
-                            onChange={nv => onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
+                            disabled={!!s.syntheticPerspective}
+                            onChange={nv => !s.syntheticPerspective && onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
                             format={v => v != null && v !== 0
                               ? fmtMoney(v)
                               : <span style={{ opacity: 0.4 }}>—</span>}/>
-                          {showPaidToggle && (
+                          {showPaidToggle && !s.syntheticPerspective && (
                             <button
                               type="button"
                               className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
@@ -3104,7 +3210,7 @@ export const InvoiceTable = ({
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
-                          {(() => {
+                          {!s.syntheticPerspective && (() => {
                             // Attachment gating is controlled by the
                             // ATTACH_ONLY_ON_ACTUAL flag (currently OFF, so
                             // uploads are allowed on every month). When ON, a
@@ -4759,6 +4865,62 @@ export const DirectoryTable = ({
     onMerge(selectedRows, selectedKind);
   };
 
+  const [search, setSearch] = useState("");
+  const searchableRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows || [];
+    return (rows || []).filter(r => {
+      const projectCount = countRefsFor(r.id, projectsByType);
+      const related = relatedDirectoryPartiesFor(r, projectsByType, r.type === "Client" ? "companies" : "clients")
+        .map(p => p.name)
+        .join(" ");
+      const haystack = [
+        r.baseName, r.name, r.type === "Client" ? "Client" : r.type, related,
+        String(projectCount),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [rows, search, projectsByType]);
+
+  const groupedRows = useMemo(() => {
+    const byName = (a, b) =>
+      String(a.baseName || a.name || "").localeCompare(String(b.baseName || b.name || ""), undefined, { sensitivity: "base" });
+    return {
+      clients: searchableRows.filter(r => r.type === "Client").slice().sort(byName),
+      companies: searchableRows.filter(r => r.type !== "Client").slice().sort(byName),
+    };
+  }, [searchableRows]);
+
+  const snapshotColumns = useMemo(() => ([
+    { label: "Name", sortKey: "name" },
+    { label: "Kind", sortKey: "type" },
+    { label: "Contact", sortKey: "contact" },
+    { label: "Email", sortKey: "email" },
+    { label: "Phone", sortKey: "phone" },
+    { label: "Location", sortKey: "address" },
+    { label: "Notes", sortKey: "notes" },
+    { label: "Projects", sortKey: "projectCount" },
+  ]), []);
+
+  useEffect(() => {
+    const processedRows = [...groupedRows.clients, ...groupedRows.companies].map(r => ({
+      ...r,
+      projectCount: countRefsFor(r.id, projectsByType),
+    }));
+    setCurrentTableSnapshot({
+      tab,
+      columns: snapshotColumns,
+      visibleColumns: snapshotColumns,
+      hiddenCols: new Set(),
+      columnOrder: snapshotColumns.map(c => c.label),
+      columnWidths: {},
+      sort: null,
+      search,
+      year: null,
+      processedRows,
+    });
+  }, [tab, snapshotColumns, groupedRows, projectsByType, search]);
+
   const mergeBar = selectedRows.length > 0 ? (
     <div className="merge-actionbar">
       <span className="merge-actionbar-count">{selectedRows.length} selected</span>
@@ -4770,202 +4932,220 @@ export const DirectoryTable = ({
     </div>
   ) : null;
 
-  const cols = [
-    { label: "__expand", w: "30px", locked: true },
-    { label: "__select", w: "42px", locked: true },
-    { label: "Name", w: "minmax(220px, 2fr)", sortKey: "name",
-      sortValue: r => (r.type === "Client" ? (r.baseName || r.name) : r.name) || "" },
-    { label: "District", w: "140px", sortKey: "district",
-      sortValue: r => r.district || "" },
-    { label: "Org Type", w: "140px", sortKey: "orgType",
-      sortValue: r => r.orgType || "" },
-    { label: "Type", w: "120px", sortKey: "type",
-      sortValue: r => r.type === "Client" ? "" : (r.type || "") },
-    { label: "Contact", w: "minmax(150px, 1.2fr)", sortKey: "contact" },
-    { label: "Email", w: "minmax(180px, 1.5fr)", sortKey: "email" },
-    { label: "Phone", w: "140px", sortKey: "phone" },
-    { label: "Location", w: "minmax(140px, 1fr)", sortKey: "address" },
-    { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
-    { label: "Projects", w: "90px", sortKey: "projectCount",
-      sortValue: r => countRefsFor(r.id, projectsByType) },
-  ];
-
-  const { orgTypeOptions, companyTypeOptions } = buildOptions();
+  const { companyTypeOptions } = buildOptions();
   const typeColor = t => ({ "Prime": "blue", "Sub": "accent", "Multiple": "rose" }[t] || "muted");
-  const dash = <span className="empty-cell">—</span>;
 
-  return (
-    <TableView
-      tab={tab}
-      filters={filters}
-      right={mergeBar}
-      columns={cols} rows={rows}
-      postProcess={injectKindHeaders}
-      emptyTitle="No directory entries yet"
-      emptyHint="Clients (organizations you contract with) and companies (firms you team with) live here. Add either to start."
-      emptyIcon="users"
-      renderRow={(r, _i, gridCols, visibleColumns) => {
-        // Section header (clients/companies). Same shape as injectOrgHeaders' row.
-        if (r._kindHeader) {
-          const orgKey = r._kindHeader.toLowerCase();
-          return (
-            <div key={r.id} className="trow org-header"
-                 data-org={orgKey}
-                 style={{ gridTemplateColumns: gridCols }}>
-              <div className="td" style={{ color: "var(--text)" }}>
-                {r._kindHeader} · {r._count} {r._unit}
-              </div>
-            </div>
-          );
+  const renderRelatedParties = (row, isClient) => {
+    const related = relatedDirectoryPartiesFor(row, projectsByType, isClient ? "companies" : "clients");
+    const label = isClient ? "Related firms" : "Related clients";
+    return (
+      <div className="dir-related">
+        <div className="dir-section-label">{label}</div>
+        {related.length === 0 ? (
+          <div className="dir-related-empty">No related {isClient ? "firms" : "clients"} yet</div>
+        ) : (
+          <div className="dir-related-chips">
+            {related.slice(0, 3).map(p => (
+              <span key={p.id} className="dir-related-chip" title={p.name}>
+                {p.name}
+                <span className="dir-related-count">{p.count}</span>
+              </span>
+            ))}
+            {related.length > 3 && (
+              <span className="dir-related-chip dir-related-more">+{related.length - 3}</span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCard = (r) => {
+    const isClient = r.type === "Client";
+    const isExpanded = expandedIds.has(r.id);
+    const otherKindLocked = selectedKind && kindOf(r) !== selectedKind;
+    const projectCount = countRefsFor(r.id, projectsByType);
+    const linked = isExpanded
+      ? linkedProjectsFor(r, projectsByType, invoice)
+      : null;
+    return (
+      <article
+        key={r.id}
+        className={
+          "dir-card" +
+          (flashId === r.id ? " flash" : "") +
+          (isExpanded ? " is-expanded" : "") +
+          (selectedIds.has(r.id) ? " is-selected" : "")
         }
-        const isClient = r.type === "Client";
-        const isExpanded = expandedIds.has(r.id);
-        const cells = {
-          "__expand": (
-            <div className="td td-expand" onClick={e => e.stopPropagation()}>
-              <button
-                type="button"
-                className={"directory-expand-btn" + (isExpanded ? " open" : "")}
-                aria-expanded={isExpanded}
-                aria-label={isExpanded ? "Collapse linked projects" : "Expand linked projects"}
-                onClick={(e) => { e.stopPropagation(); toggleExpand(r.id); }}>
-                <Icon name="chevronRight" size={12}/>
-              </button>
+        data-kind={isClient ? "client" : "company"}
+        onDoubleClick={() => onOpenDrawer(r)}
+      >
+        <div className="dir-card-head">
+          <label className="dir-card-check" onClick={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={selectedIds.has(r.id)}
+              disabled={otherKindLocked}
+              title={otherKindLocked
+                ? `Finish or clear the ${selectedKind.toLowerCase()} selection first — clients and companies can't be merged together.`
+                : "Select to merge"}
+              onChange={() => toggleSelect(r)}
+            />
+          </label>
+          <div className="dir-card-titleblock">
+            <div className="dir-card-name">
+              {isClient ? (
+                <EditableCell value={r.baseName || r.name}
+                  onChange={v => {
+                    const district = r.district || "";
+                    updateRow(r.id, {
+                      baseName: v,
+                      name: district ? v + " — " + district : v,
+                    });
+                  }}/>
+              ) : (
+                <EditableCell value={r.name}
+                  onChange={v => updateRow(r.id, { name: v })}/>
+              )}
             </div>
-          ),
-          "__select": (() => {
-            const otherKindLocked = selectedKind && kindOf(r) !== selectedKind;
-            return (
-              <div className="td row-check" onClick={e => e.stopPropagation()}>
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(r.id)}
-                  disabled={otherKindLocked}
-                  title={otherKindLocked
-                    ? `Finish or clear the ${selectedKind.toLowerCase()} selection first — clients and companies can't be merged together.`
-                    : "Select to merge"}
-                  onChange={() => toggleSelect(r)}/>
-              </div>
-            );
-          })(),
-          "Name": isClient ? (
-            <div className="td" style={{ fontWeight: 500 }}>
-              <EditableCell value={r.baseName || r.name}
-                onChange={v => {
-                  const district = r.district || "";
-                  updateRow(r.id, {
-                    baseName: v,
-                    name: district ? v + " — " + district : v,
-                  });
-                }}/>
-            </div>
-          ) : (
-            <div className="td" style={{ fontWeight: 500 }}>
-              <EditableCell value={r.name}
-                onChange={v => updateRow(r.id, { name: v })}/>
-            </div>
-          ),
-          "District": isClient ? (
-            <div className="td subtle">
-              <EditableCell value={r.district}
-                onChange={v => {
-                  const base = r.baseName || r.name || "";
-                  updateRow(r.id, {
-                    district: v || "",
-                    name: v ? base + " — " + v : base,
-                  });
-                }}/>
-            </div>
-          ) : (<div className="td">{dash}</div>),
-          "Org Type": isClient ? (
-            <div className="td">
-              <EditableCell value={r.orgType} type="select" options={orgTypeOptions}
-                onChange={v => updateRow(r.id, { orgType: v })}
-                render={v => v
-                  ? <span className="chip muted">{v}</span>
-                  : <span className="empty-cell">—</span>}/>
-            </div>
-          ) : (<div className="td">{dash}</div>),
-          "Type": isClient ? (
-            <div className="td">{dash}</div>
-          ) : (
-            <div className="td">
-              <EditableCell value={r.type} type="select" options={companyTypeOptions}
-                onChange={v => updateRow(r.id, { type: v })}
-                render={v => v
-                  ? <span className={`chip ${typeColor(v)}`}>{v}</span>
-                  : <span className="empty-cell">—</span>}/>
-            </div>
-          ),
-          "Contact": (
-            <div className="td subtle">
-              <EditableCell value={r.contact}
-                onChange={v => updateRow(r.id, { contact: v })}/>
-            </div>
-          ),
-          "Email": (
-            <div className="td mono subtle" style={{ fontSize: 12 }}>
-              <EditableCell value={r.email}
-                onChange={v => updateRow(r.id, { email: v })}/>
-            </div>
-          ),
-          "Phone": (
-            <div className="td mono subtle" style={{ fontSize: 12 }}>
-              <EditableCell value={r.phone}
-                onChange={v => updateRow(r.id, { phone: v })}/>
-            </div>
-          ),
-          "Location": (
-            <div className="td subtle">
-              <EditableCell value={r.address}
-                onChange={v => updateRow(r.id, { address: v })}/>
-            </div>
-          ),
-          "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
-              <EditableCell value={r.notes} type="textarea"
-                onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
-            </div>
-          ),
-          "Projects": (
-            <div className="td mono">
-              <button
-                type="button"
-                className="chip muted directory-projects-chip"
-                title={isExpanded ? "Collapse linked projects" : "Expand linked projects"}
-                onClick={(e) => { e.stopPropagation(); toggleExpand(r.id); }}>
-                {countRefsFor(r.id, projectsByType)}
-              </button>
-            </div>
-          ),
-        };
-        const linked = isExpanded
-          ? linkedProjectsFor(r, projectsByType, invoice)
-          : null;
-        return (
-          <React.Fragment key={r.id}>
-            <div className={"trow" + (flashId === r.id ? " flash" : "") + (isExpanded ? " expanded" : "") + (selectedIds.has(r.id) ? " row-selected" : "")}
-                 data-kind={isClient ? "client" : "company"}
-                 style={{ gridTemplateColumns: gridCols, cursor: "default" }}
-                 onDoubleClick={() => onOpenDrawer(r)}>
-              {renderOrderedCells(visibleColumns, cells)}
-            </div>
-            {isExpanded && (
-              <div className="directory-expand-row"
-                   data-kind={isClient ? "client" : "company"}
-                   role="region"
-                   aria-label={`Linked projects for ${r.baseName || r.name}`}>
-                <LinkedProjectsSection
-                  projects={linked}
-                  onOpenProject={onOpenProject}
-                />
+            {!isClient && (
+              <div className="dir-card-kicker">
+                <span className="dir-card-role">
+                  <EditableCell value={r.type} type="select" options={companyTypeOptions}
+                    onChange={v => updateRow(r.id, { type: v })}
+                    render={v => v
+                      ? <span className={`chip ${typeColor(v)}`}>{v}</span>
+                      : <span className="empty-cell">Role —</span>}/>
+                </span>
               </div>
             )}
-          </React.Fragment>
-        );
-      }}
-    />
+          </div>
+          <div className="dir-card-actions" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className="dir-icon-btn"
+              title="Open details"
+              aria-label={`Open details for ${r.baseName || r.name || "directory entry"}`}
+              onClick={() => onOpenDrawer(r)}>
+              <Icon name="maximize" size={13}/>
+            </button>
+          </div>
+        </div>
+
+        <div className="dir-card-body">
+          {renderRelatedParties(r, isClient)}
+
+          <div className="dir-project-toggle-row">
+            <button
+              type="button"
+              className={"dir-project-toggle" + (isExpanded ? " is-open" : "")}
+              aria-expanded={isExpanded}
+              title={isExpanded ? "Collapse linked projects" : "Expand linked projects"}
+              onClick={(e) => { e.stopPropagation(); toggleExpand(r.id); }}>
+              <Icon name="chevronRight" size={12}/>
+              Linked projects
+              <span className="dir-project-count">{projectCount}</span>
+            </button>
+          </div>
+        </div>
+
+        {isExpanded && (
+          <div className="directory-expand-row"
+               data-kind={isClient ? "client" : "company"}
+               role="region"
+               aria-label={`Linked projects for ${r.baseName || r.name}`}>
+            <LinkedProjectsSection
+              projects={linked}
+              onOpenProject={onOpenProject}
+            />
+          </div>
+        )}
+      </article>
+    );
+  };
+
+  const renderGroup = (title, unit, items, kind) => (
+    <section className="dir-group" data-kind={kind}>
+      <div className="dir-group-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{items.length} {items.length === 1 ? unit : `${unit}s`}</p>
+        </div>
+      </div>
+      {items.length > 0 && (
+        <div className="dir-card-grid">
+          {items.map(r => renderCard(r))}
+        </div>
+      )}
+    </section>
+  );
+
+  const showNoMatches = search.trim() && searchableRows.length === 0 && (rows || []).length > 0;
+  const totalRows = (rows || []).length;
+
+  return (
+    <div className="tablewrap directory-board-wrap">
+      <div className="toolbar directory-board-toolbar">
+        {filters?.map((f, i) => (
+          <button key={i} className={"tool-chip" + (f.active ? " on" : "")} onClick={f.onClick}>
+            {f.icon && <Icon name={f.icon} size={13}/>}
+            {f.label}
+            {f.count != null && <span style={{ opacity: .6, marginLeft: 2 }}>· {f.count}</span>}
+          </button>
+        ))}
+        {filters?.length ? <div className="tool-sep"/> : null}
+        <label className={"chrome-search directory-board-search" + (search ? " active" : "")}>
+          <Icon name="search" size={13}/>
+          <input
+            className="chrome-search-input"
+            value={search}
+            placeholder="Search directory..."
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              type="button"
+              className="chrome-search-clear"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}>
+              <Icon name="x" size={12}/>
+            </button>
+          )}
+        </label>
+        <span className="directory-board-count mono">
+          {searchableRows.length} / {totalRows}
+        </span>
+        <div className="ml-auto directory-board-toolbar-right">
+          {mergeBar}
+        </div>
+      </div>
+      {search.trim() && (
+        <div className="chrome-search-summary">
+          {showNoMatches
+            ? <>No entries match <span className="mono">"{search}"</span>.</>
+            : <><strong>{searchableRows.length}</strong> of <strong>{totalRows}</strong> match <span className="mono">"{search}"</span></>
+          }
+        </div>
+      )}
+      {totalRows === 0 ? (
+        <EmptyState
+          title="No directory entries yet"
+          hint="Clients and companies live here. Add either to start."
+          iconName="users"
+        />
+      ) : showNoMatches ? (
+        <EmptyState
+          title="No matches"
+          hint={`Nothing matches "${search}".`}
+          iconName="search"
+        />
+      ) : (
+        <div className="directory-board">
+          {renderGroup("Clients", "client", groupedRows.clients, "client")}
+          {renderGroup("Companies", "company", groupedRows.companies, "company")}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -4977,7 +5157,54 @@ function countRefsFor(id, projectsByType) {
     ...(projectsByType?.awarded   || []),
     ...(projectsByType?.closed    || []),
   ];
-  return all.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
+  return all.filter(p =>
+    p.clientId === id ||
+    p.primeId === id ||
+    (p.subs || []).some(s => s.cId === id)
+  ).length;
+}
+
+function relatedDirectoryPartiesFor(row, projectsByType, targetKind) {
+  const all = [
+    ...(projectsByType?.potential || []),
+    ...(projectsByType?.awaiting  || []),
+    ...(projectsByType?.awarded   || []),
+    ...(projectsByType?.closed    || []),
+  ];
+  const clients = getClientsOnly();
+  const companies = getCompaniesOnly();
+  const isCompany = row?.type !== "Client";
+  const counts = new Map();
+  const add = (entity) => {
+    if (!entity || entity.id === row.id) return;
+    const name = entity.baseName || entity.name || "Unnamed";
+    const key = name.trim().toLowerCase();
+    counts.set(key, {
+      id: counts.get(key)?.id || entity.id,
+      name,
+      count: (counts.get(key)?.count || 0) + 1,
+    });
+  };
+
+  for (const p of all) {
+    const isPrimeMatch = p.clientId === row.id || p.primeId === row.id;
+    const isSubMatch = (p.subs || []).some(s => s.cId === row.id);
+    const isClientMatch = p.clientId === row.id;
+
+    if (targetKind === "clients" && isCompany && (isPrimeMatch || isSubMatch)) {
+      add(clients.find(c => c.id === p.clientId));
+      continue;
+    }
+
+    if (targetKind === "companies" && !isCompany && isClientMatch) {
+      add(companies.find(c => c.id === p.primeId));
+      for (const s of (p.subs || [])) add(companies.find(c => c.id === s.cId));
+    }
+  }
+
+  return [...counts.values()].sort((a, b) =>
+    b.count - a.count || a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
 }
 
 // ======================================================================
