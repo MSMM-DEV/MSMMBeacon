@@ -139,7 +139,11 @@ const PAGE_META = {
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   licenses:  { title: "Licenses & Certifications", desc: "Every company and individual license with its expiration. Color-coded by days until due; reminder emails go out at 60 / 30 / 14 / 7 / 1 days before expiry." },
-  timesheet: { title: "Timesheet", desc: "Your daily punches, this week's hours, leave balances, and time-off requests. Punch in or out with the big button or tap your fob on the front-door reader." },
+  timesheet: {
+    title: "Timesheet",
+    desc: "Punch in/out, review time, and tap your fob at the front-door reader.",
+    mobileDesc: "Tap your fob on the front-door reader.",
+  },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, leave requests + balances, NFC enrollment, and timekeeping settings." },
   "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },
 };
@@ -4443,10 +4447,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           />
         )}
         {!detailLive && (<>
-        <div className="page-head">
+        <div className={`page-head ${tab === "timesheet" ? "page-head-timesheet" : ""}`}>
           <div>
             <h1 className="page-title">{pageTitle}</h1>
-            <p className="page-desc">{currentMeta.desc}</p>
+            <p className={`page-desc ${currentMeta.mobileDesc ? "has-mobile-desc" : ""}`}>
+              <span className="page-desc-default">{currentMeta.desc}</span>
+              {currentMeta.mobileDesc && <span className="page-desc-mobile">{currentMeta.mobileDesc}</span>}
+            </p>
           </div>
           <div className="page-actions">
             {tab === "invoice" ? (

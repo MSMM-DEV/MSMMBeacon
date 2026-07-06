@@ -388,20 +388,8 @@ function DayList({
   }
   items.sort((a, b) => b.startMin - a.startMin);
 
-  const closedCount = intervals.filter(i => i.endAt).length;
-  const openCount   = intervals.filter(i => !i.endAt).length;
-
   return (
     <div className="tk-day-list">
-      <div className="tk-day-list-meta">
-        <span className="tk-day-list-meta-band">Workday · 8a – 5p</span>
-        <span className="tk-day-list-meta-stat">
-          {intervals.length} {intervals.length === 1 ? "interval" : "intervals"}
-          {openCount > 0 && <> · <span className="tk-pulse-dot"/> 1 open</>}
-          {gaps.length > 0 && ` · ${gaps.length} gap${gaps.length === 1 ? "" : "s"}`}
-        </span>
-      </div>
-
       {items.length === 0 && (
         <div className="tk-day-list-empty">
           <Icon name="clock" size={18}/>
@@ -440,16 +428,24 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
   const minutes    = iv.durationMinutes != null
     ? iv.durationMinutes
     : Math.max(0, Math.floor((Date.now() - +new Date(iv.startAt)) / 60_000));
+  const label      = TK_CATEGORY_LABEL[iv.category] || iv.category;
+  const actionText = isUntagged ? "Tag this time block" : "Edit this time block";
+  const timeText   = `${fmtClock(iv.startAt)} to ${iv.endAt ? fmtClock(iv.endAt) : "now"}`;
 
   return (
     <button
       type="button"
       className={`tk-day-list-card tone-${tone} ${isOpen ? "is-open" : ""} ${isUntagged ? "is-untagged" : ""}`}
       onClick={onClick}
+      aria-label={`${actionText}: ${timeText}, ${label}, ${fmtHM(minutes)}`}
       data-category={iv.category}
       data-source={iv.categorySource}
     >
       <div className="tk-day-list-card-head">
+        <span className="tk-day-list-card-chip tk-day-list-card-status">
+          <span className="tk-day-list-card-dot"/>
+          {isOpen ? `${label} now` : label}
+        </span>
         <div className="tk-day-list-card-time">
           <span className="tk-day-list-card-time-from">{fmtClock(iv.startAt)}</span>
           <Icon name="forward" size={11}/>
@@ -463,10 +459,6 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
       </div>
 
       <div className="tk-day-list-card-chips">
-        <span className="tk-day-list-card-chip">
-          <span className="tk-day-list-card-dot"/>
-          {TK_CATEGORY_LABEL[iv.category] || iv.category}
-        </span>
         {iv.outlookEventId && (
           <span className="tk-day-list-card-chip tk-day-list-card-chip-outlook">
             <Icon name="link" size={11}/> Outlook

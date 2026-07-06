@@ -27,7 +27,7 @@ export function WeekSummary({
     const f = s.day?.flags || {};
     const list = [];
     if (f.missing_out)        list.push({ date: s.date, kind: "Missing punch-out" });
-    if (f.untagged_meeting)   list.push({ date: s.date, kind: "Untagged out-of-office gap" });
+    if (f.untagged_meeting)   list.push({ date: s.date, kind: "Needs a time tag" });
     return list;
   });
 
@@ -47,17 +47,18 @@ export function WeekSummary({
         {slots.map(s => {
           const minutes = s.day?.minutesWork || 0;
           const f = s.day?.flags || {};
+          const attention = attentionFor(f);
           return (
-            <li key={s.date} className="tk-week-day">
+            <li key={s.date} className={`tk-week-day ${attention ? "has-attention" : ""}`}>
               <span className="tk-week-day-label">{s.label}</span>
               <span className="tk-week-day-bar">
                 <span className="tk-week-day-bar-fill"
                   style={{ width: `${Math.min(100, (minutes / 480) * 100)}%` }} />
               </span>
               <span className="tk-week-day-total">{fmtHM(minutes)}</span>
-              {(f.missing_out || f.untagged_meeting) && (
-                <span className="tk-week-day-flag" title="Needs attention">
-                  <Icon name="bell" size={12}/>
+              {attention && (
+                <span className={`tk-week-day-flag tone-${attention.tone}`} title={attention.label} aria-label={attention.label}>
+                  {attention.short}
                 </span>
               )}
             </li>
@@ -68,12 +69,25 @@ export function WeekSummary({
       {flags.length > 0 && (
         <ul className="tk-week-flags">
           {flags.map((f, i) => (
-            <li key={i}><Icon name="bell" size={11}/> {f.kind} on {f.date}</li>
+            <li key={i}><Icon name="warn" size={11}/> {f.kind} on {f.date}</li>
           ))}
         </ul>
       )}
     </section>
   );
+}
+
+function attentionFor(flags = {}) {
+  if (flags.missing_out && flags.untagged_meeting) {
+    return { short: "Review", label: "Missing punch-out and needs a time tag", tone: "rose" };
+  }
+  if (flags.missing_out) {
+    return { short: "Missing out", label: "Missing punch-out", tone: "rose" };
+  }
+  if (flags.untagged_meeting) {
+    return { short: "Needs tag", label: "Needs a time tag", tone: "amber" };
+  }
+  return null;
 }
 
 function fmtWeekRange(weekStart) {

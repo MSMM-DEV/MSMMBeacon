@@ -117,8 +117,8 @@ export function PunchButton({
   else if (error)      label = "RETRY";
   else if (isFetchErr) label = "RETRY";
   else if (isUnknown)  label = "Checking…";
-  else if (showIn)     label = "PUNCH OUT";
-  else                 label = "PUNCH IN";
+  else if (showIn)     label = "Punch out";
+  else                 label = "Punch in";
 
   const cls = [
     "tk-punch-btn",
@@ -140,27 +140,51 @@ export function PunchButton({
   const disabled = !online || locked || busy || isUnknown;
 
   const elapsed = state === "in" ? elapsedMin(openSince) : 0;
+  const statusKind = showIn ? "in" : showOut ? "out" : null;
+  const statusTitle = showIn ? "Clocked in" : showOut ? "Clocked out" : null;
+  const actionLabel = showIn
+    ? `Punch out. Currently clocked in since ${fmtClock(openSince)}. Current session ${fmtHM(elapsed)}.`
+    : showOut
+      ? `Punch in. Worked today ${fmtHM(todayMinutesWork || 0)}.`
+      : label;
 
   return (
-    <div className="tk-punch-wrap">
+    <div className={`tk-punch-wrap ${statusKind ? `is-${statusKind}` : "is-standalone"}`}>
+      {statusKind && (
+        <div className="tk-punch-status-card">
+          <span className="tk-punch-status-kicker">Current status</span>
+          <div className="tk-punch-status-main">
+            <span className={`tk-punch-status-dot tone-${statusKind}`} aria-hidden="true"/>
+            <strong>{statusTitle}</strong>
+          </div>
+          <div className="tk-punch-status-meta">
+            {showIn ? (
+              <>
+                <span>Started at <strong>{fmtClock(openSince)}</strong></span>
+                <span>Current session <strong>{fmtHM(elapsed)}</strong></span>
+                <span>Counted work <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+              </>
+            ) : (
+              <>
+                <span>Ready to start your next work session</span>
+                <span>Counted work <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <button
         type="button"
         className={cls}
         onClick={handleClick}
         disabled={disabled}
         aria-busy={busy || isUnknown}
-        aria-label={label}
+        aria-label={actionLabel}
       >
         <span className="tk-punch-icon">
-          <Icon name={iconName} size={28}/>
+          <Icon name={iconName} size={30}/>
         </span>
         <span className="tk-punch-label">{label}</span>
-        {showIn && (
-          <span className="tk-punch-sub">in for {fmtHM(elapsed)}</span>
-        )}
-        {showOut && (
-          <span className="tk-punch-sub">today · {fmtHM(todayMinutesWork || 0)}</span>
-        )}
       </button>
       {!online && (
         <div className="tk-punch-error-msg" role="status">
@@ -172,9 +196,6 @@ export function PunchButton({
       )}
       {online && !error && isFetchErr && (
         <div className="tk-punch-error-msg" role="alert">Couldn't load your timesheet. Tap to retry.</div>
-      )}
-      {showIn && openSince && (
-        <div className="tk-punch-since">In since · {fmtClock(openSince)}</div>
       )}
     </div>
   );
