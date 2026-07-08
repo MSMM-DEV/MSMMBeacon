@@ -4105,7 +4105,7 @@ export async function loadCorrectionsForDay(userId, date) {
 export async function loadTimekeepingSettings() {
   const { data } = await supabase
     .from("app_settings")
-    .select("tk_enabled, tk_business_tz, tk_workday_hours, tk_overtime_threshold_min, tk_eod_window_start, tk_eod_window_end, tk_lunch_window_start, tk_lunch_window_end, tk_untagged_alert_after_min, tk_office_ip_cidr, tk_holidays, tk_default_travel_buffer_min")
+    .select("tk_enabled, tk_auto_punchout_enabled, tk_business_tz, tk_workday_hours, tk_overtime_threshold_min, tk_eod_window_start, tk_eod_window_end, tk_lunch_window_start, tk_lunch_window_end, tk_untagged_alert_after_min, tk_office_ip_cidr, tk_holidays, tk_default_travel_buffer_min")
     .eq("singleton", true).maybeSingle();
   return data || null;
 }

@@ -157,8 +157,7 @@ const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBe
     const msmmAtDesc = (r, d) => {
       const yr = r.byYear?.[d.year];
       if (!yr) return 0;
-      const override = yr.msmmValues?.[d.monthIdx];
-      if (override != null) return Number(override);
+      // MSMM is purely derived — stored override is no longer consulted.
       const total = Number(yr.values?.[d.monthIdx] || 0);
       const subSum = subListFor(r).reduce(
         (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);

@@ -27,6 +27,8 @@ import {
   invoicePerspectiveRole,
   invoicePerspectiveRoleIsDerived,
   invoiceTypeTone,
+  isMhzPerspectiveSub,
+  perspectiveSubListBase,
 } from "./invoice-perspectives.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
 import {
@@ -1959,7 +1961,7 @@ const SUB_DOCS = [
 ];
 
 export const InvoiceTable = ({
-  tab, rows, updateInvoice, updateInvoiceMsmm, updateRow = _noopUpdate,
+  tab, rows, updateInvoice, updateRow = _noopUpdate,
   onOpenDrawer, onAlert, flashId,
   // Rolling month window — a descriptor list { abs, year, monthIdx, mon, yy,
   // label } (default = prev 3 + current + next 12 = 16 months) shared with the
@@ -2022,16 +2024,17 @@ export const InvoiceTable = ({
   // MSMM, for cross-reference); it must not be subtracted from Total CV.
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
-  // MSMM contract portion — override (msmmAmount) takes precedence; else
-  // auto = total contract − Σ sub.contractAmount.
+  // MSMM contract portion is PURELY DERIVED: total contract − Σ sub.contractAmount.
+  // The stored msmm_amount override is no longer consulted (see migration
+  // 20260708120100_msmm_derived_only) so MSMM always recalculates on any
+  // total/sub change and can never go stale.
   const msmmContractAuto = (r) => {
     const total = Number(r.amount || 0);
     const subSum = subListFor(r).reduce(
       (a, s) => a + Number(s.contractAmount || 0), 0);
     return total - subSum;
   };
-  const msmmContractShown = (r) =>
-    r.msmmAmount != null ? Number(r.msmmAmount) : msmmContractAuto(r);
+  const msmmContractShown = (r) => msmmContractAuto(r);
 
   // ---- Rolling-window month accessors -------------------------------------
   // Each visible month is a descriptor d = { year, monthIdx, mon, label } from
@@ -2041,7 +2044,8 @@ export const InvoiceTable = ({
   // r.values[i] directly, since index i is no longer "month i of one year".
   const yrow = (r, year) => r?.byYear?.[year] || null;
   const valAtDesc          = (r, d) => Number(yrow(r, d.year)?.values?.[d.monthIdx] || 0);
-  const msmmOverrideAtDesc = (r, d) => yrow(r, d.year)?.msmmValues?.[d.monthIdx] ?? null;
+  // MSMM is purely derived (month total − Σ sub month) — there is no stored
+  // monthly override anymore, so no msmmOverrideAtDesc accessor.
   const primePaidAtDesc    = (r, d) => !!(yrow(r, d.year)?.primePaid?.[d.monthIdx]);
   const primeFilesAtDesc   = (r, d) => yrow(r, d.year)?.primeFiles?.[d.monthIdx] || [];
   const invNumAtDesc       = (r, d) => yrow(r, d.year)?.invoiceNumbers?.[d.monthIdx] || null;
@@ -2061,8 +2065,7 @@ export const InvoiceTable = ({
   // MSMM monthly value at a window descriptor — override wins, else
   // total − Σ sub amounts for that (year, month).
   const msmmAtDesc = (r, d) => {
-    const ov = msmmOverrideAtDesc(r, d);
-    if (ov != null) return Number(ov);
+    // Purely derived — total for the month minus that month's sub amounts.
     const total = valAtDesc(r, d);
     const subSum = subListFor(r).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
     return total - subSum;
@@ -2073,7 +2076,7 @@ export const InvoiceTable = ({
   const yearsOf = (r) => Object.keys(r?.byYear || {}).map(Number);
   const msmmAtYM = (r, year, m) => {
     const yr = yrow(r, year); if (!yr) return 0;
-    const ov = yr.msmmValues?.[m]; if (ov != null) return Number(ov);
+    // Purely derived — stored monthly override is no longer consulted.
     const total = Number(yr.values?.[m] || 0);
     const subSum = subListFor(r).reduce((a, s) => a + Number(s?.byYear?.[year]?.amounts?.[m] || 0), 0);
     return total - subSum;
@@ -2084,8 +2087,12 @@ export const InvoiceTable = ({
     a + (yrow(r, y)?.values || []).reduce((x, z) => x + (z || 0), 0), 0);
   const subYtdAll     = (s) => Object.values(s?.byYear || {}).reduce((a, yr) =>
     a + (yr.amounts || []).reduce((x, z) => x + (z || 0), 0), 0);
+  // Resolve the linked sibling of a given perspective. Uses the SAME
+  // source-OR-number linkage as linkedInvoiceIdsFor / isMhzPerspectiveSub so
+  // classification (hide the ENG row's subs) and injection (add the MHZ prime
+  // line) can never disagree — a number-only link resolves here too.
   const linkedPerspectiveFor = (r, targetType) => {
-    const key = r.sourceId ? "" : String(r.projectNumber || "").trim().toLowerCase();
+    const key = String(r.projectNumber || "").trim().toLowerCase();
     return rows.find(other =>
       other.id !== r.id &&
       (other.type || "ENG") === targetType &&
@@ -2381,10 +2388,13 @@ export const InvoiceTable = ({
   // further subs — so its breakdown is the whole entry list.
   const rowSubList = (r) => {
     const allEntries = subInvoices?.get(r.sourceId) || [];
-    const visible = invoicePerspectiveRole(r, rows) === "Prime"
-      ? allEntries.filter(s => (s.kind || "sub") === "sub")
-      : allEntries;
-    return withPerspectiveRows(r, visible);
+    const base = perspectiveSubListBase({
+      isPrimeRow: invoicePerspectiveRole(r, rows) === "Prime",
+      mhzPerspectiveSub: isMhzPerspectiveSub(r, rows),
+      primeEntry: allEntries.find(s => s.kind === "prime"),
+      subEntries: allEntries.filter(s => (s.kind || "sub") === "sub"),
+    });
+    return withPerspectiveRows(r, base);
   };
   const idsWithSubs    = searchedRows.filter(r => rowSubList(r).length > 0).map(r => r.id);
   const hasAnySubs     = idsWithSubs.length > 0;
@@ -2749,9 +2759,17 @@ export const InvoiceTable = ({
                   const isPrimeRow = role === "Prime";
                   const primeEntry = allEntries.find(s => s.kind === "prime");
                   const subEntries = allEntries.filter(s => (s.kind || "sub") === "sub");
-                  const subListBase = isPrimeRow
-                    ? subEntries
-                    : [...(primeEntry ? [primeEntry] : []), ...subEntries];
+                  // MHZ-perspective Sub = an ENG row for an MHZ-prime project
+                  // (MSMM is only a sub because MHZ is the prime). From MSMM's
+                  // viewpoint it must see ONLY the MHZ prime line + the total —
+                  // never MHZ's sibling subs (A, B, C). A genuine external-prime
+                  // Sub (no MHZ sibling) keeps showing its real subs; the MHZ
+                  // row (isPrimeRow) keeps its subs + MSMM (added by
+                  // withPerspectiveRows).
+                  const mhzPerspectiveSub = isMhzPerspectiveSub(r, rows);
+                  const subListBase = perspectiveSubListBase({
+                    isPrimeRow, mhzPerspectiveSub, primeEntry, subEntries,
+                  });
                   const subList = withPerspectiveRows(r, subListBase);
                   const hasPrimeEntry = !!primeEntry;
                   return (
@@ -2889,25 +2907,17 @@ export const InvoiceTable = ({
                           : <span className="empty-cell">—</span>}
                       />
                     </td>
-                    {/* Parent row's Contract cell shows MSMM Portion —
-                        auto-calc = Total CV − Σ sub.contractAmount when no
-                        override is stored; override (msmmAmount) takes over
-                        when set. Clearing the cell writes NULL → auto-calc. */}
+                    {/* Parent row's Contract cell shows the MSMM Portion —
+                        purely derived (Total CV − Σ sub.contractAmount) and
+                        read-only for everyone; it recalculates whenever the
+                        Total or any sub changes. */}
                     {(() => {
-                      const isOverride = r.msmmAmount != null;
                       const shown = msmmContractShown(r);
                       return (
-                        <td className={(isOverride ? "inv-override" : "") + (canEditMsmm ? "" : " msmm-locked")}
-                            title={!canEditMsmm
-                              ? "MSMM Portion is auto-calculated (Total − Σ subs). Only an admin can edit it — change the Total or a sub instead."
-                              : (isOverride
-                                ? `Override · auto would be ${fmtMoney(msmmContractAuto(r), false)} — clear to resume auto-calc`
-                                : "MSMM Portion · auto-calculated as Total Contract Value − Σ subs. Click to override.")}>
+                        <td className="msmm-locked"
+                            title="MSMM Portion is auto-calculated as Total Contract Value − Σ subs. Edit the Total or a sub to change it.">
                           <EditableCell value={shown} type="number"
-                            disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                            onChange={v => updateRow(r.id, {
-                              msmmAmount: (v == null || v === "") ? null : Number(v)
-                            })}
+                            disabled onBlocked={onBlockedMsmmEdit}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         </td>
                       );
@@ -2926,10 +2936,10 @@ export const InvoiceTable = ({
                         expand block (= the project's prime billing PDFs,
                         not the MSMM-portion view). */}
                     {windowMonths.map((d, wi) => {
-                      const override   = msmmOverrideAtDesc(r, d);
-                      const isOverride = override != null;
-                      const auto       = msmmAtDesc(r, d);
-                      const shown      = isOverride ? Number(override) : auto;
+                      // MSMM monthly value is purely derived (month total − Σ
+                      // sub month) and read-only for everyone — it recalculates
+                      // on any total/sub change.
+                      const shown      = msmmAtDesc(r, d);
                       // Read-only mirror of the Project total row's status for
                       // this month (paid top-left, attachment top-right) so the
                       // prominent MSMM/top row reads at a glance.
@@ -2937,16 +2947,10 @@ export const InvoiceTable = ({
                       const totalFiles = primeFilesAtDesc(r, d);
                       return (
                       <td key={d.abs}
-                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isOverride ? " inv-override" : "") + (canEditMsmm ? "" : " msmm-locked")}
-                          title={!canEditMsmm
-                            ? "MSMM monthly value is auto-calculated (Total − Σ subs). Only an admin can edit it — change the Total or a sub instead."
-                            : (isOverride
-                              ? `Override · auto would be ${fmtMoney(auto, false)}`
-                              : "MSMM monthly · auto-calc. Click to override.")}>
+                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell msmm-locked"}
+                          title="MSMM monthly value is auto-calculated (Total − Σ subs). Edit the Total or a sub to change it.">
                         <EditableCell value={shown} type="number"
-                          disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                          onChange={nv => updateInvoiceMsmm?.(r, d.year, d.monthIdx,
-                            (nv == null || nv === "") ? null : Number(nv))}
+                          disabled onBlocked={onBlockedMsmmEdit}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                         />
                         {totalPaid && (
@@ -3277,13 +3281,16 @@ export const InvoiceTable = ({
                     </tr>
                     );
                   })}
-                  {isExpanded && (() => {
+                  {isExpanded && !mhzPerspectiveSub && (() => {
                     // Prime-role projects: one button — "Add sub" (unlimited).
                     // Sub-role projects: two buttons —
                     //   "Add prime" (gated by the partial unique index — at
                     //                most one prime entry per project)
                     //   "Add sub"   (always shown; MSMM may further sub-
                     //                contract pieces of its own work)
+                    // MHZ-perspective Sub rows (ENG view of an MHZ-prime project)
+                    // are read-only — the shared subs belong to the MHZ view, so
+                    // no add affordance here (a sub added would be hidden anyway).
                     return (
                     <tr className="invoice-sub-add-row">
                       <td className="invoice-expand-col"/>

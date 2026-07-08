@@ -1,0 +1,47 @@
+name: timekeeping-eod-sweep-tick
+
+# Auto punch-out sweep. POSTs to the Supabase Edge Function `timeclock-eod-sweep`,
+# which calls beacon_v2.auto_punch_out_eod(). That RPC self-gates on
+# tk_enabled + tk_auto_punchout_enabled + CT wall-clock >= tk_eod_window_end
+# (default 7:00 PM America/Chicago) and is idempotent, so it only acts once the
+# workday's EOD boundary passes and is a harmless no-op otherwise.
+#
+# GitHub cron is UTC-only, so a fixed UTC time would drift with DST. Instead we
+# fire every 15 min across a wide evening/night window (21:00 UTC through 06:59
+# UTC) that brackets any plausible tk_eod_window_end from ~15:00 CT to ~midnight
+# CT in both CDT and CST. The RPC does the exact CT-local gate and is idempotent,
+# so ticks before the boundary are harmless no-ops. If an admin sets an EOD later
+# than ~midnight CT, widen this window to match.
+#
+# Repo secrets required:
+#   TIMECLOCK_EOD_SWEEP_URL   https://<project-ref>.supabase.co/functions/v1/timeclock-eod-sweep
+#   TIMECLOCK_EOD_SWEEP_AUTH  the Supabase service-role key for this project
+
+on:
+  schedule:
+    - cron: '*/15 0-6,21-23 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: timekeeping-eod-sweep-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: POST to timeclock-eod-sweep
+        env:
+          TIMECLOCK_EOD_SWEEP_URL:  ${{ secrets.TIMECLOCK_EOD_SWEEP_URL }}
+          TIMECLOCK_EOD_SWEEP_AUTH: ${{ secrets.TIMECLOCK_EOD_SWEEP_AUTH }}
+        run: |
+          if [ -z "$TIMECLOCK_EOD_SWEEP_URL" ] || [ -z "$TIMECLOCK_EOD_SWEEP_AUTH" ]; then
+            echo "Missing TIMECLOCK_EOD_SWEEP_URL or TIMECLOCK_EOD_SWEEP_AUTH repo secret." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$TIMECLOCK_EOD_SWEEP_URL" \
+            -H "Authorization: Bearer $TIMECLOCK_EOD_SWEEP_AUTH" \
+            -H "Content-Type: application/json" \
+            --max-time 200 \
+            -d '{}'

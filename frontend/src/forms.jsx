@@ -103,7 +103,8 @@ const DB_COLUMNS = {
   // anticipated_invoice_pms join in the second insert step.
   invoice: [
     "project_name", "year", "project_number", "type",
-    "contract_amount", "msmm_amount", "msmm_remaining_to_bill_year_start",
+    // msmm_amount is intentionally omitted — MSMM is purely derived (Total − subs).
+    "contract_amount", "msmm_remaining_to_bill_year_start",
   ],
   // beacon_v2.open_bids — pre-Awaiting tracker. PDF upload is NOT a DB column;
   // it's a storage write that happens after the row insert, see onSubmit.
@@ -217,7 +218,6 @@ const INITIAL = {
     project_number: "",
     type: "ENG",
     contract_amount: "",
-    msmm_amount: "",
     msmm_remaining_to_bill_year_start: "",
     pm_user_ids: [],
   },
@@ -587,9 +587,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
             year: row.year,
             project_number: row.project_number || null,
             // Total Contract Value = potential.total_contract_amount.
-            // MSMM Portion stays NULL by default — the Invoice expand row
-            // shows the derived value (= total − Σ subs); users override
-            // via that cell only when MSMM ≠ derived.
+            // MSMM Portion is never stored — the Invoice tab always shows the
+            // derived value (= total − Σ subs).
             contract_amount: row.total_contract_amount ?? null,
           };
           const { data: invRow, error: e4 } = await supabase
@@ -1326,12 +1325,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
                    style={{ fontFamily: "var(--font-mono)" }}
                    placeholder="0"/>
           </Field>
-          <Field label="MSMM Portion (optional override)">
-            <input className="input" type="number" value={form.msmm_amount}
-                   onChange={e => set("msmm_amount", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}
-                   placeholder="auto-calc (= total − subs)"/>
-          </Field>
+          {/* MSMM Portion is purely derived (Total − subs) and read-only on the
+              Invoice tab — no create-time override field. */}
           <Field label="MSMM Rollforward (carry-in from 2025)">
             <input className="input" type="number"
                    value={form.msmm_remaining_to_bill_year_start}

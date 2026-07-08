@@ -26,6 +26,7 @@ export function TimeSettingsPanel() {
     try {
       await updateTimekeepingSettings({
         tk_enabled:                  !!s.tk_enabled,
+        tk_auto_punchout_enabled:    !!s.tk_auto_punchout_enabled,
         tk_business_tz:              String(s.tk_business_tz || "America/Chicago"),
         tk_workday_hours:            Number(s.tk_workday_hours) || 8,
         tk_overtime_threshold_min:   parseInt(s.tk_overtime_threshold_min, 10) || 480,
@@ -55,6 +56,12 @@ export function TimeSettingsPanel() {
         <input type="checkbox" checked={!!s.tk_enabled}
           onChange={e => set("tk_enabled", e.target.checked)}/>
         <span><strong>Timekeeping enabled</strong> — turning off pauses the punch endpoint and hides the personal tab.</span>
+      </label>
+
+      <label className="tk-settings-toggle">
+        <input type="checkbox" checked={s.tk_auto_punchout_enabled !== false}
+          onChange={e => set("tk_auto_punchout_enabled", e.target.checked)}/>
+        <span><strong>Auto punch-out at end of day</strong> — anyone still clocked in when the EOD window ends (below) is automatically punched out and marked <em>done for the day</em>.</span>
       </label>
 
       <div className="tk-settings-grid">
