@@ -83,7 +83,7 @@ const TAB_META = [
   { key: "events",    label: "Events & Other",stage: "stage-events"    },
   { key: "directory", label: "Directory",     stage: "stage-clients"   },
   { key: "licenses",  label: "Licenses",      stage: "stage-events"    },
-  { key: "timesheet", label: "Timesheet",     stage: "stage-events"    },
+  { key: "timesheet", label: "Time & Leave",  stage: "stage-events"    },
   { key: "time-admin",label: "Time Admin",    stage: "stage-events", adminOnly: true },
   { key: "team-cal",  label: "Team Calendar", stage: "stage-events"    },
 ];
@@ -103,7 +103,7 @@ const NAV_GROUPS = [
   { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "side", tabs: ["events"] },
   { key: "directory", label: "Directory",           stage: "stage-clients",   group: "side", tabs: ["directory"] },
   { key: "licenses",  label: "Licenses",            stage: "stage-events",    group: "side", tabs: ["licenses"] },
-  { key: "timesheet", label: "Timesheet",           stage: "stage-events",    group: "side", tabs: ["timesheet"] },
+  { key: "timesheet", label: "Time & Leave",        stage: "stage-events",    group: "side", tabs: ["timesheet"] },
   { key: "time-admin",label: "Time Admin",          stage: "stage-events",    group: "side", tabs: ["time-admin"], adminOnly: true },
   { key: "team-cal",  label: "Team Calendar",       stage: "stage-events",    group: "side", tabs: ["team-cal"] },
 ];
@@ -140,9 +140,9 @@ const PAGE_META = {
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   licenses:  { title: "Licenses & Certifications", desc: "Every company and individual license with its expiration. Color-coded by days until due; reminder emails go out at 60 / 30 / 14 / 7 / 1 days before expiry." },
   timesheet: {
-    title: "Timesheet",
-    desc: "Punch in/out, review time, and tap your fob at the front-door reader.",
-    mobileDesc: "Tap your fob on the front-door reader.",
+    title: "Time & Leave",
+    desc: "Punch in/out, review time, request leave, and tap your fob at the front-door reader.",
+    mobileDesc: "Punch time or request leave.",
   },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, leave requests + balances, NFC enrollment, and timekeeping settings." },
   "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },

@@ -11,7 +11,7 @@ import {
   getCurrentBeaconUser, todayInCT, weekStartCT, fmtHM,
   loadPunchState, loadDayDetail, loadMyWeek,
   loadCachedPunchState, saveCachedPunchState, adaptPunchResponseToState,
-  subscribeMyTimeState, loadLatestInterval, computeOutGaps,
+  subscribeMyTimeState, loadLatestInterval,
 } from "../data";
 import { PunchButton } from "./PunchButton";
 import { DayCalendar } from "./DayCalendar";
@@ -123,6 +123,14 @@ export function TimesheetTab({ focusDate = null }) {
 
   // An open interval no longer implies "in" — a punch-out leaves an open OUT
   // interval ("currently out"). Only an open IN (is_out=false) interval is IN.
+  const currentUserName = (
+    me.first_name ||
+    me.shortName ||
+    me.display_name ||
+    me.name ||
+    me.email ||
+    ""
+  ).trim().split(/\s+/)[0] || "there";
   const punchedIn = state.open != null && !state.open.isOut;
   const todayMinutes = state.today?.minutesWork || 0;
   const locked       = !!week.week?.locked;
@@ -130,7 +138,6 @@ export function TimesheetTab({ focusDate = null }) {
   const untaggedCount = (day.intervals || []).filter(i =>
     i.category === "meeting_untagged" && !i.endAt ? false : i.category === "meeting_untagged"
   ).length;
-  const gapCount = computeOutGaps({ intervals: day.intervals || [], date }).length;
   const sectionTabId = (key) => `tk-timesheet-${key}-tab`;
   const sectionPanelId = (key) => `tk-timesheet-${key}-panel`;
   const selectSection = (key) => setSection(key);
@@ -217,6 +224,7 @@ export function TimesheetTab({ focusDate = null }) {
                 state={punchedIn ? "in" : "out"}
                 openSince={state.open?.startAt || null}
                 todayMinutesWork={todayMinutes}
+                userName={currentUserName}
                 locked={locked}
                 onPunched={applyPunchResponse}
                 onRetry={() => refresh()}
@@ -243,7 +251,11 @@ export function TimesheetTab({ focusDate = null }) {
                   {untaggedCount > 0 && (
                     <div className="tk-hero-row tk-hero-warn">
                       <Icon name="warn" size={14}/>
-                      {untaggedCount} gap{untaggedCount === 1 ? "" : "s"} need tagging
+                      <span>
+                        {untaggedCount === 1
+                          ? "1 time block needs a tag"
+                          : `${untaggedCount} time blocks need tags`}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -260,13 +272,7 @@ export function TimesheetTab({ focusDate = null }) {
                   <div className="tk-day-card-head-meta">
                     <h3>My day</h3>
                     <span className="tk-day-card-sub">
-                      <span>{fmtHM(todayMinutes)} counted</span>
-                      {(day.intervals || []).some(i => !i.endAt) && (
-                        <span className="tk-day-card-sub-chip tone-green"><span className="tk-pulse-dot"/> Open now</span>
-                      )}
-                      {gapCount > 0 && (
-                        <span className="tk-day-card-sub-chip tone-rose">{gapCount} gap{gapCount === 1 ? "" : "s"}</span>
-                      )}
+                      <span>{fmtHM(todayMinutes)} Total Hours Worked</span>
                     </span>
                   </div>
                   <div className="tk-day-card-head-actions">
@@ -320,6 +326,7 @@ export function TimesheetTab({ focusDate = null }) {
                 weekStart={weekStart}
                 days={week.days}
                 week={week.week}
+                onSelectDate={setDate}
                 onChanged={refresh}
               />
             </main>
@@ -362,6 +369,7 @@ export function TimesheetTab({ focusDate = null }) {
         <PunchPromptModal
           kind={prompt.kind}
           interval={prompt.interval}
+          userName={currentUserName}
           onClose={() => setPrompt(null)}
           onSaved={() => refresh({ silent: true })}
         />

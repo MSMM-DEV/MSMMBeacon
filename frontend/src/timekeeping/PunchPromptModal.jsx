@@ -38,6 +38,16 @@ const OUT_CATEGORY_CHOICES = [
   { key: "eod",              label: "Done for the day" },   // stops the red overlay
 ];
 
+const CATEGORY_ICON = {
+  work: "briefcase",
+  meeting: "users",
+  travel: "pin",
+  lunch: "utensils",
+  break: "pause",
+  vacation: "sun",
+  eod: "logout",
+};
+
 function choicesForKind(kind) {
   return kind === "in" ? IN_CATEGORY_CHOICES : OUT_CATEGORY_CHOICES;
 }
@@ -56,6 +66,7 @@ function defaultCategory(kind, interval) {
 export function PunchPromptModal({
   kind,             // 'in' | 'out'
   interval,         // adapted interval (the one to update)
+  userName = "there",
   onClose,          // () => void
   onSaved,          // () => void — parent re-fetches after success
 }) {
@@ -80,13 +91,15 @@ export function PunchPromptModal({
 
   if (!interval) return null;
 
+  const displayName = String(userName || "").trim() || "there";
+
   const headline = kind === "in"
     ? "What are you starting?"
     : "Where are you headed?";
 
   const eyebrow = kind === "in"
-    ? `Punched in at ${fmtClock(interval.startAt)}`
-    : `Punched out at ${fmtClock(interval.startAt)}`;
+    ? `You are now clocked in, ${displayName} · ${fmtClock(interval.startAt)}`
+    : `You are now clocked out, ${displayName} · ${fmtClock(interval.startAt)}`;
 
   const save = async () => {
     setBusy(true); setErr(null);
@@ -131,7 +144,9 @@ export function PunchPromptModal({
                 className={`tk-prompt-chip tone-${TK_CATEGORY_TONE[c.key] || "muted"} ${category === c.key ? "is-active" : ""}`}
                 onClick={() => setCategory(c.key)}
               >
-                <span className="tk-prompt-chip-dot"/>
+                <span className="tk-prompt-chip-icon" aria-hidden="true">
+                  <Icon name={CATEGORY_ICON[c.key] || "note"} size={16} />
+                </span>
                 {c.label}
               </button>
             ))}
@@ -140,7 +155,7 @@ export function PunchPromptModal({
             <span className="tk-prompt-presence-dot" />
             {kind === "in"
               ? "Saved as in-time unless you later mark this meeting as away."
-              : "Saved as out-time. Meeting can still be changed later if it happened at your desk."}
+              : "This starts an away-time block. You can edit the category later if plans change."}
           </div>
 
           <div className="form-row">
@@ -167,7 +182,7 @@ export function PunchPromptModal({
             Skip
           </button>
           <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
-            {busy ? "Saving…" : (kind === "in" ? "Save & start" : "Save tag")}
+            {busy ? "Saving…" : (kind === "in" ? "Save & start" : "Save")}
           </button>
         </div>
       </div>

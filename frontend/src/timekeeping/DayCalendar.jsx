@@ -82,6 +82,21 @@ function fmtFromMin(min) {
   return `${h12}:${m.toString().padStart(2, "0")}${ampm}`;
 }
 
+function categoryIconName(category) {
+  return ({
+    work: "briefcase",
+    meeting: "users",
+    travel: "pin",
+    lunch: "utensils",
+    break: "pause",
+    eod: "logout",
+    meeting_untagged: "warn",
+    vacation: "sun",
+    holiday: "calendar",
+    off: "ban",
+  })[category] || "clock";
+}
+
 export function DayCalendar({
   date,
   intervals = [],
@@ -429,6 +444,7 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
     ? iv.durationMinutes
     : Math.max(0, Math.floor((Date.now() - +new Date(iv.startAt)) / 60_000));
   const label      = TK_CATEGORY_LABEL[iv.category] || iv.category;
+  const iconName   = categoryIconName(iv.category);
   const actionText = isUntagged ? "Tag this time block" : "Edit this time block";
   const timeText   = `${fmtClock(iv.startAt)} to ${iv.endAt ? fmtClock(iv.endAt) : "now"}`;
 
@@ -442,31 +458,28 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
       data-source={iv.categorySource}
     >
       <div className="tk-day-list-card-head">
-        <span className="tk-day-list-card-chip tk-day-list-card-status">
-          <span className="tk-day-list-card-dot"/>
-          {isOpen ? `${label} now` : label}
-        </span>
-        <div className="tk-day-list-card-time">
-          <span className="tk-day-list-card-time-from">{fmtClock(iv.startAt)}</span>
-          <Icon name="forward" size={11}/>
-          <span className="tk-day-list-card-time-to">
-            {iv.endAt ? fmtClock(iv.endAt) : "now"}
-          </span>
-        </div>
-        <div className="tk-day-list-card-dur">
-          {isOpen && isToday ? <><span className="tk-pulse-dot"/> {fmtHM(minutes)}</> : fmtHM(minutes)}
+        <div className="tk-day-list-card-mainline">
+          <div className="tk-day-list-card-time">
+            <span className="tk-day-list-card-time-from">{fmtClock(iv.startAt)}</span>
+            <Icon name="forward" size={11}/>
+            <span className="tk-day-list-card-time-to">
+              {iv.endAt ? fmtClock(iv.endAt) : "now"}
+            </span>
+          </div>
+          <div className="tk-day-list-card-dur">
+            {isOpen && isToday ? <><span className="tk-pulse-dot"/> {fmtHM(minutes)}</> : fmtHM(minutes)}
+          </div>
         </div>
       </div>
 
       <div className="tk-day-list-card-chips">
+        <span className="tk-day-list-card-chip tk-day-list-card-status">
+          <Icon name={iconName} size={12}/>
+          {label}
+        </span>
         {iv.outlookEventId && (
           <span className="tk-day-list-card-chip tk-day-list-card-chip-outlook">
             <Icon name="link" size={11}/> Outlook
-          </span>
-        )}
-        {(iv.categorySource === "user" || iv.categorySource === "admin") && (
-          <span className="tk-day-list-card-chip tk-day-list-card-chip-confirmed">
-            <Icon name="check" size={11}/> {iv.categorySource}
           </span>
         )}
         {isUntagged && (
@@ -478,7 +491,7 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
 
       {iv.outlookEventSubject && (
         <div className="tk-day-list-card-outlook-line">
-          📅 {iv.outlookEventSubject}
+          <Icon name="calendar" size={11}/> {iv.outlookEventSubject}
           {iv.outlookEventLocation && <span className="tk-day-list-card-loc"> · {iv.outlookEventLocation}</span>}
         </div>
       )}

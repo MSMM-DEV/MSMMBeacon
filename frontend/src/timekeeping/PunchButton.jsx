@@ -52,6 +52,7 @@ export function PunchButton({
   state,                // 'in' | 'out'  — only meaningful when phase==='ready'
   openSince,            // ISO string when state === 'in'
   todayMinutesWork,     // for inline summary when out
+  userName = "there",
   locked = false,
   onPunched,            // (response) => void — parent applies the new state
   onRetry,              // () => void — parent re-fetches state on error
@@ -141,11 +142,21 @@ export function PunchButton({
 
   const elapsed = state === "in" ? elapsedMin(openSince) : 0;
   const statusKind = showIn ? "in" : showOut ? "out" : null;
-  const statusTitle = showIn ? "Clocked in" : showOut ? "Clocked out" : null;
-  const actionLabel = showIn
-    ? `Punch out. Currently clocked in since ${fmtClock(openSince)}. Current session ${fmtHM(elapsed)}.`
+  const displayName = String(userName || "").trim() || "there";
+  const statusTitle = showIn
+    ? `You are now clocked in, ${displayName}`
     : showOut
-      ? `Punch in. Worked today ${fmtHM(todayMinutesWork || 0)}.`
+      ? `You are now clocked out, ${displayName}`
+      : null;
+  const statusTitleShort = showIn
+    ? `Clocked in, ${displayName}`
+    : showOut
+      ? `Clocked out, ${displayName}`
+      : null;
+  const actionLabel = showIn
+    ? `Punch out. ${statusTitle}. Session Started At ${fmtClock(openSince)}. Current Session ${fmtHM(elapsed)}.`
+    : showOut
+      ? `Punch in. ${statusTitle}. Total Hours Worked ${fmtHM(todayMinutesWork || 0)}.`
       : label;
 
   return (
@@ -155,19 +166,22 @@ export function PunchButton({
           <span className="tk-punch-status-kicker">Current status</span>
           <div className="tk-punch-status-main">
             <span className={`tk-punch-status-dot tone-${statusKind}`} aria-hidden="true"/>
-            <strong>{statusTitle}</strong>
+            <strong>
+              <span className="tk-punch-status-title-full">{statusTitle}</span>
+              <span className="tk-punch-status-title-short">{statusTitleShort}</span>
+            </strong>
           </div>
           <div className="tk-punch-status-meta">
             {showIn ? (
               <>
-                <span>Started at <strong>{fmtClock(openSince)}</strong></span>
-                <span>Current session <strong>{fmtHM(elapsed)}</strong></span>
-                <span>Counted work <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+                <span>Session Started At <strong>{fmtClock(openSince)}</strong></span>
+                <span>Current Session <strong>{fmtHM(elapsed)}</strong></span>
+                <span>Total Hours Worked <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
               </>
             ) : (
               <>
                 <span>Ready to start your next work session</span>
-                <span>Counted work <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+                <span>Total Hours Worked <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
               </>
             )}
           </div>
