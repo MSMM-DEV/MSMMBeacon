@@ -2081,12 +2081,32 @@ export const InvoiceTable = ({
     const subSum = subListFor(r).reduce((a, s) => a + Number(s?.byYear?.[year]?.amounts?.[m] || 0), 0);
     return total - subSum;
   };
-  const msmmYtdAll    = (r) => yearsOf(r).reduce((a, y) =>
-    a + Array.from({ length: 12 }, (_, m) => msmmAtYM(r, y, m)).reduce((x, z) => x + z, 0), 0);
   const projectYtdAll = (r) => yearsOf(r).reduce((a, y) =>
     a + (yrow(r, y)?.values || []).reduce((x, z) => x + (z || 0), 0), 0);
   const subYtdAll     = (s) => Object.values(s?.byYear || {}).reduce((a, yr) =>
     a + (yr.amounts || []).reduce((x, z) => x + (z || 0), 0), 0);
+  // Total Billed (MSMM) — counts a month's MSMM value ONLY when the project's
+  // total/prime cell for that month has an invoice ATTACHED (primeFiles non-
+  // empty); entered-but-not-yet-billed / projected months are excluded. The
+  // Rollforward carry-in (remainingStart) is always added, since it represents
+  // billing that predates the loaded window. (Client direction, 2026-07.)
+  const msmmBilledAttached = (r) => {
+    // For an MHZ-prime ENG row the prime invoice attaches on the MHZ sibling (a
+    // different anticipated_invoice id — primeFiles are NOT synced across
+    // siblings), so also treat a month as billed when the linked MHZ row has an
+    // attachment for it. A normal ENG row / the MHZ row itself has no such
+    // sibling (linkedPerspectiveFor → null) and is unaffected.
+    const mhz = linkedPerspectiveFor(r, "MHZ");
+    return yearsOf(r).reduce((a, y) => {
+      const yr = yrow(r, y); if (!yr) return a;
+      const files    = yr.primeFiles || [];
+      const mhzFiles = mhz ? (yrow(mhz, y)?.primeFiles || []) : [];
+      return a + Array.from({ length: 12 }, (_, m) =>
+        ((files[m]?.length > 0) || (mhzFiles[m]?.length > 0)) ? msmmAtYM(r, y, m) : 0
+      ).reduce((x, z) => x + z, 0);
+    }, 0);
+  };
+  const msmmTotalBilled = (r) => msmmBilledAttached(r) + (Number(r.remainingStart) || 0);
   // Resolve the linked sibling of a given perspective. Uses the SAME
   // source-OR-number linkage as linkedInvoiceIdsFor / isMhzPerspectiveSub so
   // classification (hide the ENG row's subs) and injection (add the MHZ prime
@@ -2102,18 +2122,6 @@ export const InvoiceTable = ({
       )
     ) || null;
   };
-  const invoiceTotalsAsSubYears = (r) => Object.fromEntries(
-    yearsOf(r).map(year => {
-      const yr = yrow(r, year);
-      return [year, {
-        amounts: [...(yr?.values || Array(12).fill(0))],
-        files: yr?.primeFiles || Array.from({ length: 12 }, () => []),
-        subInvoiceIds: Array(12).fill(null),
-        paid: yr?.primePaid || Array(12).fill(false),
-        paidAt: Array(12).fill(null),
-      }];
-    })
-  );
   const invoiceMsmmAsSubYears = (r) => Object.fromEntries(
     yearsOf(r).map(year => [year, {
       amounts: Array.from({ length: 12 }, (_, m) => msmmAtYM(r, year, m)),
@@ -2125,33 +2133,11 @@ export const InvoiceTable = ({
   );
   const withPerspectiveRows = (r, entries) => {
     const type = r.type || "ENG";
-    if (type === "ENG") {
-      const mhz = linkedPerspectiveFor(r, "MHZ");
-      if (!mhz) return entries;
-      const byYear = invoiceTotalsAsSubYears(mhz);
-      const next = entries.slice();
-      const idx = next.findIndex(e => (e.kind || "sub") === "prime" && /(^|\s)MHZ($|\s)/i.test(e.companyName || ""));
-      const base = idx >= 0 ? next[idx] : {
-        kind: "prime",
-        companyId: "__mhz_prime__",
-        companyName: "MHZ",
-        discipline: "Prime perspective",
-      };
-      const row = {
-        ...base,
-        contractAmount: mhz.amount || 0,
-        remainingStart: mhz.totalRemainingStart ?? mhz.amount ?? null,
-        amounts: byYear[THIS_YEAR]?.amounts || Array(12).fill(0),
-        files: byYear[THIS_YEAR]?.files || Array.from({ length: 12 }, () => []),
-        subInvoiceIds: Array(12).fill(null),
-        paid: byYear[THIS_YEAR]?.paid || Array(12).fill(false),
-        paidAt: Array(12).fill(null),
-        byYear,
-        syntheticPerspective: true,
-      };
-      if (idx >= 0) next[idx] = row; else next.unshift(row);
-      return next;
-    }
+    // ENG (MSMM) view of an MHZ-prime project no longer injects a synthetic
+    // "MHZ · PRIME" line — per client direction the ENG perspective hides the
+    // MHZ prime entirely, and its totals must not reflect the full-JV value
+    // (the Project total row is rendered as MSMM's own portion below). A normal
+    // ENG row has no MHZ sibling, so nothing was ever injected for it anyway.
     if (type === "MHZ") {
       const eng = linkedPerspectiveFor(r, "ENG");
       if (!eng) return entries;
@@ -2978,16 +2964,16 @@ export const InvoiceTable = ({
                       );
                     })}
                     <td className="total-cell inv-pin-ytd"
-                        title="Auto-calculated · all the MSMM actuals for this project, summed across every year">
+                        title="Auto-calculated · MSMM billed — months with an invoice attached — plus the Rollforward carry-in">
                       {(() => {
-                        const v = msmmYtdAll(r);
+                        const v = msmmTotalBilled(r);
                         return v ? fmtMoney(v) : <span className="empty-cell">—</span>;
                       })()}
                     </td>
                     <td className="total-cell inv-pin-rem"
                         title="Auto-calculated · MSMM Portion − Total Billed">
                       {(() => {
-                        const c = msmmContractShown(r), b = msmmYtdAll(r);
+                        const c = msmmContractShown(r), b = msmmTotalBilled(r);
                         return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                       })()}
                     </td>
@@ -3031,9 +3017,11 @@ export const InvoiceTable = ({
                       <td className="sticky-1"/>
                       <td className="sticky-2" colSpan={4} style={{ paddingLeft: 28 }}>
                         <span style={{ fontStyle: "italic", color: "var(--text-soft)" }}>
-                          {isPrimeRow
-                            ? "No subs tracked on this project yet."
-                            : "No prime or subs tracked on this project yet."}
+                          {mhzPerspectiveSub
+                            ? "MHZ is the prime — the prime and subs are managed on the MHZ view."
+                            : isPrimeRow
+                              ? "No subs tracked on this project yet."
+                              : "No prime or subs tracked on this project yet."}
                         </span>
                       </td>
                       <td colSpan={windowMonths.length + 2}/>
@@ -3352,19 +3340,43 @@ export const InvoiceTable = ({
                       <td/>
                       <td/>
                       <td className="mono">
-                        <EditableCell value={r.amount} type="number"
-                          onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
-                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        {mhzPerspectiveSub ? (
+                          <span title="MSMM Portion — MHZ is the prime, so the full joint-venture total is billed on the MHZ view">
+                            {(() => { const v = msmmContractShown(r); return v != null ? fmtMoney(v) : <span className="empty-cell">—</span>; })()}
+                          </span>
+                        ) : (
+                          <EditableCell value={r.amount} type="number"
+                            onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
+                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        )}
                       </td>
                       {/* Remaining Jan 1 (project total) — editable starting
-                          balance; NULL falls back to Total Contract Value. */}
+                          balance; NULL falls back to Total Contract Value. For an
+                          MHZ-prime ENG row it mirrors MSMM's Rollforward (read-only). */}
                       <td className="mono"
                           title="Remaining amount to bill for the whole project. Defaults to Total Contract Value; edit if some was billed previously. Clear to reset.">
-                        <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"
-                          onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
-                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        {mhzPerspectiveSub ? (
+                          <span>{r.remainingStart != null ? fmtMoney(r.remainingStart) : <span className="empty-cell">—</span>}</span>
+                        ) : (
+                          <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"
+                            onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
+                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                        )}
                       </td>
                       {windowMonths.map((d, wi) => {
+                        if (mhzPerspectiveSub) {
+                          // ENG view of an MHZ-prime project — the Project total
+                          // row mirrors MSMM's own monthly portion, read-only.
+                          // Prime billing (attach / paid / invoice #) lives on the
+                          // MHZ view, so there are no controls here.
+                          const shown = msmmAtDesc(r, d);
+                          return (
+                          <td key={d.abs}
+                              className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell"}>
+                            <span className="mono">{shown ? fmtMoney(shown) : <span style={{ opacity: .4 }}>—</span>}</span>
+                          </td>
+                          );
+                        }
                         const v = valAtDesc(r, d);
                         const filesForCell = primeFilesAtDesc(r, d);
                         const hasFiles = filesForCell.length > 0;
@@ -3436,19 +3448,24 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* YTD Actual (project) — every monthly total summed across
-                          all years (all-time). Rollforward was removed. */}
+                      {/* Total Billed (project) — every monthly total summed
+                          across all years. For an MHZ-prime ENG row it mirrors
+                          MSMM's own Total Billed (attached months + Rollforward)
+                          so no full-JV figure shows in the ENG view. */}
                       <td className="total-cell mono inv-pin-ytd"
-                          title="Auto-calculated · all project totals, every year">
+                          title={mhzPerspectiveSub
+                            ? "Auto-calculated · MSMM billed (months with an invoice attached) + Rollforward"
+                            : "Auto-calculated · all project totals, every year"}>
                         {(() => {
-                          const ytd = projectYtdAll(r);
+                          const ytd = mhzPerspectiveSub ? msmmTotalBilled(r) : projectYtdAll(r);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
                       <td className="total-cell mono inv-pin-rem"
-                          title="Auto-calculated · Total Contract Value − billed">
+                          title="Auto-calculated · contract − billed">
                         {(() => {
-                          const c = Number(r.amount || 0), b = projectYtdAll(r);
+                          const c = mhzPerspectiveSub ? msmmContractShown(r) : Number(r.amount || 0);
+                          const b = mhzPerspectiveSub ? msmmTotalBilled(r) : projectYtdAll(r);
                           return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
@@ -3480,10 +3497,10 @@ export const InvoiceTable = ({
                         </td>
                       ))}
                       <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedNonOrange, msmmYtdAll))}
+                        {fmtMoney(sumBy(searchedNonOrange, msmmTotalBilled))}
                       </td>
                       <td className="total-cell inv-pin-rem" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedNonOrange, r => msmmContractShown(r) - msmmYtdAll(r)))}
+                        {fmtMoney(sumBy(searchedNonOrange, r => msmmContractShown(r) - msmmTotalBilled(r)))}
                       </td>
                       <td className="total-cell inv-pin-act"></td>
                     </tr>
@@ -3505,10 +3522,10 @@ export const InvoiceTable = ({
                         </td>
                       ))}
                       <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedRows, msmmYtdAll))}
+                        {fmtMoney(sumBy(searchedRows, msmmTotalBilled))}
                       </td>
                       <td className="total-cell inv-pin-rem" style={{ color: "var(--accent-ink)" }}>
-                        {fmtMoney(sumBy(searchedRows, r => msmmContractShown(r) - msmmYtdAll(r)))}
+                        {fmtMoney(sumBy(searchedRows, r => msmmContractShown(r) - msmmTotalBilled(r)))}
                       </td>
                       <td className="total-cell inv-pin-act"></td>
                     </tr>

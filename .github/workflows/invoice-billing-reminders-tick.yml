@@ -1,0 +1,47 @@
+name: invoice-billing-reminders-tick
+
+# Once a day, POST to the Supabase Edge Function `invoice-billing-reminders`.
+# For the month closing on the workspace's "Move actual to" cutover it:
+#   • emails a reminder on each of the final 5 days before the cutover for any
+#     project that has a total value entered but no invoice attached (#3), or a
+#     sub invoice attached while the project total is missing / unattached (#4);
+#   • on the cutover day itself, clears the unbilled month value (#3) — only if
+#     the function secret INVOICE_AUTOCLEAR_ENABLED=true.
+# Recipients: three fixed managers + the project PM(s). Per-day idempotency keys
+# mean a re-run on the same day never produces duplicate mail.
+#
+# Repo secrets required:
+#   INVOICE_BILLING_REMINDERS_URL   https://<project-ref>.supabase.co/functions/v1/invoice-billing-reminders
+#   INVOICE_BILLING_REMINDERS_AUTH  the Supabase service-role key for this project
+#
+# Kill switches (function secrets): INVOICE_REMINDERS_ENABLED=false silences
+# email; INVOICE_AUTOCLEAR_ENABLED=true (default off) arms the destructive clear.
+
+on:
+  schedule:
+    - cron: '0 13 * * *'      # 13:00 UTC ≈ 8:00 AM Central (standard time)
+  workflow_dispatch:
+
+concurrency:
+  group: invoice-billing-reminders-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST to invoice-billing-reminders
+        env:
+          INVOICE_BILLING_REMINDERS_URL:  ${{ secrets.INVOICE_BILLING_REMINDERS_URL }}
+          INVOICE_BILLING_REMINDERS_AUTH: ${{ secrets.INVOICE_BILLING_REMINDERS_AUTH }}
+        run: |
+          if [ -z "$INVOICE_BILLING_REMINDERS_URL" ] || [ -z "$INVOICE_BILLING_REMINDERS_AUTH" ]; then
+            echo "Missing INVOICE_BILLING_REMINDERS_URL or INVOICE_BILLING_REMINDERS_AUTH repo secret." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$INVOICE_BILLING_REMINDERS_URL" \
+            -H "Authorization: Bearer $INVOICE_BILLING_REMINDERS_AUTH" \
+            -H "Content-Type: application/json" \
+            --max-time 240 \
+            -d '{}'

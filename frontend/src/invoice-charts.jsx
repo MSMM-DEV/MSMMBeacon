@@ -424,11 +424,12 @@ const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBe
           const projCls = isProj ? " proj" : " actual";
           const fillForVerdict = (v) => isProj ? `url(#hatch-${v})` : undefined;
 
-          const diff = vAvg - Number(monthlyBenchmark || 0);
-          const showDiff = isAvgView && hasBenchmark && Math.abs(diff) >= 100 && vAvg > 0;
-          const diffSign = diff >= 0 ? "+" : "−";
-          const diffText = `${diffSign}${fmtMoney(Math.abs(diff), false)}`;
-          const diffY = Math.max(padT + 12, yTopAvg - 8);
+          // Label on top of each ENG bar = the month's TOTAL value (what the
+          // bar represents), not the amount above the target. The verdict class
+          // still tints it above/below the benchmark when one is set.
+          const showTotal = isAvgView && vAvg > 0;
+          const totalText = fmtMoney(vAvg, false);
+          const totalY = Math.max(padT + 12, yTopAvg - 8);
 
           if (isAvgView) {
             return (
@@ -457,13 +458,13 @@ const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBe
                     className={`bar-cap verdict-${verdictAvg}`}
                   />
                 )}
-                {showDiff && (
+                {showTotal && (
                   <text
-                    x={slotCx(i)} y={diffY}
+                    x={slotCx(i)} y={totalY}
                     textAnchor="middle"
                     className={`chart-bar-diff verdict-${verdictAvg}`}
                   >
-                    {diffText}
+                    {totalText}
                   </text>
                 )}
               </g>

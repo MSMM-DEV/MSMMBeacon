@@ -1927,6 +1927,13 @@ export async function licenseFileUrl(path) {
 export const licenseRunReminders = () =>
   supabase.functions.invoke("license-reminders", { body: {} });
 
+// Admin "Run billing reminders now" — fires the invoice-billing-reminders Edge
+// Function against the caller's Admin JWT (the daily cron uses the service-role
+// key). Sends the #3/#4 reminders for the closing month and, if the function's
+// INVOICE_AUTOCLEAR_ENABLED secret is set, performs the cutover-day clear.
+export const invoiceRunReminders = () =>
+  supabase.functions.invoke("invoice-billing-reminders", { body: {} });
+
 // ----------------------------------------------------------------------
 // Linked-projects resolver — used by both the Directory drawer (panels.jsx)
 // and the inline expand row in DirectoryTable (tables.jsx). Walks every

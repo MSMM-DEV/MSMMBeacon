@@ -3,7 +3,7 @@ import { Icon } from "./icons.jsx";
 import { TweaksPanel } from "./tweaks.jsx";
 import { AlertsAdmin } from "./admin-alerts.jsx";
 import { listAllUsersFull, adminAction, getUsers, updateMonthlyBenchmark,
-         updateInvoiceActualCutover, actualThruMonth, MONTHS, fmtMoney } from "./data.js";
+         updateInvoiceActualCutover, invoiceRunReminders, actualThruMonth, MONTHS, fmtMoney } from "./data.js";
 
 // ============================================================================
 // AdminPanel — gear-icon entry point for Admin users only.
@@ -627,6 +627,7 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
   return (
     <div className="targets-panel">
       <CutoverCard appSettings={appSettings} onSaved={onSaved} onError={onError} />
+      <BillingRemindersCard onSaved={onSaved} onError={onError} />
       <form className="target-card" onSubmit={onSubmit}>
         <div className="target-card-head">
           <div className="target-card-eyebrow">Quad Sheet · Cash Flow</div>
@@ -830,6 +831,72 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
         </div>
       )}
     </form>
+  );
+};
+
+// ----------------------------------------------------------------------------
+// BillingRemindersCard — manual trigger for the invoice-billing-reminders Edge
+// Function. The daily cron runs it automatically; this button lets an admin
+// fire it on demand (e.g. to test, or to re-send the day's reminders). The
+// destructive cutover-day clear is gated by the function's own
+// INVOICE_AUTOCLEAR_ENABLED secret (default off), so "Run now" is safe.
+// ----------------------------------------------------------------------------
+const BillingRemindersCard = ({ onSaved, onError }) => {
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const onRun = async () => {
+    if (pending) return;
+    setPending(true);
+    setResult(null);
+    try {
+      const { data, error } = await invoiceRunReminders();
+      if (error) throw error;
+      setResult(data || {});
+      const r3 = data?.reminders3 ?? 0, r4 = data?.reminders4 ?? 0, cl = data?.cleared ?? 0;
+      onSaved?.(null, `Billing reminders: ${r3 + r4} sent${cl ? `, ${cl} cleared` : ""}`);
+    } catch (err) {
+      onError?.(String(err.message || err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="target-card">
+      <div className="target-card-head">
+        <div className="target-card-eyebrow">Invoice · Billing reminders</div>
+        <h4 className="target-card-title">End-of-month billing reminders</h4>
+        <p className="target-card-desc">
+          For the month closing on the cutover date, emails Randy Pausina, Joe
+          Lavenia, Dominique Smith and each project's PM when a total value is
+          entered but not billed, or a sub invoice is attached while the total is
+          missing. Runs automatically each day; the cutover-day auto-clear only
+          fires when its server switch is on.
+        </p>
+      </div>
+      <div className="target-actions" style={{ justifyContent: "flex-start" }}>
+        <button type="button" className="btn sm" disabled={pending} onClick={onRun}>
+          <Icon name="mail" size={13}/>
+          {pending ? "Running…" : "Run reminders now"}
+        </button>
+      </div>
+      {result && (
+        <div className="target-readout">
+          <div className="target-readout-cell">
+            <div className="target-readout-label">Closing month</div>
+            <div className="target-readout-val">{result.targetMonth || result.note || "—"}</div>
+          </div>
+          <div className="target-readout-divider"/>
+          <div className="target-readout-cell">
+            <div className="target-readout-label">Sent / cleared</div>
+            <div className="target-readout-val">
+              {(result.reminders3 ?? 0) + (result.reminders4 ?? 0)} sent · {result.cleared ?? 0} cleared
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 
