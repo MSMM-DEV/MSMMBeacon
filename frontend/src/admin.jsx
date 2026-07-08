@@ -183,7 +183,10 @@ export const AdminPanel = ({
             <TargetsPanel
               appSettings={appSettings}
               onSaved={(next, msg) => {
-                onAppSettingsChange?.(next);
+                // `next` is a fresh appSettings object from a save; a card that
+                // only wants a toast (e.g. "Run reminders now") passes null —
+                // never push that into appSettings or downstream reads crash.
+                if (next) onAppSettingsChange?.(next);
                 flash(msg || "Targets updated");
               }}
               onError={(msg) => flash(msg, "x")}

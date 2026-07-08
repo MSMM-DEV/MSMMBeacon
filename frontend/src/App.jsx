@@ -1159,7 +1159,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // live setting; passed to InvoiceTable + InvoiceCharts and used in the
   // export/styling closures + the YTD stat below. The "today column" highlight
   // still keys off the real calendar month (TODAY_MONTH), not this boundary.
-  const actualThru = actualThruMonth(appSettings.invoiceActualCutoverDay, appSettings.invoiceActualCutoverNextMonth);
+  const actualThru = actualThruMonth(appSettings?.invoiceActualCutoverDay, appSettings?.invoiceActualCutoverNextMonth);
 
   // Filter state (keyed by tab)
   const [filterKey, setFilterKey] = useState({

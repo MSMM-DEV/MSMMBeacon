@@ -2094,9 +2094,10 @@ export const InvoiceTable = ({
     // For an MHZ-prime ENG row the prime invoice attaches on the MHZ sibling (a
     // different anticipated_invoice id — primeFiles are NOT synced across
     // siblings), so also treat a month as billed when the linked MHZ row has an
-    // attachment for it. A normal ENG row / the MHZ row itself has no such
-    // sibling (linkedPerspectiveFor → null) and is unaffected.
-    const mhz = linkedPerspectiveFor(r, "MHZ");
+    // attachment for it. Gate on isMhzPerspectiveSub (ENG-only) so this OR-in
+    // never applies to a PM row that merely shares the project number — a normal
+    // ENG row, the MHZ row itself, and PM rows all keep using their own files.
+    const mhz = isMhzPerspectiveSub(r, rows) ? linkedPerspectiveFor(r, "MHZ") : null;
     return yearsOf(r).reduce((a, y) => {
       const yr = yrow(r, y); if (!yr) return a;
       const files    = yr.primeFiles || [];
