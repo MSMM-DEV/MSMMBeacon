@@ -21,6 +21,8 @@
 // exceljs is loaded via dynamic import() so it only ships when the button is
 // actually clicked (keeps it out of the initial bundle).
 
+import { invoicePerspectiveRole } from "../invoice-perspectives.js";
+
 const GREEN  = "FF00B050";
 const YELLOW = "FFFFFF00";
 const RED    = "FFFF0000";
@@ -188,8 +190,15 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
     return total - subSum;
   };
 
+  // Include by the row's PERSPECTIVE role, matching the on-screen InvoiceTable
+  // (invoicePerspectiveRole): a type='MHZ' row is always Prime — even though its
+  // raw r.role is inherited from the source project where MSMM is a sub of MHZ
+  // ("Sub"). Filtering on raw r.role dropped every MHZ row → "No Prime projects
+  // with subs" despite the table clearly showing MHZ as Prime with subs A/B/C.
+  // baseRows is the perspective set for sibling detection; when the export is
+  // scoped to MHZ only, MHZ→Prime resolves without needing the ENG sibling.
   const included = (baseRows || []).filter(r =>
-    r.role === "Prime" && subListFor(r).length > 0);
+    invoicePerspectiveRole(r, baseRows) === "Prime" && subListFor(r).length > 0);
 
   const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
   const rows = included.map(r => {
