@@ -4,7 +4,9 @@
 // vertically as titled sections ("JANUARY 2026", …), each with its own header
 // row and one data row per qualifying project (Prime role + ≥1 sub). Rows are
 // sorted ascending by project number. Layout notes:
-//   • Legend in B1:B3 (Green=Paid / Red=Unpaid / Yellow=Submitted).
+//   • Optional bold, larger, merged TITLE banner on row 1 (the export scope:
+//     period · types · sort) — merged across the full width so it never clips.
+//   • Legend swatches below the title (Green=Paid / Red=Unpaid / Yellow=Submitted).
 //   • Everything is LEFT-aligned — text and money alike (the plain currency
 //     format below replaces the accounting format, which would otherwise force
 //     its own $-left / number-right layout and ignore the alignment).
@@ -172,7 +174,7 @@ export function manishAvailableYears(rows = [], currentYear = new Date().getFull
   return Array.from({ length: maxYear - MIN_EXPORT_YEAR + 1 }, (_, i) => MIN_EXPORT_YEAR + i);
 }
 
-export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [] } = {}) {
+export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [], title = "" } = {}) {
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
 
@@ -220,16 +222,18 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
     maxSubs,
     rows,
     includedCount: included.length,
+    title,
   };
 }
 
-export function buildManishYearSheets({ years = [], baseRows = [], subInvoices = new Map() } = {}) {
+export function buildManishYearSheets({ years = [], baseRows = [], subInvoices = new Map(), titleFor = null } = {}) {
   const sheets = (years || []).map(year => ({
     name: String(year),
     ...buildManishExportData({
       baseRows,
       subInvoices,
       monthDescs: manishMonthDescsBetween(Number(year), 0, Number(year), 11),
+      title: titleFor ? titleFor(year) : "",
     }),
   }));
   return {
@@ -246,7 +250,7 @@ function safeSheetName(name, fallback = "Invoices") {
 function buildConsolidatedSheet(ws, data, colWidths) {
   // monthTitles drives the section titles (e.g. "MARCH 2026") and the number of
   // stacked sections — one per month in the rolling window (spans years).
-  const { maxSubs, monthTitles } = data;
+  const { maxSubs, monthTitles, title } = data;
   const rows = [...data.rows].sort(byProjectNumber);
   const lastAmt = lastAmountCol(maxSubs);
 
@@ -255,14 +259,29 @@ function buildConsolidatedSheet(ws, data, colWidths) {
     ws.getColumn(Number(col)).width = width;
   }
 
-  // Legend (B1:B3).
+  let rowNum = 1;
+
+  // Export title — a bold, larger, WRAPPED banner describing what this export
+  // is for (time period · types · sort). Merged across the full used width
+  // (B → last amount column) so it can never be hidden behind a narrow column.
+  if (title) {
+    const lastCol = Math.max(TOTAL_COL, lastAmt);
+    ws.mergeCells(rowNum, PROJNO_COL, rowNum, lastCol);
+    const tCell = ws.getRow(rowNum).getCell(PROJNO_COL);
+    tCell.value = title;
+    tCell.font = { ...FONT, bold: true, size: 15 };
+    tCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+    ws.getRow(rowNum).height = 34;
+    rowNum += 2; // title + a blank spacer row
+  }
+
+  // Legend (three swatch rows in column B).
   LEGEND.forEach(([text, argb], i) => {
-    const cell = ws.getCell(`B${i + 1}`);
+    const cell = ws.getCell(`B${rowNum + i}`);
     cell.value = text;
     style(cell, { fill: { type: "pattern", pattern: "solid", fgColor: { argb } } });
   });
-
-  let rowNum = 5; // leave a gap under the legend
+  rowNum += LEGEND.length + 1; // legend rows + a gap before the first month
   for (let mi = 0; mi < monthTitles.length; mi++) {
     // Month title — merged across B:E, bold, slightly larger.
     ws.mergeCells(rowNum, PROJNO_COL, rowNum, TOTAL_COL);

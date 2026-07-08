@@ -4181,6 +4181,89 @@ export function intervalTone(iv) {
   return iv?.isOut ? "rose" : "green";
 }
 
+// Categories that mean "the day is over" — they render as NO block on the
+// timeline (neither green nor red) and are not counted as away time. Today
+// this is just "Done for the day" (eod), created either manually or by the
+// end-of-day auto punch-out sweep.
+export const HIDDEN_DISPLAY_CATEGORIES = new Set(["eod"]);
+
+const _ivMin = (iv) =>
+  iv?.endAt ? Math.max(0, Math.round((+new Date(iv.endAt) - +new Date(iv.startAt)) / 60000)) : Infinity;
+const _gapMin = (endISO, startISO) =>
+  Math.round((+new Date(startISO) - +new Date(endISO)) / 60000);
+
+function _extendSegment(seg, next) {
+  seg.endAt = next.endAt;
+  seg.isOpen = next.endAt == null;
+  seg.durationMinutes = next.endAt == null
+    ? null
+    : Math.max(0, Math.round((+new Date(next.endAt) - +new Date(seg.startAt)) / 60000));
+  if (!seg.notes && next.notes) seg.notes = next.notes;
+  seg.merged = true;
+}
+
+// Turn raw intervals into DISPLAY segments for the read-only timelines:
+//   1. Drop "Done for the day" (eod) intervals entirely — a finished day shows
+//      no trailing block (see HIDDEN_DISPLAY_CATEGORIES / requirement: eod is
+//      not out-time).
+//   2. Merge two same-presence + same-category blocks separated by a gap of
+//      ≤ maxGapMin minutes into one segment, absorbing the short opposite-
+//      presence sliver between them. e.g. IN 7:30–10:00 · OUT 10:00–10:03 ·
+//      IN 10:03–16:00  →  one green IN block 7:30–16:00. Same for two reds.
+//
+// DISPLAY-ONLY: day totals come from timesheet_days (server-side, fn_recompute_day),
+// never from the rendered blocks, so this transform can't change any counted
+// number. The editable admin/self canvas keeps the RAW intervals so each block
+// stays individually selectable.
+export function mergeDisplaySegments(intervals, { maxGapMin = 5 } = {}) {
+  const visible = (intervals || [])
+    .filter((iv) => iv && !HIDDEN_DISPLAY_CATEGORIES.has(iv.category))
+    .slice()
+    .sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt));
+
+  const out = [];
+  for (const iv of visible) {
+    const seg = { ...iv };
+    const prev  = out[out.length - 1];
+    const prev2 = out[out.length - 2];
+
+    // Sandwich merge: this block matches the block-before-last in presence +
+    // category, and the block directly before is a short (≤ maxGapMin) opposite-
+    // presence sliver between them — absorb the sliver and extend prev2 across
+    // both. This is the common case in the toggle model (punches always
+    // alternate presence, so two greens are separated by a brief OUT).
+    if (
+      prev2 && prev &&
+      !prev2.isOpen &&
+      prev2.isOut === seg.isOut &&
+      prev2.category === seg.category &&
+      prev.isOut !== seg.isOut &&
+      _ivMin(prev) <= maxGapMin
+    ) {
+      out.pop();                 // drop the short intervening sliver
+      _extendSegment(prev2, seg);
+      continue;
+    }
+
+    // Bare-gap merge: same presence + category directly adjacent within the
+    // gap window (defensive — rare given the alternating-presence model).
+    if (
+      prev &&
+      !prev.isOpen &&
+      prev.isOut === seg.isOut &&
+      prev.category === seg.category &&
+      _gapMin(prev.endAt, seg.startAt) >= 0 &&
+      _gapMin(prev.endAt, seg.startAt) <= maxGapMin
+    ) {
+      _extendSegment(prev, seg);
+      continue;
+    }
+
+    out.push(seg);
+  }
+  return out;
+}
+
 // ----------------------------------------------------------------------
 // Workday coverage — green-IN / red-OUT timeline overlay
 // ----------------------------------------------------------------------

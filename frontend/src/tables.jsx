@@ -2342,6 +2342,13 @@ export const InvoiceTable = ({
       sort: sortBy,
       search,
       year: null,
+      // Type-filter context so the export handlers can name files + title the
+      // Excel sheet by the scope the user is looking at (req 1.7 / 1.8).
+      // typeFilter = the list of types actually shown (all types when the
+      // filter is inactive), typeFilterActive = whether a subset is selected.
+      typeFilter: typeFilterActive ? invoiceTypeOptions.filter(t => typeFilter.has(t)) : invoiceTypeOptions.slice(),
+      typeFilterActive,
+      typeChipLabel,
     });
     // Deps are the full set of inputs to `searchedRows`; it's recomputed each
     // render from these, so referencing it in the closure is always current.

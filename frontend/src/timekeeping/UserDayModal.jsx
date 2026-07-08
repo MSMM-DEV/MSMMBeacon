@@ -124,11 +124,6 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
     finally { savingRef.current = false; setSaving(false); }
   };
 
-  const onCommitEdits = (edits) => guard(async () => {
-    await adminEditPunches(edits, userId, date);
-    await refresh(); onDirty?.(); flash("Times updated");
-  });
-
   const openCreate = (range) => {
     setSelectedId(null);
     setCreateDraft({
@@ -322,8 +317,6 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
               disabled={editingBlocked || saving}
               busy={saving}
               onSelectInterval={selectInterval}
-              onCommitEdits={onCommitEdits}
-              onCreateRange={openCreate}
             />
           </div>
 
@@ -461,7 +454,7 @@ function InspectorEdit({ interval, saving, selfMode = false, onSave, onDelete, o
           />
         </div>
         <span className="tk-de-field-hint">
-          {isOpen ? "Open block — end is now." : (selfMode ? "Adjust the fields, then save changes." : "Or drag the block / its edges on the canvas.")}
+          {isOpen ? "Open block — end is now." : "Edit the start / end times, then Save changes."}
         </span>
       </div>
 
@@ -570,20 +563,9 @@ function IdlePanel({ onAdd, disabled, selfMode = false }) {
         <span className="tk-de-legend-item"><span className="tk-de-legend-sw tone-rose" /> Out · never counts</span>
       </div>
       <ul className="tk-de-tips">
-        {selfMode ? (
-          <>
-            <li><Icon name="edit" size={12} /> Select a block to edit its tag, times, or note</li>
-            <li><Icon name="plus" size={12} /> Use Add block to fill in missing time</li>
-            <li><Icon name="sort" size={12} /> Dragging is optional when you need a quick adjustment</li>
-          </>
-        ) : (
-          <>
-            <li><Icon name="sort" size={12} /> Drag a block to move it</li>
-            <li><Icon name="columns" size={12} /> Drag a block’s top/bottom edge to resize</li>
-            <li><Icon name="plus" size={12} /> Drag an empty area to add a block</li>
-            <li><Icon name="edit" size={12} /> Click a block to retag, comment or delete</li>
-          </>
-        )}
+        <li><Icon name="edit" size={12} /> Tap a block to edit its times, tag, or note</li>
+        <li><Icon name="clock" size={12} /> Set the start &amp; end in the time fields, then Save</li>
+        <li><Icon name="plus" size={12} /> Use Add block to enter time that’s missing</li>
       </ul>
       <button type="button" className="btn btn-ghost tk-de-idle-add" onClick={onAdd} disabled={disabled}>
         <Icon name="plus" size={14} /> Add a block

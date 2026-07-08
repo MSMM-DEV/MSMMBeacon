@@ -29,6 +29,7 @@ import { Icon } from "../icons";
 import {
   intervalTone, TK_CATEGORY_LABEL, fmtClock, fmtHM,
   computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN, ctMinutesOfIso,
+  mergeDisplaySegments,
 } from "../data";
 import { useIsMobile } from "../use-mobile";
 
@@ -139,7 +140,10 @@ export function DayCalendar({
   }, [date]);
 
   // ----- prepare interval blocks -----
-  const blocks = (intervals || []).map((iv) => {
+  // Display segments: "Done for the day" is hidden and same-task blocks split by
+  // a ≤5-min gap are fused. Punch markers + the red OUT-gap overlay stay on the
+  // RAW intervals below (coverage math must see every real punch).
+  const blocks = mergeDisplaySegments(intervals).map((iv) => {
     let startH = hoursInCT(iv.startAt);
     let endH   = iv.endAt ? hoursInCT(iv.endAt) : hoursInCT(new Date().toISOString());
 
@@ -393,9 +397,10 @@ function DayList({
   onAddTagForInterval,
   isToday,
 }) {
-  // Sort + interleave (interval startMin, gap startMin).
+  // Sort + interleave (interval startMin, gap startMin). Merge/eod-hide the
+  // intervals for display so the phone list mirrors the desktop track.
   const items = [];
-  for (const iv of intervals) {
+  for (const iv of mergeDisplaySegments(intervals)) {
     items.push({ kind: "interval", startMin: ctMinutesOfIso(iv.startAt), iv });
   }
   for (const [s, e] of gaps) {

@@ -16256,8 +16256,17 @@ html, body { overflow-x: clip; }
   color: var(--text);
   font-weight: 650;
 }
+/* The start / end time fields are the ONE way to change a block's times now
+   (drag was retired), so the Times group reads as the primary editing control
+   with a soft panel + larger, finger-friendly inputs. */
+.tk-de-field-times {
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
 .tk-de-time-row { display: flex; align-items: center; gap: 8px; }
-.tk-de-time-row .form-input { font-family: var(--font-mono); text-align: center; }
+.tk-de-time-row .form-input { font-family: var(--font-mono); text-align: center; font-size: 14px; padding: 9px 8px; }
 .tk-de-time-row .form-input:disabled {
   color: var(--text-muted);
   background:
@@ -16317,7 +16326,7 @@ html, body { overflow-x: clip; }
 .tk-edit-track { position: relative; }
 .tk-edit.is-disabled .tk-edit-track { opacity: .62; }
 .tk-edit-track-bg { position: absolute; inset: 0; z-index: 0; }
-.tk-edit:not(.is-disabled) .tk-edit-track-bg { cursor: crosshair; }
+.tk-edit-track-bg { cursor: default; }
 
 .tk-edit-gutter, .tk-edit-grid, .tk-edit-workday, .tk-edit-now, .tk-edit-create-ghost { pointer-events: none; }
 .tk-edit-gutter { position: absolute; inset: 0 auto 0 0; width: 54px; z-index: 2; }
@@ -16352,14 +16361,14 @@ html, body { overflow-x: clip; }
 
 .tk-edit-card {
   position: absolute; left: 54px; right: 12px; z-index: 3;
+  appearance: none; font: inherit; text-align: left; color: inherit; width: auto;
   border-radius: 10px; padding: 0; overflow: hidden;
-  border: 1px solid transparent; cursor: grab;
-  box-shadow: var(--shadow-sm); touch-action: none; user-select: none;
+  border: 1px solid transparent; cursor: pointer;
+  box-shadow: var(--shadow-sm); user-select: none;
   transition: box-shadow .12s, transform .04s;
 }
 .tk-edit-card:hover { box-shadow: var(--shadow-md); }
-.tk-edit-card.is-dragging-card { cursor: grabbing; box-shadow: var(--shadow-lg); z-index: 6; }
-.tk-edit-card.is-locked { cursor: pointer; }
+.tk-edit-card:active { transform: scale(0.995); }
 .tk-edit-card.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; z-index: 5; }
 .tk-edit-card.tone-green {
   background: linear-gradient(180deg, #82A875 0%, #6E8F62 100%);
@@ -16370,9 +16379,7 @@ html, body { overflow-x: clip; }
   border-color: #9c4646; color: #4A1414;
 }
 .tk-edit-card.is-open { border-style: dashed; }
-.tk-edit-card-body { padding: 6px 9px; display: flex; flex-direction: column; gap: 2px; height: 100%; }
-.tk-edit-card:not(.is-locked) .tk-edit-card-body { cursor: grab; }
-.tk-edit-card.is-dragging-card .tk-edit-card-body { cursor: grabbing; }
+.tk-edit-card-body { padding: 6px 9px; display: flex; flex-direction: column; gap: 2px; height: 100%; cursor: pointer; }
 .tk-edit-card.is-compact .tk-edit-card-body { padding: 3px 9px; justify-content: center; }
 .tk-edit-card-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .tk-edit-card-time { font-family: var(--font-mono); font-size: 12px; font-weight: 650; }
@@ -16508,8 +16515,9 @@ html, body { overflow-x: clip; }
   .tk-de-toast { bottom: 96px; }
   /* ≥16px font stops iOS from auto-zooming when an input/textarea focuses. */
   .tk-de .form-input, .tk-de textarea.form-input { font-size: 16px; }
-  /* Inspector time inputs sit comfortably side by side at sheet width. */
-  .tk-de-time-row .form-input { flex: 1; min-width: 0; }
+  /* Inspector time inputs sit comfortably side by side at sheet width. Taller
+     targets since editing times is now the only way to adjust a block. */
+  .tk-de-time-row .form-input { flex: 1; min-width: 0; min-height: 44px; }
   .tk-de-insp-foot {
     position: sticky;
     bottom: 0;
@@ -16519,23 +16527,10 @@ html, body { overflow-x: clip; }
   }
 }
 @media (max-width: 640px), (hover: none) and (pointer: coarse) {
-  /* Touch has no hover, so resize handles need to be discoverable before a
-     block is selected. Card body still moves the whole block; handles resize. */
+  /* The canvas is tap-to-select only (editing happens in the inspector time
+     fields), so blocks just need finger-sized tap targets — no drag handles. */
   .tk-edit-scroller { -webkit-overflow-scrolling: touch; }
-  .tk-edit-card .tk-edit-handle {
-    height: 28px;
-    opacity: .82;
-    background: linear-gradient(180deg, rgba(255,255,255,.18), transparent);
-  }
-  .tk-edit-card .tk-edit-handle-bot {
-    background: linear-gradient(0deg, rgba(255,255,255,.18), transparent);
-  }
-  .tk-edit-card .tk-edit-handle-top { top: 0; align-items: flex-start; padding-top: 5px; }
-  .tk-edit-card .tk-edit-handle-bot { bottom: 0; align-items: flex-end; padding-bottom: 5px; }
-  .tk-edit-card .tk-edit-handle-grip { width: 44px; height: 5px; }
-  .tk-edit-card.is-selected .tk-edit-handle,
-  .tk-edit-card.is-dragging-card .tk-edit-handle { opacity: 1; }
-  .tk-edit-card.is-dragging-card .tk-edit-handle-grip { width: 50px; }
+  .tk-edit-card { min-height: 30px; }
   .tk-edit-card.is-compact .tk-edit-card-body { padding-top: 8px; padding-bottom: 8px; }
   /* Roomier day-nav + close targets on the editor header. */
   .tk-de .tk-icon-btn { width: 38px; height: 38px; }

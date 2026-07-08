@@ -13,6 +13,7 @@ import { Icon } from "../icons";
 import {
   loadTeamDay, todayInCT, fmtHM, fmtClock,
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
+  HIDDEN_DISPLAY_CATEGORIES, mergeDisplaySegments,
 } from "../data";
 import { DayTimeline } from "./DayTimeline";
 
@@ -41,7 +42,10 @@ function currentStatus(intervals) {
   const sorted = (intervals || []).slice()
     .sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt));
   const open = sorted.find(i => !i.endAt);
-  if (open) {
+  // An open "Done for the day" interval means the day is finished, not that the
+  // person is out/away — it must not paint a red timeline or count toward "out".
+  const openIsDone = !!open && open.isOut && HIDDEN_DISPLAY_CATEGORIES.has(open.category);
+  if (open && !openIsDone) {
     if (!open.isOut) {
       return { key: "in", label: "Working", tone: "green", live: true,
                since: open.startAt, note: open.notes, category: "work" };
@@ -55,9 +59,10 @@ function currentStatus(intervals) {
   if (sorted.length === 0) {
     return { key: "none", label: "Not in yet", tone: "ghost", note: null };
   }
-  const last = sorted[sorted.length - 1];
-  return { key: "done", label: "Out", tone: "muted",
-           note: last?.notes || null, lastOut: last?.endAt };
+  // Done for the day — either an open eod block, or a fully-closed day.
+  const finisher = openIsDone ? open : sorted[sorted.length - 1];
+  return { key: "done", label: "Done for the day", tone: "muted",
+           note: finisher?.notes || null, lastOut: openIsDone ? finisher?.startAt : finisher?.endAt };
 }
 
 export function TeamPresenceView({ date: controlledDate = null, onDate = null, embedded = false }) {
@@ -190,7 +195,7 @@ export function TeamPresenceView({ date: controlledDate = null, onDate = null, e
                     <div className="tk-presence-detail-empty">No punches recorded {isToday ? "yet today" : "this day"}.</div>
                   ) : (
                     <ul className="tk-presence-ivs">
-                      {intervals.slice().sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt)).map(iv => (
+                      {mergeDisplaySegments(intervals).map(iv => (
                         <li key={iv.id} className={`tk-presence-iv ${iv.isOut ? "is-out" : "is-in"}`}>
                           <span className="tk-presence-iv-time">
                             {fmtClock(iv.startAt)} – {iv.endAt ? fmtClock(iv.endAt) : "now"}

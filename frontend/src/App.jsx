@@ -3877,10 +3877,30 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     showToast(`${table[0].toUpperCase() + table.slice(1)} created`);
   };
 
+  // ---- Invoice export scope (req 1.7 / 1.8) --------------------------------
+  // Turn the InvoiceTable snapshot into filename-safe tokens + human sentences
+  // describing the selected type(s) and active sort, so every print button
+  // names its file + titles its output by exactly what the user is viewing.
+  const INVOICE_SORT_LABELS = { projectNumber: "project number", name: "project name", role: "role", pm: "PM" };
+  const invoiceTypeScope = (snap) => {
+    const types = (snap?.typeFilter && snap.typeFilter.length) ? snap.typeFilter : [];
+    const allTypes = !snap?.typeFilterActive || types.length === 0;
+    return {
+      token: allTypes ? "all" : types.join("_"),
+      text:  allTypes ? "all types" : types.join(" · "),
+    };
+  };
+  const invoiceSortScope = (snap) => {
+    const key = snap?.sort?.key;
+    if (!key) return { token: "", text: "the default order (ENG before PM, by name)" };
+    const dir = snap.sort.dir === "desc" ? "descending" : "ascending";
+    return { token: `sort_${key}_${snap.sort.dir}`, text: `${INVOICE_SORT_LABELS[key] || key}, ${dir}` };
+  };
+
   const handleExport = async () => {
     const meta = PAGE_META[tab] || {};
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `msmm-beacon-${tab}-${date}.pdf`;
+    let filename = `msmm-beacon-${tab}-${date}.pdf`;
 
     const defs = EXPORT_COLUMNS[tab] || [];
     const defsByLabel = new Map(defs.map(d => [d.label, d]));
@@ -3904,6 +3924,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       rows = currentRows;
     }
     if (cols.length === 0) cols = defs;  // safety net
+
+    // Invoice filename encodes the export scope (button · type(s) · sort · search)
+    // so a saved "Print for Mark" file is self-describing (req 1.8).
+    if (tab === "invoice" && snap?.tab === "invoice") {
+      const ts = invoiceTypeScope(snap);
+      const ss = invoiceSortScope(snap);
+      filename = ["Mark_export", `type_${ts.token}`, ss.token, snap.search ? "search" : ""]
+        .filter(Boolean).join("_") + `_${date}.pdf`;
+    }
 
     const rowColor = tab === "potential"
       ? (r) => {
@@ -3958,6 +3987,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // Build subtitle describing active filter/year/search so the PDF footer
     // communicates what the user was looking at.
     const annotations = [];
+    if (tab === "invoice" && snap?.tab === "invoice") {
+      annotations.push(`Type: ${invoiceTypeScope(snap).text}`);
+      annotations.push(`Sorted by ${invoiceSortScope(snap).text}`);
+    }
     if (yearFilter[tab] != null) annotations.push(`Year: ${yearFilter[tab]}`);
     if (filterKey[tab] && filterKey[tab] !== "all") annotations.push(`Filter: ${filterKey[tab]}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
@@ -3966,7 +3999,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try {
       showToast("Preparing PDF…", "export");
       await exportPDF(cols, rows, filename, {
-        title: `MSMM Beacon — ${meta.title || tab}`,
+        title: tab === "invoice"
+          ? "MSMM Beacon — Invoice — Print for Mark"
+          : `MSMM Beacon — ${meta.title || tab}`,
         subtitle,
         rowColor,
         cellStyle: invoiceCellStyle,
@@ -4002,14 +4037,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (tab !== "invoice") return;
     const meta = PAGE_META.invoice || {};
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `msmm-beacon-invoice-subs-${date}.pdf`;
+    let filename = `msmm-beacon-invoice-subs-${date}.pdf`;
 
     // Same snapshot-vs-fallback strategy as handleExport so the export honors
-    // the user's current year filter / search / sort.
+    // the user's current type filter / search / sort.
     const snap = getCurrentTableSnapshot();
     const projectRows = (snap && snap.tab === "invoice" && snap.processedRows)
       ? snap.processedRows
       : currentRows;
+
+    // Self-describing filename encoding the export scope (req 1.8).
+    if (snap?.tab === "invoice") {
+      const ts = invoiceTypeScope(snap);
+      const ss = invoiceSortScope(snap);
+      filename = ["Mark_Subs_export", `type_${ts.token}`, ss.token, snap.search ? "search" : ""]
+        .filter(Boolean).join("_") + `_${date}.pdf`;
+    }
 
     // Helpers — mirror tables.jsx (subListFor / primeListFor /
     // msmmAtMonth / msmmContractShown) so PDF numbers match the UI.
@@ -4254,6 +4297,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     };
 
     const annotations = [];
+    if (snap?.tab === "invoice") {
+      annotations.push(`Type: ${invoiceTypeScope(snap).text}`);
+      annotations.push(`Sorted by ${invoiceSortScope(snap).text}`);
+    }
     if (yearFilter.invoice != null) annotations.push(`Year: ${yearFilter.invoice}`);
     if (filterKey.invoice && filterKey.invoice !== "all") annotations.push(`Filter: ${filterKey.invoice}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
@@ -4312,8 +4359,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (tab !== "invoice") return;
     const date = new Date().toISOString().slice(0, 10);
     const label = (d) => d?.label?.replace(/\s/g, "") || `${d?.year || ""}${MONTHS[d?.monthIdx || 0] || ""}`;
-    const baseRows = currentRows; // filtered.invoice = merged rows (one per project, byYear)
+
+    // Respect the table's current TYPE filter (req 1.7): export the same
+    // filtered / visible rows the user sees. Manish ignores the column sort by
+    // design (it always re-sorts by project number), so only the type scope
+    // carries over — search still narrows the row set via the snapshot.
+    const snap = getCurrentTableSnapshot();
+    const baseRows = (snap && snap.tab === "invoice" && snap.processedRows)
+      ? snap.processedRows
+      : currentRows;
+    const ts = invoiceTypeScope(snap);
+
     const mode = options?.mode || "default";
+    // Bold banner atop each Excel sheet: period · type(s) · sort (req 1.8).
+    const titleFor = (periodText) =>
+      `Invoice export — ${periodText}  ·  ${ts.text}  ·  sorted by project number`;
+
     let payload;
     let filename;
     let includedCount = 0;
@@ -4321,23 +4382,28 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (mode === "years") {
       const years = options.years || [];
       if (years.length === 0) throw new Error("Select at least one year.");
-      const built = buildManishYearSheets({ years, baseRows, subInvoices });
+      const built = buildManishYearSheets({
+        years, baseRows, subInvoices,
+        titleFor: (y) => titleFor(String(y)),
+      });
       payload = { sheets: built.sheets };
       includedCount = built.includedCount;
-      filename = `msmm-invoice-manish-years-${years[0]}-${years[years.length - 1]}-${date}.xlsx`;
+      filename = `Manish_export_years_${years.join("_")}_type_${ts.token}_${date}.xlsx`;
     } else if (mode === "custom") {
       const win = manishMonthDescsBetween(options.startYear, options.startMonth, options.endYear, options.endMonth);
       if (win.length === 0) throw new Error("End date must be after the start date.");
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win });
+      const periodText = `${win[0].label} – ${win[win.length - 1].label}`;
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText) });
       payload = data;
       includedCount = data.includedCount;
-      filename = `msmm-invoice-manish-${label(win[0])}-${label(win[win.length - 1])}-${date}.xlsx`;
+      filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
     } else {
       const win = invWindowMonths;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win });
+      const periodText = `${win[0].label} – ${win[win.length - 1].label} (rolling window)`;
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText) });
       payload = data;
       includedCount = data.includedCount;
-      filename = `msmm-invoice-manish-${label(win[0])}-${label(win[win.length - 1])}-${date}.xlsx`;
+      filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
     }
 
     if (includedCount === 0) throw new Error("No Prime projects with subs for this export.");

@@ -15,6 +15,7 @@ import { Icon } from "../icons";
 import {
   intervalTone, TK_CATEGORY_LABEL, fmtClock, fmtHM,
   computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN,
+  mergeDisplaySegments,
 } from "../data";
 
 const TRACK_START_HOUR = 6;
@@ -52,8 +53,11 @@ export function DayTimeline({
   const span = TRACK_END_HOUR - TRACK_START_HOUR;
   const hours = Array.from({ length: span + 1 }, (_, i) => TRACK_START_HOUR + i);
 
-  // Clamp intervals to today and the visible window.
-  const segments = (intervals || [])
+  // Clamp intervals to today and the visible window. mergeDisplaySegments drops
+  // "Done for the day" blocks and fuses same-task blocks split by a ≤5-min gap.
+  // The red OUT-gap overlay (computeOutGaps) keeps the RAW intervals so an eod's
+  // coverage still suppresses a phantom red gap where the hidden block sat.
+  const segments = mergeDisplaySegments(intervals)
     .map(iv => {
       let start = hoursInCT(iv.startAt);
       let end   = iv.endAt ? hoursInCT(iv.endAt) : hoursInCT(new Date().toISOString());
