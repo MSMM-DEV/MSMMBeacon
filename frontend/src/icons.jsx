@@ -20,6 +20,7 @@ export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
     alignLeft: <><path d="M4 6h16M4 11h16M4 16h10"/></>,
     calendar: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></>,
     clock:    <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    utensils: <><path d="M7 2v8M4 2v8M10 2v8M4 10h6M7 10v12"/><path d="M17 2v20"/><path d="M17 2c2.2 1.8 3.2 4 3.2 6.6 0 2.4-1.1 4.1-3.2 4.9"/></>,
     check:    <><path d="M4 12l5 5L20 6"/></>,
     chevronDown: <><path d="M6 9l6 6 6-6"/></>,
     chevronRight: <><path d="M9 6l6 6-6 6"/></>,

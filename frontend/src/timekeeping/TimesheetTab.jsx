@@ -21,7 +21,7 @@ import { PunchPromptModal } from "./PunchPromptModal";
 import { IntervalReclassifyPopover } from "./IntervalReclassifyPopover";
 import { TeamPresenceView } from "./TeamPresenceView";
 import { LeaveRequestModal } from "./LeaveRequestModal";
-import { MyLeaveSection, ApprovedLeaveBanners } from "../leave.jsx";
+import { MyLeaveSection } from "../leave.jsx";
 
 export function TimesheetTab({ focusDate = null }) {
   const me        = getCurrentBeaconUser();
@@ -43,6 +43,7 @@ export function TimesheetTab({ focusDate = null }) {
   const [focusInterval, setFocusInterval] = useState(null);
   const [prompt,        setPrompt]        = useState(null);   // { kind, interval } | null
   const [showLeave,     setShowLeave]     = useState(false);  // Request-leave modal
+  const [section,       setSection]       = useState("time"); // time | leave
   const [leaveReloadKey, setLeaveReloadKey] = useState(0);    // bump → MyLeaveSection refetch
 
   // Persist whenever state changes so reloads/cross-tab opens see truth.
@@ -122,6 +123,14 @@ export function TimesheetTab({ focusDate = null }) {
 
   // An open interval no longer implies "in" — a punch-out leaves an open OUT
   // interval ("currently out"). Only an open IN (is_out=false) interval is IN.
+  const currentUserName = (
+    me.first_name ||
+    me.shortName ||
+    me.display_name ||
+    me.name ||
+    me.email ||
+    ""
+  ).trim().split(/\s+/)[0] || "there";
   const punchedIn = state.open != null && !state.open.isOut;
   const todayMinutes = state.today?.minutesWork || 0;
   const locked       = !!week.week?.locked;
@@ -129,161 +138,214 @@ export function TimesheetTab({ focusDate = null }) {
   const untaggedCount = (day.intervals || []).filter(i =>
     i.category === "meeting_untagged" && !i.endAt ? false : i.category === "meeting_untagged"
   ).length;
+  const sectionTabId = (key) => `tk-timesheet-${key}-tab`;
+  const sectionPanelId = (key) => `tk-timesheet-${key}-panel`;
+  const selectSection = (key) => setSection(key);
+  const focusSection = (key) => {
+    window.requestAnimationFrame(() => document.getElementById(sectionTabId(key))?.focus());
+  };
+  const onSectionKeyDown = (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const next =
+      e.key === "Home" ? "time" :
+      e.key === "End" ? "leave" :
+      section === "time" ? "leave" : "time";
+    setSection(next);
+    focusSection(next);
+  };
 
   return (
     <div className="tk-timesheet-page">
 
-      <header className="tk-ts-commandbar">
-        <div className="tk-ts-command-copy">
-          <div className="tk-ts-eyebrow">Timesheet</div>
-          <h3>{isToday ? "Today" : formatDateLabel(date)}</h3>
-          <p>{isToday ? "Punch, tag, review your day, and see who is available." : "Review your time and the team snapshot for this date."}</p>
-        </div>
-
-        <div className="tk-day-bar" aria-label="Timesheet date">
-          <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, -1)} aria-label="Previous day">
-            <Icon name="back" size={14}/>
+      <div className="subtabs tk-timesheet-switch" role="tablist" aria-label="Timesheet section" onKeyDown={onSectionKeyDown}>
+        {[
+          ["time", "Time", "clock"],
+          ["leave", "Leave", "sun"],
+        ].map(([key, label, icon]) => (
+          <button
+            key={key}
+            type="button"
+            id={sectionTabId(key)}
+            className={`subtab tk-timesheet-switch-btn ${section === key ? "active" : ""}`}
+            role="tab"
+            aria-selected={section === key}
+            aria-controls={sectionPanelId(key)}
+            tabIndex={section === key ? 0 : -1}
+            onClick={() => selectSection(key)}
+          >
+            <Icon name={icon} size={13}/>
+            <span>{label}</span>
           </button>
-          <input
-            type="date"
-            className="tk-day-input"
-            value={date}
-            onChange={e => setDate(e.target.value || todayInCT())}
-            max={todayInCT()}
-          />
-          <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, +1)}
-            disabled={date >= todayInCT()} aria-label="Next day">
-            <Icon name="forward" size={14}/>
-          </button>
-          {!isToday && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>
-              Today
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* Approved-leave announcements — shown on every date, until each ends */}
-      <ApprovedLeaveBanners reloadKey={leaveReloadKey}/>
-
-      {/* Hero punch panel — only on today */}
-      {isToday && (
-        <section className="tk-hero">
-          <PunchButton
-            phase={phase}
-            state={punchedIn ? "in" : "out"}
-            openSince={state.open?.startAt || null}
-            todayMinutesWork={todayMinutes}
-            locked={locked}
-            onPunched={applyPunchResponse}
-            onRetry={() => refresh()}
-          />
-          {phaseError && phase === "ready" && (
-            <div className="tk-hero-warn-banner" role="alert">
-              <Icon name="bell" size={12}/> Couldn't refresh — showing last-known state. <button className="link-btn" type="button" onClick={() => refresh()}>Retry</button>
-            </div>
-          )}
-          <div className="tk-hero-side">
-            <div className="tk-hero-row">
-              <span className="tk-hero-key">Today</span>
-              <span className="tk-hero-val">{fmtHM(todayMinutes)}</span>
-            </div>
-            {state.today?.minutesMeeting > 0 && (
-              <div className="tk-hero-row">
-                <span className="tk-hero-key">Meetings</span>
-                <span className="tk-hero-val">{fmtHM(state.today.minutesMeeting)}</span>
-              </div>
-            )}
-            {state.today?.minutesLunch > 0 && (
-              <div className="tk-hero-row">
-                <span className="tk-hero-key">Lunch</span>
-                <span className="tk-hero-val">{fmtHM(state.today.minutesLunch)}</span>
-              </div>
-            )}
-            {untaggedCount > 0 && (
-              <div className="tk-hero-row tk-hero-warn">
-                <Icon name="bell" size={14}/>
-                {untaggedCount} gap{untaggedCount === 1 ? "" : "s"} need tagging
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      <div className="tk-timesheet-grid">
-        <main className="tk-timesheet-main">
-
-          {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
-          <section className="tk-day-card tk-day-card-cal">
-            <header className="tk-day-card-head">
-              <div className="tk-day-card-head-meta">
-                <h3>My day</h3>
-                <span className="tk-day-card-sub">
-                  {(day.punches || []).length} {(day.punches || []).length === 1 ? "punch" : "punches"} ·{" "}
-                  {(day.intervals || []).filter(i => i.endAt).length} closed
-                  {(day.intervals || []).some(i => !i.endAt) ? " · 1 open" : ""}
-                </span>
-              </div>
-              <div className="tk-day-card-head-actions">
-                <button className="tk-correction-cta" onClick={() => setEditDay(true)}>
-                  <Icon name="edit" size={13}/> Edit day
-                </button>
-                <button className="tk-correction-cta" onClick={() => setShowLeave(true)}>
-                  <Icon name="sun" size={13}/> Request leave
-                </button>
-              </div>
-            </header>
-
-            {/* Approved-leave band(s) for this day */}
-            {(day.leaveBlocks || []).length > 0 && (
-              <div className="tk-leave-band-wrap">
-                {day.leaveBlocks.map((lb, i) => (
-                  <div key={lb.id || i} className={`tk-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
-                    <Icon name="sun" size={13}/>
-                    <span className="tk-leave-band-label">
-                      {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · {lb.hoursPerDay}h
-                    </span>
-                    <span className="tk-leave-band-badge">approved</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {/*
-              List-view across every viewport width. The absolute-positioned
-              hour rail can't avoid overlap when several punches cluster within
-              a short window (punch markers collide with interval cards at the
-              card boundaries; back-to-back intervals abut). The list scales
-              linearly with the count, never overlaps, and surfaces category /
-              note / source / Outlook subject as primary content. Matches what
-              the admin's UserDayModal already does.
-            */}
-            <DayCalendar
-              date={date}
-              intervals={day.intervals}
-              punches={day.punches}
-              onIntervalClick={setFocusInterval}
-              onAddTagForInterval={setFocusInterval}
-              forceList
-            />
-          </section>
-
-          {/* Week summary */}
-          <WeekSummary
-            userId={userId}
-            weekStart={weekStart}
-            days={week.days}
-            week={week.week}
-            onChanged={refresh}
-          />
-
-          {/* Leave balances + my requests */}
-          <MyLeaveSection reloadKey={leaveReloadKey}/>
-        </main>
-
-        <aside className="tk-timesheet-side">
-          <TeamPresenceView date={date} onDate={setDate} embedded />
-        </aside>
+        ))}
       </div>
+
+      {section === "time" ? (
+        <div
+          id={sectionPanelId("time")}
+          className="tk-timesheet-panel"
+          role="tabpanel"
+          aria-labelledby={sectionTabId("time")}
+        >
+          <header className={`tk-ts-commandbar ${isToday ? "is-today" : "is-other-day"}`}>
+            <div className="tk-ts-command-copy">
+              <h3>{isToday ? "Today" : formatDateLabel(date)}</h3>
+            </div>
+
+            <div className="tk-day-bar" role="group" aria-label="Timesheet date">
+              <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, -1)} aria-label="Previous day">
+                <Icon name="back" size={14}/>
+              </button>
+              <input
+                type="date"
+                className="tk-day-input"
+                aria-label="Timesheet date"
+                value={date}
+                onChange={e => setDate(e.target.value || todayInCT())}
+                max={todayInCT()}
+              />
+              <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, +1)}
+                disabled={date >= todayInCT()} aria-label="Next day">
+                <Icon name="forward" size={14}/>
+              </button>
+              {!isToday && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>
+                  Today
+                </button>
+              )}
+            </div>
+          </header>
+
+          {/* Hero punch panel — only on today */}
+          {isToday && (
+            <section className="tk-hero">
+              <PunchButton
+                phase={phase}
+                state={punchedIn ? "in" : "out"}
+                openSince={state.open?.startAt || null}
+                todayMinutesWork={todayMinutes}
+                userName={currentUserName}
+                locked={locked}
+                onPunched={applyPunchResponse}
+                onRetry={() => refresh()}
+              />
+              {phaseError && phase === "ready" && (
+                <div className="tk-hero-warn-banner" role="alert">
+                  <Icon name="warn" size={12}/> Couldn't refresh — showing last-known state. <button className="link-btn" type="button" onClick={() => refresh()}>Retry</button>
+                </div>
+              )}
+              {(state.today?.minutesMeeting > 0 || state.today?.minutesLunch > 0 || untaggedCount > 0) && (
+                <div className="tk-hero-side tk-hero-side-inline">
+                  {state.today?.minutesMeeting > 0 && (
+                    <div className="tk-hero-row">
+                      <span className="tk-hero-key">Meetings</span>
+                      <span className="tk-hero-val">{fmtHM(state.today.minutesMeeting)}</span>
+                    </div>
+                  )}
+                  {state.today?.minutesLunch > 0 && (
+                    <div className="tk-hero-row">
+                      <span className="tk-hero-key">Lunch</span>
+                      <span className="tk-hero-val">{fmtHM(state.today.minutesLunch)}</span>
+                    </div>
+                  )}
+                  {untaggedCount > 0 && (
+                    <div className="tk-hero-row tk-hero-warn">
+                      <Icon name="warn" size={14}/>
+                      <span>
+                        {untaggedCount === 1
+                          ? "1 time block needs a tag"
+                          : `${untaggedCount} time blocks need tags`}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          <div className="tk-timesheet-grid">
+            <main className="tk-timesheet-main">
+
+              {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
+              <section className="tk-day-card tk-day-card-cal">
+                <header className="tk-day-card-head">
+                  <div className="tk-day-card-head-meta">
+                    <h3>My day</h3>
+                    <span className="tk-day-card-sub">
+                      <span>{fmtHM(todayMinutes)} Total Hours Worked</span>
+                    </span>
+                  </div>
+                  <div className="tk-day-card-head-actions">
+                    <button
+                      type="button"
+                      className="tk-correction-cta tk-correction-cta-primary"
+                      onClick={() => setEditDay(true)}
+                      aria-label={`Edit timesheet day for ${formatDateLabel(date)}`}
+                    >
+                      <Icon name="edit" size={13}/> Edit day
+                    </button>
+                  </div>
+                </header>
+
+                {/* Approved-leave band(s) for this day */}
+                {(day.leaveBlocks || []).length > 0 && (
+                  <div className="tk-leave-band-wrap">
+                    {day.leaveBlocks.map((lb, i) => (
+                      <div key={lb.id || i} className={`tk-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
+                        <Icon name="sun" size={13}/>
+                        <span className="tk-leave-band-label">
+                          {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · {lb.hoursPerDay}h
+                        </span>
+                        <span className="tk-leave-band-badge">approved</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/*
+                  List-view across every viewport width. The absolute-positioned
+                  hour rail can't avoid overlap when several punches cluster within
+                  a short window (punch markers collide with interval cards at the
+                  card boundaries; back-to-back intervals abut). The list scales
+                  linearly with the count, never overlaps, and surfaces category /
+                  note / source / Outlook subject as primary content. Matches what
+                  the admin's UserDayModal already does.
+                */}
+                <DayCalendar
+                  date={date}
+                  intervals={day.intervals}
+                  punches={day.punches}
+                  onIntervalClick={setFocusInterval}
+                  onAddTagForInterval={setFocusInterval}
+                  forceList
+                />
+              </section>
+
+              {/* Week summary */}
+              <WeekSummary
+                userId={userId}
+                weekStart={weekStart}
+                days={week.days}
+                week={week.week}
+                onSelectDate={setDate}
+                onChanged={refresh}
+              />
+            </main>
+
+            <aside className="tk-timesheet-side">
+              <TeamPresenceView date={date} onDate={setDate} embedded />
+            </aside>
+          </div>
+        </div>
+      ) : (
+        <div
+          id={sectionPanelId("leave")}
+          className="tk-timesheet-panel tk-leave-panel-self"
+          role="tabpanel"
+          aria-labelledby={sectionTabId("leave")}
+        >
+          <MyLeaveSection reloadKey={leaveReloadKey} onRequest={() => setShowLeave(true)}/>
+        </div>
+      )}
 
       {/* Modals */}
       {editDay && (
@@ -307,6 +369,7 @@ export function TimesheetTab({ focusDate = null }) {
         <PunchPromptModal
           kind={prompt.kind}
           interval={prompt.interval}
+          userName={currentUserName}
           onClose={() => setPrompt(null)}
           onSaved={() => refresh({ silent: true })}
         />

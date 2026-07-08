@@ -34,7 +34,7 @@ const hrs = (n) => `${(Math.round((n || 0) * 100) / 100).toLocaleString(undefine
 // LeaveBalanceCards — the two personal cards + the accrual sub-line.
 // `balance` is one adapted leave_balances row (or null = nothing tracked).
 // ---------------------------------------------------------------------------
-export function LeaveBalanceCards({ balance, settings = getAppSettings(), busy = false }) {
+export function LeaveBalanceCards({ balance, settings = getAppSettings(), busy = false, action = null }) {
   const today    = todayInCT();
   const vacRate  = settings.leaveVacationAccrual || 0;
   const sickRate = settings.leaveSickAccrual || 0;
@@ -43,11 +43,14 @@ export function LeaveBalanceCards({ balance, settings = getAppSettings(), busy =
   return (
     <div className="leave-hero">
       <div className="leave-hero-head">
-        <h3 className="leave-hero-title">My time off</h3>
-        <span className="leave-hero-sub">
-          Accrues {vacRate.toFixed(2)} vacation · {sickRate.toFixed(2)} sick hrs each pay period
-          {" · next "}{fmtDate(nextPay)}
-        </span>
+        <div className="leave-hero-heading">
+          <h3 className="leave-hero-title">Availability</h3>
+          <span className="leave-hero-sub">
+            Accrues {vacRate.toFixed(2)} vacation · {sickRate.toFixed(2)} sick hrs each pay period
+            {" · next "}{fmtDate(nextPay)}
+          </span>
+        </div>
+        {action && <div className="leave-hero-action">{action}</div>}
       </div>
       {balance ? (() => {
         const c = computeLeaveAvailable(balance, settings, today);
@@ -70,7 +73,7 @@ export function LeaveBalanceCards({ balance, settings = getAppSettings(), busy =
 // MyLeaveSection — self-loading personal balances + recent requests.
 // `reloadKey` (a number bumped by the parent after a submit) forces a refetch.
 // ---------------------------------------------------------------------------
-export function MyLeaveSection({ reloadKey = 0 }) {
+export function MyLeaveSection({ reloadKey = 0, onRequest = null }) {
   const me = getCurrentBeaconUser();
   const settings = getAppSettings();
 
@@ -105,49 +108,131 @@ export function MyLeaveSection({ reloadKey = 0 }) {
       (rank[a.status] - rank[b.status]) || (b.dateStart || "").localeCompare(a.dateStart || ""));
   }, [requests]);
 
+  const today = todayInCT();
+  const upcoming = useMemo(() =>
+    requests
+      .filter(r => r.status === "approved" && r.dateEnd >= today)
+      .sort((a, b) => (a.dateStart || "").localeCompare(b.dateStart || "")),
+  [requests, today]);
+
+  const grouped = useMemo(() => {
+    const isUpcoming = (r) => r.status === "approved" && r.dateEnd >= today;
+    return [
+      { key: "pending", label: "Pending", rows: ordered.filter(r => r.status === "pending") },
+      { key: "approved", label: "Approved", rows: ordered.filter(r => r.status === "approved" && !isUpcoming(r)) },
+      { key: "history", label: "Past requests", rows: ordered.filter(r => r.status === "rejected" || r.status === "cancelled") },
+    ].filter(g => g.rows.length > 0);
+  }, [ordered, today]);
+
   return (
-    <section className="leave-mine">
-      <LeaveBalanceCards balance={balance} settings={settings} busy={busy}/>
+    <section className="leave-mine" aria-label="My leave">
       {err && <div className="leave-err"><Icon name="warn" size={12}/> {err}</div>}
 
-      <div className="leave-reqs">
-        <header className="leave-reqs-head">
-          <h4>My leave requests</h4>
-          {busy && <span className="leave-reqs-sub">refreshing…</span>}
+      <section className="leave-planner-top" aria-label="Leave planner">
+        <LeaveBalanceCards
+          balance={balance}
+          settings={settings}
+          busy={busy}
+          action={(
+            <button
+              type="button"
+              className="btn btn-primary leave-request-btn"
+              onClick={onRequest || undefined}
+              disabled={!onRequest}
+            >
+              <Icon name="sun" size={14}/> Request leave
+            </button>
+          )}
+        />
+      </section>
+
+      <section className="leave-upcoming" aria-labelledby="leave-upcoming-title">
+        <header className="leave-section-head">
+          <div>
+            <h4 id="leave-upcoming-title">Upcoming leave</h4>
+            <p>Approved time off that has not ended yet.</p>
+          </div>
         </header>
-        {ordered.length === 0 && !busy && (
-          <p className="leave-empty-note">No leave requests yet. Use “Request leave” above the day timeline.</p>
-        )}
-        <ul className="leave-reqs-list">
-          {ordered.map(r => (
-            <li key={r.id} className={`leave-req-row is-${r.status}`}>
-              <span className={`leave-type-dot tone-${r.leaveType === "sick" ? "blue" : "sage"}`} aria-hidden="true"/>
-              <div className="leave-req-main">
-                <div className="leave-req-top">
-                  <span className="leave-req-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
-                  <span className="leave-req-dates">
+
+        {upcoming.length === 0 ? (
+          <div className="leave-upcoming-empty">
+            <Icon name="calendar" size={18}/>
+            <span>{busy ? "Checking approved leave…" : "No upcoming leave."}</span>
+          </div>
+        ) : (
+          <ul className="leave-upcoming-list">
+            {upcoming.map(r => (
+              <li key={r.id} className={`leave-upcoming-card tone-${r.leaveType === "sick" ? "blue" : "sage"}`}>
+                <span className="leave-upcoming-icon" aria-hidden="true"><Icon name="check" size={15}/></span>
+                <div className="leave-upcoming-main">
+                  <span className="leave-upcoming-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
+                  <span className="leave-upcoming-dates">
                     {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
                   </span>
-                  <span className="leave-req-hours">{hrs(r.totalHours)}</span>
                 </div>
-                {r.reason && <div className="leave-req-reason">{r.reason}</div>}
-                {r.status === "rejected" && r.reviewNote && (
-                  <div className="leave-req-note">Admin: {r.reviewNote}</div>
-                )}
-              </div>
-              <div className="leave-req-side">
-                <LeaveStatusChip status={r.status}/>
-                {r.status === "pending" && (
-                  <button className="link-btn leave-req-cancel" type="button" onClick={() => cancel(r.id)}>
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </li>
+                <span className="leave-upcoming-hours">{hrs(r.totalHours)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="leave-reqs" aria-labelledby="leave-requests-title">
+        <header className="leave-section-head leave-reqs-head">
+          <div>
+            <h4 id="leave-requests-title">My requests</h4>
+            <p>Pending items first, older outcomes tucked below.</p>
+          </div>
+          {busy && <span className="leave-reqs-sub">refreshing…</span>}
+        </header>
+
+        {grouped.length === 0 && !busy && (
+          <p className="leave-empty-note">No leave requests yet.</p>
+        )}
+
+        <div className="leave-req-groups">
+          {grouped.map(group => (
+            <section key={group.key} className={`leave-req-group is-${group.key}`} aria-label={group.label}>
+              <h5>{group.label}</h5>
+              <ul className="leave-reqs-list">
+                {group.rows.map(r => (
+                  <LeaveRequestRow key={r.id} request={r} onCancel={cancel}/>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
-      </div>
+        </div>
+      </section>
     </section>
+  );
+}
+
+function LeaveRequestRow({ request: r, onCancel }) {
+  return (
+    <li className={`leave-req-row is-${r.status}`}>
+      <span className={`leave-type-dot tone-${r.leaveType === "sick" ? "blue" : "sage"}`} aria-hidden="true"/>
+      <div className="leave-req-main">
+        <div className="leave-req-top">
+          <span className="leave-req-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
+          <span className="leave-req-dates">
+            {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
+          </span>
+          <span className="leave-req-hours">{hrs(r.totalHours)}</span>
+        </div>
+        {r.reason && <div className="leave-req-reason">{r.reason}</div>}
+        {r.status === "rejected" && r.reviewNote && (
+          <div className="leave-req-note">Admin: {r.reviewNote}</div>
+        )}
+      </div>
+      <div className="leave-req-side">
+        <LeaveStatusChip status={r.status}/>
+        {r.status === "pending" && (
+          <button className="link-btn leave-req-cancel" type="button" onClick={() => onCancel(r.id)}>
+            Cancel
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 

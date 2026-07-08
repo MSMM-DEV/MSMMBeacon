@@ -15,7 +15,7 @@
 // which write punches/intervals with the admin's JWT and re-derive the day. No
 // Edge Function round-trip.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Icon } from "../icons";
 import {
   loadDayDetail, loadWeekLock, loadCorrectionsForDay,
@@ -216,7 +216,13 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal tk-de" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="tk-de-title">
+      <div
+        className={`modal tk-de ${selfMode ? "is-self" : ""} ${inspectorActive ? "has-active-sheet" : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tk-de-title"
+      >
 
         {/* Header */}
         <header className="tk-de-head">
@@ -230,7 +236,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
 
           <div className="tk-de-nav">
             <button type="button" className="tk-icon-btn" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day"><Icon name="back" size={14} /></button>
-            <input type="date" className="tk-day-input" value={date} max={todayInCT()} onChange={(e) => setDate(e.target.value || todayInCT())} />
+            <input type="date" className="tk-day-input" aria-label="Day editor date" value={date} max={todayInCT()} onChange={(e) => setDate(e.target.value || todayInCT())} />
             <button type="button" className="tk-icon-btn" onClick={() => setDate(shiftDay(date, +1))} disabled={date >= todayInCT()} aria-label="Next day"><Icon name="forward" size={14} /></button>
             {!isToday && <button type="button" className="tk-pill-btn" onClick={() => setDate(todayInCT())}><Icon name="clock" size={11} /> Today</button>}
           </div>
@@ -331,6 +337,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
                 draft={createDraft}
                 setDraft={setCreateDraft}
                 saving={saving}
+                selfMode={selfMode}
                 onSubmit={submitCreate}
                 onCancel={() => { setMode("idle"); setCreateDraft(null); }}
               />
@@ -339,12 +346,13 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
                 key={selected.id}
                 interval={selected}
                 saving={saving}
+                selfMode={selfMode}
                 onSave={saveSelected}
                 onDelete={() => deleteSelected(selected)}
                 onClose={() => { setMode("idle"); setSelectedId(null); }}
               />
             ) : (
-              <IdlePanel onAdd={() => openCreate(null)} disabled={editingBlocked} />
+              <IdlePanel onAdd={() => openCreate(null)} disabled={editingBlocked} selfMode={selfMode} />
             )}
             {actionErr && <div className="tk-de-inspector-err"><Icon name="ban" size={12} /> {actionErr}</div>}
           </aside>
@@ -358,7 +366,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
           aria-hidden="true"
         />
 
-        <footer className="tk-de-foot">
+        <footer className={`tk-de-foot ${inspectorActive ? "is-sheet-open" : ""}`}>
           {/* Mobile-only: the idle inspector (with its Add button) lives in the
               off-screen sheet, so surface "Add block" here on phones. */}
           <button type="button" className="btn btn-ghost tk-de-foot-add" onClick={() => openCreate(null)} disabled={editingBlocked}>
@@ -387,15 +395,19 @@ function Stat({ label, value, tone, big, dim }) {
 }
 
 // ---- Inspector: selected block ----
-function InspectorEdit({ interval, saving, onSave, onDelete, onClose }) {
+function InspectorEdit({ interval, saving, selfMode = false, onSave, onDelete, onClose }) {
   const [category, setCategory] = useState(interval.category);
   const [notes, setNotes] = useState(interval.notes || "");
   const [start, setStart] = useState(minToHHMM(ctMinutesOfIso(interval.startAt)));
   const [end, setEnd] = useState(interval.endAt ? minToHHMM(ctMinutesOfIso(interval.endAt)) : "");
   const [confirmDel, setConfirmDel] = useState(false);
+  const id = useId();
 
   const isOpen = interval.endAt == null;
   const presence = interval.isOut ? "Out" : "At desk";
+  const startId = `${id}-start`;
+  const endId = `${id}-end`;
+  const notesId = `${id}-notes`;
 
   return (
     <div className="tk-de-insp">
@@ -416,32 +428,46 @@ function InspectorEdit({ interval, saving, onSave, onDelete, onClose }) {
         <div className="tk-de-insp-outlook"><Icon name="link" size={12} /> {interval.outlookEventSubject}{interval.outlookEventLocation ? ` · ${interval.outlookEventLocation}` : ""}</div>
       )}
 
-      <div className="tk-de-field">
-        <span className="tk-de-field-label">Tag</span>
-        <div className="tk-de-chips">
+      <fieldset className="tk-de-field tk-de-fieldset">
+        <legend className="tk-de-field-label">Tag</legend>
+        <div className="tk-de-chips" role="group" aria-label="Time block tag">
           {ADMIN_CATEGORIES.map(([v, l]) => (
             <button key={v} type="button"
               className={`tk-de-chip tone-${TK_CATEGORY_TONE[v] || "muted"} ${category === v ? "is-on" : ""}`}
+              aria-pressed={category === v}
               onClick={() => setCategory(v)}>
               <span className="tk-de-chip-dot" />{l}
             </button>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       <div className="tk-de-field tk-de-field-times">
         <span className="tk-de-field-label">Times</span>
         <div className="tk-de-time-row">
-          <input type="time" className="form-input" value={start} onChange={(e) => setStart(e.target.value)} disabled={!interval.startPunchId} />
+          <label className="sr-only" htmlFor={startId}>Start time</label>
+          <input id={startId} type="time" className="form-input" value={start} onChange={(e) => setStart(e.target.value)} disabled={!interval.startPunchId} aria-label="Start time" />
           <span className="tk-de-time-arrow">→</span>
-          <input type="time" className="form-input" value={end} onChange={(e) => setEnd(e.target.value)} disabled={isOpen || !interval.endPunchId} />
+          <label className="sr-only" htmlFor={endId}>End time</label>
+          <input
+            id={endId}
+            type="time"
+            className="form-input"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+            disabled={isOpen || !interval.endPunchId}
+            aria-label={isOpen ? "End time, open block ending now" : "End time"}
+            title={isOpen ? "Open block ends at now" : "End time"}
+          />
         </div>
-        <span className="tk-de-field-hint">{isOpen ? "Open block — end is “now”." : "Or drag the block / its edges on the canvas."}</span>
+        <span className="tk-de-field-hint">
+          {isOpen ? "Open block — end is now." : (selfMode ? "Adjust the fields, then save changes." : "Or drag the block / its edges on the canvas.")}
+        </span>
       </div>
 
       <div className="tk-de-field">
-        <span className="tk-de-field-label">Comment</span>
-        <textarea className="form-input" rows={3} maxLength={400} value={notes}
+        <label className="tk-de-field-label" htmlFor={notesId}>Comment</label>
+        <textarea id={notesId} className="form-input" rows={3} maxLength={400} value={notes}
           placeholder="Add a note about this block…" onChange={(e) => setNotes(e.target.value)} />
       </div>
 
@@ -467,8 +493,12 @@ function InspectorEdit({ interval, saving, onSave, onDelete, onClose }) {
 }
 
 // ---- Inspector: create block ----
-function CreateForm({ draft, setDraft, saving, onSubmit, onCancel }) {
+function CreateForm({ draft, setDraft, saving, selfMode = false, onSubmit, onCancel }) {
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+  const id = useId();
+  const startId = `${id}-new-start`;
+  const endId = `${id}-new-end`;
+  const noteId = `${id}-new-note`;
   return (
     <div className="tk-de-insp">
       <header className="tk-de-insp-head">
@@ -479,43 +509,46 @@ function CreateForm({ draft, setDraft, saving, onSubmit, onCancel }) {
         <button type="button" className="tk-icon-btn tk-de-insp-x" onClick={onCancel} aria-label="Cancel"><Icon name="x" size={13} /></button>
       </header>
 
-      <div className="tk-de-field">
-        <span className="tk-de-field-label">This block was</span>
-        <div className="tk-de-presence-toggle">
-          <button type="button" className={`tk-de-seg ${draft.isOut ? "is-on tone-rose" : ""}`} onClick={() => set({ isOut: true })}>Away</button>
-          <button type="button" className={`tk-de-seg ${!draft.isOut ? "is-on tone-green" : ""}`} onClick={() => set({ isOut: false, category: "work" })}>Worked</button>
+      <fieldset className="tk-de-field tk-de-fieldset">
+        <legend className="tk-de-field-label">This block was</legend>
+        <div className="tk-de-presence-toggle" role="group" aria-label="Block type">
+          <button type="button" className={`tk-de-seg ${draft.isOut ? "is-on tone-rose" : ""}`} aria-pressed={draft.isOut} onClick={() => set({ isOut: true })}>Away</button>
+          <button type="button" className={`tk-de-seg ${!draft.isOut ? "is-on tone-green" : ""}`} aria-pressed={!draft.isOut} onClick={() => set({ isOut: false, category: "work" })}>Worked</button>
         </div>
-      </div>
+      </fieldset>
 
       {draft.isOut && (
-        <div className="tk-de-field">
-          <span className="tk-de-field-label">Tag</span>
-          <div className="tk-de-chips">
+        <fieldset className="tk-de-field tk-de-fieldset">
+          <legend className="tk-de-field-label">Tag</legend>
+          <div className="tk-de-chips" role="group" aria-label="Away block tag">
             {AWAY_CATEGORIES.map((v) => (
               <button key={v} type="button"
                 className={`tk-de-chip tone-${TK_CATEGORY_TONE[v] || "muted"} ${draft.category === v ? "is-on" : ""}`}
+                aria-pressed={draft.category === v}
                 onClick={() => set({ category: v })}>
                 <span className="tk-de-chip-dot" />{TK_CATEGORY_LABEL[v] || v}
               </button>
             ))}
           </div>
-        </div>
+        </fieldset>
       )}
 
       <div className="tk-de-field tk-de-field-times">
         <span className="tk-de-field-label">Times</span>
         <div className="tk-de-time-row">
-          <input type="time" className="form-input" value={minToHHMM(draft.startMin)} onChange={(e) => set({ startMin: hhmmToMin(e.target.value) })} />
+          <label className="sr-only" htmlFor={startId}>Start time</label>
+          <input id={startId} type="time" className="form-input" value={minToHHMM(draft.startMin)} onChange={(e) => set({ startMin: hhmmToMin(e.target.value) })} aria-label="Start time" />
           <span className="tk-de-time-arrow">→</span>
-          <input type="time" className="form-input" value={minToHHMM(draft.endMin)} onChange={(e) => set({ endMin: hhmmToMin(e.target.value) })} />
+          <label className="sr-only" htmlFor={endId}>End time</label>
+          <input id={endId} type="time" className="form-input" value={minToHHMM(draft.endMin)} onChange={(e) => set({ endMin: hhmmToMin(e.target.value) })} aria-label="End time" />
         </div>
         <span className="tk-de-field-hint">{fmtHM(Math.max(0, draft.endMin - draft.startMin))} block</span>
       </div>
 
       <div className="tk-de-field">
-        <span className="tk-de-field-label">Comment</span>
-        <textarea className="form-input" rows={3} maxLength={400} value={draft.note}
-          placeholder={draft.isOut ? "Why were they away?" : "What were they working on?"} onChange={(e) => set({ note: e.target.value })} />
+        <label className="tk-de-field-label" htmlFor={noteId}>Comment</label>
+        <textarea id={noteId} className="form-input" rows={3} maxLength={400} value={draft.note}
+          placeholder={draft.isOut ? (selfMode ? "Why were you away?" : "Why were they away?") : (selfMode ? "What were you working on?" : "What were they working on?")} onChange={(e) => set({ note: e.target.value })} />
       </div>
 
       <div className="tk-de-insp-foot">
@@ -529,18 +562,28 @@ function CreateForm({ draft, setDraft, saving, onSubmit, onCancel }) {
 }
 
 // ---- Inspector: idle ----
-function IdlePanel({ onAdd, disabled }) {
+function IdlePanel({ onAdd, disabled, selfMode = false }) {
   return (
-    <div className="tk-de-idle">
+    <div className={`tk-de-idle ${selfMode ? "is-self" : ""}`}>
       <div className="tk-de-idle-legend">
         <span className="tk-de-legend-item"><span className="tk-de-legend-sw tone-green" /> At desk · counts</span>
         <span className="tk-de-legend-item"><span className="tk-de-legend-sw tone-rose" /> Out · never counts</span>
       </div>
       <ul className="tk-de-tips">
-        <li><Icon name="sort" size={12} /> Drag a block to move it</li>
-        <li><Icon name="columns" size={12} /> Drag a block’s top/bottom edge to resize</li>
-        <li><Icon name="plus" size={12} /> Drag an empty area to add a block</li>
-        <li><Icon name="edit" size={12} /> Click a block to retag, comment or delete</li>
+        {selfMode ? (
+          <>
+            <li><Icon name="edit" size={12} /> Select a block to edit its tag, times, or note</li>
+            <li><Icon name="plus" size={12} /> Use Add block to fill in missing time</li>
+            <li><Icon name="sort" size={12} /> Dragging is optional when you need a quick adjustment</li>
+          </>
+        ) : (
+          <>
+            <li><Icon name="sort" size={12} /> Drag a block to move it</li>
+            <li><Icon name="columns" size={12} /> Drag a block’s top/bottom edge to resize</li>
+            <li><Icon name="plus" size={12} /> Drag an empty area to add a block</li>
+            <li><Icon name="edit" size={12} /> Click a block to retag, comment or delete</li>
+          </>
+        )}
       </ul>
       <button type="button" className="btn btn-ghost tk-de-idle-add" onClick={onAdd} disabled={disabled}>
         <Icon name="plus" size={14} /> Add a block

@@ -52,6 +52,7 @@ export function PunchButton({
   state,                // 'in' | 'out'  — only meaningful when phase==='ready'
   openSince,            // ISO string when state === 'in'
   todayMinutesWork,     // for inline summary when out
+  userName = "there",
   locked = false,
   onPunched,            // (response) => void — parent applies the new state
   onRetry,              // () => void — parent re-fetches state on error
@@ -117,8 +118,8 @@ export function PunchButton({
   else if (error)      label = "RETRY";
   else if (isFetchErr) label = "RETRY";
   else if (isUnknown)  label = "Checking…";
-  else if (showIn)     label = "PUNCH OUT";
-  else                 label = "PUNCH IN";
+  else if (showIn)     label = "Punch out";
+  else                 label = "Punch in";
 
   const cls = [
     "tk-punch-btn",
@@ -140,27 +141,64 @@ export function PunchButton({
   const disabled = !online || locked || busy || isUnknown;
 
   const elapsed = state === "in" ? elapsedMin(openSince) : 0;
+  const statusKind = showIn ? "in" : showOut ? "out" : null;
+  const displayName = String(userName || "").trim() || "there";
+  const statusTitle = showIn
+    ? `You are now clocked in, ${displayName}`
+    : showOut
+      ? `You are now clocked out, ${displayName}`
+      : null;
+  const statusTitleShort = showIn
+    ? `Clocked in, ${displayName}`
+    : showOut
+      ? `Clocked out, ${displayName}`
+      : null;
+  const actionLabel = showIn
+    ? `Punch out. ${statusTitle}. Session Started At ${fmtClock(openSince)}. Current Session ${fmtHM(elapsed)}.`
+    : showOut
+      ? `Punch in. ${statusTitle}. Total Hours Worked ${fmtHM(todayMinutesWork || 0)}.`
+      : label;
 
   return (
-    <div className="tk-punch-wrap">
+    <div className={`tk-punch-wrap ${statusKind ? `is-${statusKind}` : "is-standalone"}`}>
+      {statusKind && (
+        <div className="tk-punch-status-card">
+          <span className="tk-punch-status-kicker">Current status</span>
+          <div className="tk-punch-status-main">
+            <span className={`tk-punch-status-dot tone-${statusKind}`} aria-hidden="true"/>
+            <strong>
+              <span className="tk-punch-status-title-full">{statusTitle}</span>
+              <span className="tk-punch-status-title-short">{statusTitleShort}</span>
+            </strong>
+          </div>
+          <div className="tk-punch-status-meta">
+            {showIn ? (
+              <>
+                <span>Session Started At <strong>{fmtClock(openSince)}</strong></span>
+                <span>Current Session <strong>{fmtHM(elapsed)}</strong></span>
+                <span>Total Hours Worked <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+              </>
+            ) : (
+              <>
+                <span>Ready to start your next work session</span>
+                <span>Total Hours Worked <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <button
         type="button"
         className={cls}
         onClick={handleClick}
         disabled={disabled}
         aria-busy={busy || isUnknown}
-        aria-label={label}
+        aria-label={actionLabel}
       >
         <span className="tk-punch-icon">
-          <Icon name={iconName} size={28}/>
+          <Icon name={iconName} size={30}/>
         </span>
         <span className="tk-punch-label">{label}</span>
-        {showIn && (
-          <span className="tk-punch-sub">in for {fmtHM(elapsed)}</span>
-        )}
-        {showOut && (
-          <span className="tk-punch-sub">today · {fmtHM(todayMinutesWork || 0)}</span>
-        )}
       </button>
       {!online && (
         <div className="tk-punch-error-msg" role="status">
@@ -172,9 +210,6 @@ export function PunchButton({
       )}
       {online && !error && isFetchErr && (
         <div className="tk-punch-error-msg" role="alert">Couldn't load your timesheet. Tap to retry.</div>
-      )}
-      {showIn && openSince && (
-        <div className="tk-punch-since">In since · {fmtClock(openSince)}</div>
       )}
     </div>
   );

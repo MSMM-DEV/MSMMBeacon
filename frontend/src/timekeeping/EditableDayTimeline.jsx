@@ -106,13 +106,13 @@ export function EditableDayTimeline({
     const d = dragRef.current;
     if (!d) return;
     e.preventDefault();
-    if (Math.abs(e.clientY - d.originClientY) > 4) d.moved = true;
 
     const trackEl = trackRef.current;
     const rect = trackEl ? trackEl.getBoundingClientRect() : { top: 0 };
 
     if (d.mode === "create") {
       d.curMin = snap(clampMin(TRACK_MIN + (e.clientY - rect.top) / PX_PER_MIN));
+      d.moved = Math.abs(d.curMin - d.anchorMin) >= MIN_DUR;
       setDrag({ ...d });
       return;
     }
@@ -131,6 +131,7 @@ export function EditableDayTimeline({
       if (d.endPunchId)   moves[d.endPunchId]   = d.baseEndMin + dl;
     }
     d.moves = moves;
+    d.moved = Object.entries(moves).some(([id, m]) => Number.isFinite(m) && m !== d.baseMinByPunch[id]);
     setDrag({ ...d });
   }, []);
 
@@ -138,6 +139,7 @@ export function EditableDayTimeline({
     const d = dragRef.current;
     dragRef.current = null;
     setDrag(null);
+    try { d?.pointerTarget?.releasePointerCapture?.(d.pointerId); } catch {}
     window.removeEventListener("pointermove", handleMove);
     window.removeEventListener("pointerup", handleUp);
     window.removeEventListener("pointercancel", handleUp);
@@ -163,7 +165,16 @@ export function EditableDayTimeline({
     const c = ctx.current;
     if (c.disabled || c.busy) return;
     e.stopPropagation();
-    dragRef.current = { ...descriptor, originClientY: e.clientY, moved: false, moves: {} };
+    e.preventDefault();
+    try { e.currentTarget?.setPointerCapture?.(e.pointerId); } catch {}
+    dragRef.current = {
+      ...descriptor,
+      originClientY: e.clientY,
+      pointerId: e.pointerId,
+      pointerTarget: e.currentTarget,
+      moved: false,
+      moves: {},
+    };
     setDrag({ ...dragRef.current });
     window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handleUp);
