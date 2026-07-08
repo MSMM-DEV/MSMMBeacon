@@ -95,3 +95,33 @@ test("buildManishExportData keeps current format for arbitrary custom month rang
   assert.equal(data.rows[0].months[0].msmmAmount, 2500);
   assert.equal(data.rows[0].months[0].subs[0].amount, 800);
 });
+
+test("buildManishExportData includes MHZ rows (perspective role = Prime) even though raw role is Sub", () => {
+  // An MHZ perspective row: MSMM is a sub of MHZ on the underlying project, so
+  // the raw role is "Sub" — but the InvoiceTable (and this export) must treat it
+  // as Prime with its real subs. Filtering on raw role previously excluded it.
+  const mhzRows = [
+    {
+      role: "Sub",              // inherited from source project (MSMM sub of MHZ)
+      type: "MHZ",
+      sourceId: "mhz1",
+      projectNumber: "202514",
+      name: "JV Levee MHZ",
+      byYear: { 2026: { values: [0, 0, 0, 0, 0, 9000, 0, 0, 0, 0, 0, 0] } },
+    },
+  ];
+  const mhzSubs = new Map([
+    ["mhz1", [
+      { kind: "prime", companyName: "MHZ", byYear: {} },   // filtered out (prime)
+      { kind: "sub", companyName: "Sub A", byYear: { 2026: { amounts: [0, 0, 0, 0, 0, 2000] } } },
+      { kind: "sub", companyName: "Sub B", byYear: { 2026: { amounts: [0, 0, 0, 0, 0, 1000] } } },
+    ]],
+  ]);
+  const descs = manishMonthDescsBetween(2026, 5, 2026, 5); // June 2026
+  const data = buildManishExportData({ baseRows: mhzRows, subInvoices: mhzSubs, monthDescs: descs });
+
+  assert.equal(data.includedCount, 1);
+  assert.deepEqual(data.rows[0].subNames.slice(0, 2), ["Sub A", "Sub B"]);
+  // MSMM (parent) portion = total − Σ subs = 9000 − (2000 + 1000) = 6000.
+  assert.equal(data.rows[0].months[0].msmmAmount, 6000);
+});
