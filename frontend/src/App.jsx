@@ -22,6 +22,7 @@ import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { ProjectDetailPage } from "./project-detail.jsx";
 import { exportPDF } from "./utils/pdf.js";
+import { isChunkLoadError } from "./utils/lazy-chunk.js";
 import {
   buildManishExportData,
   buildManishYearSheets,
@@ -3901,6 +3902,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     return { token: `sort_${key}_${snap.sort.dir}`, text: `${INVOICE_SORT_LABELS[key] || key}, ${dir}` };
   };
 
+  // Exports lazy-load exceljs / jspdf via dynamic import(). If a deploy replaced
+  // those chunks while this tab was open, the import 404s → SPA index.html →
+  // MIME error. That's a stale-build signal, not a real export failure: reload
+  // once to pick up the current build (edits are auto-saved, so nothing is lost).
+  const handleExportError = (err, label = "Export failed") => {
+    if (isChunkLoadError(err)) {
+      let already = false;
+      try { already = sessionStorage.getItem("beacon.chunkReloaded") === "1"; } catch { /* storage off */ }
+      if (already) {
+        showToast("Please hard-refresh (Cmd/Ctrl+Shift+R) to load the latest version.", "x");
+        return;
+      }
+      try { sessionStorage.setItem("beacon.chunkReloaded", "1"); } catch { /* storage off */ }
+      showToast("A newer version is available — reloading to update…", "export");
+      setTimeout(() => window.location.reload(), 1200);
+      return;
+    }
+    showToast(`${label}: ${err?.message || err}`, "x");
+  };
+
   const handleExport = async () => {
     const meta = PAGE_META[tab] || {};
     const date = new Date().toISOString().slice(0, 10);
@@ -4020,7 +4041,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       });
       showToast(`Exported ${rows.length} rows`, "export");
     } catch (err) {
-      showToast(`Export failed: ${err.message || err}`, "x");
+      handleExportError(err);
     }
   };
 
@@ -4352,7 +4373,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       });
       showToast(`Exported ${projectRows.length} projects`, "export");
     } catch (err) {
-      showToast(`Export failed: ${err.message || err}`, "x");
+      handleExportError(err);
     }
   };
 
@@ -4417,7 +4438,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       await exportManishWorkbook(payload, filename);
       showToast(`Exported ${includedCount} project${includedCount === 1 ? "" : "s"} → Excel`, "export");
     } catch (err) {
-      showToast(`Export failed: ${err.message || err}`, "x");
+      handleExportError(err);
       throw err;
     }
   };
