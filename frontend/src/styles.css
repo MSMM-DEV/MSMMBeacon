@@ -898,6 +898,31 @@ html, body { overflow-x: clip; }
   letter-spacing: 0.06em;
 }
 
+/* "Edit totals & subs in MHZ view" jump — shown on the read-only ENG
+   Project-total row of an MHZ-prime project. */
+.invoice-mhz-jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border, var(--border));
+  border-radius: 999px;
+  background: var(--accent-soft, transparent);
+  color: var(--accent-ink, var(--text-soft));
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.invoice-mhz-jump-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .thead, .trow {
   display: grid;
   gap: 0;

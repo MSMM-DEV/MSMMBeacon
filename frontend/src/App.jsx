@@ -2038,6 +2038,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     rollforwardOverride: "rollforward_override",
     name:                "project_name",
     projectNumber:       "project_number",
+    // MHZ-view display identity — per-perspective, NOT in LINKED_INVOICE_SYNC_KEYS
+    // so an edit here lands only on the MHZ row (never fans out to the ENG sibling).
+    mhzProjectNumber:    "mhz_project_number",
+    mhzProjectName:      "mhz_project_name",
     amount:              "contract_amount",
     // msmmAmount intentionally omitted — MSMM is purely derived (Total − subs),
     // never written to msmm_amount from the app.

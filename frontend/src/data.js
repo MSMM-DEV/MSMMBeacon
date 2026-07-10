@@ -813,6 +813,10 @@ function adaptInvoice(r) {
     sourceId: r.source_project_id || null,
     projectNumber: r.project_number || "",
     name: r.project_name,
+    // Per-view MHZ display identity — the MHZ perspective shows these (falling
+    // back to projectNumber/name when blank); the ENG view uses the defaults.
+    mhzProjectNumber: r.mhz_project_number || "",
+    mhzProjectName: r.mhz_project_name || "",
     pmIds: allPms(r.pms),
     // `amount` continues to map to anticipated_invoice.contract_amount but
     // now represents the *total* contract value (MSMM + every sub). The UI

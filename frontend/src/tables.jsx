@@ -2198,6 +2198,28 @@ export const InvoiceTable = ({
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+  // "Edit on the MHZ view" jump target — the linked MHZ row id we switched the
+  // Type filter to reach, so it can be scrolled into view + flashed once it renders.
+  const [jumpId, setJumpId] = useState(null);
+  // From an MHZ-prime ENG row's read-only total, switch to the MHZ view (where
+  // the full total + subs are editable) and open + reveal its linked MHZ row.
+  const jumpToMhzPerspective = (engRow) => {
+    const mhz = linkedPerspectiveFor(engRow, "MHZ");
+    setTypeFilter(new Set(["MHZ"]));
+    if (mhz) {
+      setExpandedIds(prev => new Set([...prev, mhz.id]));
+      setJumpId(mhz.id);
+    }
+  };
+  useEffect(() => {
+    if (!jumpId) return;
+    // setTypeFilter + setExpandedIds + setJumpId are batched in one handler, so
+    // by the time this runs the MHZ row is rendered and flashRowRef points at it.
+    const node = flashRowRef.current;
+    if (node) node.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = setTimeout(() => setJumpId(null), 1800);
+    return () => clearTimeout(t);
+  }, [jumpId]);
 
   // Search across project name, project number, type, year, and PM names.
   // Mirrors the column-walking predicate the TableView-based tabs use.
@@ -2209,6 +2231,8 @@ export const InvoiceTable = ({
     const haystack = [
       r.name,
       r.projectNumber,
+      r.mhzProjectName,
+      r.mhzProjectNumber,
       r.type,
       String(r.year ?? ""),
       ...(r.pmIds || []).map(id => userById(id)?.name || ""),
@@ -2766,10 +2790,17 @@ export const InvoiceTable = ({
                   });
                   const subList = withPerspectiveRows(r, subListBase);
                   const hasPrimeEntry = !!primeEntry;
+                  // Per-view identity: an MHZ-type row shows/edits its own
+                  // mhz_project_number / mhz_project_name (falling back to the
+                  // shared ENG values when blank); every other row uses the
+                  // default project_number / project_name.
+                  const isMhzRow    = (r.type || "ENG") === "MHZ";
+                  const shownNumber = isMhzRow ? (r.mhzProjectNumber || r.projectNumber || "") : (r.projectNumber || "");
+                  const shownName   = isMhzRow ? (r.mhzProjectName   || r.name || "")          : r.name;
                   return (
                   <React.Fragment key={r.id}>
-                  <tr ref={flashId === r.id ? flashRowRef : null}
-                      className={(flashId === r.id ? "flash" : "") + (isExpanded ? " expanded" : "")}
+                  <tr ref={(flashId === r.id || jumpId === r.id) ? flashRowRef : null}
+                      className={((flashId === r.id || jumpId === r.id) ? "flash" : "") + (isExpanded ? " expanded" : "")}
                       data-prob={isOrange(r) ? "orange" : undefined}
                       onDoubleClick={() => onOpenDrawer?.(r)}
                       style={{ cursor: "default" }}>
@@ -2789,13 +2820,13 @@ export const InvoiceTable = ({
                       </button>
                     </td>
                     <td className="sticky-1 mono" style={{ fontSize: 12 }}>
-                      <EditableCell value={r.projectNumber || ""}
-                        onChange={v => updateRow(r.id, { projectNumber: v })}/>
+                      <EditableCell value={shownNumber}
+                        onChange={v => updateRow(r.id, isMhzRow ? { mhzProjectNumber: v } : { projectNumber: v })}/>
                     </td>
                     <td className="sticky-2" style={{ fontWeight: 500 }}>
                       <div className="inv-name-wrap">
-                        <EditableCell value={r.name}
-                          onChange={v => updateRow(r.id, { name: v })}/>
+                        <EditableCell value={shownName}
+                          onChange={v => updateRow(r.id, isMhzRow ? { mhzProjectName: v } : { name: v })}/>
                         <button
                           type="button"
                           className={"invoice-egnyte-link" + (r.egnyteFolderPath ? " has-link" : "")}
@@ -3336,6 +3367,16 @@ export const InvoiceTable = ({
                       <td className="sticky-2" style={{ paddingLeft: 28, fontWeight: 600 }}>
                         Project total
                         <span className="invoice-total-row-hint">Total CV + monthly totals</span>
+                        {mhzPerspectiveSub && (
+                          <button
+                            type="button"
+                            className="invoice-mhz-jump-btn"
+                            title="MHZ is the prime — edit the full total and the subs on the MHZ view"
+                            onClick={(e) => { e.stopPropagation(); jumpToMhzPerspective(r); }}>
+                            Edit totals &amp; subs in MHZ view
+                            <Icon name="chevronRight" size={11}/>
+                          </button>
+                        )}
                       </td>
                       <td/>
                       <td/>
