@@ -1988,13 +1988,15 @@ export const InvoiceTable = ({
   onNotesChanged,    // (invoiceId, notesLog) => void  — sync the threaded Notes count back to App state
   canEditMsmm = true,   // Admin? The MSMM/parent-row dollar cells are auto-calc; non-admins can't edit them.
   onBlockedMsmmEdit,    // () => void  — fired when a non-admin clicks a locked MSMM cell (shows a toast)
-  // Billing-state surface: 'active' (Invoices tab) or 'between' (In-Between
-  // tab). Drives which transition actions render on each row — pause on the
-  // Invoices tab; resume + close-out on In-Between. All three handlers get
-  // the merged row (groupIds carries every underlying year-row id).
+  // Billing-state surface: 'active' (Invoices tab), 'between' (In-Between tab),
+  // or 'closed' (Closed Out tab). Drives which transition actions render on each
+  // row — pause on Invoices; resume + close-out on In-Between; reopen on Closed
+  // Out. All handlers get the merged row (groupIds carries every underlying
+  // year-row id). Closed rows keep the full expand/subs/cells surface — only
+  // the row action + accent differ.
   billingMode = "active",
   onPause,           // (row) => void  — Invoices → In-Between
-  onResume,          // (row) => void  — In-Between → Invoices
+  onResume,          // (row) => void  — In-Between → Invoices, and Closed Out → Invoices (reopen)
   onCloseOutRow,     // (row) => void  — In-Between → Closed Out (MoveForwardPanel)
   onSaveEgnyteFolder, // (row, egnyteFolderPath) => Promise<string>
 }) => {
@@ -2723,6 +2725,12 @@ export const InvoiceTable = ({
             hint="Pause an active project from the Invoices tab and it lands here — billing data intact — until you resume it or close it out."
             iconName="pause"
           />
+        ) : billingMode === "closed" ? (
+          <EmptyState
+            title="Nothing closed out"
+            hint="Close a project out from Invoices or In-Between and its full billing history is archived here — subs, months, and attachments intact — ready to reopen any time."
+            iconName="x"
+          />
         ) : (
           <EmptyState
             title="No invoice rows"
@@ -3054,6 +3062,12 @@ export const InvoiceTable = ({
                                   style={{ color: "var(--rose)" }}
                                   onClick={() => onCloseOutRow(r)}>
                             <Icon name="x" size={13}/>
+                          </button>
+                        )}
+                        {billingMode === "closed" && onResume && (
+                          <button className="row-btn forward" title="Reopen — move back to Invoices"
+                                  onClick={() => onResume(r)}>
+                            <Icon name="play" size={13}/>
                           </button>
                         )}
                         <button

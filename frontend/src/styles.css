@@ -17948,6 +17948,61 @@ html, body { overflow-x: clip; }
 .invoice-table.inv-mode-active  { --inv-act-w: 76px; }
 .invoice-table.inv-mode-between { --inv-act-w: 100px; }
 
+/* Closed Out — the SAME InvoiceTable surface as In-Between (full expand, subs,
+   month cells, notes, files), rendered as a calm archive. Reopen action reuses
+   active's 3-button width; a settled rose-tinted header reads "archived" at a
+   glance without dulling the numbers themselves. */
+.invoice-table.inv-mode-closed  { --inv-act-w: 76px; }
+.invoice-table.inv-mode-closed thead th {
+  background: color-mix(in srgb, var(--rose-soft) 42%, var(--surface));
+}
+[data-theme="dark"] .invoice-table.inv-mode-closed thead th {
+  background: color-mix(in srgb, var(--rose-soft) 55%, var(--surface));
+}
+
+/* Reassurance banner above the Closed Out table — sage = "kept safe". */
+.closed-archive-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 11px 15px;
+  border: 1px solid color-mix(in srgb, var(--sage) 26%, var(--border));
+  border-left: 3px solid var(--sage);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sage-soft) 60%, var(--surface));
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.closed-archive-note svg { color: var(--sage); flex: none; }
+.closed-archive-note strong { font-weight: 650; }
+
+/* Secondary section: pipeline projects closed WITHOUT ever being invoiced
+   (proposal losses / descopes) — no billing rows to render, so they keep a
+   compact list under a clear divider heading so nothing disappears. */
+.closed-pipeline-section { margin-top: 30px; }
+.closed-pipeline-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0 2px 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.closed-pipeline-head svg { color: var(--rose); flex: none; }
+.closed-pipeline-title {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .01em;
+  color: var(--text);
+}
+.closed-pipeline-sub {
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
 /* ======================================================================
    Projects — tree-structured work-breakdown table (ProjectsTable).
    A self-contained indented outline grid (not TableView). See tables.jsx.
