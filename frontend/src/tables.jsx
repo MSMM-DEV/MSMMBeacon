@@ -10,7 +10,7 @@ import {
   buildClientOrCompanyOptions,
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
-  MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL,
+  MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, INVOICE_ACTUALS_MIN_YEAR,
   browseEgnyteFolders,
   linkedProjectsFor,
   BID_SERVICE_OPTIONS,
@@ -2002,6 +2002,11 @@ export const InvoiceTable = ({
   onResume,          // (row) => void  — In-Between → Invoices, and Closed Out → Invoices (reopen)
   onCloseOutRow,     // (row) => void  — In-Between → Closed Out (MoveForwardPanel)
   onSaveEgnyteFolder, // (row, egnyteFolderPath) => Promise<string>
+  // Invoice-type filter — LIFTED to App.jsx (shared across the Invoice sub-tabs
+  // so the sub-tab count badges track it). Falls back to local state if a caller
+  // doesn't provide it.
+  typeFilter: propTypeFilter,
+  setTypeFilter: propSetTypeFilter,
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
@@ -2119,15 +2124,20 @@ export const InvoiceTable = ({
   // Actuals = months already billed = whose invoice is ATTACHED, summed at each
   // scope. Total Remaining = Contract − Total Billed  (= Rollforward − Actuals).
   //
-  // Actuals per scope — only months with an attachment count as billed:
+  // Actuals per scope — only months with an attachment count as billed, and
+  // only from INVOICE_ACTUALS_MIN_YEAR onward (after Dec 31, 2025): pre-2026
+  // billing is already captured by Contract − Rollforward, so counting it here
+  // too would double-count.
   const projectBilledAttached = (r) => yearsOf(r).reduce((a, y) => {
+    if (Number(y) < INVOICE_ACTUALS_MIN_YEAR) return a;
     const yr = yrow(r, y); if (!yr) return a;
     const files = yr.primeFiles || [];
     return a + Array.from({ length: 12 }, (_, m) =>
       (files[m]?.length > 0) ? Number(yr.values?.[m] || 0) : 0
     ).reduce((x, z) => x + z, 0);
   }, 0);
-  const subBilledAttached = (s) => Object.values(s?.byYear || {}).reduce((a, yr) => {
+  const subBilledAttached = (s) => Object.entries(s?.byYear || {}).reduce((a, [y, yr]) => {
+    if (Number(y) < INVOICE_ACTUALS_MIN_YEAR) return a;
     const files = yr?.files || [];
     return a + Array.from({ length: 12 }, (_, m) =>
       (files[m]?.length > 0) ? Number(yr?.amounts?.[m] || 0) : 0
@@ -2150,6 +2160,7 @@ export const InvoiceTable = ({
     // ENG row, the MHZ row itself, and PM rows all keep using their own files.
     const mhz = isMhzPerspectiveSub(r, rows) ? linkedPerspectiveFor(r, hzTypeForBase(r.type || "ENG")) : null;
     return yearsOf(r).reduce((a, y) => {
+      if (Number(y) < INVOICE_ACTUALS_MIN_YEAR) return a;
       const yr = yrow(r, y); if (!yr) return a;
       const files    = yr.primeFiles || [];
       const mhzFiles = mhz ? (yrow(mhz, y)?.primeFiles || []) : [];
@@ -2306,7 +2317,9 @@ export const InvoiceTable = ({
   // book is the day-to-day view; PM is toggled on explicitly via the chip's
   // popover. Empty selection is still treated as "All" so a stray
   // double-uncheck doesn't suddenly hide every row.
-  const [typeFilter, setTypeFilter] = useState(() => new Set(["ENG"]));
+  const [localTypeFilter, setLocalTypeFilter] = useState(() => new Set(["ENG"]));
+  const typeFilter    = propTypeFilter    || localTypeFilter;
+  const setTypeFilter = propSetTypeFilter || setLocalTypeFilter;
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const typeBtnRef = useRef(null);
   const typeFilterActive =

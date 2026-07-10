@@ -47,7 +47,7 @@ import {
 } from "./invoice-perspectives.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
-  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, actualThruMonth,
+  MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, INVOICE_ACTUALS_MIN_YEAR, actualThruMonth,
   mergeInvoiceYears, adaptInvoiceRow, monthDescsForWindow, defaultWindowStartAbs, WINDOW_SIZE,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
@@ -334,12 +334,14 @@ const _approvalLabel = (r) => {
 
 // Project-scope Total Billed for the invoice PDF export — mirrors the
 // InvoiceTable project-total row: Total CV − Rollforward + billed actuals
-// (project months whose prime invoice is attached). NULL rollforward ⇒ the
-// full contract still remains, so it falls back to Total CV.
+// (project months whose prime invoice is attached, from INVOICE_ACTUALS_MIN_YEAR
+// onward — pre-2026 billing is already captured by Total CV − Rollforward).
+// NULL rollforward ⇒ the full contract still remains, so it falls back to Total CV.
 const invoiceProjectTotalBilled = (r) => {
   const rollf = (r.totalRemainingStart != null && r.totalRemainingStart !== "")
     ? Number(r.totalRemainingStart) : Number(r.amount || 0);
-  const actuals = Object.values(r.byYear || {}).reduce((a, yr) => {
+  const actuals = Object.entries(r.byYear || {}).reduce((a, [y, yr]) => {
+    if (Number(y) < INVOICE_ACTUALS_MIN_YEAR) return a;
     const files = yr?.primeFiles || [];
     return a + (yr?.values || []).reduce((x, v, m) =>
       x + ((files[m]?.length > 0) ? Number(v || 0) : 0), 0);
@@ -4698,6 +4700,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     [potential]
   );
 
+  // Type filter for the Invoice group — LIFTED here (shared across the Invoices /
+  // In-Between / Closed Out sub-tabs) so the sub-tab count badges reflect the
+  // selected type(s) and the filter persists when switching sub-tabs. Default =
+  // ENG only, matching the table's day-to-day view.
+  const [invoiceTypeFilter, setInvoiceTypeFilter] = useState(() => new Set(["ENG"]));
+
   // Invoice rolling-window — absolute-month index (year*12 + monthIdx) of the
   // leftmost visible month. Shared by the InvoiceTable, the cash-flow charts,
   // and the Manish export so all three slide together. Persisted so navigation
@@ -4761,14 +4769,36 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     ];
   }, [awarded, invoice, invoiceMerged, actualThru, hotLeads]);
 
+  // Type-filter predicate for the Invoice sub-tab counts (mirrors InvoiceTable's
+  // matchesType). Inactive when all types are selected → counts everything.
+  const invTypeActive = invoiceTypeFilter.size > 0 && invoiceTypeFilter.size < INVOICE_TYPE_OPTIONS.length;
+  const invTypeOk = (r) => !invTypeActive || invoiceTypeFilter.has(r.type);
+  // Closed-out pipeline projects that were never invoiced (no invoice-type rows).
+  // Shown below the Closed Out InvoiceTable AND counted in its badge; computed
+  // once here so the render and the count can't diverge.
+  const closedNoBilling = (() => {
+    const invoicedIds = new Set(), invoicedNums = new Set();
+    for (const r of filtered.closedInvoice) {
+      if (r.sourceId) invoicedIds.add(r.sourceId);
+      const n = normInvoiceNumber(r.projectNumber);
+      if (n) invoicedNums.add(n);
+    }
+    return filtered.closed.filter(p =>
+      !invoicedIds.has(p.id) &&
+      !(p.projectNumber && invoicedNums.has(normInvoiceNumber(p.projectNumber))));
+  })();
+
   const tabCounts = {
     openbids: openBids.length,
     potential: potential.length, awaiting: awaiting.length,
-    awarded: awarded.length, closed: closed.length,
-    // Invoice counts are per merged PROJECT (not per year-row), split by
-    // billing state to feed the Invoices / In-Between sub-tab badges.
-    invoice: invoiceMerged.filter(r => (r.billingState || "active") === "active").length,
-    between: invoiceMerged.filter(r => r.billingState === "between").length,
+    awarded: awarded.length,
+    // Invoice counts are per merged PROJECT (not per year-row), split by billing
+    // state AND filtered by the selected invoice type(s) so the sub-tab badges
+    // track the Type filter. Closed adds the never-invoiced pipeline closures
+    // (no invoice type, so they always show).
+    invoice: invoiceMerged.filter(r => (r.billingState || "active") === "active" && invTypeOk(r)).length,
+    between: invoiceMerged.filter(r => r.billingState === "between" && invTypeOk(r)).length,
+    closed: filtered.closedInvoice.filter(invTypeOk).length + closedNoBilling.length,
     events: events.length,
     hotleads: hotLeads.length,
     directory: clients.length + companies.length,
@@ -5136,17 +5166,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           // no invoice rows to show, so they keep a compact list below — that
           // way nothing disappears and invoice-closed projects aren't listed
           // twice (they're excluded from the pipeline list by source id/number).
+          // closedInv + closedNoBilling are computed once above (closedNoBilling
+          // is shared with the Closed Out sub-tab count so the two can't disagree).
           const closedInv = filtered.closedInvoice;
-          const invoicedIds = new Set();
-          const invoicedNums = new Set();
-          for (const r of closedInv) {
-            if (r.sourceId) invoicedIds.add(r.sourceId);
-            const n = normInvoiceNumber(r.projectNumber);
-            if (n) invoicedNums.add(n);
-          }
-          const closedNoBilling = filtered.closed.filter(p =>
-            !invoicedIds.has(p.id) &&
-            !(p.projectNumber && invoicedNums.has(normInvoiceNumber(p.projectNumber))));
           // Show the InvoiceTable when there ARE closed invoice projects, or
           // when the whole tab is empty (its empty-state carries the message).
           // When only never-invoiced closures exist, skip the empty table and
@@ -5196,6 +5218,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                       setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
                     canEditMsmm={isAdmin}
                     onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
+                    typeFilter={invoiceTypeFilter}
+                    setTypeFilter={setInvoiceTypeFilter}
                     billingMode="closed"
                     onResume={reopenInvoiceProject}/>
                 </>
@@ -5273,6 +5297,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 canEditMsmm={isAdmin}
                 onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
                 onNew={() => setCreateTable("invoice")}
+                typeFilter={invoiceTypeFilter}
+                setTypeFilter={setInvoiceTypeFilter}
                 billingMode="active"
                 onPause={pauseInvoiceProject}/>
               <SubsReceivablesPanel
@@ -5327,6 +5353,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
             canEditMsmm={isAdmin}
             onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
+            typeFilter={invoiceTypeFilter}
+            setTypeFilter={setInvoiceTypeFilter}
             billingMode="between"
             onResume={resumeInvoiceProject}
             onCloseOutRow={r => triggerForward(r, "invoice", "closed")}/>

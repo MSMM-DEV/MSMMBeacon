@@ -291,6 +291,14 @@ export function isActualInvoiceMonth(year, monthIdx) {
 // to bring the lock back without touching the call sites.
 export const ATTACH_ONLY_ON_ACTUAL = false;
 
+// Total Billed = Contract − Rollforward + Actuals. Rollforward is the "remaining
+// to bill at year start" (Jan 1, 2026 — pre-2026 billing history isn't loaded),
+// so Contract − Rollforward already accounts for everything billed BEFORE 2026.
+// The actuals therefore count ONLY billing after Dec 31, 2025 (year ≥ this
+// value) — months with an invoice attached — otherwise pre-2026 attachments
+// would double-count against the rollforward.
+export const INVOICE_ACTUALS_MIN_YEAR = 2026;
+
 // ----------------------------------------------------------------------
 // Invoice rolling-window
 // ----------------------------------------------------------------------
