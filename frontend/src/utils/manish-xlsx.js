@@ -21,6 +21,8 @@
 // exceljs is loaded via dynamic import() so it only ships when the button is
 // actually clicked (keeps it out of the initial bundle).
 
+import { isHzPrimeType } from "../invoice-perspectives.js";
+
 const GREEN  = "FF00B050";
 const YELLOW = "FFFFFF00";
 const RED    = "FFFF0000";
@@ -222,18 +224,20 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
     return total - subSum;
   };
 
-  // An MHZ row's stored role is inherited from its project (where MSMM is a sub
-  // of MHZ → "Sub"), but the MHZ perspective's role is Prime — MHZ is the prime
-  // of the JV. So treat MHZ rows as Prime; otherwise they'd all be filtered out
-  // and the MHZ-view export would report "No Prime projects with subs".
-  const roleOf = (r) => (r.type === "MHZ") ? "Prime" : r.role;
+  // An hz row's stored role (MHZ / MHZ PM) is inherited from its project (where
+  // MSMM is a sub of the JV → "Sub"), but the hz perspective's role is Prime —
+  // the JV entity is the prime. So treat hz rows as Prime; otherwise they'd all
+  // be filtered out and the hz-view export would report "No Prime projects with
+  // subs".
+  const roleOf = (r) => isHzPrimeType(r.type) ? "Prime" : r.role;
   const included = (baseRows || []).filter(r => {
     if (roleOf(r) !== "Prime") return false;
-    // An MHZ-prime project always has MSMM as a sub of MHZ (plus any A/B/C subs),
-    // so it qualifies even when no A/B/C subs are recorded — otherwise the 3 of 5
-    // MHZ projects that have no separate subs get silently dropped. ENG-prime
-    // projects still require ≥1 sub (that's what makes them a breakdown row).
-    return r.type === "MHZ" || subListFor(r).length > 0;
+    // An hz-prime project always has MSMM as a sub of the JV (plus any A/B/C
+    // subs), so it qualifies even when no A/B/C subs are recorded — otherwise the
+    // hz projects that have no separate subs get silently dropped. Base-prime
+    // projects (ENG / PM) still require ≥1 sub (that's what makes them a
+    // breakdown row).
+    return isHzPrimeType(r.type) || subListFor(r).length > 0;
   });
 
   const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
@@ -259,9 +263,10 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
         }),
       };
     });
-    // MHZ rows carry their own per-view identity (falls back to the shared ENG
-    // number/name when blank); the export + its by-project-number sort follow it.
-    const isMhz = r.type === "MHZ";
+    // hz rows (MHZ / MHZ PM) carry their own per-view identity (falls back to the
+    // shared base number/name when blank); the export + its by-project-number
+    // sort follow it.
+    const isMhz = isHzPrimeType(r.type);
     return {
       projectNumber: isMhz ? (r.mhzProjectNumber || r.projectNumber) : r.projectNumber,
       name:          isMhz ? (r.mhzProjectName   || r.name)          : r.name,

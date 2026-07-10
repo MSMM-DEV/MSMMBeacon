@@ -42,6 +42,8 @@ import {
   linkedInvoiceIdsFor,
   linkedInvoicePatch,
   projectNameSuggestsMhz,
+  pairSiblingOf,
+  perspectivePairOf,
 } from "./invoice-perspectives.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
@@ -2223,7 +2225,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!dbRow || !projectNameSuggestsMhz(dbRow.project_name)) return null;
     const primaryType = dbRow.type || "ENG";
     if (!HZ_INVOICE_TYPES.includes(primaryType)) return null;
-    const siblingType = primaryType === "MHZ" ? "ENG" : "MHZ";
+    // The linked sibling is the other member of this type's perspective pair:
+    // ENG↔MHZ, PM↔MHZ PM.
+    const siblingType = pairSiblingOf(primaryType);
+    if (!siblingType) return null;
+    const pairLabel = (() => {
+      const p = perspectivePairOf(primaryType);
+      return p ? `${p.base} and ${p.hz}` : `${primaryType} and ${siblingType}`;
+    })();
     const projectNumber = normInvoiceNumber(dbRow.project_number);
     const alreadyLocal = invoice.some(r =>
       (r.type || "ENG") === siblingType &&
@@ -2236,7 +2245,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (alreadyLocal) return null;
     if (prompt) {
       const ok = window.confirm(
-        `${dbRow.project_name} looks like an HZ/MHZ project.\n\nAdd it to both ENG and MHZ invoice categories and keep the two perspectives linked?`
+        `${dbRow.project_name} looks like an HZ/MHZ project.\n\nAdd it to both ${pairLabel} invoice categories and keep the two perspectives linked?`
       );
       if (!ok) return null;
     }
@@ -2316,8 +2325,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return null;
     }
     setInvoice(rs => [...rs, adaptInvoiceRow(data, { role: mergedRow.role || "Prime" })]);
-    const siblingType = (mergedRow.type || "ENG") === "MHZ" ? "ENG" : "MHZ";
-    const hasHzSibling = HZ_INVOICE_TYPES.includes(mergedRow.type || "ENG") && invoice.some(r =>
+    const siblingType = pairSiblingOf(mergedRow.type || "ENG");
+    const hasHzSibling = siblingType && invoice.some(r =>
       (r.type || "ENG") === siblingType &&
       (
         (mergedRow.sourceId && r.sourceId === mergedRow.sourceId) ||

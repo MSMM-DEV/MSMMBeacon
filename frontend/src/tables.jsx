@@ -28,6 +28,9 @@ import {
   invoicePerspectiveRoleIsDerived,
   invoiceTypeTone,
   isMhzPerspectiveSub,
+  isHzPrimeType,
+  baseTypeForHz,
+  hzTypeForBase,
   perspectiveSubListBase,
 } from "./invoice-perspectives.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
@@ -2134,7 +2137,7 @@ export const InvoiceTable = ({
     // attachment for it. Gate on isMhzPerspectiveSub (ENG-only) so this OR-in
     // never applies to a PM row that merely shares the project number — a normal
     // ENG row, the MHZ row itself, and PM rows all keep using their own files.
-    const mhz = isMhzPerspectiveSub(r, rows) ? linkedPerspectiveFor(r, "MHZ") : null;
+    const mhz = isMhzPerspectiveSub(r, rows) ? linkedPerspectiveFor(r, hzTypeForBase(r.type || "ENG")) : null;
     return yearsOf(r).reduce((a, y) => {
       const yr = yrow(r, y); if (!yr) return a;
       const files    = yr.primeFiles || [];
@@ -2176,24 +2179,26 @@ export const InvoiceTable = ({
   );
   const withPerspectiveRows = (r, entries) => {
     const type = r.type || "ENG";
-    // ENG (MSMM) view of an MHZ-prime project no longer injects a synthetic
-    // "MHZ · PRIME" line — per client direction the ENG perspective hides the
-    // MHZ prime entirely, and its totals must not reflect the full-JV value
-    // (the Project total row is rendered as MSMM's own portion below). A normal
-    // ENG row has no MHZ sibling, so nothing was ever injected for it anyway.
-    if (type === "MHZ") {
-      const eng = linkedPerspectiveFor(r, "ENG");
-      if (!eng) return entries;
+    // The base (MSMM) view of an hz-prime project (ENG for MHZ, PM for MHZ PM)
+    // no longer injects a synthetic "hz · PRIME" line — per client direction the
+    // base perspective hides the hz prime entirely, and its totals must not
+    // reflect the full-JV value (the Project total row is rendered as MSMM's own
+    // portion below). A normal base row has no hz sibling, so nothing was ever
+    // injected for it anyway. The hz view (MHZ / MHZ PM) injects MSMM as a sub,
+    // read from its linked base sibling.
+    if (isHzPrimeType(type)) {
+      const base = linkedPerspectiveFor(r, baseTypeForHz(type));
+      if (!base) return entries;
       const msmm = getCompanies().find(c => c.isMsmm) || { id: "__msmm_sub__", name: "MSMM" };
-      const byYear = invoiceMsmmAsSubYears(eng);
+      const byYear = invoiceMsmmAsSubYears(base);
       const already = entries.some(e => (e.kind || "sub") === "sub" && e.companyId === msmm.id);
       if (already) return entries;
       return [{
         kind: "sub",
         companyId: msmm.id,
         companyName: msmm.name || "MSMM",
-        contractAmount: msmmContractShown(eng),
-        remainingStart: eng.remainingStart ?? null,
+        contractAmount: msmmContractShown(base),
+        remainingStart: base.remainingStart ?? null,
         discipline: "MSMM perspective",
         amounts: byYear[THIS_YEAR]?.amounts || Array(12).fill(0),
         files: Array.from({ length: 12 }, () => []),
@@ -2243,14 +2248,16 @@ export const InvoiceTable = ({
   // "Edit on the MHZ view" jump target — the linked MHZ row id we switched the
   // Type filter to reach, so it can be scrolled into view + flashed once it renders.
   const [jumpId, setJumpId] = useState(null);
-  // From an MHZ-prime ENG row's read-only total, switch to the MHZ view (where
-  // the full total + subs are editable) and open + reveal its linked MHZ row.
-  const jumpToMhzPerspective = (engRow) => {
-    const mhz = linkedPerspectiveFor(engRow, "MHZ");
-    setTypeFilter(new Set(["MHZ"]));
-    if (mhz) {
-      setExpandedIds(prev => new Set([...prev, mhz.id]));
-      setJumpId(mhz.id);
+  // From an hz-prime base row's read-only total (ENG→MHZ, PM→MHZ PM), switch to
+  // the hz view (where the full total + subs are editable) and open + reveal its
+  // linked hz row.
+  const jumpToMhzPerspective = (baseRow) => {
+    const hzType = hzTypeForBase(baseRow.type || "ENG");
+    const hz = linkedPerspectiveFor(baseRow, hzType);
+    setTypeFilter(new Set([hzType]));
+    if (hz) {
+      setExpandedIds(prev => new Set([...prev, hz.id]));
+      setJumpId(hz.id);
     }
   };
   useEffect(() => {
@@ -2838,11 +2845,11 @@ export const InvoiceTable = ({
                   });
                   const subList = withPerspectiveRows(r, subListBase);
                   const hasPrimeEntry = !!primeEntry;
-                  // Per-view identity: an MHZ-type row shows/edits its own
-                  // mhz_project_number / mhz_project_name (falling back to the
-                  // shared ENG values when blank); every other row uses the
+                  // Per-view identity: an hz-type row (MHZ / MHZ PM) shows/edits
+                  // its own mhz_project_number / mhz_project_name (falling back to
+                  // the shared base values when blank); every other row uses the
                   // default project_number / project_name.
-                  const isMhzRow    = (r.type || "ENG") === "MHZ";
+                  const isMhzRow    = isHzPrimeType(r.type);
                   const shownNumber = isMhzRow ? (r.mhzProjectNumber || r.projectNumber || "") : (r.projectNumber || "");
                   const shownName   = isMhzRow ? (r.mhzProjectName   || r.name || "")          : r.name;
                   return (
@@ -3104,7 +3111,7 @@ export const InvoiceTable = ({
                       <td className="sticky-2" colSpan={4} style={{ paddingLeft: 28 }}>
                         <span style={{ fontStyle: "italic", color: "var(--text-soft)" }}>
                           {mhzPerspectiveSub
-                            ? "MHZ is the prime — the prime and subs are managed on the MHZ view."
+                            ? `${hzTypeForBase(r.type || "ENG") || "MHZ"} is the prime — the prime and subs are managed on the ${hzTypeForBase(r.type || "ENG") || "MHZ"} view.`
                             : isPrimeRow
                               ? "No subs tracked on this project yet."
                               : "No prime or subs tracked on this project yet."}
@@ -3422,23 +3429,26 @@ export const InvoiceTable = ({
                       <td className="sticky-2" style={{ paddingLeft: 28, fontWeight: 600 }}>
                         Project total
                         <span className="invoice-total-row-hint">Total CV + monthly totals</span>
-                        {mhzPerspectiveSub && (
+                        {mhzPerspectiveSub && (() => {
+                          const hzLabel = hzTypeForBase(r.type || "ENG") || "MHZ";
+                          return (
                           <button
                             type="button"
                             className="invoice-mhz-jump-btn"
-                            title="MHZ is the prime — edit the full total and the subs on the MHZ view"
+                            title={`${hzLabel} is the prime — edit the full total and the subs on the ${hzLabel} view`}
                             onClick={(e) => { e.stopPropagation(); jumpToMhzPerspective(r); }}>
-                            Edit totals &amp; subs in MHZ view
+                            Edit totals &amp; subs in {hzLabel} view
                             <Icon name="chevronRight" size={11}/>
                           </button>
-                        )}
+                          );
+                        })()}
                       </td>
                       <td/>
                       <td/>
                       <td/>
                       <td className="mono">
                         {mhzPerspectiveSub ? (
-                          <span title="MSMM Portion — MHZ is the prime, so the full joint-venture total is billed on the MHZ view">
+                          <span title={`MSMM Portion — ${hzTypeForBase(r.type || "ENG") || "MHZ"} is the prime, so the full joint-venture total is billed on the ${hzTypeForBase(r.type || "ENG") || "MHZ"} view`}>
                             {(() => { const v = msmmContractShown(r); return v != null ? fmtMoney(v) : <span className="empty-cell">—</span>; })()}
                           </span>
                         ) : (
