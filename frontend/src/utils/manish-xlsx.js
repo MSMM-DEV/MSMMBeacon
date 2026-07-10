@@ -188,8 +188,13 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
     return total - subSum;
   };
 
+  // An MHZ row's stored role is inherited from its project (where MSMM is a sub
+  // of MHZ → "Sub"), but the MHZ perspective's role is Prime — MHZ is the prime
+  // of the JV. So treat MHZ rows as Prime; otherwise they'd all be filtered out
+  // and the MHZ-view export would report "No Prime projects with subs".
+  const roleOf = (r) => (r.type === "MHZ") ? "Prime" : r.role;
   const included = (baseRows || []).filter(r =>
-    r.role === "Prime" && subListFor(r).length > 0);
+    roleOf(r) === "Prime" && subListFor(r).length > 0);
 
   const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
   const rows = included.map(r => {
@@ -214,7 +219,14 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
         }),
       };
     });
-    return { projectNumber: r.projectNumber, name: r.name, subNames, months };
+    // MHZ rows carry their own per-view identity (falls back to the shared ENG
+    // number/name when blank); the export + its by-project-number sort follow it.
+    const isMhz = r.type === "MHZ";
+    return {
+      projectNumber: isMhz ? (r.mhzProjectNumber || r.projectNumber) : r.projectNumber,
+      name:          isMhz ? (r.mhzProjectName   || r.name)          : r.name,
+      subNames, months,
+    };
   });
 
   return {
