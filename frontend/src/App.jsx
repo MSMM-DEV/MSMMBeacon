@@ -29,6 +29,7 @@ import {
   exportManishWorkbook,
   manishAvailableYears,
   manishMonthDescsBetween,
+  manishDataWindow,
 } from "./utils/manish-xlsx.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
@@ -37,6 +38,7 @@ import { invoiceIsOrange } from "./invoice-orange.js";
 import { hotLeadStatsBreakdown } from "./stats.js";
 import {
   HZ_INVOICE_TYPES,
+  INVOICE_TYPE_OPTIONS,
   linkedInvoiceIdsFor,
   linkedInvoicePatch,
   projectNameSuggestsMhz,
@@ -882,12 +884,19 @@ const ManishExportModal = ({
   years = [],
   defaultStart,
   defaultEnd,
+  initialTypes = [],
+  typeOptions = [],
   onClose,
   onExport,
 }) => {
   const yearChoices = years.length ? years : [THIS_YEAR];
   const preferredYear = yearChoices.includes(THIS_YEAR) ? THIS_YEAR : yearChoices[yearChoices.length - 1];
   const [mode, setMode] = useState("default");
+  // Which invoice type(s) to export — the source of truth for scope, defaulting
+  // to whatever the table is currently filtered to (so nothing changes for the
+  // usual ENG flow, but you can pick MHZ here without touching the table).
+  const [types, setTypes] = useState(() =>
+    new Set(initialTypes.length ? initialTypes : typeOptions));
   const [selectedYears, setSelectedYears] = useState(() => new Set([preferredYear]));
   const [startYear, setStartYear] = useState(defaultStart?.year || preferredYear);
   const [startMonth, setStartMonth] = useState(defaultStart?.monthIdx ?? 0);
@@ -898,13 +907,21 @@ const ManishExportModal = ({
 
   const customInvalid = (Number(endYear) * 12 + Number(endMonth)) < (Number(startYear) * 12 + Number(startMonth));
   const yearsInvalid = selectedYears.size === 0;
-  const exportDisabled = pending || (mode === "years" && yearsInvalid) || (mode === "custom" && customInvalid);
+  const typesInvalid = types.size === 0;
+  const exportDisabled = pending || typesInvalid || (mode === "years" && yearsInvalid) || (mode === "custom" && customInvalid);
 
   const toggleYear = (year) => {
     setSelectedYears(prev => {
       const next = new Set(prev);
       if (next.has(year)) next.delete(year);
       else next.add(year);
+      return next;
+    });
+  };
+  const toggleType = (t) => {
+    setTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t); else next.add(t);
       return next;
     });
   };
@@ -917,6 +934,7 @@ const ManishExportModal = ({
     try {
       await onExport({
         mode,
+        types: [...types],
         years: [...selectedYears].sort((a, b) => a - b),
         startYear: Number(startYear),
         startMonth: Number(startMonth),
@@ -958,10 +976,26 @@ const ManishExportModal = ({
         </div>
         <div className="modal-body">
           <div className="manish-export-options">
+            {option("all", "All projects", "Every project of the selected type, from its earliest to latest billed month.")}
             {option("default", "Default Export", "Use the current rolling month window.")}
             {option("years", "Years", "Create one Excel tab for each selected year.")}
             {option("custom", "Custom Dates", "Choose an inclusive start and end month.")}
           </div>
+
+          {typeOptions.length > 0 && (
+            <div className="manish-export-panel">
+              <div className="field-label">Invoice type</div>
+              <div className="manish-type-grid">
+                {typeOptions.map(t => (
+                  <label key={t} className={`manish-type-chip${types.has(t) ? " on" : ""}`}>
+                    <input type="checkbox" checked={types.has(t)} onChange={() => toggleType(t)}/>
+                    <span>{t}</span>
+                  </label>
+                ))}
+              </div>
+              {typesInvalid && <div className="form-hint danger">Select at least one type.</div>}
+            </div>
+          )}
 
           {mode === "years" && (
             <div className="manish-export-panel">
@@ -4390,10 +4424,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // design (it always re-sorts by project number), so only the type scope
     // carries over — search still narrows the row set via the snapshot.
     const snap = getCurrentTableSnapshot();
-    const baseRows = (snap && snap.tab === "invoice" && snap.processedRows)
-      ? snap.processedRows
-      : currentRows;
-    const ts = invoiceTypeScope(snap);
+    // The modal's Invoice-type selector is the source of truth for scope: filter
+    // the full active invoice set by the chosen types, so you can export MHZ (all
+    // 5 projects) even while the table is showing ENG. With no explicit types
+    // (older callers) fall back to the visible snapshot rows + its type label.
+    const requestedTypes = (options?.types && options.types.length) ? options.types : null;
+    const snapRows = (snap && snap.tab === "invoice" && snap.processedRows) ? snap.processedRows : currentRows;
+    const baseRows = requestedTypes
+      ? currentRows.filter(r => requestedTypes.includes(r.type || "ENG"))
+      : snapRows;
+    const ts = requestedTypes
+      ? { token: requestedTypes.join("_"), text: requestedTypes.join(" · ") }
+      : invoiceTypeScope(snap);
 
     const mode = options?.mode || "default";
     // Bold banner atop each Excel sheet: period · type(s) · sort (req 1.8).
@@ -4404,7 +4446,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     let filename;
     let includedCount = 0;
 
-    if (mode === "years") {
+    if (mode === "all") {
+      // Every project of the selected type(s), over one continuous window from
+      // the earliest to the latest month any of them has billed data.
+      const w = manishDataWindow(baseRows);
+      if (!w) throw new Error("No dated invoice data for the selected type(s).");
+      const win = manishMonthDescsBetween(w.startYear, w.startMonth, w.endYear, w.endMonth);
+      if (win.length === 0) throw new Error("No dated invoice data for the selected type(s).");
+      const periodText = `${win[0].label} – ${win[win.length - 1].label} · all projects`;
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText) });
+      payload = data;
+      includedCount = data.includedCount;
+      filename = `Manish_export_all_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
+    } else if (mode === "years") {
       const years = options.years || [];
       if (years.length === 0) throw new Error("Select at least one year.");
       const built = buildManishYearSheets({
@@ -5597,6 +5651,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           years={manishYears}
           defaultStart={invWindowMonths[0]}
           defaultEnd={invWindowMonths[invWindowMonths.length - 1]}
+          initialTypes={getCurrentTableSnapshot()?.typeFilter || []}
+          typeOptions={INVOICE_TYPE_OPTIONS}
           onClose={() => setManishExportOpen(false)}
           onExport={handleExportManish}
         />

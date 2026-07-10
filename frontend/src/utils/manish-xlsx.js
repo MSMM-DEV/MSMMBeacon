@@ -174,6 +174,40 @@ export function manishAvailableYears(rows = [], currentYear = new Date().getFull
   return Array.from({ length: maxYear - MIN_EXPORT_YEAR + 1 }, (_, i) => MIN_EXPORT_YEAR + i);
 }
 
+// The earliest → latest month with any billed amount across `rows` (the
+// type-scoped export set). Backs the "All projects" export mode: one continuous
+// window from the first to the last month any project of the type has data.
+// Falls back to the min→max YEAR present when amounts are all empty; null when
+// there is no dated data at all.
+export function manishDataWindow(rows = []) {
+  let minAbs = Infinity, maxAbs = -Infinity;
+  let minYear = Infinity, maxYear = -Infinity;
+  for (const r of rows || []) {
+    const byYear = r?.byYear || {};
+    for (const [yStr, yr] of Object.entries(byYear)) {
+      const y = Number(yStr);
+      if (!Number.isFinite(y)) continue;
+      minYear = Math.min(minYear, y); maxYear = Math.max(maxYear, y);
+      const vals = yr?.values || [];
+      for (let m = 0; m < 12; m++) {
+        if (Number(vals[m] || 0) !== 0) {
+          const abs = ymAbs(y, m);
+          if (abs < minAbs) minAbs = abs;
+          if (abs > maxAbs) maxAbs = abs;
+        }
+      }
+    }
+  }
+  if (minAbs <= maxAbs) {
+    const s = absToDesc(minAbs), e = absToDesc(maxAbs);
+    return { startYear: s.year, startMonth: s.monthIdx, endYear: e.year, endMonth: e.monthIdx };
+  }
+  if (Number.isFinite(minYear)) {
+    return { startYear: minYear, startMonth: 0, endYear: maxYear, endMonth: 11 };
+  }
+  return null;
+}
+
 export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [], title = "" } = {}) {
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
@@ -193,8 +227,14 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
   // of the JV. So treat MHZ rows as Prime; otherwise they'd all be filtered out
   // and the MHZ-view export would report "No Prime projects with subs".
   const roleOf = (r) => (r.type === "MHZ") ? "Prime" : r.role;
-  const included = (baseRows || []).filter(r =>
-    roleOf(r) === "Prime" && subListFor(r).length > 0);
+  const included = (baseRows || []).filter(r => {
+    if (roleOf(r) !== "Prime") return false;
+    // An MHZ-prime project always has MSMM as a sub of MHZ (plus any A/B/C subs),
+    // so it qualifies even when no A/B/C subs are recorded — otherwise the 3 of 5
+    // MHZ projects that have no separate subs get silently dropped. ENG-prime
+    // projects still require ≥1 sub (that's what makes them a breakdown row).
+    return r.type === "MHZ" || subListFor(r).length > 0;
+  });
 
   const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
   const rows = included.map(r => {

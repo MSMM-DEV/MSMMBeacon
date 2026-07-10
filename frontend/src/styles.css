@@ -1746,6 +1746,31 @@ html, body { overflow-x: clip; }
   font-size: 12.5px;
   color: var(--text);
 }
+.manish-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.manish-type-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.manish-type-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--surface));
+  color: var(--accent-ink, var(--text));
+}
 .manish-date-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
