@@ -2072,6 +2072,20 @@ export const InvoiceTable = ({
     const subSum = subListFor(r).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
     return total - subSum;
   };
+  // MSMM monthly billing IS editable on linked ENG/MHZ projects — from the MHZ
+  // "MSMM · sub" line AND the ENG Project-total row (which mirrors MSMM's own
+  // portion for an MHZ-prime project). MSMM stays a derived reconciliation
+  // (Total − Σ subs), so typing an MSMM month value writes it by moving the
+  // SHARED project total: total = MSMM + Σ subs, leaving the other subs
+  // untouched. updateInvoice fans that total out to BOTH ENG and MHZ siblings
+  // (linkedInvoiceIdsFor), so the two perspectives stay exactly equal and the
+  // edit works from either view (bidirectional). `row` may be the ENG or the
+  // MHZ merged row — subs are shared (keyed on sourceId), so the sum is the same.
+  const setMsmmMonth = (row, d, v) => {
+    const typed = (v == null || v === "") ? 0 : Number(v);
+    const subSum = subListFor(row).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
+    updateInvoice?.(row, d.year, d.monthIdx, typed + subSum);
+  };
   // YTD Actual = ALL the actuals for the project, summed across EVERY year in
   // byYear (the rolling-window definition — not just the current year). Computed
   // / read-only now; the old per-row override + Rollforward column were removed.
@@ -3268,8 +3282,9 @@ export const InvoiceTable = ({
                             className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
                           <EditableCell value={amt} type="number"
-                            disabled={!!s.syntheticPerspective}
-                            onChange={nv => !s.syntheticPerspective && onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
+                            onChange={nv => s.syntheticPerspective
+                              ? setMsmmMonth(r, d, nv)
+                              : onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
                             format={v => v != null && v !== 0
                               ? fmtMoney(v)
                               : <span style={{ opacity: 0.4 }}>—</span>}/>
@@ -3448,14 +3463,18 @@ export const InvoiceTable = ({
                       {windowMonths.map((d, wi) => {
                         if (mhzPerspectiveSub) {
                           // ENG view of an MHZ-prime project — the Project total
-                          // row mirrors MSMM's own monthly portion, read-only.
-                          // Prime billing (attach / paid / invoice #) lives on the
-                          // MHZ view, so there are no controls here.
+                          // row shows MSMM's own monthly portion and is EDITABLE:
+                          // it writes the shared total (= MSMM + subs) so it stays
+                          // in lockstep with the MHZ "MSMM · sub" line, and the
+                          // edit is mirrored to the MHZ perspective. Prime billing
+                          // (attach / paid / invoice #) still lives on the MHZ view.
                           const shown = msmmAtDesc(r, d);
                           return (
                           <td key={d.abs}
                               className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell"}>
-                            <span className="mono">{shown ? fmtMoney(shown) : <span style={{ opacity: .4 }}>—</span>}</span>
+                            <EditableCell value={shown || null} type="number"
+                              onChange={nv => setMsmmMonth(r, d, nv)}
+                              format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}/>
                           </td>
                           );
                         }
