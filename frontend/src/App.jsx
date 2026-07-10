@@ -330,6 +330,21 @@ const _approvalLabel = (r) => {
   return "Pending";
 };
 
+// Project-scope Total Billed for the invoice PDF export — mirrors the
+// InvoiceTable project-total row: Total CV − Rollforward + billed actuals
+// (project months whose prime invoice is attached). NULL rollforward ⇒ the
+// full contract still remains, so it falls back to Total CV.
+const invoiceProjectTotalBilled = (r) => {
+  const rollf = (r.totalRemainingStart != null && r.totalRemainingStart !== "")
+    ? Number(r.totalRemainingStart) : Number(r.amount || 0);
+  const actuals = Object.values(r.byYear || {}).reduce((a, yr) => {
+    const files = yr?.primeFiles || [];
+    return a + (yr?.values || []).reduce((x, v, m) =>
+      x + ((files[m]?.length > 0) ? Number(v || 0) : 0), 0);
+  }, 0);
+  return Number(r.amount || 0) - rollf + actuals;
+};
+
 const EXPORT_COLUMNS = {
   openbids: [
     { label: "RFQ/RFP #",       wMm: 26,  get: r => r.rfqNumber || "" },
@@ -434,32 +449,19 @@ const EXPORT_COLUMNS = {
     { label: "Type",              wMm: 14,                             get: r => r.type || "" },
     { label: "PM",                wMm: 24, wrap: true,                 get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
     { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(r.amount) },
-    { label: "Rollforward",       wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.remainingStart) },
+    { label: "Rollforward",       wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || 0)) },
     ...MONTHS.map((m, i) => ({
       label: m, wMm: 20, wrap: true, halign: "right",
       get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
     })),
-    // YTD Actual = ALL the actuals for the project, summed across EVERY year
-    // (not just the current one) — the rolling-window definition. Merged rows
-    // carry a byYear map; fall back to the row's own months if absent.
+    // Total Billed = Total CV − Rollforward + billed actuals (project months
+    // whose prime invoice is attached), matching the InvoiceTable project-total
+    // row. Merged rows carry a byYear map (per-year values + primeFiles).
     { label: "Total Billed",      wMm: 24, wrap: true, halign: "right",
-      get: r => {
-        const sumYr = (yr) => (yr?.values || []).reduce((a,b) => a+(b||0), 0);
-        const total = r.byYear
-          ? Object.values(r.byYear).reduce((a, yr) => a + sumYr(yr), 0)
-          : (r.values || []).reduce((a,b) => a+(b||0), 0);
-        return fmtMoney(total);
-      } },
-    // Total Remaining = Contract (Total CV) − Total Billed, mirroring the
-    // project-total scope used by the Contract + Total Billed export columns.
+      get: r => fmtMoney(invoiceProjectTotalBilled(r)) },
+    // Total Remaining = Total CV − Total Billed.
     { label: "Total Remaining",   wMm: 24, wrap: true, halign: "right",
-      get: r => {
-        const sumYr = (yr) => (yr?.values || []).reduce((a,b) => a+(b||0), 0);
-        const billed = r.byYear
-          ? Object.values(r.byYear).reduce((a, yr) => a + sumYr(yr), 0)
-          : (r.values || []).reduce((a,b) => a+(b||0), 0);
-        return fmtMoney((r.amount || 0) - billed);
-      } },
+      get: r => fmtMoney(Number(r.amount || 0) - invoiceProjectTotalBilled(r)) },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
@@ -2897,6 +2899,43 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setInvoiceBillingState(r, "between", `${r.name || "Project"} → In-Between · resume any time`, "pause");
   const resumeInvoiceProject = (r) =>
     setInvoiceBillingState(r, "active", `${r.name || "Project"} resumed → Invoices`, "play");
+  // Closed Out → Invoices. A closed-out project keeps its FULL billing history
+  // (close-out only flips billing_state='closed' — months, subs, attachments,
+  // and notes all survive). Reopening un-archives every row in the merged group
+  // (billing_state → 'active') and, when the project came from the pipeline,
+  // flips the upstream projects row back to 'awarded' and re-lists it under
+  // Awarded — mirroring the closed→invoice revive path, minus the modal.
+  // Optimistic with rollback on failure; a peer of resume, so no undo prompt
+  // (reopening is non-destructive — just close it again).
+  const reopenInvoiceProject = async (invRow) => {
+    const ids = invoiceGroupIdsFor(invRow);
+    const proj = invRow.sourceId ? closed.find(p => p.id === invRow.sourceId) : null;
+    const prevInvoice = invoice, prevClosed = closed, prevAwarded = awarded;
+    setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: "active" } : r));
+    if (proj) {
+      const reopenedAwarded = { ...proj, status: "Awarded", dateClosed: "", reason: "", stage: proj.stage || "Multi-Use Contract" };
+      setClosed(rs => rs.filter(r => r.id !== proj.id));
+      setAwarded(rs => [reopenedAwarded, ...rs]);
+    }
+    setTab("invoice");
+    setFlashId(ids[0]);
+    setTimeout(() => setFlashId(null), 1600);
+    try {
+      const { error: invErr } = await supabase
+        .from("anticipated_invoice").update({ billing_state: "active" }).in("id", ids);
+      if (invErr) throw invErr;
+      if (proj) {
+        const { error: upErr } = await supabase.from("projects").update({
+          status: "awarded", date_closed: null, reason_for_closure: null,
+        }).eq("id", proj.id);
+        if (upErr) throw upErr;
+      }
+      showToast(`${invRow.name || "Project"} reopened → Invoices · billing history revived`, "play");
+    } catch (e) {
+      setInvoice(prevInvoice); setClosed(prevClosed); setAwarded(prevAwarded);
+      showToast(`Reopen failed: ${e.message || e}`, "x");
+    }
+  };
 
   // Every invoice row belonging to a project — by lineage (sourceId) or by
   // matching project number — scoped to one invoice type (ENG/PM groups are

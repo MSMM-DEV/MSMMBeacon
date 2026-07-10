@@ -2081,15 +2081,36 @@ export const InvoiceTable = ({
     const subSum = subListFor(r).reduce((a, s) => a + Number(s?.byYear?.[year]?.amounts?.[m] || 0), 0);
     return total - subSum;
   };
-  const projectYtdAll = (r) => yearsOf(r).reduce((a, y) =>
-    a + (yrow(r, y)?.values || []).reduce((x, z) => x + (z || 0), 0), 0);
-  const subYtdAll     = (s) => Object.values(s?.byYear || {}).reduce((a, yr) =>
-    a + (yr.amounts || []).reduce((x, z) => x + (z || 0), 0), 0);
-  // Total Billed (MSMM) — counts a month's MSMM value ONLY when the project's
-  // total/prime cell for that month has an invoice ATTACHED (primeFiles non-
-  // empty); entered-but-not-yet-billed / projected months are excluded. The
-  // Rollforward carry-in (remainingStart) is always added, since it represents
-  // billing that predates the loaded window. (Client direction, 2026-07.)
+  // ---- Total Billed = Contract − Rollforward + Actuals (client direction) ----
+  // Rollforward = "remaining to bill at year start"; Contract − Rollforward is
+  // therefore the billing that predates the loaded window. A NULL rollforward
+  // means the WHOLE contract still remains (nothing billed before), so it falls
+  // back to the line's contract → Total Billed collapses to just the Actuals.
+  // Actuals = months already billed = whose invoice is ATTACHED, summed at each
+  // scope. Total Remaining = Contract − Total Billed  (= Rollforward − Actuals).
+  //
+  // Actuals per scope — only months with an attachment count as billed:
+  const projectBilledAttached = (r) => yearsOf(r).reduce((a, y) => {
+    const yr = yrow(r, y); if (!yr) return a;
+    const files = yr.primeFiles || [];
+    return a + Array.from({ length: 12 }, (_, m) =>
+      (files[m]?.length > 0) ? Number(yr.values?.[m] || 0) : 0
+    ).reduce((x, z) => x + z, 0);
+  }, 0);
+  const subBilledAttached = (s) => Object.values(s?.byYear || {}).reduce((a, yr) => {
+    const files = yr?.files || [];
+    return a + Array.from({ length: 12 }, (_, m) =>
+      (files[m]?.length > 0) ? Number(yr?.amounts?.[m] || 0) : 0
+    ).reduce((x, z) => x + z, 0);
+  }, 0);
+  // Effective Rollforward per scope — the stored "remaining at year start", else
+  // the line's full contract (nothing rolled off yet). Mirrors the value shown
+  // in each level's Rollforward cell.
+  const msmmRollforward    = (r) => (r.remainingStart      != null && r.remainingStart      !== "") ? Number(r.remainingStart)      : msmmContractShown(r);
+  const projectRollforward = (r) => (r.totalRemainingStart != null && r.totalRemainingStart !== "") ? Number(r.totalRemainingStart) : Number(r.amount || 0);
+  const subRollforward     = (s) => (s.remainingStart      != null && s.remainingStart      !== "") ? Number(s.remainingStart)      : Number(s.contractAmount || 0);
+  // MSMM Actuals — a month's MSMM value only when the project's total/prime cell
+  // for that month has an invoice attached (primeFiles non-empty).
   const msmmBilledAttached = (r) => {
     // For an MHZ-prime ENG row the prime invoice attaches on the MHZ sibling (a
     // different anticipated_invoice id — primeFiles are NOT synced across
@@ -2107,7 +2128,10 @@ export const InvoiceTable = ({
       ).reduce((x, z) => x + z, 0);
     }, 0);
   };
-  const msmmTotalBilled = (r) => msmmBilledAttached(r) + (Number(r.remainingStart) || 0);
+  // Total Billed = Contract − Rollforward + Actuals, at each scope.
+  const msmmTotalBilled    = (r) => msmmContractShown(r)      - msmmRollforward(r)    + msmmBilledAttached(r);
+  const projectTotalBilled = (r) => Number(r.amount || 0)     - projectRollforward(r) + projectBilledAttached(r);
+  const subTotalBilled     = (s) => Number(s.contractAmount || 0) - subRollforward(s) + subBilledAttached(s);
   // Resolve the linked sibling of a given perspective. Uses the SAME
   // source-OR-number linkage as linkedInvoiceIdsFor / isMhzPerspectiveSub so
   // classification (hide the ENG row's subs) and injection (add the MHZ prime
@@ -2126,7 +2150,9 @@ export const InvoiceTable = ({
   const invoiceMsmmAsSubYears = (r) => Object.fromEntries(
     yearsOf(r).map(year => [year, {
       amounts: Array.from({ length: 12 }, (_, m) => msmmAtYM(r, year, m)),
-      files: Array.from({ length: 12 }, () => []),
+      // Inherit the project's prime attachments so this synthetic MSMM-as-sub
+      // line's Total Billed counts the same months as MSMM's own actuals.
+      files: yrow(r, year)?.primeFiles || Array.from({ length: 12 }, () => []),
       subInvoiceIds: Array(12).fill(null),
       paid: Array(12).fill(false),
       paidAt: Array(12).fill(null),
@@ -2949,7 +2975,7 @@ export const InvoiceTable = ({
                     })()}
                     <td className={canEditMsmm ? "" : "msmm-locked"}
                         title={!canEditMsmm ? "MSMM value — only an admin can edit it. Change the Total or a sub instead." : undefined}>
-                      <EditableCell value={r.remainingStart} type="number"
+                      <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
                         disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
                         onChange={v => updateRow(r.id, { remainingStart: v })}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
@@ -2996,7 +3022,7 @@ export const InvoiceTable = ({
                       );
                     })}
                     <td className="total-cell inv-pin-ytd"
-                        title="Auto-calculated · MSMM billed — months with an invoice attached — plus the Rollforward carry-in">
+                        title="Auto-calculated · MSMM contract − Rollforward + billed actuals (months with an invoice attached)">
                       {(() => {
                         const v = msmmTotalBilled(r);
                         return v ? fmtMoney(v) : <span className="empty-cell">—</span>;
@@ -3288,19 +3314,19 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* YTD Actual (sub) — every billing on this sub, summed
-                          across all years (all-time). Rollforward was removed. */}
+                      {/* Total Billed (sub) = sub contract − Rollforward + billed
+                          actuals (months with a sub invoice attached). */}
                       <td className="total-cell mono inv-pin-ytd"
-                          title="Auto-calculated · all billings on this sub, every year">
+                          title="Auto-calculated · sub contract − Rollforward + billed actuals (months with an invoice attached)">
                         {(() => {
-                          const ytd = subYtdAll(s);
+                          const ytd = subTotalBilled(s);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
                       <td className="total-cell mono inv-pin-rem"
-                          title="Auto-calculated · sub contract − billed">
+                          title="Auto-calculated · sub contract − Total Billed">
                         {(() => {
-                          const c = Number(s.contractAmount || 0), b = subYtdAll(s);
+                          const c = Number(s.contractAmount || 0), b = subTotalBilled(s);
                           return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
@@ -3490,24 +3516,24 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* Total Billed (project) — every monthly total summed
-                          across all years. For an MHZ-prime ENG row it mirrors
-                          MSMM's own Total Billed (attached months + Rollforward)
-                          so no full-JV figure shows in the ENG view. */}
+                      {/* Total Billed (project) = Total CV − Rollforward + billed
+                          actuals (months with a prime invoice attached). For an
+                          MHZ-prime ENG row it mirrors MSMM's own Total Billed so
+                          no full-JV figure shows in the ENG view. */}
                       <td className="total-cell mono inv-pin-ytd"
                           title={mhzPerspectiveSub
-                            ? "Auto-calculated · MSMM billed (months with an invoice attached) + Rollforward"
-                            : "Auto-calculated · all project totals, every year"}>
+                            ? "Auto-calculated · MSMM contract − Rollforward + billed actuals (months with an invoice attached)"
+                            : "Auto-calculated · Total CV − Rollforward + billed actuals (months with an invoice attached)"}>
                         {(() => {
-                          const ytd = mhzPerspectiveSub ? msmmTotalBilled(r) : projectYtdAll(r);
+                          const ytd = mhzPerspectiveSub ? msmmTotalBilled(r) : projectTotalBilled(r);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
                       <td className="total-cell mono inv-pin-rem"
-                          title="Auto-calculated · contract − billed">
+                          title="Auto-calculated · contract − Total Billed">
                         {(() => {
                           const c = mhzPerspectiveSub ? msmmContractShown(r) : Number(r.amount || 0);
-                          const b = mhzPerspectiveSub ? msmmTotalBilled(r) : projectYtdAll(r);
+                          const b = mhzPerspectiveSub ? msmmTotalBilled(r) : projectTotalBilled(r);
                           return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
@@ -3532,7 +3558,7 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
-                      <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, r => r.remainingStart || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(searchedNonOrange, msmmRollforward))}</td>
                       {windowMonths.map((d, wi) => (
                         <td key={d.abs} className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "") + " total-cell"}>
                           {fmtMoney(sumBy(searchedNonOrange, r => msmmAtDesc(r, d)))}
@@ -3557,7 +3583,7 @@ export const InvoiceTable = ({
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
                       <td className="total-cell">—</td>
-                      <td className="total-cell">{fmtMoney(sumBy(searchedRows, r => r.remainingStart || 0))}</td>
+                      <td className="total-cell">{fmtMoney(sumBy(searchedRows, msmmRollforward))}</td>
                       {windowMonths.map((d, wi) => (
                         <td key={d.abs} className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "") + " total-cell"}>
                           {fmtMoney(sumBy(searchedRows, r => msmmAtDesc(r, d)))}
