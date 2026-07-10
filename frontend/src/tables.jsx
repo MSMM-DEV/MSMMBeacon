@@ -2089,6 +2089,17 @@ export const InvoiceTable = ({
     const subSum = subListFor(row).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
     updateInvoice?.(row, d.year, d.monthIdx, typed + subSum);
   };
+  // MSMM CONTRACT (Total CV − Σ sub contracts) is editable from the same two
+  // places as the months (the ENG Project-total row + the MHZ "MSMM · sub"
+  // line). It's derived, so a typed value writes the SHARED total contract
+  // (amount = MSMM + Σ sub contracts, other subs untouched); updateRow fans
+  // `amount` out to both ENG and MHZ siblings, keeping the two perspectives
+  // equal. `row` may be the ENG or MHZ merged row (subs are shared).
+  const setMsmmContract = (row, v) => {
+    const typed = (v == null || v === "") ? 0 : Number(v);
+    const subSum = subListFor(row).reduce((a, s) => a + Number(s.contractAmount || 0), 0);
+    updateRow(row.id, { amount: typed + subSum });
+  };
   // YTD Actual = ALL the actuals for the project, summed across EVERY year in
   // byYear (the rolling-window definition — not just the current year). Computed
   // / read-only now; the old per-row override + Rollforward column were removed.
@@ -3241,13 +3252,31 @@ export const InvoiceTable = ({
                           </span>
                         )}
                       </td>
-                      {/* Role column — empty on sub-rows */}
+                      {/* Role + Type columns — empty on sub-rows. PM is editable
+                          on the synthetic MSMM · sub line (project-level PMs,
+                          synced to the linked base perspective). */}
                       <td className="subtle"><span className="empty-cell">—</span></td>
                       <td className="subtle"><span className="empty-cell">—</span></td>
-                      <td className="subtle"><span className="empty-cell">—</span></td>
+                      <td className={s.syntheticPerspective ? "" : "subtle"}>
+                        {s.syntheticPerspective ? (
+                          <EditableCell
+                            value={r.pmIds || []}
+                            type="users"
+                            options={pmOptions}
+                            placeholder="Pick PMs…"
+                            onChange={v => updateRow(r.id, { pmIds: v })}
+                            render={v => (v || []).length > 0
+                              ? <UserStack ids={v}/>
+                              : <span className="empty-cell">—</span>}/>
+                        ) : (
+                          <span className="empty-cell">—</span>
+                        )}
+                      </td>
                       <td className="mono">
                         {s.syntheticPerspective ? (
-                          s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>
+                          <EditableCell value={s.contractAmount} type="number"
+                            onChange={v => setMsmmContract(r, v)}
+                            format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={s.contractAmount} type="number"
                             onChange={v => onUpdateSubMeta?.({
@@ -3264,7 +3293,10 @@ export const InvoiceTable = ({
                       <td className="mono"
                           title="Remaining amount to bill for this sub. Defaults to the contract amount; edit if some was billed previously. Clear to reset.">
                         {s.syntheticPerspective ? (
-                          (s.remainingStart != null ? fmtMoney(s.remainingStart) : <span className="empty-cell">—</span>)
+                          <EditableCell value={s.remainingStart != null ? s.remainingStart : null} type="number"
+                            disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
+                            onChange={v => updateRow(r.id, { remainingStart: v })}
+                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
                             onChange={v => onUpdateSubMeta?.({
@@ -3445,12 +3477,27 @@ export const InvoiceTable = ({
                       </td>
                       <td/>
                       <td/>
-                      <td/>
-                      <td className="mono">
+                      {/* PM — editable on the MSMM Project-total row of an hz-prime
+                          base view (project-level PMs, synced to the hz sibling). */}
+                      <td>
+                        {mhzPerspectiveSub && (
+                          <EditableCell
+                            value={r.pmIds || []}
+                            type="users"
+                            options={pmOptions}
+                            placeholder="Pick PMs…"
+                            onChange={v => updateRow(r.id, { pmIds: v })}
+                            render={v => (v || []).length > 0
+                              ? <UserStack ids={v}/>
+                              : <span className="empty-cell">—</span>}/>
+                        )}
+                      </td>
+                      <td className="mono"
+                          title={mhzPerspectiveSub ? "MSMM Portion — editable here; writes the shared total (MSMM + subs) and mirrors to the linked perspective" : undefined}>
                         {mhzPerspectiveSub ? (
-                          <span title={`MSMM Portion — ${hzTypeForBase(r.type || "ENG") || "MHZ"} is the prime, so the full joint-venture total is billed on the ${hzTypeForBase(r.type || "ENG") || "MHZ"} view`}>
-                            {(() => { const v = msmmContractShown(r); return v != null ? fmtMoney(v) : <span className="empty-cell">—</span>; })()}
-                          </span>
+                          <EditableCell value={msmmContractShown(r)} type="number"
+                            onChange={v => setMsmmContract(r, v)}
+                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={r.amount} type="number"
                             onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
@@ -3463,7 +3510,10 @@ export const InvoiceTable = ({
                       <td className="mono"
                           title="Remaining amount to bill for the whole project. Defaults to Total Contract Value; edit if some was billed previously. Clear to reset.">
                         {mhzPerspectiveSub ? (
-                          <span>{r.remainingStart != null ? fmtMoney(r.remainingStart) : <span className="empty-cell">—</span>}</span>
+                          <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
+                            disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
+                            onChange={v => updateRow(r.id, { remainingStart: v })}
+                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"
                             onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
