@@ -1,9 +1,13 @@
 -- MSMM Beacon v2 — MHZ invoice perspectives.
 --
 -- ENG rows remain unchanged. This permits a second auto-created invoice row
--- for the same project/year when the type is MHZ, copies the five requested
--- ENG projects into MHZ, and seeds MHZ as the upstream prime relationship on
+-- for the same project/year when the type is MHZ, copies the requested ENG
+-- projects into MHZ, and seeds MHZ as the upstream prime relationship on
 -- linked project rows so the ENG expanded view can show "MHZ · PRIME".
+--
+-- 2026-07: project 202310 was reclassified as ENG-only (not an MHZ project) and
+-- its MHZ invoice rows were deleted, so it has been dropped from the backfill
+-- lists below. The remaining MHZ projects are 202514 / 202419 / 202414 / 202324.
 
 set search_path = beacon_v2, public, extensions;
 
@@ -45,7 +49,7 @@ begin
     select %1$s, 'MHZ'::beacon_v2.invoice_type_enum
       from beacon_v2.anticipated_invoice src
      where src.type = 'ENG'::beacon_v2.invoice_type_enum
-       and src.project_number in ('202514','202419','202414','202310','202324')
+       and src.project_number in ('202514','202419','202414','202324')
        and not exists (
          select 1
            from beacon_v2.anticipated_invoice existing
@@ -83,7 +87,7 @@ select mhz.id, pms.user_id
   join beacon_v2.anticipated_invoice_pms pms
     on pms.anticipated_invoice_id = eng.id
  where eng.type = 'ENG'::beacon_v2.invoice_type_enum
-   and eng.project_number in ('202514','202419','202414','202310','202324')
+   and eng.project_number in ('202514','202419','202414','202324')
 on conflict do nothing;
 
 --------------------------------------------------------------------------------
@@ -95,12 +99,12 @@ with mhz_company as (
 target_projects as (
   select distinct source_project_id as project_id
     from beacon_v2.anticipated_invoice
-   where project_number in ('202514','202419','202414','202310','202324')
+   where project_number in ('202514','202419','202414','202324')
      and source_project_id is not null
   union
   select id
     from beacon_v2.projects
-   where project_number in ('202514','202419','202414','202310','202324')
+   where project_number in ('202514','202419','202414','202324')
 ),
 eng_amounts as (
   select distinct on (source_project_id)
@@ -109,7 +113,7 @@ eng_amounts as (
          total_remaining_to_bill_year_start
     from beacon_v2.anticipated_invoice
    where type = 'ENG'::beacon_v2.invoice_type_enum
-     and project_number in ('202514','202419','202414','202310','202324')
+     and project_number in ('202514','202419','202414','202324')
      and source_project_id is not null
    order by source_project_id, year desc, updated_at desc nulls last
 )
@@ -130,12 +134,12 @@ with mhz_company as (
 target_projects as (
   select distinct source_project_id as project_id
     from beacon_v2.anticipated_invoice
-   where project_number in ('202514','202419','202414','202310','202324')
+   where project_number in ('202514','202419','202414','202324')
      and source_project_id is not null
   union
   select id
     from beacon_v2.projects
-   where project_number in ('202514','202419','202414','202310','202324')
+   where project_number in ('202514','202419','202414','202324')
 ),
 eng_amounts as (
   select distinct on (source_project_id)
@@ -144,7 +148,7 @@ eng_amounts as (
          total_remaining_to_bill_year_start
     from beacon_v2.anticipated_invoice
    where type = 'ENG'::beacon_v2.invoice_type_enum
-     and project_number in ('202514','202419','202414','202310','202324')
+     and project_number in ('202514','202419','202414','202324')
      and source_project_id is not null
    order by source_project_id, year desc, updated_at desc nulls last
 )
