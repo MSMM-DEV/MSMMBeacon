@@ -149,7 +149,7 @@ const PAGE_META = {
   potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
   awaiting:  { title: "Proposals", desc: "Submitted proposals awaiting a verdict. Add here, then mark as Awarded or Closed Out when the verdict lands." },
   awarded:   { title: "Awarded Projects", desc: "Won contracts. Attach invoice projects by number, track capacity, or move forward when billing starts." },
-  closed:    { title: "Closed Out Projects", desc: "Archived. Losses, descopes, and completed engagements — billing history is kept." },
+  closed:    { title: "Closed Out Projects", desc: "Archived — every sub, month, attachment, and note is preserved, just like In-Between. Reopen a project to move it back to Invoices; proposals closed without billing are listed below." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
   between:   { title: "In-Between", desc: "Paused projects. Every dollar, sub, attachment, and note stays intact — resume to Invoices or close out." },
   projects:  { title: "Projects", desc: "Tree-structured work breakdown — projects, phases, and subphases. Main items are containers; Standard items are where time & expenses get logged. Child contract totals can't exceed the parent." },
@@ -670,7 +670,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
         dbRow.msmm_sep_amount, dbRow.msmm_oct_amount, dbRow.msmm_nov_amount, dbRow.msmm_dec_amount,
       ].map(v => v ?? null),
       type: dbRow.type || "ENG",
-      remainingStart: dbRow.msmm_remaining_to_bill_year_start || 0,
+      remainingStart: dbRow.msmm_remaining_to_bill_year_start ?? null,
       values: Array(12).fill(0),
       year: dbRow.year,
       ytdActualOverride: null,
@@ -1476,7 +1476,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 msmmAmount: invRow.msmm_amount ?? null,
                 msmmValues: Array(12).fill(null),
                 type: invRow.type || "ENG",
-                remainingStart: invRow.msmm_remaining_to_bill_year_start || 0,
+                remainingStart: invRow.msmm_remaining_to_bill_year_start ?? null,
                 values: Array(12).fill(0),
                 year: invRow.year,
                 ytdActualOverride:   invRow.ytd_actual_override   ?? null,
@@ -3103,7 +3103,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           msmmAmount: null,                       // auto-calc by default
           msmmValues: Array(12).fill(null),       // auto-calc per month
           type: invType,
-          remainingStart: rest.msmmRemaining || 0,
+          remainingStart: rest.msmmRemaining ?? null,
           values: Array(12).fill(0),
           year: rest.year,                        // keep shape consistent w/ other paths
           ytdActualOverride: null,
@@ -3169,7 +3169,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         projectNumber: rest.projectNumber, name: rest.name,
         pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
         type: _invoiceType || "ENG",
-        remainingStart: rest.msmm || 0,
+        remainingStart: rest.msmm ?? null,
         values: Array(12).fill(0),
         year: rest.year,
         ytdActualOverride: null,
@@ -3562,7 +3562,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         msmmAmount: null,                       // auto-calc by default
         msmmValues: Array(12).fill(null),       // auto-calc per month
         type: invType,
-        remainingStart: invRem || 0,
+        remainingStart: invRem ?? null,
         values: Array(12).fill(0),
         year: row.year,
         ytdActualOverride: null,
@@ -3944,7 +3944,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         amount: ir.contract_amount ?? uiRow.amount ?? 0,
         msmmAmount: null,
         type: "ENG",
-        remainingStart: ir.msmm_remaining_to_bill_year_start ?? uiRow.msmm ?? 0,
+        remainingStart: ir.msmm_remaining_to_bill_year_start ?? uiRow.msmm ?? null,
         values: Array(12).fill(0),
       };
       setInvoice(rs => [invUiRow, ...rs]);
@@ -4214,10 +4214,29 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           },
         };
       }
-      // (No "Rollforward"-derived override here: the Rollforward column is
-      // the carry-in amount from 2025 (remainingStart) and renders verbatim
-      // via its base accessor — the old derived remaining−billed column was
-      // removed when the UI hid YTD/Rollforward.)
+      if (c.label === "Total Remaining") {
+        // Contract − Total Billed, matching this export's per-row Total Billed
+        // override above. The base def uses invoiceProjectTotalBilled, which
+        // returns 0 for these synthetic (no-byYear) rows — so without this
+        // override every sub/prime/total line would print the full contract.
+        return {
+          ...c,
+          get: (r) => {
+            const contract = r._kind === "project" ? msmmContractShown(r) : Number(r.amount ?? 0);
+            const billed = r._kind === "project"
+              ? (r.ytdActualOverride != null
+                  ? Number(r.ytdActualOverride)
+                  : Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i)).reduce((a, b) => a + b, 0))
+              : (r.values || []).reduce((a, b) => a + (b || 0), 0);
+            return fmtMoney(Number(contract || 0) - billed);
+          },
+        };
+      }
+      if (c.label === "Rollforward") {
+        // Each line's carry-in amount, verbatim (the base def now derives from
+        // totalRemainingStart, which these synthetic breakdown rows don't carry).
+        return { ...c, get: (r) => (r.remainingStart != null ? fmtMoney(r.remainingStart) : "") };
+      }
       return c;
     });
 
@@ -4645,6 +4664,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       // archived (the Closed Out sub-tab lists projects, not invoice rows).
       invoice:   invoiceMerged.filter(r => (r.billingState || "active") === "active"),
       between:   invoiceMerged.filter(r => r.billingState === "between"),
+      // Closed Out (2026-07): closed-out invoice projects keep every dollar,
+      // sub, attachment, and note (close-out only flips billing_state='closed').
+      // Surfaced with the same InvoiceTable as In-Between so nothing is lost.
+      closedInvoice: invoiceMerged.filter(r => r.billingState === "closed"),
       events:    apply("events",    events),
       hotleads:  apply("hotleads",  hotLeads),
       openbids:  apply("openbids",  openBids),
@@ -5094,18 +5117,104 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onRemoveInvoiceLink={removeInvoiceLink}
             onOpenInvoiceProject={openInvoiceProject}/>
         )}
-        {tab === "closed" && (
-          <ClosedTable rows={filtered.closed}
-            updateRow={updateClosed}
-            onOpenDrawer={r => openDrawer(r, "closed")}
-            onAlert={r => setAlertObj({ row: r, tab: "closed" })}
-            flashId={flashId}
-            filters={chipsFor("closed")}
-            tab="closed"
-            yearOptions={availableYears.closed}
-            yearValue={yearFilter.closed}
-            onYearChange={(y) => setYear("closed", y)}/>
-        )}
+        {tab === "closed" && (() => {
+          // Closed Out (2026-07): closed-out projects keep their FULL billing
+          // detail — subs, month cells, expansion, notes, files — exactly like
+          // In-Between (close-out only flips billing_state='closed'; nothing is
+          // deleted). Render them through the same InvoiceTable so a user can
+          // read/verify everything and reopen with one click. Pipeline projects
+          // closed WITHOUT ever being invoiced (proposal losses/descopes) have
+          // no invoice rows to show, so they keep a compact list below — that
+          // way nothing disappears and invoice-closed projects aren't listed
+          // twice (they're excluded from the pipeline list by source id/number).
+          const closedInv = filtered.closedInvoice;
+          const invoicedIds = new Set();
+          const invoicedNums = new Set();
+          for (const r of closedInv) {
+            if (r.sourceId) invoicedIds.add(r.sourceId);
+            const n = normInvoiceNumber(r.projectNumber);
+            if (n) invoicedNums.add(n);
+          }
+          const closedNoBilling = filtered.closed.filter(p =>
+            !invoicedIds.has(p.id) &&
+            !(p.projectNumber && invoicedNums.has(normInvoiceNumber(p.projectNumber))));
+          // Show the InvoiceTable when there ARE closed invoice projects, or
+          // when the whole tab is empty (its empty-state carries the message).
+          // When only never-invoiced closures exist, skip the empty table and
+          // go straight to the pipeline list.
+          const showInvoiceTable = closedInv.length > 0 || closedNoBilling.length === 0;
+          return (
+            <>
+              {showInvoiceTable && (
+                <>
+                  {closedInv.length > 0 && (
+                    <div className="closed-archive-note">
+                      <Icon name="check" size={14}/>
+                      <span>
+                        <strong>Closed out — billing history preserved.</strong> Every
+                        sub, month, attachment, and note is kept. Reopen a project
+                        to move it back to Invoices.
+                      </span>
+                    </div>
+                  )}
+                  <InvoiceTable rows={closedInv}
+                    windowMonths={invWindowMonths}
+                    onWindowBack={() => setInvWindowStart(s => s - 1)}
+                    onWindowFwd={() => setInvWindowStart(s => s + 1)}
+                    onWindowToday={() => setInvWindowStart(defaultWindowStartAbs())}
+                    windowAtDefault={invWindowAtDefault}
+                    cutoverDay={appSettings.invoiceActualCutoverDay}
+                    cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
+                    updateInvoice={editInvoiceTotalMonth}
+                    updateRow={updateInvoice}
+                    onOpenDrawer={r => openDrawer(r, "invoice")}
+                    onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
+                    flashId={flashId}
+                    tab="closed"
+                    orangeSourceIds={orangeSourceIds}
+                    subInvoices={subInvoices}
+                    onUpdateSubAmount={updateSubInvoiceCell}
+                    onTogglePaid={setSubInvoicePaidStatus}
+                    onTogglePrimePaid={editInvoicePrimePaidMonth}
+                    canUntickPaid={isAdmin}
+                    onOpenFiles={openInvoiceFiles}
+                    onAddSub={(projectRow, kind = "sub") => setAddSubModal({ projectRow, kind })}
+                    onUpdateSubMeta={updateSubMeta}
+                    onRemoveSub={removeSub}
+                    onChangeRole={setInvoiceRoleHandler}
+                    onSaveEgnyteFolder={saveInvoiceProjectEgnyteFolder}
+                    onNotesChanged={(id, log) =>
+                      setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
+                    canEditMsmm={isAdmin}
+                    onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
+                    billingMode="closed"
+                    onResume={reopenInvoiceProject}/>
+                </>
+              )}
+              {closedNoBilling.length > 0 && (
+                <div className="closed-pipeline-section">
+                  <div className="closed-pipeline-head">
+                    <Icon name="x" size={13}/>
+                    <span className="closed-pipeline-title">Closed without billing</span>
+                    <span className="closed-pipeline-sub">
+                      Proposals and projects closed out before any invoice was raised — no billing rows to show.
+                    </span>
+                  </div>
+                  <ClosedTable rows={closedNoBilling}
+                    updateRow={updateClosed}
+                    onOpenDrawer={r => openDrawer(r, "closed")}
+                    onAlert={r => setAlertObj({ row: r, tab: "closed" })}
+                    flashId={flashId}
+                    filters={chipsFor("closed")}
+                    tab="closed"
+                    yearOptions={availableYears.closed}
+                    yearValue={yearFilter.closed}
+                    onYearChange={(y) => setYear("closed", y)}/>
+                </div>
+              )}
+            </>
+          );
+        })()}
         {tab === "invoice" && (() => {
           // Build the project lookup once per render — used by the
           // Outstanding Invoices panel to resolve project names + numbers

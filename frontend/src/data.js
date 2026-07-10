@@ -833,7 +833,10 @@ function adaptInvoice(r) {
       r.msmm_sep_amount, r.msmm_oct_amount, r.msmm_nov_amount, r.msmm_dec_amount,
     ].map(v => v ?? null),
     type: r.type || "ENG",
-    remainingStart: r.msmm_remaining_to_bill_year_start || 0,
+    // Keep NULL distinct from a genuine 0 (matches totalRemainingStart / sub
+    // remainingStart below): an unset MSMM rollforward must fall back to the
+    // MSMM contract in the Total Billed formula, not be read as "0 remaining".
+    remainingStart: r.msmm_remaining_to_bill_year_start ?? null,
     // Project-total "Remaining Jan 1" override (NULL = fall back to Total CV).
     totalRemainingStart: r.total_remaining_to_bill_year_start ?? null,
     values: [
