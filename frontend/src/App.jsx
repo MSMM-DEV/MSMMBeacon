@@ -4419,15 +4419,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const date = new Date().toISOString().slice(0, 10);
     const label = (d) => d?.label?.replace(/\s/g, "") || `${d?.year || ""}${MONTHS[d?.monthIdx || 0] || ""}`;
 
-    // Respect the table's current TYPE filter (req 1.7): export the same
-    // filtered / visible rows the user sees. Manish ignores the column sort by
-    // design (it always re-sorts by project number), so only the type scope
-    // carries over — search still narrows the row set via the snapshot.
+    // The modal's Invoice-type selector is the SOLE source of truth for scope:
+    // it exports every ACTIVE project of the chosen type(s) — so you can export
+    // MHZ (all 5 projects) even while the table shows ENG. This intentionally
+    // does NOT honor the table's search box or column sort (Manish always
+    // re-sorts by project number); the export is "print all of this type", not
+    // "print what's on screen". The snapshot is only consulted for a defensive
+    // fallback if a future caller invokes this without an explicit type list.
     const snap = getCurrentTableSnapshot();
-    // The modal's Invoice-type selector is the source of truth for scope: filter
-    // the full active invoice set by the chosen types, so you can export MHZ (all
-    // 5 projects) even while the table is showing ENG. With no explicit types
-    // (older callers) fall back to the visible snapshot rows + its type label.
     const requestedTypes = (options?.types && options.types.length) ? options.types : null;
     const snapRows = (snap && snap.tab === "invoice" && snap.processedRows) ? snap.processedRows : currentRows;
     const baseRows = requestedTypes
