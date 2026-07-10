@@ -78,7 +78,11 @@ export function baseTypeForHz(hzType) {
 }
 
 export function projectNameSuggestsMhz(name) {
-  return /(^|[^a-z0-9])m?hz([^a-z0-9]|$)/i.test(String(name || ""));
+  const s = String(name || "");
+  // "MHZ" anywhere — including when glued to other letters, e.g. "MHZJV" (MHZ
+  // joint venture) — OR "HZ" as a standalone token (e.g. "HZ joint venture").
+  // Does NOT match "Hazard" (no "mhz", no adjacent "hz").
+  return /mhz/i.test(s) || /(^|[^a-z0-9])hz([^a-z0-9]|$)/i.test(s);
 }
 
 export function invoiceTypeTone(type) {

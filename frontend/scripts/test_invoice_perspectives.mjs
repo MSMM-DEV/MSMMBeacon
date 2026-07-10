@@ -42,6 +42,9 @@ assert.equal(isHzPrimeType("PM"), false);
 
 assert.equal(projectNameSuggestsMhz("MSMM / MHZ drainage"), true);
 assert.equal(projectNameSuggestsMhz("HZ joint venture"), true);
+// "MHZ" glued to other letters (real data: MHZ joint venture → "MHZJV").
+assert.equal(projectNameSuggestsMhz("USACE_MVN-SWF-MHZJV-PM_Support_Services"), true);
+assert.equal(projectNameSuggestsMhz("USACE_MVM-MHZJV-PMO"), true);
 assert.equal(projectNameSuggestsMhz("Hazard mitigation"), false);
 assert.equal(projectNameSuggestsMhz("Prime services"), false);
 

@@ -6,11 +6,11 @@
 -- exists (same migration), so this migration only needs to backfill MHZ PM
 -- sibling rows for existing PM projects whose name looks like an HZ/MHZ project.
 --
--- Detection mirrors the client-side projectNameSuggestsMhz() regex
--- (/(^|[^a-z0-9])m?hz([^a-z0-9]|$)/i): "HZ" or "MHZ" as a whole token. Going
--- forward, new/edited PM rows get their MHZ PM sibling created through the
--- in-app prompt (maybeCreateHzInvoiceSibling); this seeds the ones that already
--- exist so they are linked immediately.
+-- Detection mirrors the client-side projectNameSuggestsMhz(): "MHZ" anywhere
+-- (including when glued to other letters, e.g. "MHZJV" — MHZ joint venture) OR
+-- "HZ" as a standalone token. Going forward, new/edited PM rows get their MHZ PM
+-- sibling created through the in-app prompt (maybeCreateHzInvoiceSibling); this
+-- seeds the ones that already exist so they are linked immediately.
 --
 -- Idempotent + re-runnable: each step skips PM rows that already have an MHZ PM
 -- sibling. No project_subs "prime = MHZ" seeding is needed — unlike the original
@@ -44,7 +44,8 @@ begin
     select %1$s, 'MHZ PM'::beacon_v2.invoice_type_enum
       from beacon_v2.anticipated_invoice src
      where src.type = 'PM'::beacon_v2.invoice_type_enum
-       and coalesce(src.project_name, '') ~* '(^|[^a-z0-9])m?hz([^a-z0-9]|$)'
+       and (coalesce(src.project_name, '') ~* 'mhz'
+            or coalesce(src.project_name, '') ~* '(^|[^a-z0-9])hz([^a-z0-9]|$)')
        and not exists (
          select 1
            from beacon_v2.anticipated_invoice existing
@@ -82,7 +83,8 @@ select mhz.id, pms.user_id
   join beacon_v2.anticipated_invoice_pms pms
     on pms.anticipated_invoice_id = pm.id
  where pm.type = 'PM'::beacon_v2.invoice_type_enum
-   and coalesce(pm.project_name, '') ~* '(^|[^a-z0-9])m?hz([^a-z0-9]|$)'
+   and (coalesce(pm.project_name, '') ~* 'mhz'
+        or coalesce(pm.project_name, '') ~* '(^|[^a-z0-9])hz([^a-z0-9]|$)')
 on conflict do nothing;
 
 notify pgrst, 'reload schema';
