@@ -9,8 +9,8 @@ Project-lifecycle dashboard for an engineering firm. Opportunities flow through 
 - **Database** — Supabase Postgres + PostgREST. The **live schema is `beacon_v2`** (`supabase/migrations_v2/`); the legacy `beacon` schema (`supabase/migrations/`) is kept only as a cold backup. The frontend reads/writes exclusively from `beacon_v2`.
 - **Frontend** — Vite + React (ES modules), `@supabase/supabase-js`. Responsive phone → tablet → desktop, installable PWA. Lives in [`frontend/`](./frontend).
 - **Auth** — Supabase Auth (email + password). Two app roles (`Admin`, `User`) on `beacon_v2.users.role`, enforced in-app and via RLS.
-- **Edge Functions** (Deno, on Supabase) — `admin-users`, `send-alert`, `outlook-sync`, `timeclock-punch`, `timeclock-classify`, `timeclock-admin`, `generate-description`, `license-reminders`. See [`supabase/functions/`](./supabase/functions).
-- **Scheduler** — GitHub Actions crons in [`.github/workflows/`](./.github/workflows): `alert-tick` (1 min), `outlook-sync-tick` (15 min), `timekeeping-classify-tick` (5 min), `license-reminders-tick` (daily).
+- **Edge Functions** (Deno, on Supabase) — `admin-users`, `send-alert`, `outlook-sync`, `timeclock-punch`, `timeclock-classify`, `timeclock-admin`, `timeclock-eod-sweep`, `generate-description`, `license-reminders`, `invoice-billing-reminders`. See [`supabase/functions/`](./supabase/functions).
+- **Scheduler** — GitHub Actions crons in [`.github/workflows/`](./.github/workflows): `alert-tick` (1 min), `outlook-sync-tick` (15 min), `timekeeping-classify-tick` (5 min), `timekeeping-eod-sweep-tick` (auto punch-out, every 15 min evenings), `license-reminders-tick` (daily), `invoice-billing-reminders-tick` (daily).
 - **Integrations** — Resend (email), Microsoft Graph (Outlook calendar sync), OpenAI (AI invoice-description generator). All keys are server-side Edge Function secrets, never in the browser.
 - **Office hardware** — a Raspberry Pi NFC reader (7" kiosk or headless OLED) posts punches to `timeclock-punch`. See [`pi/`](./pi).
 
@@ -24,8 +24,8 @@ MSMMBeacon/
 ├── supabase/
 │   ├── migrations_v2/           THE LIVE SCHEMA (beacon_v2). Apply in timestamp order via Studio.
 │   ├── migrations/              legacy v1 schema (beacon) — cold backup, not used by the app
-│   └── functions/               8 Edge Functions (see Stack above)
-├── .github/workflows/           4 cron ticks (alerts / outlook / timekeeping / licenses)
+│   └── functions/               10 Edge Functions (see Stack above)
+├── .github/workflows/           6 cron ticks (alerts / outlook / timekeeping ×2 / licenses / invoice billing)
 ├── scripts/                     Python ingest/seed + maintenance + setup_outlook_rbac.ps1
 ├── pi/                          Raspberry Pi NFC tap reader (kiosk + headless)
 └── frontend/                    the app (see frontend/README.md for the .env quick-start)
@@ -48,17 +48,17 @@ There is **no local Supabase stack** — the app always talks to the cloud proje
 
 Apply each file in `supabase/migrations_v2/` **in timestamp order** by pasting it into **Supabase Studio → SQL Editor → Run** (every migration is idempotent). Then add **`beacon_v2`** to **Settings → API → Exposed schemas** so PostgREST serves it.
 
-Most recent work uses the same pattern — e.g. `20260624120000_leads_openbids_anticipated_amount.sql` adds the "Anticipated Amount" field to Hot Leads + Open Bids. CLAUDE.md documents every migration and the gotcha each one creates.
+Most recent work uses the same pattern — e.g. `20260711120000` / `20260711120100` add the **MHZ PM** invoice type (the MHZ perspective for PM projects, the PM analogue of ENG↔MHZ). CLAUDE.md documents every migration and the gotcha each one creates.
 
 ## Edge Functions & crons
 
-Deploy whichever function you touched (all eight deploy the same way):
+Deploy whichever function you touched (all ten deploy the same way):
 
 ```sh
 supabase functions deploy <name> --project-ref ggqlcsppojypgaiyhods
 ```
 
-Secrets are set with `supabase secrets set KEY=value --project-ref ...` (Resend, Microsoft Graph, OpenAI, `TIMECLOCK_DEVICE_KEY`, `APP_URL`, kill switches, etc. — full list in CLAUDE.md → Hosting topology). The four GitHub Actions ticks each need a repo secret pair (`*_URL` + `*_AUTH`).
+Secrets are set with `supabase secrets set KEY=value --project-ref ...` (Resend, Microsoft Graph, OpenAI, `TIMECLOCK_DEVICE_KEY`, `APP_URL`, kill switches, etc. — full list in CLAUDE.md → Hosting topology). The six GitHub Actions ticks each need a repo secret pair (`*_URL` + `*_AUTH`).
 
 ## Deployment (Vercel)
 
