@@ -2116,13 +2116,13 @@ export const InvoiceTable = ({
     const subSum = subListFor(r).reduce((a, s) => a + Number(s?.byYear?.[year]?.amounts?.[m] || 0), 0);
     return total - subSum;
   };
-  // ---- Total Billed = Contract − Rollforward − Actuals (client direction) ----
+  // ---- Total Billed = Contract − Rollforward + Actuals (client direction) ----
   // Rollforward = "remaining to bill at year start"; Contract − Rollforward is
   // therefore the billing that predates the loaded window. A NULL rollforward
   // means the WHOLE contract still remains (nothing billed before), so it falls
   // back to the line's contract → Total Billed collapses to just the Actuals.
   // Actuals = months already billed = whose invoice is ATTACHED, summed at each
-  // scope. Total Remaining = Contract − Total Billed  (= Rollforward + Actuals).
+  // scope. Total Remaining = Contract − Total Billed  (= Rollforward − Actuals).
   //
   // Actuals per scope — only months with an attachment count as billed, and
   // only from INVOICE_ACTUALS_MIN_YEAR onward (after Dec 31, 2025): pre-2026
@@ -2166,10 +2166,10 @@ export const InvoiceTable = ({
       ).reduce((x, z) => x + z, 0);
     }, 0);
   };
-  // Total Billed = Contract − Rollforward − Actuals, at each scope.
-  const msmmTotalBilled    = (r) => msmmContractShown(r)      - msmmRollforward(r)    - msmmBilledAttached(r);
-  const projectTotalBilled = (r) => Number(r.amount || 0)     - projectRollforward(r) - projectBilledAttached(r);
-  const subTotalBilled     = (s) => Number(s.contractAmount || 0) - subRollforward(s) - subBilledAttached(s);
+  // Total Billed = Contract − Rollforward + Actuals, at each scope.
+  const msmmTotalBilled    = (r) => msmmContractShown(r)      - msmmRollforward(r)    + msmmBilledAttached(r);
+  const projectTotalBilled = (r) => Number(r.amount || 0)     - projectRollforward(r) + projectBilledAttached(r);
+  const subTotalBilled     = (s) => Number(s.contractAmount || 0) - subRollforward(s) + subBilledAttached(s);
   // Resolve the linked sibling of a given perspective. Uses the SAME
   // source-OR-number linkage as linkedInvoiceIdsFor / isMhzPerspectiveSub so
   // classification (hide the ENG row's subs) and injection (add the MHZ prime
@@ -2837,7 +2837,7 @@ export const InvoiceTable = ({
                     </th>
                   ))}
                   <th className="total-cell inv-pin-ytd" style={{ minWidth: 96 }}
-                      title="Total Billed = Contract − Rollforward − billed actuals (only months with an invoice/file attached, 2026 onward)">Total Billed</th>
+                      title="Total Billed = Contract − Rollforward + billed actuals (only months with an invoice/file attached, 2026 onward)">Total Billed</th>
                   <th className="total-cell inv-pin-rem" style={{ minWidth: 96 }}
                       title="Auto-calculated · Contract − Total Billed">Total Remaining</th>
                   <th className="inv-pin-act" aria-label="Actions"></th>
@@ -3079,7 +3079,7 @@ export const InvoiceTable = ({
                       );
                     })}
                     <td className="total-cell inv-pin-ytd"
-                        title="Auto-calculated · MSMM contract − Rollforward − billed actuals (months with an invoice attached, 2026 onward)">
+                        title="Auto-calculated · MSMM contract − Rollforward + billed actuals (months with an invoice attached, 2026 onward)">
                       {(() => {
                         const v = msmmTotalBilled(r);
                         return v ? fmtMoney(v) : <span className="empty-cell">—</span>;
@@ -3413,10 +3413,10 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* Total Billed (sub) = sub contract − Rollforward − billed
+                      {/* Total Billed (sub) = sub contract − Rollforward + billed
                           actuals (months with a sub invoice attached). */}
                       <td className="total-cell mono inv-pin-ytd"
-                          title="Auto-calculated · sub contract − Rollforward − billed actuals (months with an invoice attached, 2026 onward)">
+                          title="Auto-calculated · sub contract − Rollforward + billed actuals (months with an invoice attached, 2026 onward)">
                         {(() => {
                           const ytd = subTotalBilled(s);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
@@ -3681,14 +3681,14 @@ export const InvoiceTable = ({
                         </td>
                         );
                       })}
-                      {/* Total Billed (project) = Total CV − Rollforward − billed
+                      {/* Total Billed (project) = Total CV − Rollforward + billed
                           actuals (months with a prime invoice attached). For an
                           MHZ-prime ENG row it mirrors MSMM's own Total Billed so
                           no full-JV figure shows in the ENG view. */}
                       <td className="total-cell mono inv-pin-ytd"
                           title={mhzPerspectiveSub
-                            ? "Auto-calculated · MSMM contract − Rollforward − billed actuals (months with an invoice attached, 2026 onward)"
-                            : "Auto-calculated · Total CV − Rollforward − billed actuals (months with an invoice attached, 2026 onward)"}>
+                            ? "Auto-calculated · MSMM contract − Rollforward + billed actuals (months with an invoice attached, 2026 onward)"
+                            : "Auto-calculated · Total CV − Rollforward + billed actuals (months with an invoice attached, 2026 onward)"}>
                         {(() => {
                           const ytd = mhzPerspectiveSub ? msmmTotalBilled(r) : projectTotalBilled(r);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
@@ -3730,7 +3730,7 @@ export const InvoiceTable = ({
                         </td>
                       ))}
                       <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}
-                          title="Σ Total Billed (MSMM scope) = Σ(MSMM contract − Rollforward − billed actuals, 2026 onward)">
+                          title="Σ Total Billed (MSMM scope) = Σ(MSMM contract − Rollforward + billed actuals, 2026 onward)">
                         {fmtMoney(sumBy(searchedNonOrange, msmmTotalBilled))}
                       </td>
                       <td className="total-cell inv-pin-rem" style={{ color: "var(--accent-ink)" }}>
@@ -3756,7 +3756,7 @@ export const InvoiceTable = ({
                         </td>
                       ))}
                       <td className="total-cell inv-pin-ytd" style={{ color: "var(--accent-ink)" }}
-                          title="Σ Total Billed (MSMM scope) = Σ(MSMM contract − Rollforward − billed actuals, 2026 onward)">
+                          title="Σ Total Billed (MSMM scope) = Σ(MSMM contract − Rollforward + billed actuals, 2026 onward)">
                         {fmtMoney(sumBy(searchedRows, msmmTotalBilled))}
                       </td>
                       <td className="total-cell inv-pin-rem" style={{ color: "var(--accent-ink)" }}>

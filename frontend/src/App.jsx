@@ -333,7 +333,7 @@ const _approvalLabel = (r) => {
 };
 
 // Project-scope Total Billed for the invoice PDF export — mirrors the
-// InvoiceTable project-total row: Total CV − Rollforward − billed actuals
+// InvoiceTable project-total row: Total CV − Rollforward + billed actuals
 // (project months whose prime invoice is attached, from INVOICE_ACTUALS_MIN_YEAR
 // onward — pre-2026 billing is already captured by Total CV − Rollforward).
 // NULL rollforward ⇒ the full contract still remains, so it falls back to Total CV.
@@ -346,7 +346,7 @@ const invoiceProjectTotalBilled = (r) => {
     return a + (yr?.values || []).reduce((x, v, m) =>
       x + ((files[m]?.length > 0) ? Number(v || 0) : 0), 0);
   }, 0);
-  return Number(r.amount || 0) - rollf - actuals;
+  return Number(r.amount || 0) - rollf + actuals;
 };
 
 const EXPORT_COLUMNS = {
