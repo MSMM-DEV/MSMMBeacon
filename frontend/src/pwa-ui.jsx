@@ -11,33 +11,96 @@
 // <PwaInstallChip/> + <PwaOfflineChip/> in the topbar and <PwaUpdateToast/>
 // at the root.
 
-import React from "react";
+import React, { useState } from "react";
 import { Icon } from "./icons";
 import { usePwa, promptInstall, applyUpdate, dismissUpdate } from "./pwa";
 
+// Browser-specific "how to install" steps for when no native prompt is
+// available (iOS Safari never fires beforeinstallprompt; Chrome/Edge suppress
+// it once the app is already installed or before the engagement heuristic
+// trips). Lets the button always give the user a working path.
+function installSteps() {
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+  const isIOS = /iphone|ipad|ipod/i.test(ua) ||
+    (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1);
+  const isSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua);
+  if (isIOS || isSafari) {
+    return {
+      title: "Install on Safari / iOS",
+      steps: ["Tap the Share button", "Choose “Add to Home Screen”", "Tap “Add”"],
+    };
+  }
+  return {
+    title: "Install Beacon",
+    steps: [
+      "Click the install icon in the address bar",
+      "… or open the browser ⋮ menu → “Install Beacon”",
+      "Confirm to add it as an app",
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------
-// Install chip — visible only when:
-//   • browser fired beforeinstallprompt (Chrome/Edge/Android Chrome)
-//   • app isn't already installed
+// Install chip — shown whenever Beacon is NOT already running as the
+// installed standalone app. If the browser offered a native install prompt
+// (beforeinstallprompt captured), clicking fires it; otherwise clicking opens
+// a short instructions popover so there's always a path to install (iOS
+// Safari, already-installed-elsewhere, or the heuristic hasn't tripped yet).
 // ---------------------------------------------------------------------
 export function PwaInstallChip() {
   const { canInstall, installed } = usePwa();
-  if (installed || !canInstall) return null;
+  const [showHelp, setShowHelp] = useState(false);
+  // Running as the installed standalone app → nothing to install.
+  if (installed) return null;
 
   const onClick = async () => {
-    await promptInstall();
+    if (canInstall) {
+      const res = await promptInstall();
+      if (res?.outcome === "unavailable") setShowHelp(true);
+      return;
+    }
+    setShowHelp(v => !v);
   };
 
+  const help = installSteps();
   return (
-    <button
-      type="button"
-      className="pwa-install-chip"
-      onClick={onClick}
-      title="Install Beacon as an app"
-    >
-      <Icon name="plus" size={12}/>
-      <span className="pwa-install-chip-label">Install</span>
-    </button>
+    <div className="pwa-install-wrap">
+      <button
+        type="button"
+        className="pwa-install-chip"
+        onClick={onClick}
+        aria-expanded={showHelp}
+        title="Install Beacon as an app"
+      >
+        <Icon name="plus" size={12}/>
+        <span className="pwa-install-chip-label">Install</span>
+      </button>
+      {showHelp && (
+        <>
+          <div className="pwa-install-help-scrim" onClick={() => setShowHelp(false)}/>
+          <div className="pwa-install-help" role="dialog" aria-label="How to install Beacon">
+            <div className="pwa-install-help-head">
+              <Icon name="plus" size={13}/>
+              <span>{help.title}</span>
+              <button
+                type="button"
+                className="pwa-install-help-x"
+                onClick={() => setShowHelp(false)}
+                aria-label="Close"
+              >
+                <Icon name="x" size={12}/>
+              </button>
+            </div>
+            <ol className="pwa-install-help-steps">
+              {help.steps.map((s, i) => <li key={i}>{s}</li>)}
+            </ol>
+            <div className="pwa-install-help-note">
+              Already installed? Open Beacon from your apps / home screen.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

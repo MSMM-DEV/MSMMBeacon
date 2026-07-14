@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { signIn, fetchCurrentBeaconUser } from "./data.js";
+import { PwaInstallChip } from "./pwa-ui.jsx";
 
 // ============================================================================
 // LoginPage — entry gate before the Beacon dashboard loads.
@@ -171,6 +172,10 @@ export const LoginPage = ({ onSignedIn }) => {
           <div className="login-hint">
             <Icon name="lock" size={11}/>
             Forgot your password? Ask an administrator to reset it.
+          </div>
+
+          <div className="login-install">
+            <PwaInstallChip/>
           </div>
         </form>
       </main>

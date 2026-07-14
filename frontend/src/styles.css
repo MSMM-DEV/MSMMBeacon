@@ -13644,6 +13644,40 @@ html, body { overflow-x: clip; }
 .pwa-install-chip:active { transform: translateY(1px); }
 .pwa-install-chip-label { line-height: 1; }
 
+/* Install instructions popover (shown when no native prompt is available) */
+.pwa-install-wrap { position: relative; display: inline-flex; }
+.pwa-install-help-scrim { position: fixed; inset: 0; z-index: 40; }
+.pwa-install-help {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 41;
+  width: 268px; max-width: 82vw;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0,0,0,0.20);
+  padding: 12px 14px 13px; font-size: 12.5px;
+  text-align: left;
+}
+.pwa-install-help-head {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-display, inherit);
+  font-weight: 700; font-size: 13px; margin-bottom: 9px;
+  color: var(--accent-ink);
+}
+.pwa-install-help-x {
+  margin-left: auto; appearance: none; background: transparent; border: none;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
+  cursor: pointer; padding: 2px; border-radius: 6px; line-height: 0;
+}
+.pwa-install-help-x:hover { color: var(--text); background: var(--accent-soft); }
+.pwa-install-help-steps {
+  margin: 0; padding-left: 18px; display: grid; gap: 6px; line-height: 1.4;
+}
+.pwa-install-help-note {
+  margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--border);
+  color: color-mix(in srgb, var(--text) 60%, transparent); font-size: 11.5px;
+}
+/* Install affordance on the login card */
+.login-install { display: flex; justify-content: center; margin-top: 2px; }
+
 /* Offline pill — lives in the topbar */
 .pwa-offline-chip {
   display: inline-flex; align-items: center; gap: 6px;
