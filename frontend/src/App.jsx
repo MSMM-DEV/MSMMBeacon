@@ -2334,6 +2334,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       project_number: mergedRow.projectNumber || null,
       type: mergedRow.type || "ENG",
       contract_amount: mergedRow.amount ?? null,
+      // Inherit the group's billing state so minting a new year-row on a paused
+      // (In-Between) project doesn't flip the whole group back to active — which
+      // desynced ENG↔MHZ siblings across sub-tabs and dropped the perspective's
+      // injected MSMM sub. Defaults to active for a normal project.
+      billing_state: mergedRow.billingState || "active",
       year,
     };
     const { data, error } = await supabase

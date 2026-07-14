@@ -3095,7 +3095,7 @@ export async function reloadInvoicePartyFiles() {
 // upload/delete. Returns the same shape loadBeacon assembles for these
 // pieces so App.jsx can replace its slices in one call.
 export async function reloadInvoiceArtifacts(projects, companies) {
-  const [subInvRows, subInvFileRows, primeInvFileRows] = await Promise.all([
+  const [subInvRows, subInvFileRows, primeInvFileRows, rawProjects] = await Promise.all([
     // All years — the Invoice tab is a rolling multi-year window.
     supabase.from("sub_invoices").select("*")
       .then(({ data, error }) => { if (error) return []; return data || []; }),
@@ -3103,8 +3103,17 @@ export async function reloadInvoiceArtifacts(projects, companies) {
       .then(({ data, error }) => { if (error) return []; return data || []; }),
     supabase.from("prime_invoice_files").select("*")
       .then(({ data, error }) => { if (error) return []; return data || []; }),
+    // Fetch project_subs RAW (embedded on projects, with prime_company_id) so the
+    // rebuilt matrix keeps FULL fidelity — kind='prime' markers, amounts,
+    // disciplines, compliance docs, remaining — IDENTICAL to loadBeacon. The
+    // adapted `projects` slices passed in are lossy (adaptClosed drops subs
+    // entirely; adaptAwaiting/adaptAwarded strip kind/amount), which used to
+    // degrade the matrix on every post-edit refresh and make MHZ/MHZ PM subs
+    // vanish until a full page reload. `projects` is no longer read here.
+    supabase.from("projects").select("id, prime_company_id, subs:project_subs(*)")
+      .then(({ data, error }) => { if (error) return []; return data || []; }),
   ]);
-  // Re-build same maps as loadBeacon.
+  // Re-build the SAME maps as loadBeacon.
   const primeFilesByKey = new Map();
   for (const f of primeInvFileRows) {
     const k = `${f.invoice_id}:${f.month}`;
@@ -3117,25 +3126,25 @@ export async function reloadInvoiceArtifacts(projects, companies) {
     arr.push(f); subFilesBySubInvoice.set(f.sub_invoice_id, arr);
   }
   const subAgg = buildSubAggregate(subInvRows, subFilesBySubInvoice);
+  const buildMonthlyArrays = (projectId, kind, companyId) =>
+    subEntryArrays(subAgg, projectId, kind, companyId);
   const subInvoicesMatrix = new Map();
-  for (const p of projects) {
+  for (const p of rawProjects) {
     const subs = dedupeSubsByCompanyKind(
-      (p.subs || []).slice().sort((a,b) => (a.ord||0)-(b.ord||0))
+      (p.subs || []).slice().sort((a, b) => (a.ord || 0) - (b.ord || 0))
     );
-    if (subs.length === 0) continue;
     const entries = subs.map(s => {
-      const cId = s.cId || s.company_id;
+      const company = companies.find(c => c.id === s.company_id);
       const kind = s.kind || "sub";
-      const company = companies.find(c => c.id === cId);
-      const arrays = subEntryArrays(subAgg, p.id, kind, cId);
+      const arrays = buildMonthlyArrays(p.id, kind, s.company_id);
       return {
         kind,
-        companyId: cId,
+        companyId: s.company_id,
         companyName: company?.name || "Unknown company",
-        contractAmount: s.amt || s.amount || 0,
-        remainingStart: s.remaining ?? s.remaining_to_bill_year_start ?? null,
-        discipline: s.desc || s.discipline || "",
-        subAgreement: !!(s.subAgreement ?? s.sub_agreement),
+        contractAmount: s.amount || 0,
+        remainingStart: s.remaining_to_bill_year_start ?? null,
+        discipline: s.discipline || "",
+        subAgreement: !!s.sub_agreement,
         w9: !!s.w9,
         coi: !!s.coi,
         amounts: arrays.amounts,
@@ -3146,7 +3155,32 @@ export async function reloadInvoiceArtifacts(projects, companies) {
         byYear: arrays.byYear,
       };
     });
-    subInvoicesMatrix.set(p.id, entries);
+    // Synthetic prime fallback — MSMM-as-sub on a project with prime billing but
+    // no project_subs(kind='prime') row. Mirrors loadBeacon so a refresh doesn't
+    // drop it either.
+    const hasPrimeEntry = entries.some(e => e.kind === "prime");
+    if (!hasPrimeEntry && p.prime_company_id) {
+      const primeCompany = companies.find(c => c.id === p.prime_company_id);
+      const arrays = buildMonthlyArrays(p.id, "prime", p.prime_company_id);
+      if (arrays.touched) {
+        entries.push({
+          kind: "prime",
+          companyId: p.prime_company_id,
+          companyName: primeCompany?.name || "Unknown prime",
+          contractAmount: 0,
+          remainingStart: null,
+          discipline: "",
+          amounts: arrays.amounts,
+          files: arrays.files,
+          subInvoiceIds: arrays.subInvoiceIds,
+          paid: arrays.paid,
+          paidAt: arrays.paidAt,
+          byYear: arrays.byYear,
+          synthetic: true,
+        });
+      }
+    }
+    if (entries.length > 0) subInvoicesMatrix.set(p.id, entries);
   }
   return { primeFilesByKey, subInvoicesMatrix };
 }
