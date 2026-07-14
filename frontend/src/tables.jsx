@@ -2152,20 +2152,17 @@ export const InvoiceTable = ({
   // MSMM Actuals — a month's MSMM value only when the project's total/prime cell
   // for that month has an invoice attached (primeFiles non-empty).
   const msmmBilledAttached = (r) => {
-    // For an MHZ-prime ENG row the prime invoice attaches on the MHZ sibling (a
-    // different anticipated_invoice id — primeFiles are NOT synced across
-    // siblings), so also treat a month as billed when the linked MHZ row has an
-    // attachment for it. Gate on isMhzPerspectiveSub (ENG-only) so this OR-in
-    // never applies to a PM row that merely shares the project number — a normal
-    // ENG row, the MHZ row itself, and PM rows all keep using their own files.
-    const mhz = isMhzPerspectiveSub(r, rows) ? linkedPerspectiveFor(r, hzTypeForBase(r.type || "ENG")) : null;
+    // MSMM's own prime invoice now lives on THIS (base ENG/PM) row's prime store
+    // — the MSMM total row and the linked MHZ "MSMM · sub" row both attach here
+    // — so a month counts as MSMM-billed exactly when this row has an
+    // attachment. The JV's full prime invoice is separate (on the MHZ row) and
+    // must NOT count toward MSMM's billed.
     return yearsOf(r).reduce((a, y) => {
       if (Number(y) < INVOICE_ACTUALS_MIN_YEAR) return a;
       const yr = yrow(r, y); if (!yr) return a;
-      const files    = yr.primeFiles || [];
-      const mhzFiles = mhz ? (yrow(mhz, y)?.primeFiles || []) : [];
+      const files = yr.primeFiles || [];
       return a + Array.from({ length: 12 }, (_, m) =>
-        ((files[m]?.length > 0) || (mhzFiles[m]?.length > 0)) ? msmmAtYM(r, y, m) : 0
+        (files[m]?.length > 0) ? msmmAtYM(r, y, m) : 0
       ).reduce((x, z) => x + z, 0);
     }, 0);
   };
@@ -2191,11 +2188,13 @@ export const InvoiceTable = ({
   const invoiceMsmmAsSubYears = (r) => Object.fromEntries(
     yearsOf(r).map(year => [year, {
       amounts: Array.from({ length: 12 }, (_, m) => msmmAtYM(r, year, m)),
-      // Inherit the project's prime attachments so this synthetic MSMM-as-sub
-      // line's Total Billed counts the same months as MSMM's own actuals.
+      // MSMM's invoice + paid live on THIS base (ENG/PM) row's prime store, so
+      // the MSMM-as-sub line reads (and, via its clip/toggle, writes) the same
+      // place as the base's MSMM total row — keeping the two perspectives in
+      // lockstep on attachments AND paid status.
       files: yrow(r, year)?.primeFiles || Array.from({ length: 12 }, () => []),
       subInvoiceIds: Array(12).fill(null),
-      paid: Array(12).fill(false),
+      paid: yrow(r, year)?.primePaid || Array(12).fill(false),
       paidAt: Array(12).fill(null),
     }])
   );
@@ -2223,11 +2222,15 @@ export const InvoiceTable = ({
         remainingStart: base.remainingStart ?? null,
         discipline: "MSMM perspective",
         amounts: byYear[THIS_YEAR]?.amounts || Array(12).fill(0),
-        files: Array.from({ length: 12 }, () => []),
+        files: byYear[THIS_YEAR]?.files || Array.from({ length: 12 }, () => []),
         subInvoiceIds: Array(12).fill(null),
-        paid: Array(12).fill(false),
+        paid: byYear[THIS_YEAR]?.paid || Array(12).fill(false),
         paidAt: Array(12).fill(null),
         byYear,
+        // The base (ENG/PM) row this MSMM-as-sub mirrors. Its clip + paid toggle
+        // route to this row's prime store, so acting on the MSMM sub writes the
+        // same place the base's MSMM total row reads/writes — instant two-way sync.
+        perspectiveBaseRow: base,
         syntheticPerspective: true,
       }, ...entries];
     }
@@ -3341,7 +3344,7 @@ export const InvoiceTable = ({
                             format={v => v != null && v !== 0
                               ? fmtMoney(v)
                               : <span style={{ opacity: 0.4 }}>—</span>}/>
-                          {showPaidToggle && !s.syntheticPerspective && (
+                          {showPaidToggle && (
                             <button
                               type="button"
                               className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
@@ -3352,19 +3355,25 @@ export const InvoiceTable = ({
                                 : "Mark as paid"}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onTogglePaid?.({
-                                  projectId: r.sourceId,
-                                  companyId: s.companyId,
-                                  monthIdx: d.monthIdx,
-                                  paid: !isPaid,
-                                  kind: entryKind,
-                                  year: d.year,
-                                });
+                                if (s.syntheticPerspective) {
+                                  // MSMM-as-sub: paid lives on the base ENG/PM prime store,
+                                  // shared with the base's MSMM total row (two-way sync).
+                                  onTogglePrimePaid?.(s.perspectiveBaseRow, d.year, d.monthIdx, !isPaid);
+                                } else {
+                                  onTogglePaid?.({
+                                    projectId: r.sourceId,
+                                    companyId: s.companyId,
+                                    monthIdx: d.monthIdx,
+                                    paid: !isPaid,
+                                    kind: entryKind,
+                                    year: d.year,
+                                  });
+                                }
                               }}>
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
-                          {!s.syntheticPerspective && (() => {
+                          {(() => {
                             // Attachment gating is controlled by the
                             // ATTACH_ONLY_ON_ACTUAL flag (currently OFF, so
                             // uploads are allowed on every month). When ON, a
@@ -3380,13 +3389,21 @@ export const InvoiceTable = ({
                                 ? "Attachments can only be added to actual months"
                                 : hasFiles
                                   ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
-                                  : (isPrimeEntry
-                                      ? `Attach invoice to ${s.companyName}`
-                                      : `Attach invoice from ${s.companyName}`)}
+                                  : (s.syntheticPerspective
+                                      ? "Attach MSMM invoice file"
+                                      : isPrimeEntry
+                                        ? `Attach invoice to ${s.companyName}`
+                                        : `Attach invoice from ${s.companyName}`)}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (attachLocked) return;
-                                onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: d.monthIdx, sub: s, year: d.year });
+                                if (s.syntheticPerspective) {
+                                  // MSMM-as-sub: attach to the base ENG/PM prime store,
+                                  // shared with the base's MSMM total row (two-way sync).
+                                  onOpenFiles?.({ kind: "prime", projectRow: s.perspectiveBaseRow, monthIdx: d.monthIdx, year: d.year });
+                                } else {
+                                  onOpenFiles?.({ kind: "sub", projectRow: r, monthIdx: d.monthIdx, sub: s, year: d.year });
+                                }
                               }}>
                               <Icon name="link" size={11}/>
                               {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
@@ -3540,15 +3557,56 @@ export const InvoiceTable = ({
                           // row shows MSMM's own monthly portion and is EDITABLE:
                           // it writes the shared total (= MSMM + subs) so it stays
                           // in lockstep with the MHZ "MSMM · sub" line, and the
-                          // edit is mirrored to the MHZ perspective. Prime billing
-                          // (attach / paid / invoice #) still lives on the MHZ view.
+                          // edit is mirrored to the MHZ perspective. MSMM's OWN
+                          // prime invoice + paid live on THIS (ENG/PM) row and
+                          // stay in lockstep with the MHZ MSMM-sub row (same
+                          // store); the JV's full prime invoice is separate, on
+                          // the MHZ total.
                           const shown = msmmAtDesc(r, d);
+                          const filesForCell = primeFilesAtDesc(r, d);
+                          const hasFiles = filesForCell.length > 0;
+                          const isPaid   = primePaidAtDesc(r, d);
+                          const showPaidToggle = (shown != null && shown !== 0) || isPaid;
+                          const attachLocked = ATTACH_ONLY_ON_ACTUAL && !isActualInvoiceMonth(d.year, d.monthIdx) && !hasFiles;
                           return (
                           <td key={d.abs}
-                              className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell"}>
+                              className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
+                              data-paid={isPaid ? "true" : undefined}>
                             <EditableCell value={shown || null} type="number"
                               onChange={nv => setMsmmMonth(r, d, nv)}
                               format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}/>
+                            {showPaidToggle && (
+                              <button
+                                type="button"
+                                className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
+                                title={isPaid
+                                  ? (canUntickPaid
+                                      ? "MSMM paid — click to unmark (confirmation required)"
+                                      : "MSMM paid · locked — only an administrator can unmark")
+                                  : "Mark MSMM invoice as paid"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTogglePrimePaid?.(r, d.year, d.monthIdx, !isPaid);
+                                }}>
+                                <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className={"invoice-cell-clip" + (hasFiles ? " has-files" : "") + (attachLocked ? " locked" : "")}
+                              title={attachLocked
+                                ? "Attachments can only be added to actual months"
+                                : hasFiles
+                                  ? `${filesForCell.length} file${filesForCell.length === 1 ? "" : "s"} attached`
+                                  : "Attach MSMM invoice file"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (attachLocked) return;
+                                onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: d.monthIdx, year: d.year });
+                              }}>
+                              <Icon name="link" size={11}/>
+                              {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
+                            </button>
                           </td>
                           );
                         }

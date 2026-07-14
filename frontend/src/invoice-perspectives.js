@@ -27,10 +27,14 @@ const LINKED_INVOICE_SYNC_KEYS = new Set([
   // (MSMM's own portion) and hz (MSMM-as-a-sub) views compute different MSMM
   // numbers from the same shared totals, so a stored override must never cross
   // between siblings.
+  // NOTE: primePaid is intentionally NOT synced either. The base (ENG/PM) row
+  // holds MSMM's OWN paid status; the hz (MHZ/MHZ PM) row holds the JV
+  // full-total's paid status — independent facts. MSMM's paid stays in lockstep
+  // between the base MSMM total row and the hz MSMM-as-sub row because they
+  // read/write the SAME base row's prime store, not via a sibling fan-out.
   "remainingStart",
   "totalRemainingStart",
   "values",
-  "primePaid",
   "invoiceNumbers",
   "year",
   "ytdActualOverride",

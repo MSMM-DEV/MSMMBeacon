@@ -1979,16 +1979,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateInvoicePrimePaid = (id, monthIdx, paid) => {
     const col = INVOICE_PAID_MONTH_COLS[monthIdx];
     if (!col) return;
-    const existing = invoice.find(r => r.id === id);
-    // Always include `id` itself: a freshly-minted year-row isn't in this
-    // render's `invoice` closure yet, so linkedInvoiceIdsForExisting would
-    // return [] and the update would target .in("id", []) — a silent no-op that
-    // lost the edit on refresh. Union with the linked same-year siblings when
-    // the row is already known.
-    const ids = Array.from(new Set([
-      id,
-      ...(existing ? linkedInvoiceIdsForExisting(existing, { sameYear: true }) : []),
-    ]));
+    // MSMM paid is INDEPENDENT of the linked HZ (JV) prime-total's paid — the
+    // two are separate facts (MSMM's own slice vs the full JV bill), so this
+    // writes ONLY the resolved year-row (no perspective fan-out). `id` is
+    // already the minted/found year-row id. MSMM's paid stays in lockstep
+    // across the base MSMM total row and the hz MSMM-as-sub row because both
+    // target the SAME base row's id here, not because of a sibling fan.
+    const ids = [id];
     const apply = () => {
       setInvoice(rows => rows.map(r => {
         if (!ids.includes(r.id)) return r;
