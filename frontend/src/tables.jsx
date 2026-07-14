@@ -2414,6 +2414,12 @@ export const InvoiceTable = ({
   const searchedOrange    = sortGroup(orangeRows.filter(passes));
   const searchedRows      = [...searchedNonOrange, ...searchedOrange];
 
+  // The project-count chip reflects the Type filter (matchesType) — total and
+  // non-Orange counts of the currently-selected type(s), e.g. ENG only, or
+  // ENG + PM. Falls back to all rows when no type subset is selected.
+  const typeCountTotal     = rows.filter(matchesType).length;
+  const typeCountNonOrange = nonOrangeRows.filter(matchesType).length;
+
   // Publish the current display order + filters so the "Print for Mark"
   // exports (handleExport / handleExportInvoiceSubs in App.jsx) render the
   // SAME rows the user sees: sorted by the active column sort, Orange rows
@@ -2608,11 +2614,11 @@ export const InvoiceTable = ({
             </button>
           )}
         </div>
-        <div className="invoice-count-chip" title={`${rows.length} total · ${nonOrangeRows.length} excluding Orange`}>
-          <span className="invoice-count-num mono">{rows.length}</span>
-          <span className="invoice-count-label">{rows.length === 1 ? "project" : "projects"}</span>
+        <div className="invoice-count-chip" title={`${typeCountTotal} total · ${typeCountNonOrange} excluding Orange`}>
+          <span className="invoice-count-num mono">{typeCountTotal}</span>
+          <span className="invoice-count-label">{typeCountTotal === 1 ? "project" : "projects"}</span>
           <span className="invoice-count-sep">·</span>
-          <span className="invoice-count-num mono" style={{ color: "var(--text-soft)" }}>{nonOrangeRows.length}</span>
+          <span className="invoice-count-num mono" style={{ color: "var(--text-soft)" }}>{typeCountNonOrange}</span>
           <span className="invoice-count-label">w/o Orange</span>
         </div>
         <div className="invoice-window-nav" role="group" aria-label="Visible month window">
