@@ -204,13 +204,34 @@ export async function promptInstall() {
   return choice;
 }
 
-// User accepted the "new version available" prompt — reload via the SW.
+// User accepted the "new version available" prompt. Reliably load the newest
+// build regardless of service-worker state:
+//   • If a new worker is WAITING → activate it (skipWaiting); the plugin reloads
+//     on controllerchange, with a hard-reload backstop in case it doesn't.
+//   • If NO worker is waiting → the toast came from the version heartbeat while
+//     the SW couldn't install a new one (e.g. an edge-cached sw.js). Unregister
+//     the SW + clear the caches so the reload fetches a fresh shell from the
+//     network instead of the stale precache. This is why the button used to look
+//     dead: _updateSW(true) is a silent no-op when nothing is waiting.
 export async function applyUpdate() {
-  if (typeof _updateSW === "function") {
-    await _updateSW(true);   // true = reload after activation
-  } else {
-    window.location.reload();
-  }
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      const hasWaiting = regs.some(r => r.waiting);
+      if (hasWaiting && typeof _updateSW === "function") {
+        _updateSW(true);                                    // reloads on controllerchange
+        setTimeout(() => window.location.reload(), 1500);   // backstop if it doesn't
+        return;
+      }
+      // No waiting worker → force a network-fresh load.
+      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+      if (typeof caches !== "undefined" && caches.keys) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+      }
+    }
+  } catch { /* fall through to a plain reload */ }
+  window.location.reload();
 }
 
 // User dismissed the update — keep the SW waiting; the next reload picks it up.
