@@ -2,6 +2,13 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+// A fresh build stamp baked into the client bundle (via `define` below) and
+// emitted to /version.json (via the emit-version-json plugin). The running app
+// compares the two at runtime through a UNIQUE cache-busted fetch — immune to
+// Cloudflare edge-caching the stable-named sw.js — so a new deploy is detected
+// even when reg.update() keeps seeing an unchanged (edge-cached) worker.
+const BUILD_ID = String(Date.now());
+
 // PWA notes ----------------------------------------------------------------
 //
 // `registerType: 'prompt'` — we surface an "Update available" toast in
@@ -21,8 +28,25 @@ import { VitePWA } from "vite-plugin-pwa";
 // route — the cached shell loads, the in-memory app shows offline UX.
 
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   plugins: [
     react(),
+    // Emit a tiny /version.json carrying the same BUILD_ID baked into the
+    // client. NOT precached (globPatterns below excludes json), so a
+    // cache-busted fetch of it always reaches the network and reflects the
+    // live deploy — the heartbeat in src/pwa.js polls it.
+    {
+      name: "emit-version-json",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "version.json",
+          source: JSON.stringify({ buildId: BUILD_ID }),
+        });
+      },
+    },
     VitePWA({
       registerType: "prompt",
       injectRegister: false,          // we register manually in src/pwa.js
@@ -65,7 +89,7 @@ export default defineConfig({
             name:        "Quad Sheet",
             short_name:  "Quad",
             description: "Open the executive dashboard.",
-            url:         "/?tab=quad",
+            url:         "/?tab=invoice",
             icons:       [{ src: "/icon-192.png", sizes: "192x192" }],
           },
         ],

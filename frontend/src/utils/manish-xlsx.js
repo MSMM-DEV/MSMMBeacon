@@ -6,7 +6,7 @@
 // sorted ascending by project number. Layout notes:
 //   • Optional bold, larger, merged TITLE banner on row 1 (the export scope:
 //     period · types · sort) — merged across the full width so it never clips.
-//   • Legend swatches below the title (Green=Paid / Red=Unpaid / Yellow=Submitted).
+//   • Legend swatches below the title (Red=Unpaid / Yellow=Submitted / Green=Paid).
 //   • Everything is LEFT-aligned — text and money alike (the plain currency
 //     format below replaces the accounting format, which would otherwise force
 //     its own $-left / number-right layout and ignore the alignment).
@@ -16,6 +16,7 @@
 //     skipped, so it totals MSMM + every sub amount.
 //   • Per-cell color mirrors the in-app InvoiceTable signal:
 //       paid tick → green · invoice PDF attached → yellow · amount only → red.
+//       Projected (future) months are left uncolored (no red/yellow/green).
 //   • Columns are auto-sized tight (no extra slack) from the widest content.
 //
 // exceljs is loaded via dynamic import() so it only ships when the button is
@@ -36,9 +37,9 @@ const MONTH_FULL = [
   "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
 ];
 const LEGEND = [
-  ["Green = Paid", GREEN],
   ["Red = Unpaid", RED],
   ["Yellow = Submitted", YELLOW],
+  ["Green = Paid", GREEN],
 ];
 const MIN_EXPORT_YEAR = 2020;
 
@@ -210,7 +211,7 @@ export function manishDataWindow(rows = []) {
   return null;
 }
 
-export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [], title = "" } = {}) {
+export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [], title = "", isActualMonth = () => true } = {}) {
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
 
@@ -247,6 +248,8 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
     const months = monthDescs.map((d) => {
       const yr = r.byYear?.[d.year] || {};
       return {
+        // Projected (future) months are left uncolored in the sheet.
+        isActual: !!isActualMonth(d.year, d.monthIdx),
         msmmAmount: msmmAtDesc(r, d),
         invoiceNumber: (yr.invoiceNumbers && yr.invoiceNumbers[d.monthIdx]) || null,
         primePaid: !!(yr.primePaid && yr.primePaid[d.monthIdx]),
@@ -283,7 +286,7 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
   };
 }
 
-export function buildManishYearSheets({ years = [], baseRows = [], subInvoices = new Map(), titleFor = null } = {}) {
+export function buildManishYearSheets({ years = [], baseRows = [], subInvoices = new Map(), titleFor = null, isActualMonth = () => true } = {}) {
   const sheets = (years || []).map(year => ({
     name: String(year),
     ...buildManishExportData({
@@ -291,6 +294,7 @@ export function buildManishYearSheets({ years = [], baseRows = [], subInvoices =
       subInvoices,
       monthDescs: manishMonthDescsBetween(Number(year), 0, Number(year), 11),
       title: titleFor ? titleFor(year) : "",
+      isActualMonth,
     }),
   }));
   return {
@@ -392,19 +396,19 @@ function buildConsolidatedSheet(ws, data, colWidths) {
       dCell.value = {
         formula: `SUM(${colLetter(MSMM_COL)}${rowNum}:${colLetter(lastAmt)}${rowNum})`,
       };
-      style(dCell, { money: true, fill: statusFill(m.primePaid, m.primeHasFile, totalAmount) });
+      style(dCell, { money: true, fill: m.isActual ? statusFill(m.primePaid, m.primeHasFile, totalAmount) : null });
 
       // F — MSMM portion. Colored by the same prime status, gated on its amount.
       const eCell = row.getCell(MSMM_COL);
       eCell.value = (m.msmmAmount != null && m.msmmAmount !== 0) ? Number(m.msmmAmount) : null;
-      style(eCell, { money: true, fill: statusFill(m.primePaid, m.primeHasFile, m.msmmAmount) });
+      style(eCell, { money: true, fill: m.isActual ? statusFill(m.primePaid, m.primeHasFile, m.msmmAmount) : null });
 
       // Sub pairs.
       for (let s = 0; s < maxSubs; s++) {
         const nameCol = FIRST_SUB_COL + s * 2;
         const amtCol = nameCol + 1;
         const sub = m.subs[s] || { amount: null, paid: false, hasFile: false };
-        const fill = statusFill(sub.paid, sub.hasFile, sub.amount);
+        const fill = m.isActual ? statusFill(sub.paid, sub.hasFile, sub.amount) : null;
 
         const nameCell = row.getCell(nameCol);
         nameCell.value = r.subNames[s] || "";

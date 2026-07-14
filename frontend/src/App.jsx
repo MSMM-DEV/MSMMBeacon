@@ -333,7 +333,7 @@ const _approvalLabel = (r) => {
 };
 
 // Project-scope Total Billed for the invoice PDF export — mirrors the
-// InvoiceTable project-total row: Total CV − Rollforward + billed actuals
+// InvoiceTable project-total row: Total CV − Rollforward − billed actuals
 // (project months whose prime invoice is attached, from INVOICE_ACTUALS_MIN_YEAR
 // onward — pre-2026 billing is already captured by Total CV − Rollforward).
 // NULL rollforward ⇒ the full contract still remains, so it falls back to Total CV.
@@ -346,7 +346,7 @@ const invoiceProjectTotalBilled = (r) => {
     return a + (yr?.values || []).reduce((x, v, m) =>
       x + ((files[m]?.length > 0) ? Number(v || 0) : 0), 0);
   }, 0);
-  return Number(r.amount || 0) - rollf + actuals;
+  return Number(r.amount || 0) - rollf - actuals;
 };
 
 const EXPORT_COLUMNS = {
@@ -1945,7 +1945,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
     const existing = invoice.find(r => r.id === id);
-    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
+    // Always include `id` itself: a freshly-minted year-row isn't in this
+    // render's `invoice` closure yet, so linkedInvoiceIdsForExisting would
+    // return [] and the update would target .in("id", []) — a silent no-op that
+    // lost the edit on refresh. Union with the linked same-year siblings when
+    // the row is already known.
+    const ids = Array.from(new Set([
+      id,
+      ...(existing ? linkedInvoiceIdsForExisting(existing, { sameYear: true }) : []),
+    ]));
     setInvoice(rows => rows.map(r => {
       if (!ids.includes(r.id)) return r;
       const vals = [...r.values];
@@ -1972,7 +1980,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const col = INVOICE_PAID_MONTH_COLS[monthIdx];
     if (!col) return;
     const existing = invoice.find(r => r.id === id);
-    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
+    // Always include `id` itself: a freshly-minted year-row isn't in this
+    // render's `invoice` closure yet, so linkedInvoiceIdsForExisting would
+    // return [] and the update would target .in("id", []) — a silent no-op that
+    // lost the edit on refresh. Union with the linked same-year siblings when
+    // the row is already known.
+    const ids = Array.from(new Set([
+      id,
+      ...(existing ? linkedInvoiceIdsForExisting(existing, { sameYear: true }) : []),
+    ]));
     const apply = () => {
       setInvoice(rows => rows.map(r => {
         if (!ids.includes(r.id)) return r;
@@ -2030,7 +2046,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!col) return;
     const clean = (value == null || String(value).trim() === "") ? null : String(value).trim();
     const existing = invoice.find(r => r.id === id);
-    const ids = linkedInvoiceIdsForExisting(existing, { sameYear: true });
+    // Always include `id` itself: a freshly-minted year-row isn't in this
+    // render's `invoice` closure yet, so linkedInvoiceIdsForExisting would
+    // return [] and the update would target .in("id", []) — a silent no-op that
+    // lost the edit on refresh. Union with the linked same-year siblings when
+    // the row is already known.
+    const ids = Array.from(new Set([
+      id,
+      ...(existing ? linkedInvoiceIdsForExisting(existing, { sameYear: true }) : []),
+    ]));
     const prevVal = existing?.invoiceNumbers?.[monthIdx] ?? null;
     if (prevVal === clean) return;
     setInvoice(rows => rows.map(r => {
@@ -2069,6 +2093,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         (key && normInvoiceNumber(r.projectNumber) === key)
       )));
     return matches.length ? matches.map(r => r.id) : [row.id];
+  };
+
+  // Like invoiceGroupIdsFor, but also spans the LINKED perspective sibling's
+  // group (ENG↔MHZ, PM↔MHZ PM). billing_state is a linked-sync field, so a
+  // pause / resume / close-out / reopen on one perspective must carry its
+  // sibling too — otherwise the two desync (e.g. ENG shows In-Between while its
+  // MHZ sibling stays Active). invoiceGroupIdsFor is type-scoped, so on its own
+  // it never reaches the sibling.
+  const invoiceGroupIdsWithSiblings = (row) => {
+    const own = invoiceGroupIdsFor(row);
+    const seeds = linkedInvoiceIdsFor(row, invoice).filter(id => !own.includes(id));
+    const sibGroups = seeds.flatMap(id => {
+      const sib = invoice.find(r => r.id === id);
+      return sib ? invoiceGroupIdsFor(sib) : [id];
+    });
+    return Array.from(new Set([...own, ...sibGroups]));
   };
 
   // UI-field → DB-column whitelist for other editable Invoice cells. Any
@@ -2838,8 +2878,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       } else {
         openDrawer(match, tab);
       }
-      setPendingFocusRowId(null);
     }
+    // ALWAYS clear after ONE resolution pass — never leave it pending. BeaconApp
+    // only mounts after data is loaded (phase === "ready"), so the target row is
+    // already present if it exists; a miss means a stale deep-link id. Leaving
+    // pendingFocusRowId set made this effect re-fire on every invoice-data
+    // refresh (the `invoice` array gets a new identity after each artifact
+    // refresh) and re-assert setTab — yanking the user's sub-tab (e.g.
+    // In-Between → Invoices) with no click. Resolve once, then stop.
+    setPendingFocusRowId(null);
   }, [pendingFocusRowId, tab, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
 
   // Snapshot all pipeline slices so an Undo toast can restore them in one
@@ -2891,7 +2938,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // close-out keeps the rows (state='closed') instead of deleting them.
   // ----------------------------------------------------------------------
   const setInvoiceBillingState = async (row, state, successMsg, successIcon = "check") => {
-    const ids = invoiceGroupIdsFor(row);
+    const ids = invoiceGroupIdsWithSiblings(row);
     const prevState = row.billingState || "active";
     setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: state } : r));
     const { error } = await supabase
@@ -2919,7 +2966,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Optimistic with rollback on failure; a peer of resume, so no undo prompt
   // (reopening is non-destructive — just close it again).
   const reopenInvoiceProject = async (invRow) => {
-    const ids = invoiceGroupIdsFor(invRow);
+    const ids = invoiceGroupIdsWithSiblings(invRow);
     const proj = invRow.sourceId ? closed.find(p => p.id === invRow.sourceId) : null;
     const prevInvoice = invoice, prevClosed = closed, prevAwarded = awarded;
     setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: "active" } : r));
@@ -3071,7 +3118,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         if ((row.invoiceLinks || []).some(x => normInvoiceNumber(x) === normInvoiceNumber(n))) return;
         setAwarded(rs => rs.map(r => r.id === row.id
           ? { ...r, invoiceLinks: [...(r.invoiceLinks || []), n] } : r));
-        addProjectInvoiceLink(row.id, n).catch(() => { /* links table optional */ });
+        addProjectInvoiceLink(row.id, n).catch((e) => {
+          // Persist failed — revert the optimistic chip so it doesn't look
+          // saved when it isn't, and surface the error.
+          setAwarded(rs => rs.map(r => r.id === row.id
+            ? { ...r, invoiceLinks: (r.invoiceLinks || []).filter(x => normInvoiceNumber(x) !== normInvoiceNumber(n)) }
+            : r));
+          showToast(`Couldn't link invoice ${n}: ${e.message || e}`, "x");
+        });
       };
 
       if (existingGroup.length > 0) {
@@ -3286,7 +3340,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
            || awaiting.find(r => r.id === sourceId)
            || closed.find(r => r.id === sourceId))
         : null;
-      const groupIds = invoiceGroupIdsFor(row);
+      const groupIds = invoiceGroupIdsWithSiblings(row);
       const prevBillingState = row.billingState || "active";
       const prevInvoice = invoice;
       const prevPotential = potential;

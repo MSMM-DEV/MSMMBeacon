@@ -22,6 +22,14 @@ import { registerSW } from "virtual:pwa-register";
 // the moment you switch back to a backgrounded window.
 const SW_UPDATE_POLL_MS = 60_000;
 
+// Build stamp baked into this bundle at compile time (see vite.config.js
+// `define` + the emit-version-json plugin). The heartbeat below fetches
+// /version.json with a unique cache-busted URL and compares its buildId to
+// this — a mismatch means a newer build has shipped. This path is immune to
+// Cloudflare edge-caching the stable-named sw.js, so it detects deploys even
+// when reg.update() keeps re-fetching an unchanged (edge-cached) worker.
+const BUILD_ID = (typeof __BUILD_ID__ !== "undefined") ? __BUILD_ID__ : null;
+
 // ----------------------------------------------------------------------
 // Minimal subscribable store
 // ----------------------------------------------------------------------
@@ -60,6 +68,29 @@ function isStandalone() {
 // Wire the lifecycle on first import (main.jsx imports this module)
 // ----------------------------------------------------------------------
 let _updateSW = null;
+let _versionHeartbeat = null;
+
+// Build-version heartbeat. Fetch /version.json through a UNIQUE cache-busted
+// URL (so no HTTP/edge cache can mask it) and, if its buildId differs from the
+// one compiled into this bundle, treat it exactly like an SW update: nudge the
+// worker to update, raise the toast, and — if the app is backgrounded — apply
+// silently. `reg` may be null (the SW never became ready) — the version check
+// still works without it.
+async function checkVersion(reg) {
+  try {
+    const res = await fetch("/version.json?_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const { buildId } = await res.json();
+    if (BUILD_ID && buildId && buildId !== BUILD_ID) {
+      if (reg) reg.update().catch(() => {});
+      state.needRefresh = true;
+      emit();
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        applyUpdate();
+      }
+    }
+  } catch { /* offline / parse error — ignore, the next tick retries */ }
+}
 
 export function initPwa() {
   if (typeof window === "undefined") return;
@@ -132,14 +163,24 @@ export function initPwa() {
         if (navigator.onLine === false) return;  // offline → update() just errors
         reg.update().catch(() => { /* transient; the next tick retries */ });
       };
-      check();                                   // catch a build shipped before this launch
-      setInterval(check, SW_UPDATE_POLL_MS);
+      check(); checkVersion(reg);                // catch a build shipped before this launch
+      setInterval(() => { check(); checkVersion(reg); }, SW_UPDATE_POLL_MS);
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") check();
+        if (document.visibilityState === "visible") { check(); checkVersion(reg); }
       });
-      window.addEventListener("focus",  check);
-      window.addEventListener("online", check);
+      window.addEventListener("focus",  () => { check(); checkVersion(reg); });
+      window.addEventListener("online", () => { check(); checkVersion(reg); });
     }).catch(() => { /* SW never became ready (unsupported / blocked) */ });
+  }
+
+  // 5. Build-version heartbeat, independent of the service worker. If the SW
+  //    never reaches `ready` (unsupported / blocked / stuck), the reg-based
+  //    checks above never run — but a new deploy must still be detectable. Poll
+  //    /version.json directly, exactly once (guarded so a repeat initPwa() call
+  //    can't stack intervals).
+  checkVersion(null);
+  if (!_versionHeartbeat) {
+    _versionHeartbeat = setInterval(() => checkVersion(null), SW_UPDATE_POLL_MS);
   }
 }
 
