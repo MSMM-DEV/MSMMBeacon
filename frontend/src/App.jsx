@@ -4573,7 +4573,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const win = manishMonthDescsBetween(w.startYear, w.startMonth, w.endYear, w.endMonth);
       if (win.length === 0) throw new Error("No dated invoice data for the selected type(s).");
       const periodText = `${win[0].label} – ${win[win.length - 1].label} · all projects`;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText) });
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_all_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
@@ -4583,6 +4583,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const built = buildManishYearSheets({
         years, baseRows, subInvoices,
         titleFor: (y) => titleFor(String(y)),
+        isActualMonth: isActualInvoiceMonth,
       });
       payload = { sheets: built.sheets };
       includedCount = built.includedCount;
@@ -4591,14 +4592,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const win = manishMonthDescsBetween(options.startYear, options.startMonth, options.endYear, options.endMonth);
       if (win.length === 0) throw new Error("End date must be after the start date.");
       const periodText = `${win[0].label} – ${win[win.length - 1].label}`;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText) });
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
     } else {
       const win = invWindowMonths;
       const periodText = `${win[0].label} – ${win[win.length - 1].label} (rolling window)`;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText) });
+      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
