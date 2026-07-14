@@ -2418,6 +2418,7 @@ export const ConfirmDialog = ({
   message,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  hideCancel = false,      // alert mode — show only the confirm button
   tone = "default",        // "default" | "danger"
   icon = "warn",
   onConfirm, onClose,
@@ -2451,7 +2452,9 @@ export const ConfirmDialog = ({
           </div>
         )}
         <div className="modal-foot" style={{ justifyContent: "flex-end", gap: 8 }}>
-          <button className="btn sm" onClick={onClose} disabled={busy}>{cancelLabel}</button>
+          {!hideCancel && (
+            <button className="btn sm" onClick={onClose} disabled={busy}>{cancelLabel}</button>
+          )}
           <button className={"btn sm " + (tone === "danger" ? "danger" : "primary")}
                   onClick={run} disabled={busy}>
             {!busy && tone === "danger" && <Icon name={icon} size={13}/>}

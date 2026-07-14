@@ -2108,6 +2108,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     return Array.from(new Set([...own, ...sibGroups]));
   };
 
+  // Project-number uniqueness. A given project number may belong to only ONE
+  // project — never repeated across two different projects. Returns the OTHER
+  // invoice row that already uses `newNumber` (so the change can be blocked), or
+  // null when the number is free. The current project's OWN rows — all its
+  // year-rows, same source project, and its linked ENG↔MHZ / PM↔MHZ PM
+  // perspective siblings — never count as a clash (they share the number by
+  // design). An empty number is allowed (clearing the field).
+  const invoiceNumberConflict = (existing, newNumber) => {
+    const newNum = normInvoiceNumber(newNumber);
+    if (!newNum) return null;
+    const ownIds = new Set(invoiceGroupIdsWithSiblings(existing));
+    const ownSource = existing?.sourceId || null;
+    return invoice.find(r =>
+      !ownIds.has(r.id) &&
+      !(ownSource && r.sourceId === ownSource) &&
+      normInvoiceNumber(r.projectNumber) === newNum
+    ) || null;
+  };
+
   // UI-field → DB-column whitelist for other editable Invoice cells. Any
   // key not in this map updates local state only. PMs are mirrored below
   // through anticipated_invoice_pms, not patched onto anticipated_invoice.
@@ -2134,6 +2153,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateInvoice = (id, patch) => {
     const existing = invoice.find(r => r.id === id);
     if (!existing) return;
+    // Enforce unique project numbers: a change that would reuse another
+    // project's number is rejected with a popup instead of being saved.
+    if ("projectNumber" in patch) {
+      const clash = invoiceNumberConflict(existing, patch.projectNumber);
+      if (clash) {
+        const clashName = (clash.name || "").trim() || "another project";
+        setConfirmState({
+          title: "Project number already in use",
+          message: `Project number “${String(patch.projectNumber).trim()}” is already assigned to “${clashName}”. Each project number must be unique — it can't be reused. Enter a different number.`,
+          confirmLabel: "OK",
+          hideCancel: true,
+          icon: "warn",
+          onConfirm: () => {},
+        });
+        return;   // reject: no local change, no DB write — the cell reverts
+      }
+    }
     const syncedPatch = linkedInvoicePatch(patch);
     const syncLinked = Object.keys(syncedPatch).length > 0;
     const ids = syncLinked ? linkedInvoiceIdsForExisting(existing, { sameYear: "year" in patch }) : [id];
