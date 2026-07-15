@@ -1637,19 +1637,30 @@ async function _leaveAvailableFor(userId, leaveType) {
 // snapshot, then best-effort emails (a) the requester a confirmation with the
 // before/after balance and (b) every admin a review request. Email failures
 // never block the insert — each send is wrapped independently.
-export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursPerDay, reason }) {
+export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursPerDay, totalHours, reason }) {
   const u = getCurrentBeaconUser();
   if (!u) throw new Error("not signed in");
   const holidays = getAppSettings().tkHolidays;
   const businessDays = leaveBusinessDays(dateStart, dateEnd, holidays);
   const hpd = Number(hoursPerDay) || 0;
-  const totalHours = Math.round(businessDays * hpd * 100) / 100;
+  // total_hours is the authoritative amount deducted from the balance on
+  // approval. Full/Half are per-weekday (× eligible weekdays); Custom passes an
+  // explicit TOTAL for the whole leave (not per day) via `totalHours`.
+  const total = (totalHours != null && totalHours !== "")
+    ? Math.round((Number(totalHours) || 0) * 100) / 100
+    : Math.round(businessDays * hpd * 100) / 100;
+  // Representative per-day figure stored for the "each day" line. For a custom
+  // total it's the average across the eligible weekdays, so business_days ×
+  // hours_per_day still reconciles to total_hours.
+  const perDay = (totalHours != null && totalHours !== "" && businessDays > 0)
+    ? Math.round((total / businessDays) * 100) / 100
+    : hpd;
   const { data, error } = await supabase
     .from("leave_requests")
     .insert({
       user_id: u.id, leave_type: leaveType,
       date_start: dateStart, date_end: dateEnd,
-      hours_per_day: hpd, business_days: businessDays, total_hours: totalHours,
+      hours_per_day: perDay, business_days: businessDays, total_hours: total,
       reason: reason || null, status: "pending",
     })
     .select("*").single();
@@ -1662,7 +1673,7 @@ export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursP
   const range   = _leaveRangeLabel(dateStart, dateEnd);
   const dayWord = businessDays === 1 ? "weekday" : "weekdays";
   const before  = await _leaveAvailableFor(u.id, leaveType);
-  const after   = before == null ? null : Math.round((before - totalHours) * 100) / 100;
+  const after   = before == null ? null : Math.round((before - total) * 100) / 100;
 
   // (a) Confirmation to the requester.
   try {
@@ -1670,7 +1681,7 @@ export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursP
       `Your ${kind} request has been submitted for review.`,
       ``,
       `• Dates: ${range} (${businessDays} ${dayWord})`,
-      `• Each day: ${_hrsTxt(hpd)} · ${_hrsTxt(totalHours)} total`,
+      `• Each day: ${_hrsTxt(perDay)} · ${_hrsTxt(total)} total`,
       before == null ? null : `• Balance: ${_hrsTxt(before)} now → ${_hrsTxt(after)} after approval`,
       reason ? `• Reason: ${reason}` : null,
       ``,
@@ -1684,12 +1695,12 @@ export async function submitLeaveRequest({ leaveType, dateStart, dateEnd, hoursP
     // All admins except the submitter (a self-submitting admin already got the
     // personal confirmation above — no need to also ask them to review it).
     const admins  = getUsers().filter(x => x.role === "Admin" && x.id !== u.id).map(x => x.id);
-    const overTxt = (before != null && totalHours > before) ? " (over balance — would go negative)" : "";
+    const overTxt = (before != null && total > before) ? " (over balance — would go negative)" : "";
     const lines = [
       `${who} submitted a ${kind} request and it's awaiting your review.`,
       ``,
       `• Dates: ${range} (${businessDays} ${dayWord})`,
-      `• Each day: ${_hrsTxt(hpd)} · ${_hrsTxt(totalHours)} total`,
+      `• Each day: ${_hrsTxt(perDay)} · ${_hrsTxt(total)} total`,
       before == null ? null : `• Their balance: ${_hrsTxt(before)} now → ${_hrsTxt(after)} if approved${overTxt}`,
       reason ? `• Reason: ${reason}` : null,
       ``,

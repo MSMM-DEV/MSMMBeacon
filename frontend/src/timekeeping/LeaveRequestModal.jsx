@@ -51,11 +51,18 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
     if (end < s) setEnd(s);
   };
 
-  const hoursPerDay = basis === "half" ? 4 : basis === "custom" ? (Number(customHrs) || 0) : 8;
+  const isCustom    = basis === "custom";
+  // Full/Half are per-WEEKDAY (× eligible weekdays). Custom is the TOTAL number
+  // of hours for the whole leave (not per day) — the user enters how much time
+  // off they want across the selected range.
+  const perDay      = basis === "half" ? 4 : 8;
+  const customTotal = Math.max(0, Number(customHrs) || 0);
 
   const calc = useMemo(() => {
     const days = leaveBusinessDays(start, end, holidays);
-    const requested = Math.round(days * hoursPerDay * 100) / 100;
+    // Custom = the total hours entered (spread across the whole leave);
+    // Full/Half = per-weekday × eligible weekdays.
+    const requested = isCustom ? customTotal : Math.round(days * perDay * 100) / 100;
     const avail = balance
       ? (leaveType === "sick"
           ? computeLeaveAvailable(balance, settings).sickAvailable
@@ -63,9 +70,9 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
       : 0;
     const after = Math.round((avail - requested) * 100) / 100;
     return { days, requested, avail, after, over: requested > avail };
-  }, [start, end, holidays, hoursPerDay, balance, leaveType, settings]);
+  }, [start, end, holidays, isCustom, perDay, customTotal, balance, leaveType, settings]);
 
-  const canSubmit = calc.days > 0 && hoursPerDay > 0 && !busy;
+  const canSubmit = calc.days > 0 && calc.requested > 0 && !busy;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -75,7 +82,10 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
         leaveType,
         dateStart: start,
         dateEnd:   end,
-        hoursPerDay,
+        // Full/Half send a per-day basis; Custom sends an explicit TOTAL for the
+        // whole leave (not per day).
+        hoursPerDay: isCustom ? undefined : perDay,
+        totalHours:  isCustom ? calc.requested : undefined,
         reason:    reason.trim() || null,
       });
       onSubmitted?.();
@@ -136,22 +146,26 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
 
           {/* Basis */}
           <div className="form-row">
-            <label className="form-label">Each day</label>
-            <div className="leave-seg" role="group" aria-label="Hours per day">
-              <button type="button" className={`leave-seg-btn ${basis === "full"   ? "is-active" : ""}`} onClick={() => setBasis("full")}>Full · 8h</button>
-              <button type="button" className={`leave-seg-btn ${basis === "half"   ? "is-active" : ""}`} onClick={() => setBasis("half")}>Half · 4h</button>
+            <label className="form-label">Hours</label>
+            <div className="leave-seg" role="group" aria-label="How many hours">
+              <button type="button" className={`leave-seg-btn ${basis === "full"   ? "is-active" : ""}`} onClick={() => setBasis("full")}>Full · 8h/day</button>
+              <button type="button" className={`leave-seg-btn ${basis === "half"   ? "is-active" : ""}`} onClick={() => setBasis("half")}>Half · 4h/day</button>
               <button type="button" className={`leave-seg-btn ${basis === "custom" ? "is-active" : ""}`} onClick={() => setBasis("custom")}>Custom</button>
             </div>
             {basis === "custom" && (
               <div className="leave-custom-hrs">
-                <input type="number" className="form-input" min="0" max="24" step="0.5"
+                <input type="number" className="form-input" min="0" step="0.5"
                   value={customHrs}
                   onChange={e => setCustomHrs(e.target.value)}
                   onFocus={e => e.target.select()}/>
-                <span className="form-help" style={{ margin: 0 }}>hours per weekday</span>
+                <span className="form-help" style={{ margin: 0 }}>total hours for the whole leave</span>
               </div>
             )}
-            <p className="form-help">Weekends and company holidays don’t count against your balance.</p>
+            <p className="form-help">
+              {isCustom
+                ? "Custom is the total hours you want off across the selected weekdays — not per day."
+                : "Full and Half are per weekday. Weekends and company holidays don’t count against your balance."}
+            </p>
           </div>
 
           {/* Reason */}
