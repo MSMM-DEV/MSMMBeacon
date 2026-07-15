@@ -2224,37 +2224,18 @@ export const InvoiceTable = ({
       paidAt: Array(12).fill(null),
     }])
   );
-  // MHZ earned value (the JV prime's OWN portion) per year: the full JV month
-  // total (this hz row) minus MSMM's month total (the base ENG/PM row). Because
-  // the base month already folds MSMM + subs together, hz.month − base.month
-  // leaves exactly the prime's earned slice. Purely derived + read-only — it
-  // recomputes when the Total, MSMM, or any sub changes; for a linked pair whose
-  // two totals are still equal it is 0.
-  const invoiceMhzEarnedYears = (r, base) => Object.fromEntries(
-    yearsOf(r).map(year => [year, {
-      amounts: Array.from({ length: 12 }, (_, m) =>
-        Number(yrow(r, year)?.values?.[m] || 0) - Number(yrow(base, year)?.values?.[m] || 0)),
-      files: Array.from({ length: 12 }, () => []),
-      subInvoiceIds: Array(12).fill(null),
-      paid: Array(12).fill(false),
-      paidAt: Array(12).fill(null),
-    }])
-  );
   const withPerspectiveRows = (r, entries) => {
     const type = r.type || "ENG";
-    // The base (MSMM) view of an hz-prime project (ENG for MHZ, PM for MHZ PM)
-    // no longer injects a synthetic "hz · PRIME" line — per client direction the
-    // base perspective hides the hz prime entirely, and its totals must not
-    // reflect the full-JV value (the Project total row is rendered as MSMM's own
-    // portion below). A normal base row has no hz sibling, so nothing was ever
-    // injected for it anyway.
+    // The base (ENG/PM) view of an hz-prime project hides the hz prime entirely;
+    // its header row already shows MSMM's own earned value (Total − subs). A
+    // normal base row has no hz sibling, so nothing is injected for it.
     //
-    // The hz view (MHZ / MHZ PM) injects, in order:
-    //   1) the MHZ earned-value line  (derived: Total − subs − MSMM, read-only),
-    //   2) the real subs A/B/C        (entries),
-    //   3) MSMM as a sub              (= the linked base ENG/PM row's value).
-    // The Project total row below reconciles to the full JV total, so
-    // earned + subs + MSMM sum exactly to it.
+    // The hz view (MHZ / MHZ PM) shows the real subs A/B/C followed by MSMM as a
+    // sub (read from the linked base ENG/PM row). There is NO separate "earned
+    // value" row — the hz HEADER row itself is the MHZ earned value (Total −
+    // subs). Editing MSMM writes the base row (that IS "sync to ENG/PM") and,
+    // since the two perspectives' totals are no longer synced, it leaves this hz
+    // row's own total (the header earned value) untouched.
     if (isHzPrimeType(type)) {
       const base = linkedPerspectiveFor(r, baseTypeForHz(type));
       if (!base) return entries;
@@ -2277,29 +2258,13 @@ export const InvoiceTable = ({
         byYear: msmmByYear,
         // The base (ENG/PM) row this MSMM-as-sub mirrors. Editing it (contract /
         // months) writes the base row DIRECTLY — that IS "sync to the ENG/PM
-        // perspective", and it leaves this hz row's Total untouched (so the
-        // earned-value line above absorbs the change). Its clip + paid toggle
-        // route to the base row's prime store too — instant two-way sync.
+        // perspective", and it leaves this hz row's total (the header earned
+        // value) untouched. Its clip + paid toggle route to the base row's prime
+        // store too — instant two-way sync.
         perspectiveBaseRow: base,
         syntheticPerspective: true,
       };
-      const earnedByYear = invoiceMhzEarnedYears(r, base);
-      const earnedRow = {
-        kind: "sub",
-        companyId: "__mhz_earned__",
-        companyName: "MHZ",
-        contractAmount: Number(r.amount || 0) - Number(base.amount || 0),
-        remainingStart: null,
-        discipline: "Earned value (Total − subs)",
-        amounts: earnedByYear[THIS_YEAR]?.amounts || Array(12).fill(0),
-        files: Array.from({ length: 12 }, () => []),
-        subInvoiceIds: Array(12).fill(null),
-        paid: Array(12).fill(false),
-        paidAt: Array(12).fill(null),
-        byYear: earnedByYear,
-        syntheticMhzPrime: true,
-      };
-      return [earnedRow, ...entries, msmmSub];
+      return [...entries, msmmSub];
     }
     return entries;
   };
@@ -3088,18 +3053,18 @@ export const InvoiceTable = ({
                           : <span className="empty-cell">—</span>}
                       />
                     </td>
-                    {/* Parent row's Contract cell.
-                        • hz view (MHZ / MHZ PM): the FULL JV contract, EDITABLE —
-                          the expanded "MHZ earned value" line (Total − subs)
-                          recomputes from it, and editing it never touches the
-                          MSMM sub or the linked ENG/PM perspective.
-                        • base view (ENG / PM): the MSMM Portion — purely derived
-                          (Total CV − Σ sub.contractAmount), read-only. */}
+                    {/* Parent (white) row's Contract cell IS the earned value —
+                        auto-calculated as Total − subs:
+                        • ENG / PM: MSMM's earned value, read-only.
+                        • MHZ / MHZ PM: MHZ's earned value, EDITABLE (typing sets
+                          the MHZ total; subs untouched; never touches the MSMM
+                          sub or the linked ENG/PM perspective). There is no
+                          separate earned-value row — this row is it. */}
                     {isMhzRow ? (
                       <td className="mono"
-                          title="Full JV contract value — click to edit. The expanded “MHZ earned value” line (Total − subs) recomputes from it.">
-                        <EditableCell value={r.amount} type="number"
-                          onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
+                          title="MHZ earned value (Total − subs) — click to edit; it sets the MHZ total.">
+                        <EditableCell value={msmmContractShown(r)} type="number"
+                          onChange={v => setMsmmContract(r, v)}
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
                     ) : (() => {
@@ -3113,23 +3078,13 @@ export const InvoiceTable = ({
                         </td>
                       );
                     })()}
-                    {isMhzRow ? (
-                      <td className="mono"
-                          title="Rollforward — remaining to bill on the full JV at year start. Edit it on the Project total row in the expand.">
-                        {(() => {
-                          const v = r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null);
-                          return v != null ? fmtMoney(v) : <span className="empty-cell">—</span>;
-                        })()}
-                      </td>
-                    ) : (
-                      <td className={canEditMsmm ? "" : "msmm-locked"}
-                          title={!canEditMsmm ? "MSMM value — only an admin can edit it. Change the Total or a sub instead." : undefined}>
-                        <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
-                          disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                          onChange={v => updateRow(r.id, { remainingStart: v })}
-                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                      </td>
-                    )}
+                    <td className={canEditMsmm ? "" : "msmm-locked"}
+                        title={!canEditMsmm ? "MSMM value — only an admin can edit it. Change the Total or a sub instead." : undefined}>
+                      <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
+                        disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
+                        onChange={v => updateRow(r.id, { remainingStart: v })}
+                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                    </td>
                     {/* Parent-row month cells show MSMM monthly values —
                         auto-calc = total[i] − Σ sub.amounts[i]; override
                         via msmm_{jan..dec}_amount. Prime invoice file
@@ -3137,13 +3092,11 @@ export const InvoiceTable = ({
                         expand block (= the project's prime billing PDFs,
                         not the MSMM-portion view). */}
                     {windowMonths.map((d, wi) => {
-                      // Parent-row month value, read-only:
-                      //   • hz view (MHZ / MHZ PM): the FULL JV month total (the
-                      //     header summarizes the JV; edit months on the Project
-                      //     total row in the expand).
-                      //   • base view (ENG / PM): the MSMM month portion, purely
-                      //     derived (month total − Σ sub month).
-                      const shown      = isMhzRow ? valAtDesc(r, d) : msmmAtDesc(r, d);
+                      // Parent (white) row month value = the earned value for that
+                      // month (auto-calculated, month total − Σ sub month) — MSMM's
+                      // for ENG/PM, MHZ's for MHZ/MHZ PM. Read-only; edit the
+                      // monthly totals on the Project total row in the expand.
+                      const shown      = msmmAtDesc(r, d);
                       // Read-only mirror of the Project total row's status for
                       // this month (paid top-left, attachment top-right) so the
                       // prominent top row reads at a glance.
@@ -3152,9 +3105,7 @@ export const InvoiceTable = ({
                       return (
                       <td key={d.abs}
                           className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell msmm-locked"}
-                          title={isMhzRow
-                            ? "Full JV monthly total — edit it on the Project total row in the expand."
-                            : "MSMM monthly value is auto-calculated (Total − Σ subs). Edit the Total or a sub to change it."}>
+                          title="Earned value for this month — auto-calculated (month total − Σ subs). Edit the monthly total on the Project total row.">
                         <EditableCell value={shown} type="number"
                           disabled onBlocked={onBlockedMsmmEdit}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
