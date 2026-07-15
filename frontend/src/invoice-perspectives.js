@@ -21,7 +21,16 @@ const LINKED_INVOICE_SYNC_KEYS = new Set([
   "projectNumber",
   "name",
   "pmIds",
-  "amount",
+  // NOTE: `amount` (contract) and `values` (12 monthly totals) are intentionally
+  // NOT synced. The two perspectives hold DIFFERENT totals: the hz row (MHZ /
+  // MHZ PM) carries the FULL JV contract, while the base row (ENG / PM) carries
+  // MSMM's OWN portion. The hz "MHZ earned value" line is derived as
+  // hz.total − base.total (Total − subs − MSMM), so forcing the two equal would
+  // pin that earned value to 0 and make an edit to one total silently move the
+  // other perspective's MSMM figure — the exact coupling this un-sync removes.
+  // MSMM edits from the hz view write the base row directly (its own id), which
+  // IS "sync to the ENG/PM sibling", so no fan-out is needed for that either.
+  //
   // NOTE: msmmAmount / msmmValues are intentionally NOT synced. MSMM is a
   // purely derived value (Total − subs) computed per perspective — the base
   // (MSMM's own portion) and hz (MSMM-as-a-sub) views compute different MSMM
@@ -34,7 +43,6 @@ const LINKED_INVOICE_SYNC_KEYS = new Set([
   // read/write the SAME base row's prime store, not via a sibling fan-out.
   "remainingStart",
   "totalRemainingStart",
-  "values",
   "invoiceNumbers",
   "year",
   "ytdActualOverride",

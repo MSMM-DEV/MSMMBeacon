@@ -93,8 +93,10 @@ const countRefs = (id) => {
 const TAB_META = [
   { key: "hotleads",  label: "Hot Leads",     stage: "stage-events"    },
   { key: "openbids",  label: "Open Bids",     stage: "stage-openbids"  },
+  { key: "leads-deleted", label: "Deleted",   stage: "stage-openbids"  },
   { key: "awaiting",  label: "Proposals",     stage: "stage-awaiting"  },
   { key: "awarded",   label: "Awarded",       stage: "stage-awarded"   },
+  { key: "proposals-deleted", label: "Deleted", stage: "stage-awarded" },
   { key: "potential", label: "Potential",     stage: "stage-potential" },
   { key: "invoice",   label: "Invoices",      stage: "stage-invoice"   },
   { key: "between",   label: "In-Between",    stage: "stage-invoice"   },
@@ -116,8 +118,8 @@ const NAV_GROUPS = [
   // Leads & Bids → Proposals → Awarded → Invoice ⇄ In-Between → Closed Out.
   // The "potential" TAB KEY stays valid (deep links + Directory project
   // jumps still render the hidden page); it's just not navigable from here.
-  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids"] },
-  { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded"] },
+  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids", "leads-deleted"] },
+  { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded", "proposals-deleted"] },
   { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "pipeline", tabs: ["invoice", "between", "closed"] },
   { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "side", tabs: ["projects"] },
   { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "side", tabs: ["events"] },
@@ -134,10 +136,12 @@ const SUB_TABS = {
   leads: [
     { key: "hotleads", label: "Hot Leads", icon: "trend" },
     { key: "openbids", label: "Open Bids", icon: "flag"  },
+    { key: "leads-deleted", label: "Deleted", icon: "trash" },
   ],
   proposals: [
     { key: "awaiting", label: "Proposals", icon: "clock" },
     { key: "awarded",  label: "Awarded",   icon: "check" },
+    { key: "proposals-deleted", label: "Deleted", icon: "trash" },
   ],
   invoice: [
     { key: "invoice", label: "Invoices",   icon: "trend" },
@@ -157,6 +161,8 @@ const PAGE_META = {
   projects:  { title: "Projects", desc: "Tree-structured work breakdown — projects, phases, and subphases. Main items are containers; Standard items are where time & expenses get logged. Child contract totals can't exceed the parent." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
+  "leads-deleted": { title: "Deleted — Leads & Bids", desc: "Deleted Hot Leads and Open Bids. Nothing is lost — every field is preserved. Restore any row to send it back to its tab." },
+  "proposals-deleted": { title: "Deleted — Proposals & Awarded", desc: "Deleted Proposals and Awarded projects. Nothing is lost — every field is preserved. Restore any row to send it back to its tab." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   licenses:  { title: "Licenses & Certifications", desc: "Every company and individual license with its expiration. Color-coded by days until due; reminder emails go out at 60 / 30 / 14 / 7 / 1 days before expiry." },
   timesheet: {
@@ -1180,6 +1186,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [events,    setEvents]    = useState(initial.events);
   const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
   const [openBids,  setOpenBids]  = useState(initial.openBids || []);
+  // Soft-deleted rows, per page's "Deleted" sub-tab. Populated by loadBeacon;
+  // a delete moves a row from its live slice into here (and back on restore).
+  const [deletedLeads,    setDeletedLeads]    = useState(initial.deletedLeads    || []);
+  const [deletedOpenBids, setDeletedOpenBids] = useState(initial.deletedOpenBids || []);
+  const [deletedAwaiting, setDeletedAwaiting] = useState(initial.deletedAwaiting || []);
+  const [deletedAwarded,  setDeletedAwarded]  = useState(initial.deletedAwarded  || []);
   // Projects (tree-structured work breakdown — beacon_v2.project_items). One
   // flat array; ProjectsTable builds the parent/child tree from parentId.
   const [projectItems, setProjectItems] = useState(initial.projectItems || []);
@@ -1887,6 +1899,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setAwarded(d.awarded);     setClosed(d.closed);
     setInvoice(d.invoices);    setHotLeads(d.hotLeads || []);
     setOpenBids(d.openBids || []);
+    setDeletedLeads(d.deletedLeads || []);       setDeletedOpenBids(d.deletedOpenBids || []);
+    setDeletedAwaiting(d.deletedAwaiting || []); setDeletedAwarded(d.deletedAwarded || []);
     setSubInvoices(d.subInvoices || new Map());
     setClients(getClientsOnly());
     setCompanies(getCompaniesOnly());
@@ -1944,16 +1958,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   };
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
-    const existing = invoice.find(r => r.id === id);
-    // Always include `id` itself: a freshly-minted year-row isn't in this
-    // render's `invoice` closure yet, so linkedInvoiceIdsForExisting would
-    // return [] and the update would target .in("id", []) — a silent no-op that
-    // lost the edit on refresh. Union with the linked same-year siblings when
-    // the row is already known.
-    const ids = Array.from(new Set([
-      id,
-      ...(existing ? linkedInvoiceIdsForExisting(existing, { sameYear: true }) : []),
-    ]));
+    // Monthly totals are PER-PERSPECTIVE: the hz row (MHZ / MHZ PM) holds the
+    // full JV month total, the base row (ENG / PM) holds MSMM's own month total,
+    // and the hz "MHZ earned value" line = hz.month − base.month. So a month
+    // edit writes ONLY this row's year (no cross-perspective fan-out) — editing
+    // the MHZ total must NOT move the ENG/MSMM figure, and an MSMM edit routes
+    // to the base row's own id directly. (See LINKED_INVOICE_SYNC_KEYS.)
+    const ids = [id];
     setInvoice(rows => rows.map(r => {
       if (!ids.includes(r.id)) return r;
       const vals = [...r.values];
@@ -2494,6 +2505,100 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
     showToast("Hot lead deleted", "check");
   };
+
+  // ---- Soft delete + restore -------------------------------------------------
+  // Leads & Bids (Hot Leads · Open Bids) and Proposals & Awarded (Proposals ·
+  // Awarded) don't hard-delete: a delete stamps `deleted_at` and moves the row
+  // into that page's "Deleted" sub-tab with EVERY field preserved; Restore
+  // clears the stamp and moves it back. Both are gated behind a ConfirmDialog.
+  // The DB column + graceful degrade are in 20260715120000_soft_delete...
+  //
+  // The config is rebuilt each render so `rows` (used to find the row being
+  // acted on) is always current; the setters are stable and use functional
+  // updates, so the optimistic move is race-safe.
+  const softDeleteConfig = () => ({
+    leads:    { table: "leads",     rows: hotLeads, setLive: setHotLeads, setDel: setDeletedLeads,    alertSubject: "lead",    noun: "Hot lead",        nameOf: r => r.title || "this lead" },
+    openbids: { table: "open_bids", rows: openBids, setLive: setOpenBids, setDel: setDeletedOpenBids, alertSubject: null,      noun: "Open bid",        nameOf: r => r.rfqNumber || "this bid" },
+    awaiting: { table: "projects",  rows: awaiting, setLive: setAwaiting, setDel: setDeletedAwaiting, alertSubject: "project", noun: "Proposal",        nameOf: r => r.name || r.projectNumber || "this proposal" },
+    awarded:  { table: "projects",  rows: awarded,  setLive: setAwarded,  setDel: setDeletedAwarded,  alertSubject: "project", noun: "Awarded project", nameOf: r => r.name || r.projectNumber || "this project" },
+  });
+  const deletedSliceFor = (type) => ({
+    leads: deletedLeads, openbids: deletedOpenBids, awaiting: deletedAwaiting, awarded: deletedAwarded,
+  }[type] || []);
+
+  const softDeleteRow = async (type, id) => {
+    const cfg = softDeleteConfig()[type];
+    if (!cfg) return;
+    const row = cfg.rows.find(r => r.id === id);
+    if (!row) return;
+    const stamped = { ...row, deletedAt: new Date().toISOString() };
+    cfg.setLive(rows => rows.filter(r => r.id !== id));
+    cfg.setDel(rows => [stamped, ...rows.filter(r => r.id !== id)]);
+    const { error } = await supabase.from(cfg.table)
+      .update({ deleted_at: stamped.deletedAt }).eq("id", id);
+    if (error) {
+      cfg.setDel(rows => rows.filter(r => r.id !== id));
+      cfg.setLive(rows => [row, ...rows.filter(r => r.id !== id)]);
+      showToast(`Delete failed: ${error.message}`, "x");
+      return;
+    }
+    // Stop the deleted row's future alert fires (the hard-delete trigger did
+    // this; a soft delete is an UPDATE so it doesn't run). Best-effort.
+    if (cfg.alertSubject) {
+      supabase.from("alerts").update({ is_active: false })
+        .eq("subject_table", cfg.alertSubject).eq("subject_row_id", id)
+        .then(() => {});
+    }
+    showToast(`${cfg.noun} moved to Deleted`, "trash");
+  };
+
+  const restoreRow = async (type, id) => {
+    const cfg = softDeleteConfig()[type];
+    if (!cfg) return;
+    const row = deletedSliceFor(type).find(r => r.id === id);
+    if (!row) return;
+    const revived = { ...row, deletedAt: null };
+    cfg.setDel(rows => rows.filter(r => r.id !== id));
+    cfg.setLive(rows => [revived, ...rows.filter(r => r.id !== id)]);
+    const { error } = await supabase.from(cfg.table)
+      .update({ deleted_at: null }).eq("id", id);
+    if (error) {
+      cfg.setLive(rows => rows.filter(r => r.id !== id));
+      cfg.setDel(rows => [row, ...rows.filter(r => r.id !== id)]);
+      showToast(`Restore failed: ${error.message}`, "x");
+      return;
+    }
+    showToast(`${cfg.noun} restored`, "check");
+  };
+
+  const requestSoftDelete = (type, row) => {
+    const cfg = softDeleteConfig()[type];
+    if (!cfg || !row) return;
+    setConfirmState({
+      title: `Delete this ${cfg.noun.toLowerCase()}?`,
+      message: `“${cfg.nameOf(row)}” will move to the Deleted tab. Nothing is lost — you can restore it any time.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+      icon: "trash",
+      onConfirm: () => softDeleteRow(type, row.id),
+    });
+  };
+  const requestRestore = (type, row) => {
+    const cfg = softDeleteConfig()[type];
+    if (!cfg || !row) return;
+    setConfirmState({
+      title: `Restore this ${cfg.noun.toLowerCase()}?`,
+      message: `“${cfg.nameOf(row)}” will move back to its tab with all its information.`,
+      confirmLabel: "Restore",
+      icon: "undo",
+      onConfirm: () => restoreRow(type, row.id),
+    });
+  };
+  // Deleted-tab rows are a read-only archive: all fields stay visible, but
+  // editing is blocked (the live `update*` handlers only find rows in the live
+  // slices, so an edit here would silently vanish). Restore first, then edit.
+  const deletedRowReadOnly = () =>
+    showToast("This item is in Deleted — restore it before editing.", "lock");
 
   // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
   // The invoice rows + sub matrix get re-fetched together so primeFiles/files
@@ -4775,13 +4880,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       events:    apply("events",    events),
       hotleads:  apply("hotleads",  hotLeads),
       openbids:  apply("openbids",  openBids),
+      // Per-page Deleted tabs (both record types stacked). Live-slice filters
+      // don't apply — these are archives, rendered as their own tables below.
+      "leads-deleted":     [...deletedLeads, ...deletedOpenBids],
+      "proposals-deleted": [...deletedAwaiting, ...deletedAwarded],
       directory: apply("directory", [...clients, ...companies]),
       // Projects is a tree — ProjectsTable does its own ancestor-aware
       // filtering, so pass the full flat list through unfiltered (the export
       // fallback + currentRows still get something sensible).
       projects:  projectItems,
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, clients, companies, projectItems]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, deletedLeads, deletedOpenBids, deletedAwaiting, deletedAwarded, clients, companies, projectItems]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -4894,6 +5003,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     closed: filtered.closedInvoice.filter(invTypeOk).length + closedNoBilling.length,
     events: events.length,
     hotleads: hotLeads.length,
+    "leads-deleted": deletedLeads.length + deletedOpenBids.length,
+    "proposals-deleted": deletedAwaiting.length + deletedAwarded.length,
     directory: clients.length + companies.length,
     projects: projectItems.length,
     timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
@@ -4906,7 +5017,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // counts on the rail pill.
   const currentGroup = navGroupOf(tab) || null;
   const groupCount = (g) => {
-    const vals = g.tabs.map(k => tabCounts[k]).filter(v => v != null);
+    // The rail pill counts only LIVE items — a page's "Deleted" sub-tab is an
+    // archive, so it's excluded from the pill sum (it still shows its own count
+    // on the sub-tab strip).
+    const vals = g.tabs
+      .filter(k => !k.endsWith("-deleted"))
+      .map(k => tabCounts[k])
+      .filter(v => v != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
   };
   const currentMeta = PAGE_META[tab];
@@ -5121,7 +5238,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   <Icon name="export" size={13}/>Print for Manish
                 </button>
               </>
-            ) : (
+            ) : tab.endsWith("-deleted") ? null : (
               <button className="btn sm" onClick={handleExport}>
                 <Icon name="export" size={13}/>Export PDF
               </button>
@@ -5199,13 +5316,50 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onUploadPdf={uploadBidPdf}
             onRemovePdf={removeBidPdf}
             onOpenPdf={openBidPdfInNewTab}
-            onDelete={deleteOpenBidRow}
+            onSoftDelete={r => requestSoftDelete("openbids", r)}
             flashId={flashId}
             filters={chipsFor("openbids")}
             tab="openbids"
             yearOptions={availableYears.openbids}
             yearValue={yearFilter.openbids}
             onYearChange={(y) => setYear("openbids", y)}/>
+        )}
+        {tab === "leads-deleted" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {deletedLeads.length === 0 && deletedOpenBids.length === 0 && (
+              <div className="subtle" style={{ padding: "24px 4px", fontSize: 13 }}>
+                Nothing deleted. Deleted Hot Leads and Open Bids land here with every field intact — restore any row to send it back.
+              </div>
+            )}
+            {deletedLeads.length > 0 && (
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Hot Leads · {deletedLeads.length}</h3>
+                <HotLeadsTable rows={deletedLeads}
+                  updateRow={deletedRowReadOnly}
+                  onOpenDrawer={() => {}}
+                  deletedMode
+                  onRestore={r => requestRestore("leads", r)}
+                  flashId={flashId}
+                  filters={[]}
+                  tab="leads-deleted"/>
+              </div>
+            )}
+            {deletedOpenBids.length > 0 && (
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Open Bids · {deletedOpenBids.length}</h3>
+                <OpenBidsTable rows={deletedOpenBids}
+                  updateRow={deletedRowReadOnly}
+                  isAdmin={isAdmin}
+                  onOpenDrawer={() => {}}
+                  onOpenPdf={openBidPdfInNewTab}
+                  deletedMode
+                  onRestore={r => requestRestore("openbids", r)}
+                  flashId={flashId}
+                  filters={[]}
+                  tab="leads-deleted"/>
+              </div>
+            )}
+          </div>
         )}
         {tab === "potential" && (
           <PotentialTable rows={filtered.potential} updateRow={updatePotential}
@@ -5225,6 +5379,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onForward={r => triggerForward(r, "awaiting", "awarded")}
             onCloseOut={r => triggerForward(r, "awaiting", "closed")}
             onAlert={r => setAlertObj({ row: r, tab: "awaiting" })}
+            onSoftDelete={r => requestSoftDelete("awaiting", r)}
             flashId={flashId}
             filters={chipsFor("awaiting")}
             tab="awaiting"
@@ -5237,6 +5392,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onOpenDrawer={r => openDrawer(r, "awarded")}
             onForward={r => triggerForward(r, "awarded", "invoice")}
             onAlert={r => setAlertObj({ row: r, tab: "awarded" })}
+            onSoftDelete={r => requestSoftDelete("awarded", r)}
             flashId={flashId}
             filters={chipsFor("awarded")}
             tab="awarded"
@@ -5248,6 +5404,46 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onAddInvoiceLink={addInvoiceLink}
             onRemoveInvoiceLink={removeInvoiceLink}
             onOpenInvoiceProject={openInvoiceProject}/>
+        )}
+        {tab === "proposals-deleted" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {deletedAwaiting.length === 0 && deletedAwarded.length === 0 && (
+              <div className="subtle" style={{ padding: "24px 4px", fontSize: 13 }}>
+                Nothing deleted. Deleted Proposals and Awarded projects land here with every field intact — restore any row to send it back.
+              </div>
+            )}
+            {deletedAwaiting.length > 0 && (
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Proposals · {deletedAwaiting.length}</h3>
+                <AwaitingTable rows={deletedAwaiting}
+                  updateRow={deletedRowReadOnly}
+                  onOpenDrawer={() => {}}
+                  deletedMode
+                  onRestore={r => requestRestore("awaiting", r)}
+                  flashId={flashId}
+                  filters={[]}
+                  tab="proposals-deleted"/>
+              </div>
+            )}
+            {deletedAwarded.length > 0 && (
+              <div>
+                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Awarded · {deletedAwarded.length}</h3>
+                <AwardedTable rows={deletedAwarded}
+                  updateRow={deletedRowReadOnly}
+                  onOpenDrawer={() => {}}
+                  deletedMode
+                  onRestore={r => requestRestore("awarded", r)}
+                  flashId={flashId}
+                  filters={[]}
+                  tab="proposals-deleted"
+                  invoiceIndex={invoiceByNumber}
+                  actualThru={actualThru}
+                  onAddInvoiceLink={addInvoiceLink}
+                  onRemoveInvoiceLink={removeInvoiceLink}
+                  onOpenInvoiceProject={openInvoiceProject}/>
+              </div>
+            )}
+          </div>
         )}
         {tab === "closed" && (() => {
           // Closed Out (2026-07): closed-out projects keep their FULL billing
@@ -5535,6 +5731,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               onOpenDrawer={r => openDrawer(r, "hotleads")}
               onForward={r => triggerForward(r, "hotleads", "awaiting")}
               onAlert={r => setAlertObj({ row: r, tab: "hotleads" })}
+              onSoftDelete={r => requestSoftDelete("leads", r)}
               flashId={flashId}
               filters={chipsFor("hotleads")}
               tab="hotleads"

@@ -754,6 +754,7 @@ function adaptAwaiting(r) {
     msmmUsed: r.msmm_used || 0,
     msmmRemaining: r.msmm_remaining || 0,
     egnyteFolderPath: r.egnyte_folder_path || "",
+    deletedAt: r.deleted_at || null,
   };
 }
 
@@ -786,6 +787,7 @@ function adaptAwarded(r) {
     pools: r.pool || "",
     contractExpiry: r.contract_expiry_date || "",
     egnyteFolderPath: r.egnyte_folder_path || "",
+    deletedAt: r.deleted_at || null,
   };
 }
 
@@ -1306,6 +1308,7 @@ function adaptHotLead(r) {
     stars: r.stars == null ? null : Number(r.stars),
     anticipatedAmount: r.anticipated_amount == null ? null : Number(r.anticipated_amount),
     attendees: (r.attendees || []).map(a => a.user_id),
+    deletedAt: r.deleted_at || null,
   };
 }
 
@@ -1327,6 +1330,7 @@ function adaptOpenBid(r) {
     createdBy:          r.created_by || null,
     createdAt:          r.created_at || null,
     anticipatedAmount:  r.anticipated_amount == null ? null : Number(r.anticipated_amount),
+    deletedAt:          r.deleted_at || null,
   };
 }
 
@@ -2184,11 +2188,23 @@ export async function loadBeacon() {
   _appSettings = adaptAppSettings(appSettingsRows?.[0] || null);
 
   // Split the consolidated projects array into status-keyed slices so the
-  // rest of the app sees the same shape it always has.
+  // rest of the app sees the same shape it always has. Soft-deleted Proposals
+  // (awaiting) and Awarded rows carry a `deleted_at` stamp — they're pulled out
+  // of the live slices and surfaced separately in the page's Deleted tab (see
+  // 20260715120000_soft_delete...). `deleted_at` reads as undefined when the
+  // migration isn't applied, so `!r.deleted_at` keeps every row live.
+  const isSoftDeleted = (r) => !!r.deleted_at;
   const potential = projects.filter(r => r.status === "potential");
-  const awaiting  = projects.filter(r => r.status === "awaiting");
-  const awarded   = projects.filter(r => r.status === "awarded");
+  const awaiting  = projects.filter(r => r.status === "awaiting"  && !isSoftDeleted(r));
+  const awarded   = projects.filter(r => r.status === "awarded"   && !isSoftDeleted(r));
   const closed    = projects.filter(r => r.status === "closed_out");
+  const deletedAwaitingRows = projects.filter(r => r.status === "awaiting" && isSoftDeleted(r));
+  const deletedAwardedRows  = projects.filter(r => r.status === "awarded"  && isSoftDeleted(r));
+  // Leads (Hot Leads) + Open Bids soft-delete the same way.
+  const liveHotLeadRows    = hotLeads.filter(r => !isSoftDeleted(r));
+  const deletedHotLeadRows = hotLeads.filter(isSoftDeleted);
+  const liveOpenBidRows    = (openBidRows || []).filter(r => !isSoftDeleted(r));
+  const deletedOpenBidRows = (openBidRows || []).filter(isSoftDeleted);
 
   _users = users.map(adaptUser);
 
@@ -2421,8 +2437,14 @@ export async function loadBeacon() {
     closed:    closed.map(adaptClosed),
     invoices:  adaptedInvoices,
     events:    events.map(adaptEvent),
-    hotLeads:  hotLeads.map(adaptHotLead),
-    openBids:  (openBidRows || []).map(adaptOpenBid),
+    hotLeads:  liveHotLeadRows.map(adaptHotLead),
+    openBids:  liveOpenBidRows.map(adaptOpenBid),
+    // Soft-deleted rows for the per-page "Deleted" tabs. Same adapters/shape as
+    // their live counterparts so the Deleted tab renders the identical table.
+    deletedLeads:    deletedHotLeadRows.map(adaptHotLead),
+    deletedOpenBids: deletedOpenBidRows.map(adaptOpenBid),
+    deletedAwaiting: deletedAwaitingRows.map(adaptAwaiting),
+    deletedAwarded:  deletedAwardedRows.map(adaptAwarded),
     projectItems: (projectItemRows || []).map(adaptProjectItem),
     clients:   _companies,
     users:     _users,

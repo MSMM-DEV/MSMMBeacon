@@ -1351,6 +1351,7 @@ const injectKindHeaders = (sortedRows) => {
 export const AwaitingTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, onCloseOut, flashId, filters,
   yearOptions, yearValue, onYearChange,
+  deletedMode = false, onSoftDelete, onRestore,
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
@@ -1511,15 +1512,26 @@ export const AwaitingTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end", gap: 4 }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
-                <button className="row-btn forward" title="Award → move to Awarded" onClick={() => onForward(r, "Awarded")}>
-                  <Icon name="check" size={14}/>
-                </button>
-                <button className="row-btn" title="Close Out" onClick={() => onCloseOut(r)} style={{ color: "var(--rose)" }}>
-                  <Icon name="x" size={14}/>
-                </button>
-                <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
-                  <Icon name="bell" size={14}/>
-                </button>
+                {deletedMode ? (
+                  <button className="row-btn forward" title="Restore this proposal" onClick={() => onRestore?.(r)}>
+                    <Icon name="undo" size={14}/>
+                  </button>
+                ) : (
+                  <>
+                    <button className="row-btn forward" title="Award → move to Awarded" onClick={() => onForward(r, "Awarded")}>
+                      <Icon name="check" size={14}/>
+                    </button>
+                    <button className="row-btn" title="Close Out" onClick={() => onCloseOut(r)} style={{ color: "var(--rose)" }}>
+                      <Icon name="x" size={14}/>
+                    </button>
+                    <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+                      <Icon name="bell" size={14}/>
+                    </button>
+                    <button className="row-btn" title="Delete" onClick={() => onSoftDelete?.(r)} style={{ color: "var(--rose)" }}>
+                      <Icon name="trash" size={14}/>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ),
@@ -1542,6 +1554,7 @@ export const AwaitingTable = ({
 export const AwardedTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
+  deletedMode = false, onSoftDelete, onRestore,
   // Awarded ↔ Invoice links (project_invoice_links). The Proj # column
   // renders each row's linked invoice projects as chips backed by the live
   // merged Invoice rows; see invoice-links.jsx.
@@ -1766,15 +1779,26 @@ export const AwardedTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end" }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
-                {onForward && (
-                  <button className="row-btn forward" title="Move → Invoice"
-                          onClick={() => onForward(r)}>
-                    <Icon name="forward" size={14}/>
+                {deletedMode ? (
+                  <button className="row-btn forward" title="Restore this project" onClick={() => onRestore?.(r)}>
+                    <Icon name="undo" size={14}/>
                   </button>
+                ) : (
+                  <>
+                    {onForward && (
+                      <button className="row-btn forward" title="Move → Invoice"
+                              onClick={() => onForward(r)}>
+                        <Icon name="forward" size={14}/>
+                      </button>
+                    )}
+                    <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+                      <Icon name="bell" size={14}/>
+                    </button>
+                    <button className="row-btn" title="Delete" onClick={() => onSoftDelete?.(r)} style={{ color: "var(--rose)" }}>
+                      <Icon name="trash" size={14}/>
+                    </button>
+                  </>
                 )}
-                <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
-                  <Icon name="bell" size={14}/>
-                </button>
               </div>
             </div>
           ),
@@ -2080,26 +2104,28 @@ export const InvoiceTable = ({
     const subSum = subListFor(r).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
     return total - subSum;
   };
-  // MSMM monthly billing IS editable on linked ENG/MHZ projects — from the MHZ
-  // "MSMM · sub" line AND the ENG Project-total row (which mirrors MSMM's own
-  // portion for an MHZ-prime project). MSMM stays a derived reconciliation
-  // (Total − Σ subs), so typing an MSMM month value writes it by moving the
-  // SHARED project total: total = MSMM + Σ subs, leaving the other subs
-  // untouched. updateInvoice fans that total out to BOTH ENG and MHZ siblings
-  // (linkedInvoiceIdsFor), so the two perspectives stay exactly equal and the
-  // edit works from either view (bidirectional). `row` may be the ENG or the
-  // MHZ merged row — subs are shared (keyed on sourceId), so the sum is the same.
+  // MSMM monthly billing IS editable on a linked ENG/MHZ project — from the MHZ
+  // "MSMM · sub" line AND the ENG Project-total row (both are MSMM's own
+  // portion). MSMM stays a derived reconciliation (base total − Σ subs), so
+  // typing an MSMM month value writes it by moving THAT ROW's total:
+  // total = MSMM + Σ subs, leaving the other subs untouched. `row` must be the
+  // BASE (ENG/PM) row — from the MHZ view, callers pass `s.perspectiveBaseRow`;
+  // from the ENG view, `r` already IS the base row. Since `amount`/`values` are
+  // no longer synced across the pair (see LINKED_INVOICE_SYNC_KEYS), this writes
+  // ONLY the base row — which is exactly "sync to the ENG/PM perspective" — and
+  // the hz row's Total is untouched, so the "MHZ earned value" line absorbs the
+  // change. subs are shared (keyed on sourceId), so the sum is consistent.
   const setMsmmMonth = (row, d, v) => {
     const typed = (v == null || v === "") ? 0 : Number(v);
     const subSum = subListFor(row).reduce((a, s) => a + Number(subAmtAtDesc(s, d) || 0), 0);
     updateInvoice?.(row, d.year, d.monthIdx, typed + subSum);
   };
-  // MSMM CONTRACT (Total CV − Σ sub contracts) is editable from the same two
-  // places as the months (the ENG Project-total row + the MHZ "MSMM · sub"
-  // line). It's derived, so a typed value writes the SHARED total contract
-  // (amount = MSMM + Σ sub contracts, other subs untouched); updateRow fans
-  // `amount` out to both ENG and MHZ siblings, keeping the two perspectives
-  // equal. `row` may be the ENG or MHZ merged row (subs are shared).
+  // MSMM CONTRACT (base total − Σ sub contracts) is editable from the same two
+  // places as the months. It's derived, so a typed value writes THAT ROW's total
+  // contract (amount = MSMM + Σ sub contracts, other subs untouched). `row` must
+  // be the BASE (ENG/PM) row — no cross-perspective fan-out anymore, so this
+  // updates MSMM's own value and the hz "MHZ earned value" line (hz.total −
+  // base.total) recomputes. `row` = the base merged row (subs shared).
   const setMsmmContract = (row, v) => {
     const typed = (v == null || v === "") ? 0 : Number(v);
     const subSum = subListFor(row).reduce((a, s) => a + Number(s.contractAmount || 0), 0);
@@ -2198,6 +2224,22 @@ export const InvoiceTable = ({
       paidAt: Array(12).fill(null),
     }])
   );
+  // MHZ earned value (the JV prime's OWN portion) per year: the full JV month
+  // total (this hz row) minus MSMM's month total (the base ENG/PM row). Because
+  // the base month already folds MSMM + subs together, hz.month − base.month
+  // leaves exactly the prime's earned slice. Purely derived + read-only — it
+  // recomputes when the Total, MSMM, or any sub changes; for a linked pair whose
+  // two totals are still equal it is 0.
+  const invoiceMhzEarnedYears = (r, base) => Object.fromEntries(
+    yearsOf(r).map(year => [year, {
+      amounts: Array.from({ length: 12 }, (_, m) =>
+        Number(yrow(r, year)?.values?.[m] || 0) - Number(yrow(base, year)?.values?.[m] || 0)),
+      files: Array.from({ length: 12 }, () => []),
+      subInvoiceIds: Array(12).fill(null),
+      paid: Array(12).fill(false),
+      paidAt: Array(12).fill(null),
+    }])
+  );
   const withPerspectiveRows = (r, entries) => {
     const type = r.type || "ENG";
     // The base (MSMM) view of an hz-prime project (ENG for MHZ, PM for MHZ PM)
@@ -2205,34 +2247,59 @@ export const InvoiceTable = ({
     // base perspective hides the hz prime entirely, and its totals must not
     // reflect the full-JV value (the Project total row is rendered as MSMM's own
     // portion below). A normal base row has no hz sibling, so nothing was ever
-    // injected for it anyway. The hz view (MHZ / MHZ PM) injects MSMM as a sub,
-    // read from its linked base sibling.
+    // injected for it anyway.
+    //
+    // The hz view (MHZ / MHZ PM) injects, in order:
+    //   1) the MHZ earned-value line  (derived: Total − subs − MSMM, read-only),
+    //   2) the real subs A/B/C        (entries),
+    //   3) MSMM as a sub              (= the linked base ENG/PM row's value).
+    // The Project total row below reconciles to the full JV total, so
+    // earned + subs + MSMM sum exactly to it.
     if (isHzPrimeType(type)) {
       const base = linkedPerspectiveFor(r, baseTypeForHz(type));
       if (!base) return entries;
       const msmm = getCompanies().find(c => c.isMsmm) || { id: "__msmm_sub__", name: "MSMM" };
-      const byYear = invoiceMsmmAsSubYears(base);
       const already = entries.some(e => (e.kind || "sub") === "sub" && e.companyId === msmm.id);
       if (already) return entries;
-      return [{
+      const msmmByYear = invoiceMsmmAsSubYears(base);
+      const msmmSub = {
         kind: "sub",
         companyId: msmm.id,
         companyName: msmm.name || "MSMM",
         contractAmount: msmmContractShown(base),
         remainingStart: base.remainingStart ?? null,
         discipline: "MSMM perspective",
-        amounts: byYear[THIS_YEAR]?.amounts || Array(12).fill(0),
-        files: byYear[THIS_YEAR]?.files || Array.from({ length: 12 }, () => []),
+        amounts: msmmByYear[THIS_YEAR]?.amounts || Array(12).fill(0),
+        files: msmmByYear[THIS_YEAR]?.files || Array.from({ length: 12 }, () => []),
         subInvoiceIds: Array(12).fill(null),
-        paid: byYear[THIS_YEAR]?.paid || Array(12).fill(false),
+        paid: msmmByYear[THIS_YEAR]?.paid || Array(12).fill(false),
         paidAt: Array(12).fill(null),
-        byYear,
-        // The base (ENG/PM) row this MSMM-as-sub mirrors. Its clip + paid toggle
-        // route to this row's prime store, so acting on the MSMM sub writes the
-        // same place the base's MSMM total row reads/writes — instant two-way sync.
+        byYear: msmmByYear,
+        // The base (ENG/PM) row this MSMM-as-sub mirrors. Editing it (contract /
+        // months) writes the base row DIRECTLY — that IS "sync to the ENG/PM
+        // perspective", and it leaves this hz row's Total untouched (so the
+        // earned-value line above absorbs the change). Its clip + paid toggle
+        // route to the base row's prime store too — instant two-way sync.
         perspectiveBaseRow: base,
         syntheticPerspective: true,
-      }, ...entries];
+      };
+      const earnedByYear = invoiceMhzEarnedYears(r, base);
+      const earnedRow = {
+        kind: "sub",
+        companyId: "__mhz_earned__",
+        companyName: "MHZ",
+        contractAmount: Number(r.amount || 0) - Number(base.amount || 0),
+        remainingStart: null,
+        discipline: "Earned value (Total − subs)",
+        amounts: earnedByYear[THIS_YEAR]?.amounts || Array(12).fill(0),
+        files: Array.from({ length: 12 }, () => []),
+        subInvoiceIds: Array(12).fill(null),
+        paid: Array(12).fill(false),
+        paidAt: Array(12).fill(null),
+        byYear: earnedByYear,
+        syntheticMhzPrime: true,
+      };
+      return [earnedRow, ...entries, msmmSub];
     }
     return entries;
   };
@@ -3021,11 +3088,21 @@ export const InvoiceTable = ({
                           : <span className="empty-cell">—</span>}
                       />
                     </td>
-                    {/* Parent row's Contract cell shows the MSMM Portion —
-                        purely derived (Total CV − Σ sub.contractAmount) and
-                        read-only for everyone; it recalculates whenever the
-                        Total or any sub changes. */}
-                    {(() => {
+                    {/* Parent row's Contract cell.
+                        • hz view (MHZ / MHZ PM): the FULL JV contract, EDITABLE —
+                          the expanded "MHZ earned value" line (Total − subs)
+                          recomputes from it, and editing it never touches the
+                          MSMM sub or the linked ENG/PM perspective.
+                        • base view (ENG / PM): the MSMM Portion — purely derived
+                          (Total CV − Σ sub.contractAmount), read-only. */}
+                    {isMhzRow ? (
+                      <td className="mono"
+                          title="Full JV contract value — click to edit. The expanded “MHZ earned value” line (Total − subs) recomputes from it.">
+                        <EditableCell value={r.amount} type="number"
+                          onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
+                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                      </td>
+                    ) : (() => {
                       const shown = msmmContractShown(r);
                       return (
                         <td className="msmm-locked"
@@ -3036,13 +3113,23 @@ export const InvoiceTable = ({
                         </td>
                       );
                     })()}
-                    <td className={canEditMsmm ? "" : "msmm-locked"}
-                        title={!canEditMsmm ? "MSMM value — only an admin can edit it. Change the Total or a sub instead." : undefined}>
-                      <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
-                        disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                        onChange={v => updateRow(r.id, { remainingStart: v })}
-                        format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                    </td>
+                    {isMhzRow ? (
+                      <td className="mono"
+                          title="Rollforward — remaining to bill on the full JV at year start. Edit it on the Project total row in the expand.">
+                        {(() => {
+                          const v = r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null);
+                          return v != null ? fmtMoney(v) : <span className="empty-cell">—</span>;
+                        })()}
+                      </td>
+                    ) : (
+                      <td className={canEditMsmm ? "" : "msmm-locked"}
+                          title={!canEditMsmm ? "MSMM value — only an admin can edit it. Change the Total or a sub instead." : undefined}>
+                        <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
+                          disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
+                          onChange={v => updateRow(r.id, { remainingStart: v })}
+                          format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                      </td>
+                    )}
                     {/* Parent-row month cells show MSMM monthly values —
                         auto-calc = total[i] − Σ sub.amounts[i]; override
                         via msmm_{jan..dec}_amount. Prime invoice file
@@ -3050,19 +3137,24 @@ export const InvoiceTable = ({
                         expand block (= the project's prime billing PDFs,
                         not the MSMM-portion view). */}
                     {windowMonths.map((d, wi) => {
-                      // MSMM monthly value is purely derived (month total − Σ
-                      // sub month) and read-only for everyone — it recalculates
-                      // on any total/sub change.
-                      const shown      = msmmAtDesc(r, d);
+                      // Parent-row month value, read-only:
+                      //   • hz view (MHZ / MHZ PM): the FULL JV month total (the
+                      //     header summarizes the JV; edit months on the Project
+                      //     total row in the expand).
+                      //   • base view (ENG / PM): the MSMM month portion, purely
+                      //     derived (month total − Σ sub month).
+                      const shown      = isMhzRow ? valAtDesc(r, d) : msmmAtDesc(r, d);
                       // Read-only mirror of the Project total row's status for
                       // this month (paid top-left, attachment top-right) so the
-                      // prominent MSMM/top row reads at a glance.
+                      // prominent top row reads at a glance.
                       const totalPaid  = primePaidAtDesc(r, d);
                       const totalFiles = primeFilesAtDesc(r, d);
                       return (
                       <td key={d.abs}
                           className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell msmm-locked"}
-                          title="MSMM monthly value is auto-calculated (Total − Σ subs). Edit the Total or a sub to change it.">
+                          title={isMhzRow
+                            ? "Full JV monthly total — edit it on the Project total row in the expand."
+                            : "MSMM monthly value is auto-calculated (Total − Σ subs). Edit the Total or a sub to change it."}>
                         <EditableCell value={shown} type="number"
                           disabled onBlocked={onBlockedMsmmEdit}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
@@ -3164,7 +3256,7 @@ export const InvoiceTable = ({
                     <tr key={`${r.id}:${entryKind}:${s.companyId}`}
                         className={"invoice-sub-row" + (isPrimeEntry ? " invoice-prime-row" : "")}>
                       <td className="invoice-expand-col">
-                        {onRemoveSub && !s.syntheticPerspective && (
+                        {onRemoveSub && !s.syntheticPerspective && !s.syntheticMhzPrime && (
                           <button
                             type="button"
                             className="invoice-sub-remove"
@@ -3202,7 +3294,7 @@ export const InvoiceTable = ({
                               ? (r.partyFiles?.prime?.[s.companyId] || [])
                               : (r.partyFiles?.sub?.[s.companyId] || []);
                             const hasFiles = partyBucket.length > 0;
-                            if (s.syntheticPerspective) return null;
+                            if (s.syntheticPerspective || s.syntheticMhzPrime) return null;
                             return (
                               <button
                                 type="button"
@@ -3227,7 +3319,7 @@ export const InvoiceTable = ({
                         </span>
                         <span className="invoice-sub-discipline mono">
                           {s.discipline ? "· " : null}
-                          {s.syntheticPerspective ? (
+                          {(s.syntheticPerspective || s.syntheticMhzPrime) ? (
                             <span>{s.discipline}</span>
                           ) : (
                             <EditableCell value={s.discipline || ""}
@@ -3242,7 +3334,7 @@ export const InvoiceTable = ({
                                 : <span className="invoice-sub-discipline-empty">+ discipline</span>}/>
                           )}
                         </span>
-                        {entryKind === "sub" && !s.syntheticPerspective && (
+                        {entryKind === "sub" && !s.syntheticPerspective && !s.syntheticMhzPrime && (
                           <span className="sub-docs" role="group"
                                 aria-label={`Compliance documents for ${s.companyName}`}>
                             {SUB_DOCS.map(doc => {
@@ -3296,9 +3388,13 @@ export const InvoiceTable = ({
                         )}
                       </td>
                       <td className="mono">
-                        {s.syntheticPerspective ? (
+                        {s.syntheticMhzPrime ? (
+                          <span title="MHZ earned value = Total Contract − all subs (incl. MSMM). Auto-calculated — edit the Total or a sub to change it.">
+                            {s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>}
+                          </span>
+                        ) : s.syntheticPerspective ? (
                           <EditableCell value={s.contractAmount} type="number"
-                            onChange={v => setMsmmContract(r, v)}
+                            onChange={v => setMsmmContract(s.perspectiveBaseRow, v)}
                             format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={s.contractAmount} type="number"
@@ -3315,10 +3411,12 @@ export const InvoiceTable = ({
                           NULL falls back to the sub's contract amount. */}
                       <td className="mono"
                           title="Remaining amount to bill for this sub. Defaults to the contract amount; edit if some was billed previously. Clear to reset.">
-                        {s.syntheticPerspective ? (
+                        {s.syntheticMhzPrime ? (
+                          <span className="empty-cell">—</span>
+                        ) : s.syntheticPerspective ? (
                           <EditableCell value={s.remainingStart != null ? s.remainingStart : null} type="number"
                             disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                            onChange={v => updateRow(r.id, { remainingStart: v })}
+                            onChange={v => updateRow(s.perspectiveBaseRow.id, { remainingStart: v })}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
@@ -3343,14 +3441,20 @@ export const InvoiceTable = ({
                         <td key={d.abs}
                             className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell" + (isPaid ? " paid" : "")}
                             data-paid={isPaid ? "true" : undefined}>
-                          <EditableCell value={amt} type="number"
-                            onChange={nv => s.syntheticPerspective
-                              ? setMsmmMonth(r, d, nv)
-                              : onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
-                            format={v => v != null && v !== 0
-                              ? fmtMoney(v)
-                              : <span style={{ opacity: 0.4 }}>—</span>}/>
-                          {showPaidToggle && (
+                          {s.syntheticMhzPrime ? (
+                            <span className="mono" title="MHZ earned value — auto-calculated (month total − subs).">
+                              {amt != null && amt !== 0 ? fmtMoney(amt) : <span style={{ opacity: 0.4 }}>—</span>}
+                            </span>
+                          ) : (
+                            <EditableCell value={amt} type="number"
+                              onChange={nv => s.syntheticPerspective
+                                ? setMsmmMonth(s.perspectiveBaseRow, d, nv)
+                                : onUpdateSubAmount?.(r.sourceId, s.companyId, d.monthIdx, nv, entryKind, d.year)}
+                              format={v => v != null && v !== 0
+                                ? fmtMoney(v)
+                                : <span style={{ opacity: 0.4 }}>—</span>}/>
+                          )}
+                          {!s.syntheticMhzPrime && showPaidToggle && (
                             <button
                               type="button"
                               className={"invoice-cell-paid-toggle" + (isPaid ? " paid" : "") + (isPaid && !canUntickPaid ? " locked" : "")}
@@ -3379,7 +3483,7 @@ export const InvoiceTable = ({
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
                             </button>
                           )}
-                          {(() => {
+                          {!s.syntheticMhzPrime && (() => {
                             // Attachment gating is controlled by the
                             // ATTACH_ONLY_ON_ACTUAL flag (currently OFF, so
                             // uploads are allowed on every month). When ON, a
@@ -3423,14 +3527,14 @@ export const InvoiceTable = ({
                           actuals (months with a sub invoice attached). */}
                       <td className="total-cell mono inv-pin-ytd"
                           title="Auto-calculated · sub contract − Rollforward + billed actuals (months with an invoice attached, 2026 onward)">
-                        {(() => {
+                        {s.syntheticMhzPrime ? <span className="empty-cell">—</span> : (() => {
                           const ytd = subTotalBilled(s);
                           return ytd ? fmtMoney(ytd) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
                       <td className="total-cell mono inv-pin-rem"
                           title="Auto-calculated · sub contract − Total Billed">
-                        {(() => {
+                        {s.syntheticMhzPrime ? <span className="empty-cell">—</span> : (() => {
                           const c = Number(s.contractAmount || 0), b = subTotalBilled(s);
                           return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                         })()}
@@ -4662,6 +4766,7 @@ function fmtQuickTime(iso) {
 export const HotLeadsTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
+  deletedMode = false, onSoftDelete, onRestore,
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
@@ -4805,15 +4910,26 @@ export const HotLeadsTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end" }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
-                {onForward && (
-                  <button className="row-btn forward" title="Move → Proposals"
-                          onClick={() => onForward(r)}>
-                    <Icon name="forward" size={14}/>
+                {deletedMode ? (
+                  <button className="row-btn forward" title="Restore this lead" onClick={() => onRestore?.(r)}>
+                    <Icon name="undo" size={14}/>
                   </button>
+                ) : (
+                  <>
+                    {onForward && (
+                      <button className="row-btn forward" title="Move → Proposals"
+                              onClick={() => onForward(r)}>
+                        <Icon name="forward" size={14}/>
+                      </button>
+                    )}
+                    <button className="row-btn alert" title="Set alert" onClick={() => onAlert && onAlert(r)}>
+                      <Icon name="bell" size={14}/>
+                    </button>
+                    <button className="row-btn" title="Delete" onClick={() => onSoftDelete?.(r)} style={{ color: "var(--rose)" }}>
+                      <Icon name="trash" size={14}/>
+                    </button>
+                  </>
                 )}
-                <button className="row-btn alert" title="Set alert" onClick={() => onAlert && onAlert(r)}>
-                  <Icon name="bell" size={14}/>
-                </button>
               </div>
             </div>
           ),
@@ -4852,6 +4968,7 @@ export const OpenBidsTable = ({
   onDelete,
   flashId, filters,
   yearOptions, yearValue, onYearChange,
+  deletedMode = false, onSoftDelete, onRestore,
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
@@ -5062,24 +5179,28 @@ export const OpenBidsTable = ({
           "__actions": (
             <div className="td" style={{ justifyContent: "flex-end", gap: 4 }}>
               <div className="row-actions" onClick={e => e.stopPropagation()}>
-                <button
-                  className="row-btn forward"
-                  title={isApproved
-                    ? "Move to Proposals"
-                    : "Approve this bid before moving forward"}
-                  disabled={!isApproved}
-                  onClick={() => isApproved && onForward?.(r)}>
-                  <Icon name="forward" size={14}/>
-                </button>
-                <button className="row-btn" title="Delete bid"
-                        onClick={() => {
-                          if (confirm("Delete this open bid? This cannot be undone.")) {
-                            onDelete?.(r.id);
-                          }
-                        }}
-                        style={{ color: "var(--rose)" }}>
-                  <Icon name="trash" size={13}/>
-                </button>
+                {deletedMode ? (
+                  <button className="row-btn forward" title="Restore this bid" onClick={() => onRestore?.(r)}>
+                    <Icon name="undo" size={14}/>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="row-btn forward"
+                      title={isApproved
+                        ? "Move to Proposals"
+                        : "Approve this bid before moving forward"}
+                      disabled={!isApproved}
+                      onClick={() => isApproved && onForward?.(r)}>
+                      <Icon name="forward" size={14}/>
+                    </button>
+                    <button className="row-btn" title="Delete"
+                            onClick={() => onSoftDelete?.(r)}
+                            style={{ color: "var(--rose)" }}>
+                      <Icon name="trash" size={13}/>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ),
