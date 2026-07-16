@@ -13,12 +13,12 @@ import {
   hzTypeForBase,
   baseTypeForHz,
   linkedInvoiceIdsFor,
-  linkedBaseInvoiceRowsForSubRebase,
+  linkedMsmmValue,
+  msmmPatchForMonth,
+  msmmFieldPatch,
   linkedInvoicePatch,
   invoiceRemainderValue,
   basePerspectiveOwnValue,
-  basePerspectiveStoredTotal,
-  rebaseStoredTotalForSubChange,
   perspectiveSubListBase,
   projectNameSuggestsMhz,
 } from "../src/invoice-perspectives.js";
@@ -44,6 +44,43 @@ assert.equal(isHzPrimeType("MHZ"), true);
 assert.equal(isHzPrimeType("MHZ PM"), true);
 assert.equal(isHzPrimeType("ENG"), false);
 assert.equal(isHzPrimeType("PM"), false);
+
+// Linked MHZ/MHZ PM projects use an independently stored MSMM sub value.
+// Changing any other sub must not change this result, including stored zero.
+assert.equal(linkedMsmmValue({
+  linked: true,
+  storedValue: -29457.90,
+  total: 48556.71,
+  subValues: [48556.71],
+}), -29457.90);
+assert.equal(linkedMsmmValue({
+  linked: true,
+  storedValue: -29457.90,
+  total: 58556.71,
+  subValues: [58556.71],
+}), -29457.90);
+assert.equal(linkedMsmmValue({
+  linked: true,
+  storedValue: 0,
+  total: 100000,
+  subValues: [25000],
+}), 0);
+assert.equal(linkedMsmmValue({
+  linked: false,
+  storedValue: null,
+  total: 100000,
+  subValues: [25000],
+}), 75000);
+assert.deepEqual(msmmPatchForMonth(6, -29457.90), {
+  msmm_jul_amount: -29457.90,
+});
+assert.deepEqual(msmmPatchForMonth(0, 0), { msmm_jan_amount: 0 });
+assert.deepEqual(msmmFieldPatch({ msmmAmount: 295632.97 }), {
+  msmm_amount: 295632.97,
+});
+assert.deepEqual(msmmFieldPatch({ remainingStart: 89279.26 }), {
+  msmm_remaining_to_bill_year_start: 89279.26,
+});
 
 assert.equal(projectNameSuggestsMhz("MSMM / MHZ drainage"), true);
 assert.equal(projectNameSuggestsMhz("HZ joint venture"), true);
@@ -147,52 +184,33 @@ const assertCurrencyEqual = (actual, expected) =>
   assert.ok(Math.abs(actual - expected) < 0.000001, `expected ${expected}, received ${actual}`);
 assertCurrencyEqual(invoiceRemainderValue(893067.34, mhzSubsIncludingMsmm), 2075.39);
 
-// ENG/PM keeps the existing total-minus-subs storage representation. Editing
-// MSMM stores MSMM + subs, while changing another sub rebases that stored total
-// by the same delta so the derived MSMM value stays unchanged.
+// Unlinked ENG/PM keeps the existing total-minus-subs representation.
 assertCurrencyEqual(basePerspectiveOwnValue(622045.82, [420970.43]), 201075.39);
-assertCurrencyEqual(basePerspectiveStoredTotal(225000, [329453.93, 250005]), 804458.93);
-assertCurrencyEqual(rebaseStoredTotalForSubChange(622045.82, 80000, 90000), 632045.82);
+
+// Screenshot fixture: black-box MSMM stays fixed; only the red-box first-row
+// remainder absorbs a Tetra Tech edit.
+const screenshotMsmm = -29457.90;
 assertCurrencyEqual(
-  basePerspectiveOwnValue(
-    rebaseStoredTotalForSubChange(622045.82, 80000, 90000),
-    [430970.43]
-  ),
-  201075.39
+  invoiceRemainderValue(67655.52, [48556.71, screenshotMsmm]),
+  48556.71
 );
+assertCurrencyEqual(
+  invoiceRemainderValue(67655.52, [58556.71, screenshotMsmm]),
+  38556.71
+);
+assertCurrencyEqual(screenshotMsmm, -29457.90);
 
-// Project 012 is a merged, multi-year perspective: the visible MHZ number is
-// stored only on the 2026 MHZ row, while July 2024 must rebase the exact linked
-// ENG 2024 row. Never fall through to the current-year ENG row (or no row).
-const project012Rows = [
-  { id: "eng-2024", sourceId: "project-012", projectNumber: "202324", type: "ENG", year: 2024 },
-  { id: "eng-2026", sourceId: "project-012", projectNumber: "202324", type: "ENG", year: 2026 },
-  { id: "mhz-2024", sourceId: "project-012", projectNumber: "202324", type: "MHZ", year: 2024 },
-  { id: "mhz-2026", sourceId: "project-012", projectNumber: "202324", mhzProjectNumber: "012", type: "MHZ", year: 2026 },
-];
-assert.deepEqual(
-  linkedBaseInvoiceRowsForSubRebase(project012Rows, "project-012", 2024).map(row => row.id),
-  ["eng-2024"]
+// Exact project 012 July 2024 fixture: adding 10,000 to Neelu leaves stored
+// MSMM unchanged and reduces only the white first row by 10,000.
+const project012Msmm = -145403.77;
+assertCurrencyEqual(
+  invoiceRemainderValue(378885.43, [55605.78, 206538.82, 0, project012Msmm]),
+  262144.60
 );
-assert.deepEqual(
-  linkedBaseInvoiceRowsForSubRebase(project012Rows, "project-012", 2026).map(row => row.id),
-  ["eng-2026"]
+assertCurrencyEqual(
+  invoiceRemainderValue(378885.43, [55605.78, 206538.82, 10000, project012Msmm]),
+  252144.60
 );
-
-// Exact July 2024 values from project 012. Adding 10,000 to Neelu must keep
-// MSMM at -145,403.77 and reduce only the white first row by 10,000.
-const project012JulySubsBefore = [55605.78, 206538.82, 0];
-const project012MsmmBefore = basePerspectiveOwnValue(116740.83, project012JulySubsBefore);
-const project012FirstBefore = invoiceRemainderValue(
-  378885.43, [...project012JulySubsBefore, project012MsmmBefore]);
-const project012JulySubsAfter = [55605.78, 206538.82, 10000];
-const project012BaseAfter = rebaseStoredTotalForSubChange(116740.83, 0, 10000);
-const project012MsmmAfter = basePerspectiveOwnValue(project012BaseAfter, project012JulySubsAfter);
-const project012FirstAfter = invoiceRemainderValue(
-  378885.43, [...project012JulySubsAfter, project012MsmmAfter]);
-assertCurrencyEqual(project012MsmmBefore, -145403.77);
-assertCurrencyEqual(project012MsmmAfter, -145403.77);
-assertCurrencyEqual(project012FirstBefore, 262144.60);
-assertCurrencyEqual(project012FirstAfter, 252144.60);
+assertCurrencyEqual(project012Msmm, -145403.77);
 
 console.log("invoice perspective helper tests passed");

@@ -834,9 +834,9 @@ function adaptInvoice(r) {
     // renames the cell to "Total Contract Value" — the underlying field is
     // unchanged so the drawer / forms / PDF export stay wired identically.
     amount: r.contract_amount || 0,
-    // MSMM override fields — NULL means "show derived value (= total − Σ subs)";
-    // numeric means "this is a frozen override". Same semantic as
-    // ytd_actual_override / rollforward_override.
+    // Linked MHZ/MHZ PM pairs use these as authoritative, independently
+    // editable MSMM sub values. NULL retains the deployment-safe derived
+    // fallback for unlinked/legacy rows.
     msmmAmount: r.msmm_amount ?? null,
     msmmValues: [
       r.msmm_jan_amount, r.msmm_feb_amount, r.msmm_mar_amount, r.msmm_apr_amount,

@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { Icon } from "./icons.jsx";
 import { fmtMoney, isActualInvoiceMonth, THIS_YEAR, TODAY_MONTH } from "./data.js";
+import { isMhzPerspectiveSub, linkedMsmmValue } from "./invoice-perspectives.js";
 
 // ============================================================================
 // InvoiceCharts — Engineering + Project Management cash-flow charts.
@@ -23,7 +24,7 @@ import { fmtMoney, isActualInvoiceMonth, THIS_YEAR, TODAY_MONTH } from "./data.j
 // toggle (ENG only — PM has no Orange); benchmark coloring; hover tooltip.
 // ============================================================================
 
-export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices }) => {
+export const InvoiceCharts = ({ rows = [], allRows = rows, windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices }) => {
   const [pmCollapsed, setPmCollapsed] = useState(() => {
     try { return localStorage.getItem("beacon.quadPmCollapsed") === "1"; }
     catch { return false; }
@@ -72,6 +73,7 @@ export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, m
             orangeSourceIds={orangeSourceIds}
             monthlyBenchmark={monthlyBenchmark}
             subInvoices={subInvoices}
+            allRows={allRows}
             view={chartView}
             onViewChange={setChartView}
           />
@@ -115,6 +117,7 @@ export const InvoiceCharts = ({ rows = [], windowMonths = [], orangeSourceIds, m
                   windowMonths={windowMonths}
                   orangeSourceIds={orangeSourceIds}
                   subInvoices={subInvoices}
+                  allRows={allRows}
                   view={chartView}
                   /* No onViewChange — PM doesn't render the toggle UI. */
                   /* No benchmark — engineering-revenue only. */
@@ -141,7 +144,7 @@ const niceChartMax = (peak) => {
   return nice * mag;
 };
 
-const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices, eyebrow, view = "pair", onViewChange }) => {
+const InvoiceChart = ({ rows = [], allRows = rows, windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices, eyebrow, view = "pair", onViewChange }) => {
   const N = Math.max(1, windowMonths.length);
   // Per-window-month totals — each row contributes its MSMM PORTION for the
   // month, mirroring the InvoiceTable's msmmAtDesc exactly (the per-month
@@ -157,11 +160,15 @@ const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBe
     const msmmAtDesc = (r, d) => {
       const yr = r.byYear?.[d.year];
       if (!yr) return 0;
-      // MSMM is purely derived — stored override is no longer consulted.
       const total = Number(yr.values?.[d.monthIdx] || 0);
-      const subSum = subListFor(r).reduce(
-        (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);
-      return total - subSum;
+      const subValues = subListFor(r).map(
+        s => Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0));
+      return linkedMsmmValue({
+        linked: isMhzPerspectiveSub(r, allRows),
+        storedValue: yr.msmmValues?.[d.monthIdx],
+        total,
+        subValues,
+      });
     };
     const totalsBase = Array(N).fill(0);
     const totalsAll  = Array(N).fill(0);
@@ -175,7 +182,7 @@ const InvoiceChart = ({ rows = [], windowMonths = [], orangeSourceIds, monthlyBe
     }
     const totalsAvg = totalsAll.map((v, i) => (v + totalsBase[i]) / 2);
     return { totalsBase, totalsAll, totalsAvg };
-  }, [rows, windowMonths, orangeSourceIds, subInvoices, N]);
+  }, [rows, allRows, windowMonths, orangeSourceIds, subInvoices, N]);
 
   // Actual / projection split is per (year, month). The actual months form a
   // contiguous prefix of the window (past → present), so lastActualWi is the

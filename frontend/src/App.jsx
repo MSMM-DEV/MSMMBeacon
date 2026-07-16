@@ -44,8 +44,12 @@ import {
   projectNameSuggestsMhz,
   pairSiblingOf,
   perspectivePairOf,
-  linkedBaseInvoiceRowsForSubRebase,
-  rebaseStoredTotalForSubChange,
+  isHzPrimeType,
+  isMhzPerspectiveSub,
+  linkedMsmmValue,
+  invoiceRemainderValue,
+  msmmPatchForMonth,
+  msmmFieldPatch,
 } from "./invoice-perspectives.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
@@ -1476,9 +1480,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 project_name: existing.name,
                 year: existing.year,
                 project_number: existing.projectNumber || null,
-                // Total Contract Value only. MSMM portion stays NULL so the
-                // UI shows the derived value (= total − Σ subs); the user
-                // can override from the Invoice expand row if needed.
+                // Total Contract Value only. For a linked MHZ/MHZ PM pair the
+                // database materializes the initial independent MSMM value;
+                // unlinked rows retain the legacy derived fallback.
                 contract_amount: existing.amount ?? null,
               };
               const { data: invRow, error } = await supabase
@@ -1929,9 +1933,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     "may_amount","jun_amount","jul_amount","aug_amount",
     "sep_amount","oct_amount","nov_amount","dec_amount",
   ];
-  // Parallel monthly columns holding MSMM-portion overrides. NULL means
-  // "auto-calc (= total month − Σ sub.amounts[month])"; numeric is a
-  // frozen override. Same semantic as msmm_amount on the contract field.
+  // Authoritative monthly MSMM values for linked MHZ/MHZ PM projects.
   const INVOICE_MSMM_MONTH_COLS = [
     "msmm_jan_amount","msmm_feb_amount","msmm_mar_amount","msmm_apr_amount",
     "msmm_may_amount","msmm_jun_amount","msmm_jul_amount","msmm_aug_amount",
@@ -1981,8 +1983,57 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         if (error) showToast(`Save failed: ${error.message}`, "x");
       });
   };
-  // (MSMM monthly values are purely derived — Total − subs — so there is no
-  // MSMM month write path anymore; the cells are read-only.)
+  const updateInvoiceMsmmCell = (id, monthIdx, value) => {
+    const dbPatch = msmmPatchForMonth(monthIdx, value);
+    const col = INVOICE_MSMM_MONTH_COLS[monthIdx];
+    if (!col || !Object.hasOwn(dbPatch, col)) return;
+    const nextValue = dbPatch[col];
+    const previous = invoice.find(row => row.id === id)?.msmmValues?.[monthIdx] ?? null;
+    setInvoice(rows => rows.map(row => {
+      if (row.id !== id) return row;
+      const msmmValues = [...(row.msmmValues || Array(12).fill(null))];
+      msmmValues[monthIdx] = nextValue;
+      return { ...row, msmmValues };
+    }));
+    supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
+      .then(({ error }) => {
+        if (!error) return;
+        setInvoice(rows => rows.map(row => {
+          if (row.id !== id) return row;
+          const msmmValues = [...(row.msmmValues || Array(12).fill(null))];
+          msmmValues[monthIdx] = previous;
+          return { ...row, msmmValues };
+        }));
+        showToast(`MSMM save failed: ${error.message}`, "x");
+      });
+  };
+
+  const updateInvoiceMsmmFields = (id, patch) => {
+    const dbPatch = msmmFieldPatch(patch);
+    if (Object.keys(dbPatch).length === 0) return;
+    const existing = invoice.find(row => row.id === id);
+    if (!existing) return;
+    const localPatch = {};
+    if (Object.hasOwn(patch, "msmmAmount")) {
+      localPatch.msmmAmount = dbPatch.msmm_amount;
+    }
+    if (Object.hasOwn(patch, "remainingStart")) {
+      localPatch.remainingStart = dbPatch.msmm_remaining_to_bill_year_start;
+    }
+    setInvoice(rows => rows.map(row => row.id === id ? { ...row, ...localPatch } : row));
+    supabase.from("anticipated_invoice").update(dbPatch).eq("id", id)
+      .then(({ error }) => {
+        if (!error) return;
+        setInvoice(rows => rows.map(row => row.id === id
+          ? {
+              ...row,
+              ...(Object.hasOwn(localPatch, "msmmAmount") ? { msmmAmount: existing.msmmAmount } : {}),
+              ...(Object.hasOwn(localPatch, "remainingStart") ? { remainingStart: existing.remainingStart } : {}),
+            }
+          : row));
+        showToast(`MSMM save failed: ${error.message}`, "x");
+      });
+  };
   // Prime/total invoice per-month paid toggle. Flips one boolean column
   // (jan_paid..dec_paid) on anticipated_invoice — the prime analogue of the
   // sub paid toggle. Optimistic local flip so the Project total cell turns
@@ -2361,6 +2412,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setInvoice(rs => rs.some(r => r.id === sibling.id)
         ? rs
         : [...rs, { ...adaptInvoiceRow(sibling, { role }), pmIds }]);
+      // The database trigger materializes the base row's independent MSMM
+      // values only after the linked pair exists. INSERT ... RETURNING can
+      // therefore contain the pre-trigger/null shape for the first member of
+      // the pair. Re-read both rows so the black MSMM sub cell is authoritative
+      // immediately, without requiring a page reload.
+      const materializedIds = [dbRow.id, sibling.id].filter(Boolean);
+      const { data: materialized, error: materializedError } = await supabase
+        .from("anticipated_invoice")
+        .select([
+          "id", "msmm_amount", "msmm_remaining_to_bill_year_start",
+          ...INVOICE_MSMM_MONTH_COLS,
+        ].join(","))
+        .in("id", materializedIds);
+      if (materializedError) throw materializedError;
+      const materializedById = new Map((materialized || []).map(row => [row.id, row]));
+      setInvoice(rs => rs.map(row => {
+        const stored = materializedById.get(row.id);
+        if (!stored) return row;
+        return {
+          ...row,
+          msmmAmount: stored.msmm_amount ?? null,
+          remainingStart: stored.msmm_remaining_to_bill_year_start ?? null,
+          msmmValues: INVOICE_MSMM_MONTH_COLS.map(column => stored[column] ?? null),
+        };
+      }));
       showToast(`${siblingType} perspective added and linked`, "link");
       return sibling;
     } catch (e) {
@@ -2439,6 +2515,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const editInvoiceTotalMonth = async (mergedRow, year, monthIdx, v) => {
     const id = await resolveInvoiceYearId(mergedRow, year);
     if (id) updateInvoiceCell(id, monthIdx, v);
+  };
+  const editInvoiceMsmmMonth = async (mergedBaseRow, year, monthIdx, v) => {
+    const id = await resolveInvoiceYearId(mergedBaseRow, year);
+    if (id) updateInvoiceMsmmCell(id, monthIdx, v);
   };
   const editInvoicePrimePaidMonth = async (mergedRow, year, monthIdx, paid) => {
     const id = await resolveInvoiceYearId(mergedRow, year);
@@ -2606,7 +2686,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
   // The invoice rows + sub matrix get re-fetched together so primeFiles/files
   // stay in sync with whatever the user just saved.
-  const refreshInvoiceArtifacts = async ({ baseMonthUpdates = [], monthIdx = null } = {}) => {
+  const refreshInvoiceArtifacts = async () => {
     try {
       const allProjects = [...potential, ...awaiting, ...awarded, ...closed];
       const allCompaniesOrClients = [...clients, ...companies];
@@ -2614,65 +2694,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         reloadInvoiceArtifacts(allProjects, allCompaniesOrClients),
         reloadInvoicePartyFiles(),
       ]);
-      const baseMonthById = new Map(baseMonthUpdates.map(update => [update.id, update.value]));
-      // Publish the rebased base month and refreshed sub matrix in the same
-      // React batch. Rendering either side alone temporarily moves the derived
-      // MSMM cell — exactly the project-012 July 2024 symptom.
-      setInvoice(rows => rows.map(inv => {
-        let next = inv;
-        if (monthIdx != null && baseMonthById.has(inv.id)) {
-          const values = [...(inv.values || Array(12).fill(0))];
-          values[monthIdx] = baseMonthById.get(inv.id);
-          next = { ...next, values };
-        }
-        return {
-          ...next,
+      setInvoice(rows => rows.map(inv => ({
+          ...inv,
           primeFiles: Array.from({ length: 12 }, (_, i) =>
             primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
           ),
           partyFiles: partyFilesByInvoice.get(inv.id) || { msmm: [], prime: {}, sub: {} },
-        };
-      }));
+      })));
       setSubInvoices(subInvoicesMatrix);
     } catch (e) {
       showToast(`Reload failed: ${e?.message || e}`, "x");
     }
-  };
-
-  // Linked ENG/PM rows keep the historical reconciliation representation:
-  // stored total = MSMM + shared subs. When a shared sub value changes, move
-  // the base stored total by the same delta so MSMM itself stays unchanged.
-  const rebaseLinkedBaseContractTotals = async (projectId, oldSubValue, newSubValue) => {
-    const updates = linkedBaseInvoiceRowsForSubRebase(invoice, projectId).map(row => ({
-      id: row.id,
-      amount: rebaseStoredTotalForSubChange(row.amount, oldSubValue, newSubValue),
-    }));
-    if (updates.length === 0) return [];
-    const results = await Promise.all(updates.map(({ id, amount }) =>
-      supabase.from("anticipated_invoice").update({ contract_amount: amount }).eq("id", id)
-    ));
-    const failure = results.find(result => result.error)?.error;
-    if (failure) throw failure;
-    return updates;
-  };
-
-  const rebaseLinkedBaseMonthTotals = async (
-    projectId, year, monthIdx, oldSubValue, newSubValue
-  ) => {
-    const col = INVOICE_MONTH_COLS[monthIdx];
-    if (!col) return [];
-    const updates = linkedBaseInvoiceRowsForSubRebase(invoice, projectId, year).map(row => ({
-      id: row.id,
-      value: rebaseStoredTotalForSubChange(
-        row.values?.[monthIdx], oldSubValue, newSubValue),
-    }));
-    if (updates.length === 0) return [];
-    const results = await Promise.all(updates.map(({ id, value }) =>
-      supabase.from("anticipated_invoice").update({ [col]: value }).eq("id", id)
-    ));
-    const failure = results.find(result => result.error)?.error;
-    if (failure) throw failure;
-    return updates;
   };
 
   // Toggle paid status for a single (project, sub, month) cell. Ensures the
@@ -2711,10 +2743,6 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value, kind = "sub", year = THIS_YEAR) => {
     try {
       const cleaned = value === "" || value == null ? null : Number(value);
-      const currentEntry = (subInvoices.get(projectId) || []).find(entry =>
-        entry.companyId === companyId && (entry.kind || "sub") === kind);
-      const oldValue = currentEntry?.byYear?.[year]?.amounts?.[monthIdx]
-        ?? (Number(year) === Number(THIS_YEAR) ? currentEntry?.amounts?.[monthIdx] : null);
       await upsertSubInvoiceAmount({
         projectId, companyId,
         year,
@@ -2722,24 +2750,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         amount: cleaned,
         kind,
       });
-      let baseMonthUpdates = [];
-      if (kind === "sub" && Number(oldValue || 0) !== Number(cleaned || 0)) {
-        try {
-          baseMonthUpdates = await rebaseLinkedBaseMonthTotals(
-            projectId, year, monthIdx, oldValue, cleaned);
-        } catch (rebaseError) {
-          // Keep the two writes logically atomic from the user's perspective.
-          await upsertSubInvoiceAmount({
-            projectId, companyId,
-            year,
-            month: monthIdx + 1,
-            amount: oldValue ?? null,
-            kind,
-          });
-          throw rebaseError;
-        }
-      }
-      await refreshInvoiceArtifacts({ baseMonthUpdates, monthIdx });
+      await refreshInvoiceArtifacts();
     } catch (e) {
       showToast(`Invoice save failed: ${e?.message || e}`, "x");
     }
@@ -2753,35 +2764,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateSubMeta = async ({ projectId, companyId, kind = "sub", patch }) => {
     if (!patch || Object.keys(patch).length === 0) return;
     try {
-      const currentEntry = (subInvoices.get(projectId) || []).find(entry =>
-        entry.companyId === companyId && (entry.kind || "sub") === kind);
-      const oldContractAmount = Number(currentEntry?.contractAmount || 0);
-      const newContractAmount = (patch.amount === "" || patch.amount == null)
-        ? 0 : Number(patch.amount);
       await updateProjectSub({ projectId, companyId, kind, ...patch });
-      let baseContractUpdates = [];
-      if (
-        kind === "sub" && patch.amount !== undefined &&
-        oldContractAmount !== newContractAmount
-      ) {
-        try {
-          baseContractUpdates = await rebaseLinkedBaseContractTotals(
-            projectId, oldContractAmount, newContractAmount);
-        } catch (rebaseError) {
-          await updateProjectSub({
-            projectId, companyId, kind, amount: oldContractAmount,
-          });
-          throw rebaseError;
-        }
-      }
-
-      const baseContractById = new Map(
-        baseContractUpdates.map(update => [update.id, update.amount]));
-      setInvoice(rows => rows.map(row =>
-        baseContractById.has(row.id)
-          ? { ...row, amount: baseContractById.get(row.id) }
-          : row
-      ));
 
       // 1) Patch the matrix entry (Invoice tab + Receivables read this).
       setSubInvoices(prev => {
@@ -3407,8 +3390,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           id: rest.id, sourceId: row.id,
           projectNumber: rest.projectNumber, name: rest.name,
           pmIds: [...(rest.pmIds || [])], amount: rest.amount || 0,
-          msmmAmount: null,                       // auto-calc by default
-          msmmValues: Array(12).fill(null),       // auto-calc per month
+          msmmAmount: null,                       // materialized when an HZ pair exists
+          msmmValues: Array(12).fill(null),       // materialized when an HZ pair exists
           type: invType,
           remainingStart: rest.msmmRemaining ?? null,
           values: Array(12).fill(0),
@@ -3433,7 +3416,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 project_number: rest.projectNumber || null,
                 year: rest.year ?? THIS_YEAR,
                 contract_amount: rest.amount ?? null,
-                // MSMM portion stays NULL → auto-calc in the expand row.
+                // A linked pair's MSMM is materialized by the DB trigger.
                 type: invType,
                 msmm_remaining_to_bill_year_start: rest.msmmRemaining ?? null,
               }).select().single();
@@ -3497,7 +3480,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               project_number: rest.projectNumber || null,
               year: rest.year,
               contract_amount: rest.amount ?? null,
-              // MSMM portion stays NULL → auto-calc in the expand row.
+              // A linked pair's MSMM is materialized by the DB trigger.
               type: _invoiceType || "ENG",
               msmm_remaining_to_bill_year_start: rest.msmm ?? null,
             }).select().single();
@@ -3866,8 +3849,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         name: row.name,
         pmIds: [...(row.pmIds || [])],
         amount: invAmt || 0,
-        msmmAmount: null,                       // auto-calc by default
-        msmmValues: Array(12).fill(null),       // auto-calc per month
+        msmmAmount: null,                       // materialized when an HZ pair exists
+        msmmValues: Array(12).fill(null),       // materialized when an HZ pair exists
         type: invType,
         remainingStart: invRem ?? null,
         values: Array(12).fill(0),
@@ -3901,7 +3884,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               project_number: row.projectNumber || null,
               year: row.year ?? null,
               contract_amount: invAmt,
-              // MSMM portion stays NULL → auto-calc.
+              // A linked pair's MSMM is materialized by the DB trigger.
               type: invType,
               msmm_remaining_to_bill_year_start: invRem,
             }).select().single();
@@ -4245,9 +4228,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         projectNumber: ir.project_number || uiRow.projectNumber || "",
         name: ir.project_name || uiRow.name,
         pmIds: [...(uiRow.pmIds || [])],
-        // Orange invoice INSERT (forms.jsx) writes only contract_amount =
-        // potential.total_contract_amount. MSMM is purely derived (Total − subs),
-        // never stored, so the stub carries no MSMM override.
+        // Orange invoice INSERT writes only contract_amount. If an HZ sibling
+        // is created, the DB trigger materializes its independent MSMM value.
         amount: ir.contract_amount ?? uiRow.amount ?? 0,
         msmmAmount: null,
         type: "ENG",
@@ -4459,25 +4441,52 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         .filter(Boolean).join("_") + `_${date}.pdf`;
     }
 
-    // Helpers — mirror tables.jsx (subListFor / primeListFor /
-    // msmmAtMonth / msmmContractShown) so PDF numbers match the UI.
+    // Helpers — mirror tables.jsx so PDF numbers match the UI. For MHZ/MHZ PM,
+    // the first row is the project remainder and MSMM is an independent sub
+    // sourced from the linked ENG/PM row.
     const allEntriesFor = (r) => subInvoices?.get(r.sourceId) || [];
     const subListFor    = (r) => allEntriesFor(r).filter(s => (s.kind || "sub") === "sub");
     const primeListFor  = (r) => allEntriesFor(r).filter(s => s.kind === "prime");
-    const msmmAtMonth = (r, i) => {
-      // Purely derived (mirrors tables.jsx) — stored override no longer consulted.
-      const total = Number(r.values?.[i] || 0);
-      const subSum = subListFor(r).reduce(
-        (a, s) => a + Number((s.amounts && s.amounts[i]) || 0), 0);
-      return total - subSum;
+    const msmmSourceFor = (r) => {
+      if (!isHzPrimeType(r.type)) return r;
+      const baseType = r.type === "MHZ PM" ? "PM" : "ENG";
+      const number = normInvoiceNumber(r.projectNumber);
+      return invoiceMerged.find(candidate =>
+        (candidate.type || "ENG") === baseType && (
+          (r.sourceId && candidate.sourceId === r.sourceId) ||
+          (number && normInvoiceNumber(candidate.projectNumber) === number)
+        )) || r;
     };
-    const msmmContractAuto = (r) => {
-      const total = Number(r.amount || 0);
-      const subSum = subListFor(r).reduce(
-        (a, s) => a + Number(s.contractAmount || 0), 0);
-      return total - subSum;
+    const storedMsmmAtMonth = (r, i) => {
+      const source = msmmSourceFor(r);
+      return linkedMsmmValue({
+        linked: isMhzPerspectiveSub(source, invoiceMerged),
+        storedValue: source.msmmValues?.[i],
+        total: source.values?.[i],
+        subValues: subListFor(source).map(s => s.amounts?.[i]),
+      });
     };
-    const msmmContractShown = (r) => msmmContractAuto(r);
+    const storedMsmmContract = (r) => {
+      const source = msmmSourceFor(r);
+      return linkedMsmmValue({
+        linked: isMhzPerspectiveSub(source, invoiceMerged),
+        storedValue: source.msmmAmount,
+        total: source.amount,
+        subValues: subListFor(source).map(s => s.contractAmount),
+      });
+    };
+    const firstRowAtMonth = (r, i) => isHzPrimeType(r.type)
+      ? invoiceRemainderValue(r.values?.[i], [
+          ...subListFor(r).map(s => s.amounts?.[i]),
+          storedMsmmAtMonth(r, i),
+        ])
+      : storedMsmmAtMonth(r, i);
+    const firstRowContract = (r) => isHzPrimeType(r.type)
+      ? invoiceRemainderValue(r.amount, [
+          ...subListFor(r).map(s => s.contractAmount),
+          storedMsmmContract(r),
+        ])
+      : storedMsmmContract(r);
 
     // Build the column list. Reuse regular-export columns BUT replace the
     // parent row's monthly accessor — for `_kind === "project"` we render
@@ -4491,7 +4500,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           ...c,
           get: (r) => {
             const v = r._kind === "project"
-              ? msmmAtMonth(r, monthIdx)
+              ? firstRowAtMonth(r, monthIdx)
               : (r.values?.[monthIdx] ?? 0);
             return v ? fmtMoney(v) : "";
           },
@@ -4501,7 +4510,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         return {
           ...c,
           get: (r) => {
-            const v = r._kind === "project" ? msmmContractShown(r) : (r.amount ?? 0);
+            const v = r._kind === "project" ? firstRowContract(r) : (r.amount ?? 0);
             return v != null ? fmtMoney(v) : "";
           },
         };
@@ -4512,7 +4521,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           get: (r) => {
             if (r._kind === "project") {
               if (r.ytdActualOverride != null) return fmtMoney(r.ytdActualOverride);
-              const ytd = Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i))
+              const ytd = Array.from({ length: 12 }, (_, i) => firstRowAtMonth(r, i))
                 .reduce((a, b) => a + b, 0);
               return fmtMoney(ytd);
             }
@@ -4529,11 +4538,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         return {
           ...c,
           get: (r) => {
-            const contract = r._kind === "project" ? msmmContractShown(r) : Number(r.amount ?? 0);
+            const contract = r._kind === "project" ? firstRowContract(r) : Number(r.amount ?? 0);
             const billed = r._kind === "project"
               ? (r.ytdActualOverride != null
                   ? Number(r.ytdActualOverride)
-                  : Array.from({ length: 12 }, (_, i) => msmmAtMonth(r, i)).reduce((a, b) => a + b, 0))
+                  : Array.from({ length: 12 }, (_, i) => firstRowAtMonth(r, i)).reduce((a, b) => a + b, 0))
               : (r.values || []).reduce((a, b) => a + (b || 0), 0);
             return fmtMoney(Number(contract || 0) - billed);
           },
@@ -4572,8 +4581,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     });
     const expandedRows = [];
     projectRows.forEach((r, idx) => {
-      // Parent row = MSMM view
-      expandedRows.push({ ...r, _kind: "project" });
+      // Parent row = the same white first row shown in the table.
+      const msmmSource = msmmSourceFor(r);
+      const firstRemaining = isHzPrimeType(r.type)
+        ? invoiceRemainderValue(r.totalRemainingStart ?? r.amount, [
+            ...subListFor(r).map(s => s.remainingStart ?? s.contractAmount),
+            msmmSource.remainingStart ?? storedMsmmContract(r),
+          ])
+        : (msmmSource.remainingStart ?? storedMsmmContract(r));
+      expandedRows.push({ ...r, _kind: "project", remainingStart: firstRemaining });
 
       // Sub rows
       for (const sub of subListFor(r)) {
@@ -4588,6 +4604,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           amount: Number(sub.contractAmount) || 0,
           remainingStart: Number(sub.contractAmount) || 0,
           values: amounts,
+          msmmValues: null,
+          ytdActualOverride: null,
+          rollforwardOverride: null,
+          sourceId: null,
+        });
+      }
+
+      // In the HZ perspectives MSMM is a normal sub row. Its stored values are
+      // never replaced by edits to another sub or to the project total.
+      if (isHzPrimeType(r.type)) {
+        expandedRows.push({
+          _kind: "sub",
+          id: `${r.id}::sub::msmm`,
+          name: "    Sub · MSMM",
+          type: "Sub",
+          pmIds: [],
+          amount: storedMsmmContract(r),
+          remainingStart: msmmSource.remainingStart,
+          values: Array.from({ length: 12 }, (_, i) => storedMsmmAtMonth(r, i)),
           msmmValues: null,
           ytdActualOverride: null,
           rollforwardOverride: null,
@@ -4818,7 +4853,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const win = manishMonthDescsBetween(w.startYear, w.startMonth, w.endYear, w.endMonth);
       if (win.length === 0) throw new Error("No dated invoice data for the selected type(s).");
       const periodText = `${win[0].label} – ${win[win.length - 1].label} · all projects`;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
+      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_all_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
@@ -4826,7 +4861,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const years = options.years || [];
       if (years.length === 0) throw new Error("Select at least one year.");
       const built = buildManishYearSheets({
-        years, baseRows, subInvoices,
+        years, baseRows, allRows: invoiceMerged, subInvoices,
         titleFor: (y) => titleFor(String(y)),
         isActualMonth: isActualInvoiceMonth,
       });
@@ -4837,14 +4872,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const win = manishMonthDescsBetween(options.startYear, options.startMonth, options.endYear, options.endMonth);
       if (win.length === 0) throw new Error("End date must be after the start date.");
       const periodText = `${win[0].label} – ${win[win.length - 1].label}`;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
+      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
     } else {
       const win = invWindowMonths;
       const periodText = `${win[0].label} – ${win[win.length - 1].label} (rolling window)`;
-      const data = buildManishExportData({ baseRows, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
+      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
@@ -5286,6 +5321,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               cutoverDay: appSettings.invoiceActualCutoverDay,
               cutoverNextMonth: appSettings.invoiceActualCutoverNextMonth,
               updateInvoice: editInvoiceTotalMonth,
+              updateMsmmMonth: editInvoiceMsmmMonth,
+              updateMsmmFields: updateInvoiceMsmmFields,
               updateRow: updateInvoice,
               onOpenDrawer: r => openDrawer(r, "invoice"),
               onAlert: r => setAlertObj({ row: r, tab: "invoice" }),
@@ -5304,7 +5341,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               onSaveEgnyteFolder: saveInvoiceProjectEgnyteFolder,
               onNotesChanged: (id, log) => setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r)),
               canEditMsmm: isAdmin,
-              onBlockedMsmmEdit: () => showToast("MSMM values are auto-calculated — only an admin can edit them. Edit the Total (or a sub) instead.", "lock"),
+              onBlockedMsmmEdit: () => showToast("This legacy first-row value is calculated from the total and subs.", "lock"),
               onNew: () => setCreateTable("invoice"),
               // No pause/resume/close-out from the detail view — it shows the
               // project's invoice rows across ALL billing states, so a single
@@ -5585,6 +5622,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     cutoverDay={appSettings.invoiceActualCutoverDay}
                     cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
                     updateInvoice={editInvoiceTotalMonth}
+                    updateMsmmMonth={editInvoiceMsmmMonth}
+                    updateMsmmFields={updateInvoiceMsmmFields}
                     updateRow={updateInvoice}
                     onOpenDrawer={r => openDrawer(r, "invoice")}
                     onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
@@ -5605,7 +5644,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     onNotesChanged={(id, log) =>
                       setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
                     canEditMsmm={isAdmin}
-                    onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
+                    onBlockedMsmmEdit={() => showToast("This legacy first-row value is calculated from the total and subs.", "lock")}
                     typeFilter={invoiceTypeFilter}
                     setTypeFilter={setInvoiceTypeFilter}
                     billingMode="closed"
@@ -5649,6 +5688,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             <>
               <InvoiceCharts
                 rows={filtered.invoice}
+                allRows={invoiceMerged}
                 windowMonths={invWindowMonths}
                 orangeSourceIds={orangeSourceIds}
                 monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
@@ -5663,6 +5703,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 cutoverDay={appSettings.invoiceActualCutoverDay}
                 cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
                 updateInvoice={editInvoiceTotalMonth}
+                updateMsmmMonth={editInvoiceMsmmMonth}
+                updateMsmmFields={updateInvoiceMsmmFields}
                 updateRow={updateInvoice}
                 onOpenDrawer={r => openDrawer(r, "invoice")}
                 onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
@@ -5683,7 +5725,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 onNotesChanged={(id, log) =>
                   setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
                 canEditMsmm={isAdmin}
-                onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
+                onBlockedMsmmEdit={() => showToast("This legacy first-row value is calculated from the total and subs.", "lock")}
                 onNew={() => setCreateTable("invoice")}
                 typeFilter={invoiceTypeFilter}
                 setTypeFilter={setInvoiceTypeFilter}
@@ -5720,6 +5762,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             cutoverDay={appSettings.invoiceActualCutoverDay}
             cutoverNextMonth={appSettings.invoiceActualCutoverNextMonth}
             updateInvoice={editInvoiceTotalMonth}
+            updateMsmmMonth={editInvoiceMsmmMonth}
+            updateMsmmFields={updateInvoiceMsmmFields}
             updateRow={updateInvoice}
             onOpenDrawer={r => openDrawer(r, "invoice")}
             onAlert={r => setAlertObj({ row: r, tab: "invoice" })}
@@ -5740,7 +5784,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onNotesChanged={(id, log) =>
               setInvoice(rows => rows.map(r => r.id === id ? { ...r, notesLog: log } : r))}
             canEditMsmm={isAdmin}
-            onBlockedMsmmEdit={() => showToast("MSMM is auto-calculated (Total − subs). Edit the Total or a sub to change it.", "lock")}
+            onBlockedMsmmEdit={() => showToast("This legacy first-row value is calculated from the total and subs.", "lock")}
             typeFilter={invoiceTypeFilter}
             setTypeFilter={setInvoiceTypeFilter}
             billingMode="between"

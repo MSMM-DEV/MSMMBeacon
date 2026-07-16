@@ -302,8 +302,8 @@ export const DetailDrawer = ({
       { k: "type",           label: "Type",                    type: "select", options: INVOICE_TYPE_OPTIONS },
       { k: "pmIds",          label: "PMs",                     type: "users" },
       { k: "amount",         label: "Total Contract Value",    type: "money" },
-      // MSMM Portion is purely derived (Total − subs) and shown read-only on the
-      // Invoice table's parent row — no drawer field (it isn't stored).
+      // Linked-pair MSMM is edited on the expanded HZ sub row, not in this
+      // project-level drawer. Unlinked rows keep their legacy derived fallback.
       { k: "remainingStart", label: "Rollforward (from 2025)",   type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
       { k: "description",    label: "Description",             type: "textarea", placeholder: "Project scope / description…" },
       // Notes moved to the threaded, multi-author Notes log — opened from the

@@ -103,7 +103,8 @@ const DB_COLUMNS = {
   // anticipated_invoice_pms join in the second insert step.
   invoice: [
     "project_name", "year", "project_number", "type",
-    // msmm_amount is intentionally omitted — MSMM is purely derived (Total − subs).
+    // msmm_amount is omitted here; linked HZ pair creation materializes it and
+    // users edit it from the expanded MSMM sub row.
     "contract_amount", "msmm_remaining_to_bill_year_start",
   ],
   // beacon_v2.open_bids — pre-Awaiting tracker. PDF upload is NOT a DB column;
@@ -1325,8 +1326,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
                    style={{ fontFamily: "var(--font-mono)" }}
                    placeholder="0"/>
           </Field>
-          {/* MSMM Portion is purely derived (Total − subs) and read-only on the
-              Invoice tab — no create-time override field. */}
+          {/* Linked-pair MSMM is initialized when the HZ sibling is created and
+              edited from its expanded sub row — no create-time field here. */}
           <Field label="MSMM Rollforward (carry-in from 2025)">
             <input className="input" type="number"
                    value={form.msmm_remaining_to_bill_year_start}

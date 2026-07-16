@@ -33,7 +33,7 @@ import {
   hzTypeForBase,
   invoiceRemainderValue,
   basePerspectiveOwnValue,
-  basePerspectiveStoredTotal,
+  linkedMsmmValue,
   perspectiveSubListBase,
 } from "./invoice-perspectives.js";
 import { setCurrentTableSnapshot } from "./table-state.js";
@@ -1991,7 +1991,8 @@ const SUB_DOCS = [
 ];
 
 export const InvoiceTable = ({
-  tab, rows, updateInvoice, updateRow = _noopUpdate,
+  tab, rows, updateInvoice, updateMsmmMonth, updateMsmmFields,
+  updateRow = _noopUpdate,
   onOpenDrawer, onAlert, flashId,
   // Rolling month window — a descriptor list { abs, year, monthIdx, mon, yy,
   // label } (default = prev 3 + current + next 12 = 16 months) shared with the
@@ -2016,8 +2017,8 @@ export const InvoiceTable = ({
   onRemoveSub,       // ({projectId, companyId, kind, companyName}) => void  — × button on sub row
   onNew,             // () => void  — opens the New Invoice CreateModal
   onNotesChanged,    // (invoiceId, notesLog) => void  — sync the threaded Notes count back to App state
-  canEditMsmm = true,   // Admin? The MSMM/parent-row dollar cells are auto-calc; non-admins can't edit them.
-  onBlockedMsmmEdit,    // () => void  — fired when a non-admin clicks a locked MSMM cell (shows a toast)
+  canEditMsmm = true,   // Admin? Applies only to legacy/unlinked ENG/PM MSMM cells.
+  onBlockedMsmmEdit,    // () => void  — fired when a locked legacy MSMM cell is clicked.
   // Billing-state surface: 'active' (Invoices tab), 'between' (In-Between tab),
   // or 'closed' (Closed Out tab). Drives which transition actions render on each
   // row — pause on Invoices; resume + close-out on In-Between; reopen on Closed
@@ -2058,15 +2059,17 @@ export const InvoiceTable = ({
   // MSMM, for cross-reference); it must not be subtracted from Total CV.
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
-  // ENG/PM stores a reconciliation total and derives MSMM as Total − Σ subs.
-  // Sub-edit handlers rebase that stored total by the sub delta so the derived
-  // MSMM value remains independent when another sub changes.
   const msmmContractAuto = (r) => {
     const total = Number(r.amount || 0);
     const subValues = subListFor(r).map(s => s.contractAmount);
     return basePerspectiveOwnValue(total, subValues);
   };
-  const msmmContractShown = (r) => msmmContractAuto(r);
+  const msmmContractShown = (r) => linkedMsmmValue({
+    linked: isMhzPerspectiveSub(r, rows),
+    storedValue: r.msmmAmount,
+    total: r.amount,
+    subValues: subListFor(r).map(s => s.contractAmount),
+  });
 
   // ---- Rolling-window month accessors -------------------------------------
   // Each visible month is a descriptor d = { year, monthIdx, mon, label } from
@@ -2076,8 +2079,6 @@ export const InvoiceTable = ({
   // r.values[i] directly, since index i is no longer "month i of one year".
   const yrow = (r, year) => r?.byYear?.[year] || null;
   const valAtDesc          = (r, d) => Number(yrow(r, d.year)?.values?.[d.monthIdx] || 0);
-  // There is no stored msmm monthly override accessor. Linked base rows store
-  // MSMM directly; unlinked rows derive it from their project month and subs.
   const primePaidAtDesc    = (r, d) => !!(yrow(r, d.year)?.primePaid?.[d.monthIdx]);
   const primeFilesAtDesc   = (r, d) => yrow(r, d.year)?.primeFiles?.[d.monthIdx] || [];
   const invNumAtDesc       = (r, d) => yrow(r, d.year)?.invoiceNumbers?.[d.monthIdx] || null;
@@ -2094,28 +2095,22 @@ export const InvoiceTable = ({
     isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual"
     : hasPrimeBillAtDesc(r, d) ? ("month-actual" + (cue ? " month-promoted" : ""))
     : "month-proj";
-  // MSMM's month is the ENG/PM reconciliation month minus sub months.
   const msmmAtDesc = (r, d) => {
-    const total = valAtDesc(r, d);
-    const subValues = subListFor(r).map(s => subAmtAtDesc(s, d));
-    return basePerspectiveOwnValue(total, subValues);
+    const yr = yrow(r, d.year);
+    return linkedMsmmValue({
+      linked: isMhzPerspectiveSub(r, rows),
+      storedValue: yr?.msmmValues?.[d.monthIdx],
+      total: yr?.values?.[d.monthIdx],
+      subValues: subListFor(r).map(s => subAmtAtDesc(s, d)),
+    });
   };
-  // MSMM monthly billing IS editable on a linked ENG/MHZ project — from the MHZ
-  // "MSMM · sub" line AND the ENG Project-total row (both are MSMM's own
-  // portion). Typing MSMM stores MSMM + Σ subs on the base row.
   const setMsmmMonth = (row, d, v) => {
     const typed = (v == null || v === "") ? 0 : Number(v);
-    const subValues = subListFor(row).map(s => subAmtAtDesc(s, d));
-    const stored = basePerspectiveStoredTotal(typed, subValues);
-    updateInvoice?.(row, d.year, d.monthIdx, stored);
+    updateMsmmMonth?.(row, d.year, d.monthIdx, typed);
   };
-  // MSMM CONTRACT (base total − Σ sub contracts) is editable from the same two
-  // places as the months. The base row stores the typed value + Σ subs.
   const setMsmmContract = (row, v) => {
     const typed = (v == null || v === "") ? 0 : Number(v);
-    const subValues = subListFor(row).map(s => s.contractAmount);
-    const stored = basePerspectiveStoredTotal(typed, subValues);
-    updateRow(row.id, { amount: stored });
+    updateMsmmFields?.(row.id, { msmmAmount: typed });
   };
   // YTD Actual = ALL the actuals for the project, summed across EVERY year in
   // byYear (the rolling-window definition — not just the current year). Computed
@@ -2123,9 +2118,12 @@ export const InvoiceTable = ({
   const yearsOf = (r) => Object.keys(r?.byYear || {}).map(Number);
   const msmmAtYM = (r, year, m) => {
     const yr = yrow(r, year); if (!yr) return 0;
-    const total = Number(yr.values?.[m] || 0);
-    const subValues = subListFor(r).map(s => s?.byYear?.[year]?.amounts?.[m]);
-    return basePerspectiveOwnValue(total, subValues);
+    return linkedMsmmValue({
+      linked: isMhzPerspectiveSub(r, rows),
+      storedValue: yr.msmmValues?.[m],
+      total: yr.values?.[m],
+      subValues: subListFor(r).map(s => s?.byYear?.[year]?.amounts?.[m]),
+    });
   };
   // ---- Total Billed = Contract − Rollforward + Actuals (client direction) ----
   // Rollforward = "remaining to bill at year start"; Contract − Rollforward is
@@ -3079,14 +3077,14 @@ export const InvoiceTable = ({
                           ? "Auto-calculated · Project total − all sub rows, including MSMM"
                           : "MSMM Portion is auto-calculated as Total Contract Value − Σ subs. Edit the Total or a sub to change it."}>
                       <EditableCell value={firstRowContract(r)} type="number"
-                        disabled onBlocked={onBlockedMsmmEdit}
+                        disabled onBlocked={isMhzRow ? undefined : onBlockedMsmmEdit}
                         format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                     </td>
                     {isMhzRow ? (
                       <td className="mono msmm-locked"
                           title="Auto-calculated · Project total Rollforward − all sub-row Rollforward values, including MSMM">
                         <EditableCell value={firstRowRollforward(r)} type="number"
-                          disabled onBlocked={onBlockedMsmmEdit}
+                          disabled
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
                     ) : (
@@ -3098,17 +3096,12 @@ export const InvoiceTable = ({
                           format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                       </td>
                     )}
-                    {/* Parent-row month cells show MSMM monthly values —
-                        auto-calc = total[i] − Σ sub.amounts[i]; override
-                        via msmm_{jan..dec}_amount. Prime invoice file
-                        attachments live on the Project total row in the
-                        expand block (= the project's prime billing PDFs,
-                        not the MSMM-portion view). */}
+                    {/* The white first-row months are read-only earned-value
+                        remainders. In MHZ/MHZ PM they subtract every expanded
+                        sub row, including independently stored MSMM. */}
                     {windowMonths.map((d, wi) => {
-                      // Parent (white) row month value = the earned value for that
-                      // month (auto-calculated, month total − Σ sub month) — MSMM's
-                      // for ENG/PM, MHZ's for MHZ/MHZ PM. Read-only; edit the
-                      // monthly totals on the Project total row in the expand.
+                      // Parent (white) row month value = earned value for the
+                      // month. Read-only; edit the project total or a sub row.
                       const shown      = firstRowMonth(r, d);
                       // Read-only mirror of the Project total row's status for
                       // this month (paid top-left, attachment top-right) so the
@@ -3122,7 +3115,7 @@ export const InvoiceTable = ({
                             ? "Auto-calculated · Project total month − all sub-row month values, including MSMM"
                             : "Earned value for this month — auto-calculated (month total − Σ subs). Edit the monthly total on the Project total row."}>
                         <EditableCell value={shown} type="number"
-                          disabled onBlocked={onBlockedMsmmEdit}
+                          disabled onBlocked={isMhzRow ? undefined : onBlockedMsmmEdit}
                           format={v => v ? fmtMoney(v) : <span style={{ opacity: .4 }}>—</span>}
                         />
                         {totalPaid && (
@@ -3385,8 +3378,7 @@ export const InvoiceTable = ({
                           <span className="empty-cell">—</span>
                         ) : s.syntheticPerspective ? (
                           <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
-                            disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                            onChange={v => updateRow(s.perspectiveBaseRow.id, { remainingStart: v })}
+                            onChange={v => updateMsmmFields?.(s.perspectiveBaseRow.id, { remainingStart: v })}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
@@ -3623,7 +3615,7 @@ export const InvoiceTable = ({
                         {mhzPerspectiveSub ? (
                           <EditableCell value={r.remainingStart != null ? r.remainingStart : (msmmContractShown(r) || null)} type="number"
                             disabled={!canEditMsmm} onBlocked={onBlockedMsmmEdit}
-                            onChange={v => updateRow(r.id, { remainingStart: v })}
+                            onChange={v => updateMsmmFields?.(r.id, { remainingStart: v })}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
                           <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"

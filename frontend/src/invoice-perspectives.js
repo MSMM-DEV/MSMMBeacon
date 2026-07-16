@@ -25,13 +25,14 @@ const LINKED_INVOICE_SYNC_KEYS = new Set([
   // NOT synced. The two perspectives hold DIFFERENT totals: the hz row (MHZ /
   // MHZ PM) carries the FULL JV contract, while the base row (ENG / PM) carries
   // the reconciliation total MSMM + shared subs. The hz white row is derived as
-  // hz Project total minus every sub, including derived MSMM. Forcing the two
+  // hz Project total minus every sub, including independently stored MSMM.
+  // Forcing the two
   // perspective totals to sync would make an MHZ edit move MSMM too.
   // MSMM edits from the hz view write the base row directly (its own id), which
   // IS "sync to the ENG/PM sibling", so no fan-out is needed for that either.
   //
   // NOTE: msmmAmount / msmmValues are intentionally NOT synced. The base row's
-  // derived MSMM value and the hz row's project total are separate facts.
+  // stored MSMM value and the hz row's project total are separate facts.
   // NOTE: primePaid is intentionally NOT synced either. The base (ENG/PM) row
   // holds MSMM's OWN paid status; the hz (MHZ/MHZ PM) row holds the JV
   // full-total's paid status — independent facts. MSMM's paid stays in lockstep
@@ -204,39 +205,43 @@ export function basePerspectiveOwnValue(total, subValues = []) {
   return invoiceRemainderValue(total, subValues);
 }
 
-// Inverse of basePerspectiveOwnValue for edit handlers.
-export function basePerspectiveStoredTotal(ownValue, subValues = []) {
-  return invoiceNumber(ownValue) + subValues.reduce((sum, value) => sum + invoiceNumber(value), 0);
+// Linked ENG/MHZ and PM/MHZ PM pairs store MSMM independently. NULL remains a
+// deployment-safe fallback for rows that have not yet been materialized by the
+// migration; unlinked ENG/PM rows keep their historical Total − subs behavior.
+export function linkedMsmmValue({
+  linked = false,
+  storedValue = null,
+  total = 0,
+  subValues = [],
+} = {}) {
+  if (linked && storedValue != null && storedValue !== "") {
+    return invoiceNumber(storedValue);
+  }
+  return basePerspectiveOwnValue(total, subValues);
 }
 
-// When a shared sub changes, move the linked ENG/PM reconciliation total by the
-// same delta. Its derived MSMM value then remains an independent user input.
-export function rebaseStoredTotalForSubChange(storedTotal, oldSubValue, newSubValue) {
-  return invoiceNumber(storedTotal) + invoiceNumber(newSubValue) - invoiceNumber(oldSubValue);
+const MSMM_MONTH_COLUMNS = [
+  "msmm_jan_amount", "msmm_feb_amount", "msmm_mar_amount", "msmm_apr_amount",
+  "msmm_may_amount", "msmm_jun_amount", "msmm_jul_amount", "msmm_aug_amount",
+  "msmm_sep_amount", "msmm_oct_amount", "msmm_nov_amount", "msmm_dec_amount",
+];
+
+export function msmmPatchForMonth(monthIdx, value) {
+  const column = MSMM_MONTH_COLUMNS[monthIdx];
+  if (!column) return {};
+  return { [column]: value == null || value === "" ? null : Number(value) };
 }
 
-// Resolve the exact flat ENG/PM year-row that backs the synthetic MSMM line
-// for a sub edit. This deliberately works on the unmerged invoice slice: a
-// merged MHZ project can display its JV number from a current-year row while
-// an edited historical month (project 012 / July 2024) lives on a different
-// flat row. Matching the requested year prevents the current-year base amount
-// from being changed in place of the historical value shown in the table.
-export function linkedBaseInvoiceRowsForSubRebase(rows = [], projectId, year = null) {
-  if (!projectId) return [];
-  return rows.filter(row => {
-    if (row?.sourceId !== projectId) return false;
-    if (year != null && Number(row.year) !== Number(year)) return false;
-    const rowType = row.type || "ENG";
-    const pair = perspectivePairOf(rowType);
-    if (!pair || pair.base !== rowType) return false;
-    const rowNumber = normInvoicePerspectiveNumber(row.projectNumber);
-    return rows.some(other =>
-      other?.id !== row.id &&
-      (other?.type || "ENG") === pair.hz &&
-      (
-        (row.sourceId && other?.sourceId === row.sourceId) ||
-        (rowNumber && normInvoicePerspectiveNumber(other?.projectNumber) === rowNumber)
-      )
-    );
-  });
+export function msmmFieldPatch(patch = {}) {
+  const out = {};
+  if (Object.hasOwn(patch, "msmmAmount")) {
+    out.msmm_amount = patch.msmmAmount == null || patch.msmmAmount === ""
+      ? null : Number(patch.msmmAmount);
+  }
+  if (Object.hasOwn(patch, "remainingStart")) {
+    out.msmm_remaining_to_bill_year_start =
+      patch.remainingStart == null || patch.remainingStart === ""
+        ? null : Number(patch.remainingStart);
+  }
+  return out;
 }

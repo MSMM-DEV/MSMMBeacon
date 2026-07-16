@@ -22,7 +22,13 @@
 // exceljs is loaded via dynamic import() so it only ships when the button is
 // actually clicked (keeps it out of the initial bundle).
 
-import { isHzPrimeType } from "../invoice-perspectives.js";
+import {
+  baseTypeForHz,
+  isHzPrimeType,
+  isMhzPerspectiveSub,
+  linkedMsmmValue,
+  normInvoicePerspectiveNumber,
+} from "../invoice-perspectives.js";
 
 const GREEN  = "FF00B050";
 const YELLOW = "FFFFFF00";
@@ -211,18 +217,37 @@ export function manishDataWindow(rows = []) {
   return null;
 }
 
-export function buildManishExportData({ baseRows = [], subInvoices = new Map(), monthDescs = [], title = "", isActualMonth = () => true } = {}) {
+export function buildManishExportData({ baseRows = [], allRows = baseRows, subInvoices = new Map(), monthDescs = [], title = "", isActualMonth = () => true } = {}) {
   const subListFor = (r) =>
     (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
 
+  // MHZ/MHZ PM shows MSMM as an ordinary sub, but its authoritative values
+  // live on the linked ENG/PM row. Resolve that row even when the export scope
+  // contains only the HZ perspective.
+  const msmmSourceFor = (r) => {
+    const baseType = baseTypeForHz(r.type);
+    if (!baseType) return r;
+    const number = normInvoicePerspectiveNumber(r.projectNumber);
+    return (allRows || []).find(candidate =>
+      (candidate.type || "ENG") === baseType && (
+        (r.sourceId && candidate.sourceId === r.sourceId) ||
+        (number && normInvoicePerspectiveNumber(candidate.projectNumber) === number)
+      )) || r;
+  };
+
   const msmmAtDesc = (r, d) => {
-    const yr = r.byYear?.[d.year];
+    const source = msmmSourceFor(r);
+    const yr = source.byYear?.[d.year];
     if (!yr) return 0;
-    // MSMM is purely derived — stored override is no longer consulted.
     const total = Number(yr.values?.[d.monthIdx] || 0);
-    const subSum = subListFor(r).reduce(
-      (a, s) => a + Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0), 0);
-    return total - subSum;
+    const subValues = subListFor(source).map(
+      s => Number(s.byYear?.[d.year]?.amounts?.[d.monthIdx] || 0));
+    return linkedMsmmValue({
+      linked: isMhzPerspectiveSub(source, allRows),
+      storedValue: yr.msmmValues?.[d.monthIdx],
+      total,
+      subValues,
+    });
   };
 
   // An hz row's stored role (MHZ / MHZ PM) is inherited from its project (where
@@ -247,13 +272,14 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
     const subNames = Array.from({ length: maxSubs }, (_, j) => subs[j]?.companyName || "");
     const months = monthDescs.map((d) => {
       const yr = r.byYear?.[d.year] || {};
+      const msmmYr = msmmSourceFor(r).byYear?.[d.year] || yr;
       return {
         // Projected (future) months are left uncolored in the sheet.
         isActual: !!isActualMonth(d.year, d.monthIdx),
         msmmAmount: msmmAtDesc(r, d),
-        invoiceNumber: (yr.invoiceNumbers && yr.invoiceNumbers[d.monthIdx]) || null,
-        primePaid: !!(yr.primePaid && yr.primePaid[d.monthIdx]),
-        primeHasFile: ((yr.primeFiles && yr.primeFiles[d.monthIdx]) || []).length > 0,
+        invoiceNumber: (msmmYr.invoiceNumbers && msmmYr.invoiceNumbers[d.monthIdx]) || null,
+        primePaid: !!(msmmYr.primePaid && msmmYr.primePaid[d.monthIdx]),
+        primeHasFile: ((msmmYr.primeFiles && msmmYr.primeFiles[d.monthIdx]) || []).length > 0,
         subs: Array.from({ length: maxSubs }, (_, j) => {
           const s = subs[j];
           const sy = s?.byYear?.[d.year];
@@ -286,11 +312,12 @@ export function buildManishExportData({ baseRows = [], subInvoices = new Map(), 
   };
 }
 
-export function buildManishYearSheets({ years = [], baseRows = [], subInvoices = new Map(), titleFor = null, isActualMonth = () => true } = {}) {
+export function buildManishYearSheets({ years = [], baseRows = [], allRows = baseRows, subInvoices = new Map(), titleFor = null, isActualMonth = () => true } = {}) {
   const sheets = (years || []).map(year => ({
     name: String(year),
     ...buildManishExportData({
       baseRows,
+      allRows,
       subInvoices,
       monthDescs: manishMonthDescsBetween(Number(year), 0, Number(year), 11),
       title: titleFor ? titleFor(year) : "",
