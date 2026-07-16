@@ -44,6 +44,7 @@ import {
   projectNameSuggestsMhz,
   pairSiblingOf,
   perspectivePairOf,
+  linkedBaseInvoiceRowsForSubRebase,
   rebaseStoredTotalForSubChange,
 } from "./invoice-perspectives.js";
 import {
@@ -2605,7 +2606,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
   // The invoice rows + sub matrix get re-fetched together so primeFiles/files
   // stay in sync with whatever the user just saved.
-  const refreshInvoiceArtifacts = async () => {
+  const refreshInvoiceArtifacts = async ({ baseMonthUpdates = [], monthIdx = null } = {}) => {
     try {
       const allProjects = [...potential, ...awaiting, ...awarded, ...closed];
       const allCompaniesOrClients = [...clients, ...companies];
@@ -2613,14 +2614,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         reloadInvoiceArtifacts(allProjects, allCompaniesOrClients),
         reloadInvoicePartyFiles(),
       ]);
-      // Re-annotate primeFiles + partyFiles on existing invoice rows.
-      setInvoice(rows => rows.map(inv => ({
-        ...inv,
-        primeFiles: Array.from({ length: 12 }, (_, i) =>
-          primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
-        ),
-        partyFiles: partyFilesByInvoice.get(inv.id) || { msmm: [], prime: {}, sub: {} },
-      })));
+      const baseMonthById = new Map(baseMonthUpdates.map(update => [update.id, update.value]));
+      // Publish the rebased base month and refreshed sub matrix in the same
+      // React batch. Rendering either side alone temporarily moves the derived
+      // MSMM cell — exactly the project-012 July 2024 symptom.
+      setInvoice(rows => rows.map(inv => {
+        let next = inv;
+        if (monthIdx != null && baseMonthById.has(inv.id)) {
+          const values = [...(inv.values || Array(12).fill(0))];
+          values[monthIdx] = baseMonthById.get(inv.id);
+          next = { ...next, values };
+        }
+        return {
+          ...next,
+          primeFiles: Array.from({ length: 12 }, (_, i) =>
+            primeFilesByKey.get(`${inv.id}:${i + 1}`) || []
+          ),
+          partyFiles: partyFilesByInvoice.get(inv.id) || { msmm: [], prime: {}, sub: {} },
+        };
+      }));
       setSubInvoices(subInvoicesMatrix);
     } catch (e) {
       showToast(`Reload failed: ${e?.message || e}`, "x");
@@ -2630,63 +2642,37 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Linked ENG/PM rows keep the historical reconciliation representation:
   // stored total = MSMM + shared subs. When a shared sub value changes, move
   // the base stored total by the same delta so MSMM itself stays unchanged.
-  const linkedBaseInvoiceRowsForProject = (projectId, year = null) =>
-    invoice.filter(row => {
-      if (!projectId || row.sourceId !== projectId) return false;
-      if (year != null && Number(row.year) !== Number(year)) return false;
-      const pair = perspectivePairOf(row.type || "ENG");
-      if (!pair || pair.base !== (row.type || "ENG")) return false;
-      const rowNumber = normInvoiceNumber(row.projectNumber);
-      return invoice.some(other =>
-        other.id !== row.id &&
-        (other.type || "ENG") === pair.hz &&
-        (
-          (row.sourceId && other.sourceId === row.sourceId) ||
-          (rowNumber && normInvoiceNumber(other.projectNumber) === rowNumber)
-        )
-      );
-    });
-
   const rebaseLinkedBaseContractTotals = async (projectId, oldSubValue, newSubValue) => {
-    const updates = linkedBaseInvoiceRowsForProject(projectId).map(row => ({
+    const updates = linkedBaseInvoiceRowsForSubRebase(invoice, projectId).map(row => ({
       id: row.id,
       amount: rebaseStoredTotalForSubChange(row.amount, oldSubValue, newSubValue),
     }));
-    if (updates.length === 0) return;
+    if (updates.length === 0) return [];
     const results = await Promise.all(updates.map(({ id, amount }) =>
       supabase.from("anticipated_invoice").update({ contract_amount: amount }).eq("id", id)
     ));
     const failure = results.find(result => result.error)?.error;
     if (failure) throw failure;
-    const byId = new Map(updates.map(update => [update.id, update.amount]));
-    setInvoice(rows => rows.map(row =>
-      byId.has(row.id) ? { ...row, amount: byId.get(row.id) } : row
-    ));
+    return updates;
   };
 
   const rebaseLinkedBaseMonthTotals = async (
     projectId, year, monthIdx, oldSubValue, newSubValue
   ) => {
     const col = INVOICE_MONTH_COLS[monthIdx];
-    if (!col) return;
-    const updates = linkedBaseInvoiceRowsForProject(projectId, year).map(row => ({
+    if (!col) return [];
+    const updates = linkedBaseInvoiceRowsForSubRebase(invoice, projectId, year).map(row => ({
       id: row.id,
       value: rebaseStoredTotalForSubChange(
         row.values?.[monthIdx], oldSubValue, newSubValue),
     }));
-    if (updates.length === 0) return;
+    if (updates.length === 0) return [];
     const results = await Promise.all(updates.map(({ id, value }) =>
       supabase.from("anticipated_invoice").update({ [col]: value }).eq("id", id)
     ));
     const failure = results.find(result => result.error)?.error;
     if (failure) throw failure;
-    const byId = new Map(updates.map(update => [update.id, update.value]));
-    setInvoice(rows => rows.map(row => {
-      if (!byId.has(row.id)) return row;
-      const values = [...(row.values || Array(12).fill(0))];
-      values[monthIdx] = byId.get(row.id);
-      return { ...row, values };
-    }));
+    return updates;
   };
 
   // Toggle paid status for a single (project, sub, month) cell. Ensures the
@@ -2736,9 +2722,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         amount: cleaned,
         kind,
       });
+      let baseMonthUpdates = [];
       if (kind === "sub" && Number(oldValue || 0) !== Number(cleaned || 0)) {
         try {
-          await rebaseLinkedBaseMonthTotals(projectId, year, monthIdx, oldValue, cleaned);
+          baseMonthUpdates = await rebaseLinkedBaseMonthTotals(
+            projectId, year, monthIdx, oldValue, cleaned);
         } catch (rebaseError) {
           // Keep the two writes logically atomic from the user's perspective.
           await upsertSubInvoiceAmount({
@@ -2751,7 +2739,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           throw rebaseError;
         }
       }
-      await refreshInvoiceArtifacts();
+      await refreshInvoiceArtifacts({ baseMonthUpdates, monthIdx });
     } catch (e) {
       showToast(`Invoice save failed: ${e?.message || e}`, "x");
     }
@@ -2771,12 +2759,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const newContractAmount = (patch.amount === "" || patch.amount == null)
         ? 0 : Number(patch.amount);
       await updateProjectSub({ projectId, companyId, kind, ...patch });
+      let baseContractUpdates = [];
       if (
         kind === "sub" && patch.amount !== undefined &&
         oldContractAmount !== newContractAmount
       ) {
         try {
-          await rebaseLinkedBaseContractTotals(
+          baseContractUpdates = await rebaseLinkedBaseContractTotals(
             projectId, oldContractAmount, newContractAmount);
         } catch (rebaseError) {
           await updateProjectSub({
@@ -2785,6 +2774,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           throw rebaseError;
         }
       }
+
+      const baseContractById = new Map(
+        baseContractUpdates.map(update => [update.id, update.amount]));
+      setInvoice(rows => rows.map(row =>
+        baseContractById.has(row.id)
+          ? { ...row, amount: baseContractById.get(row.id) }
+          : row
+      ));
 
       // 1) Patch the matrix entry (Invoice tab + Receivables read this).
       setSubInvoices(prev => {

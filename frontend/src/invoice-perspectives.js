@@ -214,3 +214,29 @@ export function basePerspectiveStoredTotal(ownValue, subValues = []) {
 export function rebaseStoredTotalForSubChange(storedTotal, oldSubValue, newSubValue) {
   return invoiceNumber(storedTotal) + invoiceNumber(newSubValue) - invoiceNumber(oldSubValue);
 }
+
+// Resolve the exact flat ENG/PM year-row that backs the synthetic MSMM line
+// for a sub edit. This deliberately works on the unmerged invoice slice: a
+// merged MHZ project can display its JV number from a current-year row while
+// an edited historical month (project 012 / July 2024) lives on a different
+// flat row. Matching the requested year prevents the current-year base amount
+// from being changed in place of the historical value shown in the table.
+export function linkedBaseInvoiceRowsForSubRebase(rows = [], projectId, year = null) {
+  if (!projectId) return [];
+  return rows.filter(row => {
+    if (row?.sourceId !== projectId) return false;
+    if (year != null && Number(row.year) !== Number(year)) return false;
+    const rowType = row.type || "ENG";
+    const pair = perspectivePairOf(rowType);
+    if (!pair || pair.base !== rowType) return false;
+    const rowNumber = normInvoicePerspectiveNumber(row.projectNumber);
+    return rows.some(other =>
+      other?.id !== row.id &&
+      (other?.type || "ENG") === pair.hz &&
+      (
+        (row.sourceId && other?.sourceId === row.sourceId) ||
+        (rowNumber && normInvoicePerspectiveNumber(other?.projectNumber) === rowNumber)
+      )
+    );
+  });
+}

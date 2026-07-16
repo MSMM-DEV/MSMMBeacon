@@ -13,6 +13,7 @@ import {
   hzTypeForBase,
   baseTypeForHz,
   linkedInvoiceIdsFor,
+  linkedBaseInvoiceRowsForSubRebase,
   linkedInvoicePatch,
   invoiceRemainderValue,
   basePerspectiveOwnValue,
@@ -159,5 +160,39 @@ assertCurrencyEqual(
   ),
   201075.39
 );
+
+// Project 012 is a merged, multi-year perspective: the visible MHZ number is
+// stored only on the 2026 MHZ row, while July 2024 must rebase the exact linked
+// ENG 2024 row. Never fall through to the current-year ENG row (or no row).
+const project012Rows = [
+  { id: "eng-2024", sourceId: "project-012", projectNumber: "202324", type: "ENG", year: 2024 },
+  { id: "eng-2026", sourceId: "project-012", projectNumber: "202324", type: "ENG", year: 2026 },
+  { id: "mhz-2024", sourceId: "project-012", projectNumber: "202324", type: "MHZ", year: 2024 },
+  { id: "mhz-2026", sourceId: "project-012", projectNumber: "202324", mhzProjectNumber: "012", type: "MHZ", year: 2026 },
+];
+assert.deepEqual(
+  linkedBaseInvoiceRowsForSubRebase(project012Rows, "project-012", 2024).map(row => row.id),
+  ["eng-2024"]
+);
+assert.deepEqual(
+  linkedBaseInvoiceRowsForSubRebase(project012Rows, "project-012", 2026).map(row => row.id),
+  ["eng-2026"]
+);
+
+// Exact July 2024 values from project 012. Adding 10,000 to Neelu must keep
+// MSMM at -145,403.77 and reduce only the white first row by 10,000.
+const project012JulySubsBefore = [55605.78, 206538.82, 0];
+const project012MsmmBefore = basePerspectiveOwnValue(116740.83, project012JulySubsBefore);
+const project012FirstBefore = invoiceRemainderValue(
+  378885.43, [...project012JulySubsBefore, project012MsmmBefore]);
+const project012JulySubsAfter = [55605.78, 206538.82, 10000];
+const project012BaseAfter = rebaseStoredTotalForSubChange(116740.83, 0, 10000);
+const project012MsmmAfter = basePerspectiveOwnValue(project012BaseAfter, project012JulySubsAfter);
+const project012FirstAfter = invoiceRemainderValue(
+  378885.43, [...project012JulySubsAfter, project012MsmmAfter]);
+assertCurrencyEqual(project012MsmmBefore, -145403.77);
+assertCurrencyEqual(project012MsmmAfter, -145403.77);
+assertCurrencyEqual(project012FirstBefore, 262144.60);
+assertCurrencyEqual(project012FirstAfter, 252144.60);
 
 console.log("invoice perspective helper tests passed");
