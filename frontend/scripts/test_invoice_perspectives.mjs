@@ -14,6 +14,10 @@ import {
   baseTypeForHz,
   linkedInvoiceIdsFor,
   linkedInvoicePatch,
+  invoiceRemainderValue,
+  basePerspectiveOwnValue,
+  basePerspectiveStoredTotal,
+  rebaseStoredTotalForSubChange,
   perspectiveSubListBase,
   projectNameSuggestsMhz,
 } from "../src/invoice-perspectives.js";
@@ -132,5 +136,28 @@ assert.deepEqual(perspectiveSubListBase({ isPrimeRow: false, mhzPerspectiveSub: 
 // Genuine external-prime Sub: upstream prime + its subs (unchanged behavior).
 assert.deepEqual(perspectiveSubListBase({ isPrimeRow: false, mhzPerspectiveSub: false, primeEntry: P, subEntries: [A, B] }), [P, A, B]);
 assert.deepEqual(perspectiveSubListBase({ isPrimeRow: false, mhzPerspectiveSub: false, primeEntry: undefined, subEntries: [A] }), [A]);
+
+// MHZ/MHZ PM white-row values are the project total minus EVERY expanded sub,
+// including the linked MSMM row. This is the reported project-style example:
+// 893,067.34 - (329,453.93 + 250,005 + 80,682.63 + 29,775 + 201,075.39)
+// = 2,075.39.
+const mhzSubsIncludingMsmm = [329453.93, 250005, 80682.63, 29775, 201075.39];
+const assertCurrencyEqual = (actual, expected) =>
+  assert.ok(Math.abs(actual - expected) < 0.000001, `expected ${expected}, received ${actual}`);
+assertCurrencyEqual(invoiceRemainderValue(893067.34, mhzSubsIncludingMsmm), 2075.39);
+
+// ENG/PM keeps the existing total-minus-subs storage representation. Editing
+// MSMM stores MSMM + subs, while changing another sub rebases that stored total
+// by the same delta so the derived MSMM value stays unchanged.
+assertCurrencyEqual(basePerspectiveOwnValue(622045.82, [420970.43]), 201075.39);
+assertCurrencyEqual(basePerspectiveStoredTotal(225000, [329453.93, 250005]), 804458.93);
+assertCurrencyEqual(rebaseStoredTotalForSubChange(622045.82, 80000, 90000), 632045.82);
+assertCurrencyEqual(
+  basePerspectiveOwnValue(
+    rebaseStoredTotalForSubChange(622045.82, 80000, 90000),
+    [430970.43]
+  ),
+  201075.39
+);
 
 console.log("invoice perspective helper tests passed");

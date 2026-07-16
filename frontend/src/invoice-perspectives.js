@@ -24,18 +24,14 @@ const LINKED_INVOICE_SYNC_KEYS = new Set([
   // NOTE: `amount` (contract) and `values` (12 monthly totals) are intentionally
   // NOT synced. The two perspectives hold DIFFERENT totals: the hz row (MHZ /
   // MHZ PM) carries the FULL JV contract, while the base row (ENG / PM) carries
-  // MSMM's OWN portion. The hz "MHZ earned value" line is derived as
-  // hz.total − base.total (Total − subs − MSMM), so forcing the two equal would
-  // pin that earned value to 0 and make an edit to one total silently move the
-  // other perspective's MSMM figure — the exact coupling this un-sync removes.
+  // the reconciliation total MSMM + shared subs. The hz white row is derived as
+  // hz Project total minus every sub, including derived MSMM. Forcing the two
+  // perspective totals to sync would make an MHZ edit move MSMM too.
   // MSMM edits from the hz view write the base row directly (its own id), which
   // IS "sync to the ENG/PM sibling", so no fan-out is needed for that either.
   //
-  // NOTE: msmmAmount / msmmValues are intentionally NOT synced. MSMM is a
-  // purely derived value (Total − subs) computed per perspective — the base
-  // (MSMM's own portion) and hz (MSMM-as-a-sub) views compute different MSMM
-  // numbers from the same shared totals, so a stored override must never cross
-  // between siblings.
+  // NOTE: msmmAmount / msmmValues are intentionally NOT synced. The base row's
+  // derived MSMM value and the hz row's project total are separate facts.
   // NOTE: primePaid is intentionally NOT synced either. The base (ENG/PM) row
   // holds MSMM's OWN paid status; the hz (MHZ/MHZ PM) row holds the JV
   // full-total's paid status — independent facts. MSMM's paid stays in lockstep
@@ -191,4 +187,30 @@ export function perspectiveSubListBase({ isPrimeRow, mhzPerspectiveSub, primeEnt
   if (isPrimeRow) return subs;
   if (mhzPerspectiveSub) return [];
   return [...(primeEntry ? [primeEntry] : []), ...subs];
+}
+
+const invoiceNumber = (value) =>
+  value == null || value === "" || !Number.isFinite(Number(value)) ? 0 : Number(value);
+
+// The white MHZ/MHZ PM row is the only remainder row. Callers pass the project
+// total for one column and the value from every rendered sub row, including the
+// synthetic MSMM row.
+export function invoiceRemainderValue(total, subValues = []) {
+  return invoiceNumber(total) - subValues.reduce((sum, value) => sum + invoiceNumber(value), 0);
+}
+
+// ENG/PM stores a reconciliation total and derives MSMM as Total − Σ subs.
+export function basePerspectiveOwnValue(total, subValues = []) {
+  return invoiceRemainderValue(total, subValues);
+}
+
+// Inverse of basePerspectiveOwnValue for edit handlers.
+export function basePerspectiveStoredTotal(ownValue, subValues = []) {
+  return invoiceNumber(ownValue) + subValues.reduce((sum, value) => sum + invoiceNumber(value), 0);
+}
+
+// When a shared sub changes, move the linked ENG/PM reconciliation total by the
+// same delta. Its derived MSMM value then remains an independent user input.
+export function rebaseStoredTotalForSubChange(storedTotal, oldSubValue, newSubValue) {
+  return invoiceNumber(storedTotal) + invoiceNumber(newSubValue) - invoiceNumber(oldSubValue);
 }

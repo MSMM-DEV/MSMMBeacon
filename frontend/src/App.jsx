@@ -44,6 +44,7 @@ import {
   projectNameSuggestsMhz,
   pairSiblingOf,
   perspectivePairOf,
+  rebaseStoredTotalForSubChange,
 } from "./invoice-perspectives.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
@@ -1959,8 +1960,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateInvoiceCell = (id, monthIdx, v) => {
     const nv = Number(v || 0);
     // Monthly totals are PER-PERSPECTIVE: the hz row (MHZ / MHZ PM) holds the
-    // full JV month total, the base row (ENG / PM) holds MSMM's own month total,
-    // and the hz "MHZ earned value" line = hz.month − base.month. So a month
+    // full JV month total, while the base row (ENG / PM) holds the reconciliation
+    // total MSMM + shared subs. The hz white-row remainder = hz.month − base.month.
+    // So a month
     // edit writes ONLY this row's year (no cross-perspective fan-out) — editing
     // the MHZ total must NOT move the ENG/MSMM figure, and an MSMM edit routes
     // to the base row's own id directly. (See LINKED_INVOICE_SYNC_KEYS.)
@@ -2151,8 +2153,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     mhzProjectNumber:    "mhz_project_number",
     mhzProjectName:      "mhz_project_name",
     amount:              "contract_amount",
-    // msmmAmount intentionally omitted — MSMM is purely derived (Total − subs),
-    // never written to msmm_amount from the app.
+    // msmmAmount intentionally omitted — MSMM is derived from the base
+    // reconciliation total minus subs, never written to msmm_amount from the app.
     type:                "type",
     remainingStart:      "msmm_remaining_to_bill_year_start",
     totalRemainingStart: "total_remaining_to_bill_year_start",
@@ -2625,6 +2627,68 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // Linked ENG/PM rows keep the historical reconciliation representation:
+  // stored total = MSMM + shared subs. When a shared sub value changes, move
+  // the base stored total by the same delta so MSMM itself stays unchanged.
+  const linkedBaseInvoiceRowsForProject = (projectId, year = null) =>
+    invoice.filter(row => {
+      if (!projectId || row.sourceId !== projectId) return false;
+      if (year != null && Number(row.year) !== Number(year)) return false;
+      const pair = perspectivePairOf(row.type || "ENG");
+      if (!pair || pair.base !== (row.type || "ENG")) return false;
+      const rowNumber = normInvoiceNumber(row.projectNumber);
+      return invoice.some(other =>
+        other.id !== row.id &&
+        (other.type || "ENG") === pair.hz &&
+        (
+          (row.sourceId && other.sourceId === row.sourceId) ||
+          (rowNumber && normInvoiceNumber(other.projectNumber) === rowNumber)
+        )
+      );
+    });
+
+  const rebaseLinkedBaseContractTotals = async (projectId, oldSubValue, newSubValue) => {
+    const updates = linkedBaseInvoiceRowsForProject(projectId).map(row => ({
+      id: row.id,
+      amount: rebaseStoredTotalForSubChange(row.amount, oldSubValue, newSubValue),
+    }));
+    if (updates.length === 0) return;
+    const results = await Promise.all(updates.map(({ id, amount }) =>
+      supabase.from("anticipated_invoice").update({ contract_amount: amount }).eq("id", id)
+    ));
+    const failure = results.find(result => result.error)?.error;
+    if (failure) throw failure;
+    const byId = new Map(updates.map(update => [update.id, update.amount]));
+    setInvoice(rows => rows.map(row =>
+      byId.has(row.id) ? { ...row, amount: byId.get(row.id) } : row
+    ));
+  };
+
+  const rebaseLinkedBaseMonthTotals = async (
+    projectId, year, monthIdx, oldSubValue, newSubValue
+  ) => {
+    const col = INVOICE_MONTH_COLS[monthIdx];
+    if (!col) return;
+    const updates = linkedBaseInvoiceRowsForProject(projectId, year).map(row => ({
+      id: row.id,
+      value: rebaseStoredTotalForSubChange(
+        row.values?.[monthIdx], oldSubValue, newSubValue),
+    }));
+    if (updates.length === 0) return;
+    const results = await Promise.all(updates.map(({ id, value }) =>
+      supabase.from("anticipated_invoice").update({ [col]: value }).eq("id", id)
+    ));
+    const failure = results.find(result => result.error)?.error;
+    if (failure) throw failure;
+    const byId = new Map(updates.map(update => [update.id, update.value]));
+    setInvoice(rows => rows.map(row => {
+      if (!byId.has(row.id)) return row;
+      const values = [...(row.values || Array(12).fill(0))];
+      values[monthIdx] = byId.get(row.id);
+      return { ...row, values };
+    }));
+  };
+
   // Toggle paid status for a single (project, sub, month) cell. Ensures the
   // sub_invoice row exists first (so users can mark a cell paid even before
   // typing an amount), then patches the matrix locally so the cell flips
@@ -2661,6 +2725,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateSubInvoiceCell = async (projectId, companyId, monthIdx, value, kind = "sub", year = THIS_YEAR) => {
     try {
       const cleaned = value === "" || value == null ? null : Number(value);
+      const currentEntry = (subInvoices.get(projectId) || []).find(entry =>
+        entry.companyId === companyId && (entry.kind || "sub") === kind);
+      const oldValue = currentEntry?.byYear?.[year]?.amounts?.[monthIdx]
+        ?? (Number(year) === Number(THIS_YEAR) ? currentEntry?.amounts?.[monthIdx] : null);
       await upsertSubInvoiceAmount({
         projectId, companyId,
         year,
@@ -2668,6 +2736,21 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         amount: cleaned,
         kind,
       });
+      if (kind === "sub" && Number(oldValue || 0) !== Number(cleaned || 0)) {
+        try {
+          await rebaseLinkedBaseMonthTotals(projectId, year, monthIdx, oldValue, cleaned);
+        } catch (rebaseError) {
+          // Keep the two writes logically atomic from the user's perspective.
+          await upsertSubInvoiceAmount({
+            projectId, companyId,
+            year,
+            month: monthIdx + 1,
+            amount: oldValue ?? null,
+            kind,
+          });
+          throw rebaseError;
+        }
+      }
       await refreshInvoiceArtifacts();
     } catch (e) {
       showToast(`Invoice save failed: ${e?.message || e}`, "x");
@@ -2682,7 +2765,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const updateSubMeta = async ({ projectId, companyId, kind = "sub", patch }) => {
     if (!patch || Object.keys(patch).length === 0) return;
     try {
+      const currentEntry = (subInvoices.get(projectId) || []).find(entry =>
+        entry.companyId === companyId && (entry.kind || "sub") === kind);
+      const oldContractAmount = Number(currentEntry?.contractAmount || 0);
+      const newContractAmount = (patch.amount === "" || patch.amount == null)
+        ? 0 : Number(patch.amount);
       await updateProjectSub({ projectId, companyId, kind, ...patch });
+      if (
+        kind === "sub" && patch.amount !== undefined &&
+        oldContractAmount !== newContractAmount
+      ) {
+        try {
+          await rebaseLinkedBaseContractTotals(
+            projectId, oldContractAmount, newContractAmount);
+        } catch (rebaseError) {
+          await updateProjectSub({
+            projectId, companyId, kind, amount: oldContractAmount,
+          });
+          throw rebaseError;
+        }
+      }
 
       // 1) Patch the matrix entry (Invoice tab + Receivables read this).
       setSubInvoices(prev => {
