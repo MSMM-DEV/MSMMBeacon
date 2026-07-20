@@ -1819,6 +1819,12 @@ export const InvoiceFilesModal = ({
                             disabled={busy}>
                       <Icon name="trash" size={12}/>
                     </button>
+                    {f.notes && (
+                      <div className="invoice-file-note" title={f.notes}>
+                        <Icon name="edit" size={11}/>
+                        <span>{f.notes}</span>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -2459,6 +2465,75 @@ export const ConfirmDialog = ({
                   onClick={run} disabled={busy}>
             {!busy && tone === "danger" && <Icon name={icon} size={13}/>}
             {busy ? "Working…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ---------- AddContractProjectModal ----------
+// Multi-project contracts (Multi-Use Contract / AE Selected List, or an unset
+// stage) can carry SEVERAL invoice projects under one awarded contract. This is
+// step 2 of that flow (step 1 is the "add another?" confirm): it prompts for the
+// new project number, validates it is unique within the Invoice table via the
+// `validate(number)` prop (returns an error string or null), then hands the
+// number to `onSubmit`. The new invoice row shares the contract's name / PMs /
+// type; only the project number differs. Renders above other modals.
+export const AddContractProjectModal = ({
+  projectName, existingNumber, invType, validate, onSubmit, onClose,
+}) => {
+  const [num, setNum] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const trimmed = num.trim();
+  const liveError = trimmed ? (validate?.(trimmed) || "") : "";
+  const submit = async () => {
+    if (busy) return;
+    const problem = validate?.(trimmed);
+    if (problem) { setErr(problem); return; }
+    setBusy(true);
+    try { await onSubmit(trimmed); onClose(); }
+    catch (e) { setErr(e?.message || String(e)); setBusy(false); }
+  };
+  return (
+    <>
+      <div className="overlay confirm-overlay" onClick={busy ? undefined : onClose}/>
+      <div className="modal confirm-modal" style={{ width: 460 }} role="dialog" aria-modal="true">
+        <div className="modal-head">
+          <div className="icon-badge"><Icon name="plus" size={16}/></div>
+          <div style={{ flex: 1 }}>
+            <h3 className="drawer-title" style={{ fontSize: 16 }}>Add project under this contract</h3>
+          </div>
+          <button className="drawer-close" onClick={onClose} disabled={busy}><Icon name="x" size={16}/></button>
+        </div>
+        <div className="modal-body">
+          <p className="confirm-message" style={{ marginBottom: 12 }}>
+            Adding another invoice project under <strong>{projectName || "this contract"}</strong>
+            {existingNumber ? <> (already has #{existingNumber})</> : null}. It keeps the same project
+            name{invType ? <> and is created as <strong>{invType}</strong></> : null}. Enter a new
+            project number — it must be unique in the Invoice table.
+          </p>
+          <div className="field-label" style={{ marginBottom: 6 }}>New project number</div>
+          <input
+            className="input mono" autoFocus value={num}
+            onChange={e => { setNum(e.target.value); setErr(""); }}
+            onKeyDown={e => {
+              if (e.key === "Enter") submit();
+              if (e.key === "Escape") onClose();
+            }}
+            placeholder="e.g. 202609"
+          />
+          {(err || liveError) && (
+            <p className="confirm-message" style={{ color: "var(--rose)", marginTop: 8, marginBottom: 0 }}>
+              {err || liveError}
+            </p>
+          )}
+        </div>
+        <div className="modal-foot" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn sm primary" onClick={submit} disabled={busy || !trimmed || !!liveError}>
+            {busy ? "Creating…" : "Create invoice project"}
           </button>
         </div>
       </div>

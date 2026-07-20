@@ -11,7 +11,7 @@ import {
 import { InvoiceCharts } from "./invoice-charts.jsx";
 import { SubsReceivablesPanel } from "./quadsheet-receivables.jsx";
 import { EventsCalendar } from "./events-calendar.jsx";
-import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal, MergeModal, ConfirmDialog } from "./panels.jsx";
+import { DetailDrawer, MoveForwardPanel, AlertModal, InvoiceFilesModal, AddSubModal, MergeModal, ConfirmDialog, AddContractProjectModal } from "./panels.jsx";
 import { TweaksPanel, applyTweaks } from "./tweaks.jsx";
 import { CreateModal } from "./forms.jsx";
 import { LoginPage } from "./login.jsx";
@@ -1252,6 +1252,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Generic confirm prompt — { title, message, confirmLabel, tone, icon, onConfirm } or null.
   // Currently drives the "unmark a paid invoice" gate; reusable for other guards.
   const [confirmState, setConfirmState] = useState(null);
+  // Multi-project contract flow: when set, renders AddContractProjectModal
+  // (step 2 of "add another invoice project under this awarded contract").
+  // Shape: { awardedRow, invType, existingNumber }.
+  const [addContractProject, setAddContractProject] = useState(null);
   const [manishExportOpen, setManishExportOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
@@ -3230,6 +3234,108 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
          normInvoiceNumber(r.projectNumber) === normInvoiceNumber(projectRow.projectNumber)))
       && (r.type || "ENG") === (invType || "ENG"));
 
+  // Multi-project contracts. A Multi-Use Contract / AE Selected List award — or
+  // one whose stage is unset (none/null/empty) — is a vehicle that can hold MANY
+  // invoice projects, each with its own unique project number. Single-use /
+  // Design-30% awards stay one-invoice-per-project.
+  const MULTI_INVOICE_STAGES = new Set(["Multi-Use Contract", "AE Selected List"]);
+  const awardedAllowsMultipleInvoices = (projectRow) => {
+    const stage = (projectRow?.stage || "").trim();
+    return stage === "" || MULTI_INVOICE_STAGES.has(stage);
+  };
+  // Uniqueness gate for a NEW invoice project number (no existing row to exclude,
+  // unlike invoiceNumberConflict). Returns an error string, or "" when free.
+  const validateNewInvoiceNumber = (num) => {
+    const trimmed = String(num || "").trim();
+    if (!trimmed) return "Enter a project number.";
+    const key = normInvoiceNumber(trimmed);
+    const clash = invoice.find(r => normInvoiceNumber(r.projectNumber) === key);
+    if (clash) {
+      const who = (clash.name || "").trim() || "another project";
+      return `Project number “${trimmed}” is already used by “${who}”. Enter a unique number.`;
+    }
+    return "";
+  };
+  // Create an ADDITIONAL invoice project under a multi-project awarded contract.
+  // The row is a manual invoice (source_project_id = NULL, so it's exempt from
+  // the (source_project_id, year, type) unique index and can coexist with the
+  // contract's other invoice projects) that shares the contract's name / PMs /
+  // contract amount / type, and is linked back to the awarded row by number via
+  // project_invoice_links (the intended "one award ↔ many invoice projects"
+  // mechanism). Throws on failure so the modal can surface it.
+  const createContractInvoiceProject = async (awardedRow, invType, newNumber) => {
+    const num = String(newNumber || "").trim();
+    const type = invType || "ENG";
+    const tempId = mkId();
+    const invRow = {
+      id: tempId, sourceId: null,
+      projectNumber: num, name: awardedRow.name,
+      pmIds: [...(awardedRow.pmIds || [])], amount: awardedRow.amount || 0,
+      msmmAmount: null,
+      msmmValues: Array(12).fill(null),
+      type,
+      remainingStart: awardedRow.msmmRemaining ?? null,
+      values: Array(12).fill(0),
+      year: awardedRow.year,
+      ytdActualOverride: null,
+      rollforwardOverride: null,
+      billingState: "active",
+      primeFiles: Array.from({ length: 12 }, () => []),
+      partyFiles: { msmm: [], prime: {}, sub: {} },
+      notesLog: [],
+    };
+    const prevInvoice = invoice;
+    setInvoice(rs => [invRow, ...rs]);
+    setFlashId(tempId);
+    revealInvoiceRow(invRow);
+    // PHASE 1 — the invoice row. A failure here rolls the optimistic row back.
+    let invData;
+    try {
+      const { data, error } = await supabase
+        .from("anticipated_invoice").insert({
+          source_project_id: null,
+          project_name: awardedRow.name,
+          project_number: num || null,
+          year: awardedRow.year ?? THIS_YEAR,
+          contract_amount: awardedRow.amount ?? null,
+          type,
+          msmm_remaining_to_bill_year_start: awardedRow.msmmRemaining ?? null,
+        }).select().single();
+      if (error) throw error;
+      invData = data;
+    } catch (e) {
+      setInvoice(prevInvoice);
+      throw e;
+    }
+    setInvoice(rs => rs.map(r => r.id === tempId ? { ...r, id: invData.id } : r));
+    setFlashId(invData.id);
+    // PHASE 2 — follow-ups on the COMMITTED row (never roll back here): PMs, the
+    // Awarded → number link, and the HZ perspective sibling if the name warrants.
+    try {
+      if ((awardedRow.pmIds || []).length > 0) {
+        const { error: pmErr } = await supabase
+          .from("anticipated_invoice_pms")
+          .insert(awardedRow.pmIds.map(uid => ({
+            anticipated_invoice_id: invData.id, user_id: uid,
+          })));
+        if (pmErr) throw pmErr;
+      }
+      if (num && !(awardedRow.invoiceLinks || []).some(x => normInvoiceNumber(x) === normInvoiceNumber(num))) {
+        setAwarded(rs => rs.map(r => r.id === awardedRow.id
+          ? { ...r, invoiceLinks: [...(r.invoiceLinks || []), num] } : r));
+        await addProjectInvoiceLink(awardedRow.id, num);
+      }
+      await maybeCreateHzInvoiceSibling(invData, {
+        pmIds: awardedRow.pmIds || [],
+        role: awardedRow.role || "Prime",
+      });
+    } catch (e) {
+      showToast(`Project #${num} created, but a follow-up step failed: ${e.message || e}`, "x");
+      return;
+    }
+    showToast(`Added project #${num} under this contract`, "check");
+  };
+
   // Jumping to an existing invoice row is only useful if the row is RENDERABLE
   // when we land. Two things can hide it:
   //   1. The Invoice page's Type filter defaults to ENG-only and is SHARED across
@@ -3430,8 +3536,26 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       };
 
       if (existingGroup.length > 0) {
-        const anyActive = existingGroup.some(r => (r.billingState || "active") === "active");
         const target = existingGroup[0];
+        const anyActive = existingGroup.some(r => (r.billingState || "active") === "active");
+        // Multi-project contracts (Multi-Use / AE Selected List / unset stage)
+        // with a LIVE invoice project already present: instead of jumping to the
+        // one that exists, offer to add ANOTHER project under the same contract
+        // (its own unique number). When the existing rows are all archived
+        // (paused/closed) we fall through to the revive path below instead.
+        if (anyActive && awardedAllowsMultipleInvoices(row)) {
+          const existingNum = target.projectNumber || rest.projectNumber || row.projectNumber || "—";
+          setMoving(null);
+          setConfirmState({
+            title: "Add another project under this contract?",
+            message: `We already have an existing project, #${existingNum}. Would you like to add another project under this contract?`,
+            confirmLabel: "Yes, add project",
+            cancelLabel: "No",
+            icon: "link",
+            onConfirm: () => setAddContractProject({ awardedRow: row, invType, existingNumber: existingNum }),
+          });
+          return;
+        }
         if (anyActive) {
           // Name the category — the row is often a PM / MHZ perspective the
           // user isn't currently filtered to, so "already there" is only
@@ -5227,8 +5351,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // active filter — they existed, blocked re-creation, and showed up nowhere.
   const invTypeOk = (r) => !invTypeActive || invoiceTypeFilter.has(r.type || "ENG");
   // Closed-out pipeline projects that were never invoiced (no invoice-type rows).
-  // Shown below the Closed Out InvoiceTable AND counted in its badge; computed
-  // once here so the render and the count can't diverge.
+  // Shown below the Closed Out InvoiceTable in their own "Closed without billing"
+  // list (with their own header count) — NOT folded into the sub-tab badge, so
+  // the Closed badge stays parity with Active/In-Between (closed invoice projects
+  // only). Computed once here so the render and that section's count can't diverge.
   const closedNoBilling = (() => {
     const invoicedIds = new Set(), invoicedNums = new Set();
     for (const r of filtered.closedInvoice) {
@@ -5251,7 +5377,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // (no invoice type, so they always show).
     invoice: invoiceMerged.filter(r => (r.billingState || "active") === "active" && invTypeOk(r)).length,
     between: invoiceMerged.filter(r => r.billingState === "between" && invTypeOk(r)).length,
-    closed: filtered.closedInvoice.filter(invTypeOk).length + closedNoBilling.length,
+    // Parity with Active/In-Between: count only the closed INVOICE projects
+    // (billing_state='closed', type-filtered). The never-invoiced pipeline
+    // closures (closedNoBilling) are listed separately below with their own
+    // header count — folding them in here inflated the badge (e.g. 25 vs 14).
+    closed: filtered.closedInvoice.filter(invTypeOk).length,
     events: events.length,
     hotleads: hotLeads.length,
     "leads-deleted": deletedLeads.length + deletedOpenBids.length,
@@ -5772,7 +5902,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 <div className="closed-pipeline-section">
                   <div className="closed-pipeline-head">
                     <Icon name="x" size={13}/>
-                    <span className="closed-pipeline-title">Closed without billing</span>
+                    <span className="closed-pipeline-title">Closed without billing · {closedNoBilling.length}</span>
                     <span className="closed-pipeline-sub">
                       Proposals and projects closed out before any invoice was raised — no billing rows to show.
                     </span>
@@ -6397,6 +6527,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           {...confirmState}
           onConfirm={confirmState.onConfirm}
           onClose={() => setConfirmState(null)}
+        />
+      )}
+
+      {addContractProject && (
+        <AddContractProjectModal
+          projectName={addContractProject.awardedRow.name}
+          existingNumber={addContractProject.existingNumber}
+          invType={addContractProject.invType}
+          validate={validateNewInvoiceNumber}
+          onSubmit={num => createContractInvoiceProject(
+            addContractProject.awardedRow, addContractProject.invType, num)}
+          onClose={() => setAddContractProject(null)}
         />
       )}
 
