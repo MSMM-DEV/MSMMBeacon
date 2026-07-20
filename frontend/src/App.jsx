@@ -3326,19 +3326,77 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const snap = buildPipelineSnapshot();
 
     if (from === "awaiting" && to === "awarded") {
-      // MOVE: Awaiting row leaves; Awarded row lands. No auto-Invoice — user
-      // explicitly moves from Awarded → Invoice when ready to bill.
-      setAwarded(rs => [newRow, ...rs]);
+      // MOVE (in-place status flip): the SAME projects row transitions
+      // status='awaiting' → 'awarded'. It KEEPS its real DB id — never a fresh
+      // mkId — so downstream Awarded → Invoice can reference it as
+      // source_project_id (a mkId there fails the uuid FK with 22P02, which is
+      // what made "Create Invoice row from Awarded" silently do nothing). We
+      // persist the flip + awarded-only fields and null anticipated_result_date
+      // (allowed only on 'awaiting'). stage_id needs a name→id lookup against
+      // awarded_stages — skipped here, same as the closed→awarded reopen path;
+      // the picked label shows locally and is editable via the Awarded drawer.
+      // No auto-Invoice — the user explicitly moves Awarded → Invoice to bill.
+      const awardedRow = { ...row, ...newData, id: row.id, status: "Awarded" };
+      setAwarded(rs => [awardedRow, ...rs]);
       setAwaiting(rs => rs.filter(r => r.id !== row.id));
-      setFlashId(newRow.id);
-      offerUndo("Awarded · carried to Awarded Projects", snap, null);
+      setFlashId(awardedRow.id);
       setTab("awarded");
+      (async () => {
+        try {
+          const { error } = await supabase.from("projects").update({
+            status: "awarded",
+            details: newData.details || null,
+            pool: newData.pools || null,
+            contract_expiry_date: newData.contractExpiry || null,
+            anticipated_result_date: null,
+          }).eq("id", row.id);
+          if (error) throw error;
+          offerUndo("Awarded · carried to Awarded Projects", snap, async () => {
+            const { error: revErr } = await supabase.from("projects").update({
+              status: "awaiting",
+              details: null, pool: null, contract_expiry_date: null,
+              anticipated_result_date: row.anticipatedResultDate || null,
+            }).eq("id", row.id);
+            if (revErr) throw revErr;
+          });
+        } catch (e) {
+          restorePipelineSnapshot(snap);
+          showToast(`Move failed: ${e.message || e}`, "x");
+        }
+      })();
     } else if (from === "awaiting" && to === "closed") {
-      setClosed(rs => [newRow, ...rs]);
+      // MOVE (in-place status flip): same projects row, status='awaiting' →
+      // 'closed_out', KEEPING its real id (so Reopen paths can find it). Persist
+      // date_closed + reason_for_closure and null anticipated_result_date
+      // (awaiting-only). Previously this only touched local state (with a fresh
+      // mkId), so closing a proposal was lost on reload.
+      const closedRow = { ...row, ...newData, id: row.id, status: "Closed Out" };
+      setClosed(rs => [closedRow, ...rs]);
       setAwaiting(rs => rs.filter(r => r.id !== row.id));
-      setFlashId(newRow.id);
-      offerUndo("Closed out · carried to Closed Out Projects", snap, null);
+      setFlashId(closedRow.id);
       setTab("closed");
+      (async () => {
+        try {
+          const { error } = await supabase.from("projects").update({
+            status: "closed_out",
+            date_closed: newData.dateClosed || null,
+            reason_for_closure: newData.reason || null,
+            anticipated_result_date: null,
+          }).eq("id", row.id);
+          if (error) throw error;
+          offerUndo("Closed out · carried to Closed Out Projects", snap, async () => {
+            const { error: revErr } = await supabase.from("projects").update({
+              status: "awaiting",
+              date_closed: null, reason_for_closure: null,
+              anticipated_result_date: row.anticipatedResultDate || null,
+            }).eq("id", row.id);
+            if (revErr) throw revErr;
+          });
+        } catch (e) {
+          restorePipelineSnapshot(snap);
+          showToast(`Move failed: ${e.message || e}`, "x");
+        }
+      })();
     } else if (from === "awarded" && to === "potential") {
       // COPY: Potential row gets its own id; sourceId points back to Awarded.
       setPotential(rs => [newRow, ...rs]);
