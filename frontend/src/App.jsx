@@ -3200,7 +3200,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setClosed(rs => rs.filter(r => r.id !== proj.id));
       setAwarded(rs => [reopenedAwarded, ...rs]);
     }
-    setTab("invoice");
+    revealInvoiceRow(invRow, "active");
     setFlashId(ids[0]);
     setTimeout(() => setFlashId(null), 1600);
     try {
@@ -3229,6 +3229,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         (projectRow.projectNumber &&
          normInvoiceNumber(r.projectNumber) === normInvoiceNumber(projectRow.projectNumber)))
       && (r.type || "ENG") === (invType || "ENG"));
+
+  // Jumping to an existing invoice row is only useful if the row is RENDERABLE
+  // when we land. Two things can hide it:
+  //   1. The Invoice page's Type filter defaults to ENG-only and is SHARED across
+  //      the Invoices / In-Between / Closed Out sub-tabs — so a PM / MHZ / MHZ PM
+  //      row is invisible on all three.
+  //   2. A paused / closed-out project lives on a different sub-tab than "invoice".
+  // Without this, "Already in the Invoice table — jumping to it" landed the user
+  // on a page showing nothing, which reads as "it says it exists but it doesn't".
+  // `stateOverride` is for callers that just changed the billing state and whose
+  // `target` still carries the pre-change value (e.g. reopen → 'active').
+  const revealInvoiceRow = (target, stateOverride) => {
+    if (!target) return;
+    const t = target.type || "ENG";
+    setInvoiceTypeFilter(prev => prev.has(t) ? prev : new Set([...prev, t]));
+    const state = stateOverride || target.billingState || "active";
+    setTab(state === "between" ? "between" : state === "closed" ? "closed" : "invoice");
+  };
 
   // ----------------------------------------------------------------------
   // Awarded ↔ Invoice links (project_invoice_links). Optimistic local update
@@ -3357,7 +3375,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         const anyActive = existingGroup.some(r => (r.billingState || "active") === "active");
         const target = existingGroup[0];
         if (anyActive) {
-          showToast("Already in the Invoice table — jumping to it.", "check");
+          // Name the category — the row is often a PM / MHZ perspective the
+          // user isn't currently filtered to, so "already there" is only
+          // actionable once they know WHICH view it's on.
+          showToast(`Already in the Invoice table as ${target.type || "ENG"} — jumping to it.`, "check");
         }
         autoLink(target.projectNumber || rest.projectNumber);
         if (!anyActive) {
@@ -3384,7 +3405,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           })();
         }
         setFlashId(target.id);
-        setTab("invoice");
+        revealInvoiceRow(target);
       } else {
         const invRow = {
           id: rest.id, sourceId: row.id,
@@ -3406,10 +3427,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         const prevInvoice = invoice;
         setInvoice(rs => [invRow, ...rs]);
         setFlashId(invRow.id);
-        setTab("invoice");
+        // A freshly created PM / MHZ / MHZ PM row is hidden by the default
+        // ENG-only Type filter too — widen it so the new row is actually visible.
+        revealInvoiceRow(invRow);
         (async () => {
+          // PHASE 1 — the invoice row itself. Nothing has landed yet, so a
+          // failure here can safely roll the optimistic row back.
+          let invData;
           try {
-            const { data: invData, error: invErr } = await supabase
+            const { data, error: invErr } = await supabase
               .from("anticipated_invoice").insert({
                 source_project_id: row.id,
                 project_name: rest.name,
@@ -3421,6 +3447,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 msmm_remaining_to_bill_year_start: rest.msmmRemaining ?? null,
               }).select().single();
             if (invErr) throw invErr;
+            invData = data;
+          } catch (e) {
+            setInvoice(prevInvoice);
+            showToast(`Move failed: ${e.message || e}`, "x");
+            return;
+          }
+          // Replace the temp local id with the DB id so future edits hit it.
+          setInvoice(rs => rs.map(r => r.id === invRow.id ? { ...r, id: invData.id } : r));
+          setFlashId(invData.id);
+          // PHASE 2 — follow-up wiring (PMs, the linked HZ sibling, the awarded
+          // link chip). The invoice row is ALREADY COMMITTED, so a failure here
+          // must NOT roll local state back: doing so hid a row that exists in
+          // the DB, and the next attempt then tripped the
+          // (source_project_id, year, type) unique index with "already exists"
+          // while the user could see nothing anywhere. Warn and keep the row.
+          try {
             if ((rest.pmIds || []).length > 0) {
               const { error: pmErr } = await supabase
                 .from("anticipated_invoice_pms")
@@ -3429,22 +3471,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 })));
               if (pmErr) throw pmErr;
             }
-            // Replace the temp local id with the DB id so future edits hit it.
-            setInvoice(rs => rs.map(r => r.id === invRow.id ? { ...r, id: invData.id } : r));
             await maybeCreateHzInvoiceSibling(invData, {
               pmIds: rest.pmIds || [],
               role: row.role || invRow.role || "Prime",
             });
             autoLink(rest.projectNumber);
-            offerUndo("Invoice row created from Awarded project", snap, async () => {
-              const { error: delErr } = await supabase
-                .from("anticipated_invoice").delete().eq("id", invData.id);
-              if (delErr) throw delErr;
-            });
           } catch (e) {
-            setInvoice(prevInvoice);
-            showToast(`Move failed: ${e.message || e}`, "x");
+            showToast(`Invoice row created, but a follow-up step failed: ${e.message || e}`, "x");
           }
+          offerUndo("Invoice row created from Awarded project", snap, async () => {
+            const { error: delErr } = await supabase
+              .from("anticipated_invoice").delete().eq("id", invData.id);
+            if (delErr) throw delErr;
+          });
         })();
       }
     } else if (from === "potential" && to === "invoice") {
@@ -3470,10 +3509,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setInvoice(rs => [invRow, ...rs]);
       setPotential(rs => rs.filter(r => r.id !== row.id));
       setFlashId(invRow.id);
-      setTab("invoice");
+      revealInvoiceRow(invRow, "active");
       (async () => {
+        // PHASE 1 — the invoice row. Nothing has landed yet, so a failure here
+        // can safely roll both optimistic slices back.
+        let invData;
         try {
-          const { data: invData, error: invErr } = await supabase
+          const { data, error: invErr } = await supabase
             .from("anticipated_invoice").insert({
               source_project_id: row.id,
               project_name: rest.name,
@@ -3485,6 +3527,18 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               msmm_remaining_to_bill_year_start: rest.msmm ?? null,
             }).select().single();
           if (invErr) throw invErr;
+          invData = data;
+        } catch (e) {
+          setPotential(prevPotential);
+          setInvoice(prevInvoice);
+          showToast(`Move failed: ${e.message || e}`, "x");
+          return;
+        }
+        // PHASE 2 — the invoice row is COMMITTED. A failure past this point must
+        // restore the Potential row (its delete may not have run) but must NOT
+        // hide the invoice row, or the DB and UI diverge and the next attempt
+        // trips the (source_project_id, year, type) unique index.
+        try {
           // Sync PMs onto the new anticipated_invoice row.
           if ((rest.pmIds || []).length > 0) {
             const { error: pmErr } = await supabase
@@ -3543,9 +3597,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             }
           );
         } catch (e) {
+          // Restore the Potential row (the delete may not have executed) but
+          // keep the committed invoice row — it exists in the DB.
           setPotential(prevPotential);
-          setInvoice(prevInvoice);
-          showToast(`Move failed: ${e.message || e}`, "x");
+          showToast(`Invoice row created, but a follow-up step failed: ${e.message || e}`, "x");
         }
       })();
     } else if (from === "invoice" && to === "closed") {
@@ -3799,7 +3854,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         setAwarded(rs => [reopenedAwarded, ...rs]);
         setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: "active" } : r));
         setFlashId(existingGroup[0].id);
-        setTab("invoice");
+        revealInvoiceRow(existingGroup[0], "active");
         (async () => {
           try {
             const { error: upErr } = await supabase.from("projects").update({
@@ -3866,7 +3921,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       setAwarded(rs => [reopenedAwarded, ...rs]);
       setInvoice(rs => [invRow, ...rs]);
       setFlashId(tempInvId);
-      setTab("invoice");
+      revealInvoiceRow(invRow, "active");
       (async () => {
         try {
           // 1. Flip the project status back to 'awarded' and clear close-out fields.
@@ -5108,7 +5163,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Type-filter predicate for the Invoice sub-tab counts (mirrors InvoiceTable's
   // matchesType). Inactive when all types are selected → counts everything.
   const invTypeActive = invoiceTypeFilter.size > 0 && invoiceTypeFilter.size < INVOICE_TYPE_OPTIONS.length;
-  const invTypeOk = (r) => !invTypeActive || invoiceTypeFilter.has(r.type);
+  // A NULL `type` reads as ENG everywhere else (mergeInvoiceYears' typeOf,
+  // findInvoiceGroupForProject, the perspective helpers). Normalizing here too
+  // keeps legacy/imported rows with no type from being invisible under EVERY
+  // active filter — they existed, blocked re-creation, and showed up nowhere.
+  const invTypeOk = (r) => !invTypeActive || invoiceTypeFilter.has(r.type || "ENG");
   // Closed-out pipeline projects that were never invoiced (no invoice-type rows).
   // Shown below the Closed Out InvoiceTable AND counted in its badge; computed
   // once here so the render and the count can't diverge.

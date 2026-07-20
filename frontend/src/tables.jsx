@@ -2381,7 +2381,9 @@ export const InvoiceTable = ({
     typeFilter.size > 0 && typeFilter.size < invoiceTypeOptions.length;
   const matchesType = (r) => {
     if (!typeFilterActive) return true;
-    return typeFilter.has(r.type);
+    // NULL type reads as ENG everywhere else (mergeInvoiceYears, the perspective
+    // helpers) — match that here so a legacy row with no type is reachable.
+    return typeFilter.has(r.type || "ENG");
   };
   const toggleType = (t) => setTypeFilter(prev => {
     const next = new Set(prev);
@@ -2508,10 +2510,13 @@ export const InvoiceTable = ({
   useEffect(() => {
     if (!flashId) return;
     const created = rows.find(r => r.id === flashId);
-    if (created && typeFilterActive && created.type && !typeFilter.has(created.type)) {
+    // Normalize NULL → ENG to match matchesType, so a legacy row with no type
+    // is revealed rather than silently staying hidden.
+    const createdType = created && (created.type || "ENG");
+    if (created && typeFilterActive && !typeFilter.has(createdType)) {
       // Reveal the just-created row's type; the re-render re-runs this effect
       // (typeFilter dep) and then scrolls now that the row is on-screen.
-      setTypeFilter(prev => new Set([...prev, created.type]));
+      setTypeFilter(prev => new Set([...prev, createdType]));
       return;
     }
     const node = flashRowRef.current;
