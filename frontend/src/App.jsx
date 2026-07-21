@@ -31,6 +31,10 @@ import {
   manishMonthDescsBetween,
   manishDataWindow,
 } from "./utils/manish-xlsx.js";
+import {
+  buildInvoiceGridSheets,
+  exportInvoiceGridWorkbook,
+} from "./utils/mark-xlsx.js";
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
@@ -898,7 +902,23 @@ const OwnPasswordModal = ({ user, onClose, onSubmit }) => {
   );
 };
 
-const ManishExportModal = ({
+// Export date+time stamp shown on every exported sheet (req: date+time per
+// sheet) and appended to PDF subtitles. e.g. "Jul 21, 2026, 3:42 PM".
+const formatExportStamp = (d = new Date()) =>
+  d.toLocaleString("en-US", {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+
+// Shared Invoice export options modal — used by "Print for Mark",
+// "Print for Mark - Subs" (Excel + PDF), and "Print for Manish" (Excel only).
+// `formats` controls the format toggle; the mode options (All / Default / Years
+// / Custom) drive the Excel export shape and are hidden for the PDF format
+// (PDF keeps its current on-screen-scoped behavior). The Invoice-type selector
+// applies to both formats. onExport receives { format, mode, types, years, … }.
+const InvoiceExportModal = ({
+  title = "Print for Manish",
+  formats = ["excel"],
   years = [],
   defaultStart,
   defaultEnd,
@@ -909,6 +929,7 @@ const ManishExportModal = ({
 }) => {
   const yearChoices = years.length ? years : [THIS_YEAR];
   const preferredYear = yearChoices.includes(THIS_YEAR) ? THIS_YEAR : yearChoices[yearChoices.length - 1];
+  const [format, setFormat] = useState(formats[0] || "excel");
   const [mode, setMode] = useState("default");
   // Which invoice type(s) to export — the source of truth for scope, defaulting
   // to whatever the table is currently filtered to (so nothing changes for the
@@ -926,7 +947,12 @@ const ManishExportModal = ({
   const customInvalid = (Number(endYear) * 12 + Number(endMonth)) < (Number(startYear) * 12 + Number(startMonth));
   const yearsInvalid = selectedYears.size === 0;
   const typesInvalid = types.size === 0;
-  const exportDisabled = pending || typesInvalid || (mode === "years" && yearsInvalid) || (mode === "custom" && customInvalid);
+  // Mode/date validation only gates the Excel path — the PDF path ignores mode
+  // (it keeps the current on-screen-scoped behavior).
+  const isExcel = format === "excel";
+  const exportDisabled = pending || typesInvalid
+    || (isExcel && mode === "years" && yearsInvalid)
+    || (isExcel && mode === "custom" && customInvalid);
 
   const toggleYear = (year) => {
     setSelectedYears(prev => {
@@ -951,6 +977,7 @@ const ManishExportModal = ({
     setError("");
     try {
       await onExport({
+        format,
         mode,
         types: [...types],
         years: [...selectedYears].sort((a, b) => a - b),
@@ -986,21 +1013,37 @@ const ManishExportModal = ({
           <div className="icon-badge"><Icon name="export" size={16}/></div>
           <div style={{ flex: 1 }}>
             <div className="modal-eyebrow">Invoice</div>
-            <h3 className="modal-title">Print for Manish</h3>
+            <h3 className="modal-title">{title}</h3>
           </div>
           <button type="button" className="modal-close" onClick={onClose} disabled={pending}>
             <Icon name="x" size={16}/>
           </button>
         </div>
         <div className="modal-body">
-          <div className="manish-export-options">
-            {option("all", "All projects", "Every project of the selected type, from its earliest to latest billed month.")}
-            {option("default", "Default Export", "Use the current rolling month window.")}
-            {option("years", "Years", "Create one Excel tab for each selected year.")}
-            {option("custom", "Custom Dates", "Choose an inclusive start and end month.")}
-          </div>
+          {formats.length > 1 && (
+            <div className="export-format-toggle">
+              <div className="seg" role="tablist">
+                <button type="button" className={`seg-btn${format === "pdf" ? " active" : ""}`} onClick={() => setFormat("pdf")}>PDF</button>
+                <button type="button" className={`seg-btn${format === "excel" ? " active" : ""}`} onClick={() => setFormat("excel")}>Excel</button>
+              </div>
+              <small className="form-hint">
+                {isExcel
+                  ? "Excel — one tab per year, month grid, with an export date/time on every sheet."
+                  : "PDF — the current on-screen layout."}
+              </small>
+            </div>
+          )}
 
-          {typeOptions.length > 0 && (
+          {isExcel && (
+            <div className="manish-export-options">
+              {option("all", "All projects", "Every project of the selected type, from its earliest to latest billed month.")}
+              {option("default", "Default Export", "Use the current rolling month window.")}
+              {option("years", "Years", "Create one Excel tab for each selected year.")}
+              {option("custom", "Custom Dates", "Choose an inclusive start and end month.")}
+            </div>
+          )}
+
+          {isExcel && typeOptions.length > 0 && (
             <div className="manish-export-panel">
               <div className="field-label">Invoice type</div>
               <div className="manish-type-grid">
@@ -1015,7 +1058,7 @@ const ManishExportModal = ({
             </div>
           )}
 
-          {mode === "years" && (
+          {isExcel && mode === "years" && (
             <div className="manish-export-panel">
               <div className="field-label">Years</div>
               <div className="manish-year-grid">
@@ -1030,7 +1073,7 @@ const ManishExportModal = ({
             </div>
           )}
 
-          {mode === "custom" && (
+          {isExcel && mode === "custom" && (
             <div className="manish-export-panel">
               <div className="manish-date-grid">
                 <label>
@@ -1073,7 +1116,7 @@ const ManishExportModal = ({
           <button type="button" className="btn sm" onClick={onClose} disabled={pending}>Cancel</button>
           <button className="btn primary sm" disabled={exportDisabled}>
             <Icon name="export" size={13}/>
-            {pending ? "Exporting…" : "Export Excel"}
+            {pending ? "Exporting…" : (isExcel ? "Export Excel" : "Export PDF")}
           </button>
         </div>
       </form>
@@ -1257,6 +1300,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Shape: { awardedRow, invType, existingNumber }.
   const [addContractProject, setAddContractProject] = useState(null);
   const [manishExportOpen, setManishExportOpen] = useState(false);
+  const [markExportOpen, setMarkExportOpen] = useState(false);
+  const [markSubsExportOpen, setMarkSubsExportOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -4521,7 +4566,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     showToast(`${label}: ${err?.message || err}`, "x");
   };
 
-  const handleExport = async () => {
+  const handleExport = async (overrideOpts = {}) => {
+    // The plain "Export PDF" / "Print for Mark" buttons bind onClick, which
+    // passes a React MouseEvent — treat only a genuine options object (no
+    // synthetic event) as options; everything else is a bare click.
+    const opts = (overrideOpts && !overrideOpts.nativeEvent) ? overrideOpts : {};
+    const exportedAt = opts.exportedAt || formatExportStamp(new Date());
     const meta = PAGE_META[tab] || {};
     const date = new Date().toISOString().slice(0, 10);
     let filename = `msmm-beacon-${tab}-${date}.pdf`;
@@ -4618,6 +4668,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (yearFilter[tab] != null) annotations.push(`Year: ${yearFilter[tab]}`);
     if (filterKey[tab] && filterKey[tab] !== "all") annotations.push(`Filter: ${filterKey[tab]}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
+    annotations.push(`Exported ${exportedAt}`);
     const subtitle = [meta.desc, annotations.join(" · ")].filter(Boolean).join(" — ");
 
     try {
@@ -4644,6 +4695,71 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
   };
 
+  // Shared Excel (.xlsx) grid export backing the Excel format of "Print for
+  // Mark" (variant "grid" — one row per project) and "Print for Mark - Subs"
+  // (variant "subs" — project total + constituent lines). Reuses the same
+  // mode→month-window logic as Manish, then lays the months out as a per-year
+  // grid (one tab per year) with an export date/time on every sheet.
+  const runInvoiceGridExcel = async ({ variant, options, exportedAt, buttonLabel, filePrefix }) => {
+    const date = new Date().toISOString().slice(0, 10);
+    const requestedTypes = (options?.types && options.types.length) ? options.types : null;
+    const snap = getCurrentTableSnapshot();
+    const snapRows = (snap && snap.tab === "invoice" && snap.processedRows) ? snap.processedRows : currentRows;
+    const baseRows = requestedTypes
+      ? currentRows.filter(r => requestedTypes.includes(r.type || "ENG"))
+      : snapRows;
+    const ts = requestedTypes
+      ? { token: requestedTypes.join("_"), text: requestedTypes.join(" · ") }
+      : invoiceTypeScope(snap);
+    const mode = options?.mode || "default";
+    const titleFor = (y) => `${buttonLabel} — ${y}  ·  ${ts.text}`;
+
+    let monthDescs;
+    if (mode === "all") {
+      const w = manishDataWindow(baseRows);
+      if (!w) throw new Error("No dated invoice data for the selected type(s).");
+      monthDescs = manishMonthDescsBetween(w.startYear, w.startMonth, w.endYear, w.endMonth);
+    } else if (mode === "years") {
+      const years = options.years || [];
+      if (years.length === 0) throw new Error("Select at least one year.");
+      monthDescs = years.flatMap(y => manishMonthDescsBetween(y, 0, y, 11));
+    } else if (mode === "custom") {
+      monthDescs = manishMonthDescsBetween(options.startYear, options.startMonth, options.endYear, options.endMonth);
+      if (monthDescs.length === 0) throw new Error("End date must be after the start date.");
+    } else {
+      monthDescs = invWindowMonths;
+    }
+
+    const built = buildInvoiceGridSheets({
+      variant, baseRows, allRows: invoiceMerged, subInvoices,
+      monthDescs, titleFor, isActualMonth: isActualInvoiceMonth, exportedAt,
+    });
+    if (!built.includedCount || built.sheets.length === 0) {
+      throw new Error("No invoice data for the selected type(s) / range.");
+    }
+    const filename = `${filePrefix}_export_${mode}_type_${ts.token}_${date}.xlsx`;
+    try {
+      showToast("Preparing Excel…", "export");
+      await exportInvoiceGridWorkbook({ sheets: built.sheets, exportedAt }, filename);
+      showToast(`Exported ${built.includedCount} project${built.includedCount === 1 ? "" : "s"} → Excel`, "export");
+    } catch (err) {
+      handleExportError(err);
+      throw err;
+    }
+  };
+
+  // "Print for Mark" — options modal → PDF (current on-screen behavior) or the
+  // Excel grid. Both stamp the export date/time.
+  const handleExportMark = async (options = {}) => {
+    const opts = (options && !options.nativeEvent) ? options : {};
+    const exportedAt = formatExportStamp(new Date());
+    if (opts.format === "excel") {
+      await runInvoiceGridExcel({ variant: "grid", options: opts, exportedAt, buttonLabel: "Invoice", filePrefix: "Mark" });
+      return;
+    }
+    await handleExport({ exportedAt });
+  };
+
   // "Print for Mark - Subs" — Invoice-only. Mirrors the UI's expanded-row
   // structure for each project: the parent row carries MSMM's portion
   // (matching what users see in InvoiceTable's parent), then per-sub rows,
@@ -4657,8 +4773,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // garbled "¹³" / "¹²" substitutions. We rely on the colored band + bold
   // text + plain ASCII labels ("Sub · ", "Prime · ", "MSMM portion",
   // "Project total") to communicate row identity instead.
-  const handleExportInvoiceSubs = async () => {
+  const handleExportInvoiceSubs = async (options = {}) => {
     if (tab !== "invoice") return;
+    const opts = (options && !options.nativeEvent) ? options : {};
+    const exportedAt = formatExportStamp(new Date());
+    if (opts.format === "excel") {
+      await runInvoiceGridExcel({ variant: "subs", options: opts, exportedAt, buttonLabel: "Invoice (subs)", filePrefix: "Mark_Subs" });
+      return;
+    }
     const meta = PAGE_META.invoice || {};
     const date = new Date().toISOString().slice(0, 10);
     let filename = `msmm-beacon-invoice-subs-${date}.pdf`;
@@ -5001,6 +5123,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (filterKey.invoice && filterKey.invoice !== "all") annotations.push(`Filter: ${filterKey.invoice}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
     annotations.push(`Parent rows show MSMM portion · Total row reconciles each project`);
+    annotations.push(`Exported ${exportedAt}`);
     const subtitle = [
       meta.desc,
       annotations.join(" · "),
@@ -5053,6 +5176,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // sheets or one custom inclusive month range.
   const handleExportManish = async (options = { mode: "default" }) => {
     if (tab !== "invoice") return;
+    const exportedAt = formatExportStamp(new Date());
     const date = new Date().toISOString().slice(0, 10);
     const label = (d) => d?.label?.replace(/\s/g, "") || `${d?.year || ""}${MONTHS[d?.monthIdx || 0] || ""}`;
 
@@ -5126,7 +5250,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
     try {
       showToast("Preparing Excel…", "export");
-      await exportManishWorkbook(payload, filename);
+      await exportManishWorkbook({ ...payload, exportedAt }, filename);
       showToast(`Exported ${includedCount} project${includedCount === 1 ? "" : "s"} → Excel`, "export");
     } catch (err) {
       handleExportError(err);
@@ -5611,10 +5735,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <div className="page-actions">
             {tab === "invoice" ? (
               <>
-                <button className="btn sm" onClick={handleExport}>
+                <button className="btn sm" onClick={() => setMarkExportOpen(true)}>
                   <Icon name="export" size={13}/>Print for Mark
                 </button>
-                <button className="btn sm" onClick={handleExportInvoiceSubs}>
+                <button className="btn sm" onClick={() => setMarkSubsExportOpen(true)}>
                   <Icon name="export" size={13}/>Print for Mark - Subs
                 </button>
                 <button className="btn sm" onClick={() => setManishExportOpen(true)}>
@@ -6510,8 +6634,38 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         );
       })()}
 
+      {markExportOpen && (
+        <InvoiceExportModal
+          title="Print for Mark"
+          formats={["pdf", "excel"]}
+          years={manishYears}
+          defaultStart={invWindowMonths[0]}
+          defaultEnd={invWindowMonths[invWindowMonths.length - 1]}
+          initialTypes={getCurrentTableSnapshot()?.typeFilter || []}
+          typeOptions={INVOICE_TYPE_OPTIONS}
+          onClose={() => setMarkExportOpen(false)}
+          onExport={handleExportMark}
+        />
+      )}
+
+      {markSubsExportOpen && (
+        <InvoiceExportModal
+          title="Print for Mark - Subs"
+          formats={["pdf", "excel"]}
+          years={manishYears}
+          defaultStart={invWindowMonths[0]}
+          defaultEnd={invWindowMonths[invWindowMonths.length - 1]}
+          initialTypes={getCurrentTableSnapshot()?.typeFilter || []}
+          typeOptions={INVOICE_TYPE_OPTIONS}
+          onClose={() => setMarkSubsExportOpen(false)}
+          onExport={handleExportInvoiceSubs}
+        />
+      )}
+
       {manishExportOpen && (
-        <ManishExportModal
+        <InvoiceExportModal
+          title="Print for Manish"
+          formats={["excel"]}
           years={manishYears}
           defaultStart={invWindowMonths[0]}
           defaultEnd={invWindowMonths[invWindowMonths.length - 1]}

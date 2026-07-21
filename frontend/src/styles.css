@@ -1692,6 +1692,10 @@ html, body { overflow-x: clip; }
   align-items: center;
 }
 .manish-export-modal { width: min(620px, 94vw); }
+/* Format (PDF / Excel) toggle atop the Mark / Mark-Subs export modal. */
+.export-format-toggle { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.export-format-toggle .seg { align-self: flex-start; }
+.export-format-toggle .form-hint { margin: 0; }
 .manish-export-options {
   display: grid;
   gap: 8px;

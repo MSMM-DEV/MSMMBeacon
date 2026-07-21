@@ -349,6 +349,18 @@ function buildConsolidatedSheet(ws, data, colWidths) {
 
   let rowNum = 1;
 
+  // Export timestamp — one italic line at the top of EVERY sheet, so a saved
+  // workbook always records when it was generated (req: date+time per sheet).
+  if (data.exportedAt) {
+    const lastCol = Math.max(TOTAL_COL, lastAmt);
+    ws.mergeCells(rowNum, PROJNO_COL, rowNum, lastCol);
+    const tsCell = ws.getRow(rowNum).getCell(PROJNO_COL);
+    tsCell.value = `Exported ${data.exportedAt}`;
+    tsCell.font = { ...FONT, italic: true, size: 10, color: { argb: "FF6E6659" } };
+    tsCell.alignment = { horizontal: "left", vertical: "middle" };
+    rowNum += 1;
+  }
+
   // Export title — a bold, larger, WRAPPED banner describing what this export
   // is for (time period · types · sort). Merged across the full used width
   // (B → last amount column) so it can never be hidden behind a narrow column.
@@ -471,15 +483,19 @@ export async function buildManishWorkbookObject(data) {
     ? data.sheets
     : [{ name: "Invoices", ...data }];
   for (const sheet of sheets) {
-    const colWidths = computeColWidths(sheet);
-    const ws = wb.addWorksheet(safeSheetName(sheet.name));
-    buildConsolidatedSheet(ws, sheet, colWidths);
+    // A top-level exportedAt on the payload applies to every sheet (each sheet
+    // may still carry its own to override).
+    const sheetData = { ...sheet, exportedAt: sheet.exportedAt || data.exportedAt };
+    const colWidths = computeColWidths(sheetData);
+    const ws = wb.addWorksheet(safeSheetName(sheetData.name));
+    buildConsolidatedSheet(ws, sheetData, colWidths);
   }
   return wb;
 }
 
-export async function exportManishWorkbook(data, filename = "invoice-manish.xlsx") {
-  const wb = await buildManishWorkbookObject(data);
+// Shared browser download for any built exceljs workbook (also used by the
+// "Print for Mark" / "Print for Mark - Subs" grid exporter in mark-xlsx.js).
+export async function downloadWorkbook(wb, filename = "invoice.xlsx") {
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -494,3 +510,12 @@ export async function exportManishWorkbook(data, filename = "invoice-manish.xlsx
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
+
+export async function exportManishWorkbook(data, filename = "invoice-manish.xlsx") {
+  const wb = await buildManishWorkbookObject(data);
+  await downloadWorkbook(wb, filename);
+}
+
+// Shared primitives reused by mark-xlsx.js so the two Invoice Excel exporters
+// stay visually consistent (same font, money format, three-state cell fills).
+export { MONEY_FMT, FONT, ALIGN, MONTH_FULL, statusFill, colLetter, safeSheetName, style as styleCell };
