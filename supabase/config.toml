@@ -347,6 +347,27 @@ verify_jwt = false
 [functions.timeclock-admin]
 verify_jwt = false
 
+# These four handle their own auth in the function body — a service-role bearer
+# for the cron callers OR an admin session JWT (license-reminders,
+# invoice-billing-reminders, timeclock-eod-sweep) — or must accept a browser
+# CORS preflight OPTIONS with no Authorization header (generate-description).
+# The gateway's default verify_jwt=true would 401 the cron's non-JWT
+# sb_secret_* key and/or the browser preflight BEFORE the request reaches the
+# function, so verify_jwt must stay OFF. Declaring it here (they were previously
+# deployed with a manual --no-verify-jwt) makes every future
+# `supabase functions deploy` deterministic instead of silently re-enabling it.
+[functions.license-reminders]
+verify_jwt = false
+
+[functions.invoice-billing-reminders]
+verify_jwt = false
+
+[functions.timeclock-eod-sweep]
+verify_jwt = false
+
+[functions.generate-description]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
