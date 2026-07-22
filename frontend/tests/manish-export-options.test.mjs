@@ -39,10 +39,13 @@ const rows = [
     },
   },
   {
+    // Sub-role + no subs recorded — used to be silently dropped by the old
+    // "Prime role + ≥1 sub" filter; the export now includes EVERY project of
+    // the selected type(s) (2026-07).
     role: "Sub",
     sourceId: "p2",
     projectNumber: "202402",
-    name: "Ignored Sub Role",
+    name: "Sub Role Project",
     byYear: { 2027: { values: [] } },
   },
 ];
@@ -79,7 +82,7 @@ test("buildManishYearSheets creates one workbook sheet per selected year", () =>
     subInvoices,
   });
 
-  assert.equal(includedCount, 1);
+  assert.equal(includedCount, 2);
   assert.deepEqual(sheets.map(s => s.name), ["2020", "2022", "2025"]);
   assert.equal(sheets[0].monthTitles[0], "JANUARY 2020");
   assert.equal(sheets[1].monthTitles[2], "MARCH 2022");
@@ -91,7 +94,20 @@ test("buildManishExportData keeps current format for arbitrary custom month rang
   const data = buildManishExportData({ baseRows: rows, subInvoices, monthDescs: descs });
 
   assert.deepEqual(data.monthTitles, ["MARCH 2022", "APRIL 2022", "MAY 2022"]);
-  assert.equal(data.includedCount, 1);
+  assert.equal(data.includedCount, 2);
   assert.equal(data.rows[0].months[0].msmmAmount, 2500);
   assert.equal(data.rows[0].months[0].subs[0].amount, 800);
+});
+
+test("buildManishExportData includes EVERY project of the type — Sub-role and subless rows too", () => {
+  const descs = manishMonthDescsBetween(2022, 2, 2022, 2);
+  const data = buildManishExportData({ baseRows: rows, subInvoices, monthDescs: descs });
+
+  assert.equal(data.includedCount, 2);
+  const subRole = data.rows.find(r => r.projectNumber === "202402");
+  assert.ok(subRole, "Sub-role project with no subs must be exported");
+  // No subs recorded → empty sub columns; no 2022 data → the month renders
+  // empty (MSMM 0) but the project row itself is still present.
+  assert.deepEqual(subRole.subNames.filter(Boolean), []);
+  assert.equal(subRole.months[0].msmmAmount, 0);
 });

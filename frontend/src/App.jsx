@@ -911,7 +911,8 @@ const formatExportStamp = (d = new Date()) =>
   });
 
 // Shared Invoice export options modal — used by "Print for Mark",
-// "Print for Mark - Subs" (Excel + PDF), and "Print for Manish" (Excel only).
+// "Print for Mark - Subs" (Excel + PDF), and "Print for Manish" /
+// "Print for Randy" (Excel only).
 // `formats` controls the format toggle; the mode options (All / Default / Years
 // / Custom) drive the Excel export shape and are hidden for the PDF format
 // (PDF keeps its current on-screen-scoped behavior). The Invoice-type selector
@@ -1302,6 +1303,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [manishExportOpen, setManishExportOpen] = useState(false);
   const [markExportOpen, setMarkExportOpen] = useState(false);
   const [markSubsExportOpen, setMarkSubsExportOpen] = useState(false);
+  const [randyExportOpen, setRandyExportOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [flashId, setFlashId] = useState(null);
   const [eventsViewMode, setEventsViewModeState] = useState(() => {
@@ -4700,7 +4702,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // (variant "subs" — project total + constituent lines). Reuses the same
   // mode→month-window logic as Manish, then lays the months out as a per-year
   // grid (one tab per year) with an export date/time on every sheet.
-  const runInvoiceGridExcel = async ({ variant, options, exportedAt, buttonLabel, filePrefix }) => {
+  const runInvoiceGridExcel = async ({ variant, options, exportedAt, buttonLabel, filePrefix, titleFor: titleForOverride }) => {
     const date = new Date().toISOString().slice(0, 10);
     const requestedTypes = (options?.types && options.types.length) ? options.types : null;
     const snap = getCurrentTableSnapshot();
@@ -4712,7 +4714,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       ? { token: requestedTypes.join("_"), text: requestedTypes.join(" · ") }
       : invoiceTypeScope(snap);
     const mode = options?.mode || "default";
-    const titleFor = (y) => `${buttonLabel} — ${y}  ·  ${ts.text}`;
+    // Callers may supply a richer titleFor (receives the year + type scope) —
+    // Randy uses it to make the banner self-describing (options/types/sort).
+    const titleFor = titleForOverride
+      ? (y) => titleForOverride(y, ts)
+      : (y) => `${buttonLabel} — ${y}  ·  ${ts.text}`;
 
     let monthDescs;
     if (mode === "all") {
@@ -4758,6 +4764,29 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return;
     }
     await handleExport({ exportedAt });
+  };
+
+  // "Print for Randy" — Invoice-only Excel export. Same options modal + grid
+  // layout (one tab per year) + cell colors as the "Print for Mark" Excel, but
+  // each month cell carries MSMM's OWN portion (the project's first/MSMM row in
+  // the InvoiceTable) instead of the project total. The title banner records
+  // the selected options — mode (incl. whether Default was used), invoice
+  // type(s), and sort — so a saved file is self-describing.
+  const handleExportRandy = async (options = {}) => {
+    const opts = (options && !options.nativeEvent) ? options : {};
+    const exportedAt = formatExportStamp(new Date());
+    const mode = opts.mode || "default";
+    const modeText =
+      mode === "all"    ? "All projects (full billed range)" :
+      mode === "years"  ? `Years: ${(opts.years || []).join(", ")}` :
+      mode === "custom" ? `Custom dates: ${MONTHS[opts.startMonth] || ""} ${opts.startYear} – ${MONTHS[opts.endMonth] || ""} ${opts.endYear}` :
+                          "Default export (rolling month window)";
+    await runInvoiceGridExcel({
+      variant: "msmm", options: opts, exportedAt,
+      buttonLabel: "Print for Randy", filePrefix: "Randy",
+      titleFor: (y, ts) =>
+        `Print for Randy — MSMM values — ${y}  ·  Types: ${ts.text}  ·  ${modeText}  ·  sorted by project number`,
+    });
   };
 
   // "Print for Mark - Subs" — Invoice-only. Mirrors the UI's expanded-row
@@ -5246,7 +5275,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
     }
 
-    if (includedCount === 0) throw new Error("No Prime projects with subs for this export.");
+    if (includedCount === 0) throw new Error("No projects of the selected type(s) for this export.");
 
     try {
       showToast("Preparing Excel…", "export");
@@ -5743,6 +5772,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 </button>
                 <button className="btn sm" onClick={() => setManishExportOpen(true)}>
                   <Icon name="export" size={13}/>Print for Manish
+                </button>
+                <button className="btn sm" onClick={() => setRandyExportOpen(true)}>
+                  <Icon name="export" size={13}/>Print for Randy
                 </button>
               </>
             ) : tab.endsWith("-deleted") ? null : (
@@ -6673,6 +6705,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           typeOptions={INVOICE_TYPE_OPTIONS}
           onClose={() => setManishExportOpen(false)}
           onExport={handleExportManish}
+        />
+      )}
+
+      {randyExportOpen && (
+        <InvoiceExportModal
+          title="Print for Randy"
+          formats={["excel"]}
+          years={manishYears}
+          defaultStart={invWindowMonths[0]}
+          defaultEnd={invWindowMonths[invWindowMonths.length - 1]}
+          initialTypes={getCurrentTableSnapshot()?.typeFilter || []}
+          typeOptions={INVOICE_TYPE_OPTIONS}
+          onClose={() => setRandyExportOpen(false)}
+          onExport={handleExportRandy}
         />
       )}
 

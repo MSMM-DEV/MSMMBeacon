@@ -10,6 +10,11 @@
 //   • variant "subs"  → each project expands into a bold total row followed by
 //     its constituent lines (subs, primes, MSMM, and — for MHZ/MHZ PM JV
 //     projects — the prime remainder), whose month values sum back to the total.
+//   • variant "msmm"  → one row per project; each month cell is MSMM's OWN
+//     portion for that (year, month) — the value on the project's first (MSMM)
+//     row in the InvoiceTable — instead of the project total. Same layout,
+//     colors, and styling as "grid"; only the values differ. Backs the
+//     "Print for Randy" button.
 //
 // Value resolution is shared with the InvoiceTable via the invoice-perspectives
 // helpers so the numbers match the app exactly (incl. the independent MSMM sub
@@ -157,16 +162,21 @@ export function buildInvoiceGridSheets({
       const name = displayName(r);
       const type = r.type || "ENG";
 
+      // "msmm" (Print for Randy) exports MSMM's own portion per month instead
+      // of the project total; the skip rule then keys off the exported metric.
+      const valueAt = variant === "msmm"
+        ? (i) => R.msmmAt(r, year, i)
+        : (i) => R.projTotalAt(r, year, i);
       const projCells = cellsFor(
         (i) => R.primePaidAt(r, year, i),
         (i) => R.primeFileAt(r, year, i),
-        (i) => R.projTotalAt(r, year, i),
+        valueAt,
       );
       // Skip projects with no billing in this sheet's months.
       if (!projCells.some(c => c.value)) continue;
       included += 1;
 
-      if (variant === "grid") {
+      if (variant !== "subs") {
         rows.push({ proj, name, type, level: 0, bold: false, cells: projCells });
         continue;
       }

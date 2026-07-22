@@ -2,8 +2,10 @@
 //
 // ONE consolidated sheet (was one sheet per month). The 12 months stack
 // vertically as titled sections ("JANUARY 2026", …), each with its own header
-// row and one data row per qualifying project (Prime role + ≥1 sub). Rows are
-// sorted ascending by project number. Layout notes:
+// row and one data row per project of the selected type(s) — EVERY project is
+// included (2026-07: the old "Prime role + ≥1 sub" filter silently dropped
+// Sub-role and subless projects, e.g. 201508). Rows are sorted ascending by
+// project number. Layout notes:
 //   • Optional bold, larger, merged TITLE banner on row 1 (the export scope:
 //     period · types · sort) — merged across the full width so it never clips.
 //   • Legend swatches below the title (Red=Unpaid / Yellow=Submitted / Green=Paid).
@@ -30,7 +32,9 @@ import {
   normInvoicePerspectiveNumber,
 } from "../invoice-perspectives.js";
 
-const GREEN  = "FF00B050";
+// Excel's "Light Green" — the old standard green (FF00B050) printed too dark
+// to read the black cell text; the light fill keeps the paid signal legible.
+const GREEN  = "FF92D050";
 const YELLOW = "FFFFFF00";
 const RED    = "FFFF0000";
 // Plain currency (no accounting padding) so values sit flush-left with no gap
@@ -250,21 +254,12 @@ export function buildManishExportData({ baseRows = [], allRows = baseRows, subIn
     });
   };
 
-  // An hz row's stored role (MHZ / MHZ PM) is inherited from its project (where
-  // MSMM is a sub of the JV → "Sub"), but the hz perspective's role is Prime —
-  // the JV entity is the prime. So treat hz rows as Prime; otherwise they'd all
-  // be filtered out and the hz-view export would report "No Prime projects with
-  // subs".
-  const roleOf = (r) => isHzPrimeType(r.type) ? "Prime" : r.role;
-  const included = (baseRows || []).filter(r => {
-    if (roleOf(r) !== "Prime") return false;
-    // An hz-prime project always has MSMM as a sub of the JV (plus any A/B/C
-    // subs), so it qualifies even when no A/B/C subs are recorded — otherwise the
-    // hz projects that have no separate subs get silently dropped. Base-prime
-    // projects (ENG / PM) still require ≥1 sub (that's what makes them a
-    // breakdown row).
-    return isHzPrimeType(r.type) || subListFor(r).length > 0;
-  });
+  // EVERY project of the selected type(s) is included (2026-07). The old
+  // filter (Prime role + ≥1 sub) silently dropped Sub-role projects and Prime
+  // projects with no recorded subs; the export is "print all of this type".
+  // Subless projects simply render empty Sub columns, with MSMM = the full
+  // month total (total − 0 subs).
+  const included = [...(baseRows || [])];
 
   const maxSubs = Math.max(3, ...included.map(r => subListFor(r).length));
   const rows = included.map(r => {

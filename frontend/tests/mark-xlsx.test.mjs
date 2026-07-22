@@ -60,6 +60,23 @@ test("subs variant: total row + sub + MSMM lines reconcile to the project total"
   assert.equal(sub.total + msmm.total, proj.total); // constituents reconcile
 });
 
+test("msmm variant (Print for Randy): one row per project, MSMM portion per month", () => {
+  const { sheets, includedCount } = buildInvoiceGridSheets({
+    variant: "msmm", baseRows: rows, allRows: rows, subInvoices,
+    monthDescs: manishMonthDescsBetween(2025, 0, 2026, 11),
+  });
+  assert.deepEqual(sheets.map(s => s.name), ["2025", "2026"]);
+  const s25 = sheets[0];
+  assert.equal(s25.rows.length, 1);                 // p2 (no data) is skipped
+  assert.equal(s25.rows[0].proj, "202401");
+  assert.equal(s25.rows[0].cells[0].value, 700);    // Jan MSMM = total 1000 − sub 300
+  assert.equal(s25.rows[0].cells[1].value, 500);    // Feb MSMM = 500 − 0
+  assert.equal(s25.rows[0].total, 1200);            // Σ MSMM months, not project total
+  const s26 = sheets[1];
+  assert.equal(s26.rows[0].cells[2].value, 2000);   // Mar 2026 MSMM = 3000 − 1000
+  assert.equal(includedCount, 1);
+});
+
 test("custom range shows only the in-scope months for the year", () => {
   const { sheets } = buildInvoiceGridSheets({
     variant: "grid", baseRows: rows, allRows: rows, subInvoices,
