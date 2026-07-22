@@ -7,9 +7,11 @@ import { manishMonthDescsBetween } from "../src/utils/manish-xlsx.js";
 const rows = [
   {
     role: "Prime", sourceId: "p1", projectNumber: "202401", name: "Pump Station", type: "ENG",
+    amount: 10000, // Total CV — drives the Contract / Total Billed / Total Remaining columns
     byYear: {
       2025: { values: [1000, 500, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], msmmValues: [], primePaid: [true], primeFiles: [] },
-      2026: { values: [0, 0, 3000, 0, 0, 0, 0, 0, 0, 0, 0, 0], msmmValues: [], primePaid: [], primeFiles: [] },
+      // Mar 2026 has a prime attachment → counts as billed (≥ actualsMinYear).
+      2026: { values: [0, 0, 3000, 0, 0, 0, 0, 0, 0, 0, 0, 0], msmmValues: [], primePaid: [], primeFiles: [[], [], [{ id: "pf" }]] },
     },
   },
   {
@@ -75,6 +77,45 @@ test("msmm variant (Print for Randy): one row per project, MSMM portion per mont
   const s26 = sheets[1];
   assert.equal(s26.rows[0].cells[2].value, 2000);   // Mar 2026 MSMM = 3000 − 1000
   assert.equal(includedCount, 1);
+  // Whole-project summary columns (same on every year sheet).
+  assert.ok(s25.hasSummary);
+  assert.equal(s25.rows[0].contract, 5000);         // MSMM contract = CV 10000 − sub 5000
+  assert.equal(s25.rows[0].billed, 2000);           // Mar 2026 attached → MSMM 3000 − 1000
+  assert.equal(s25.rows[0].remaining, 3000);
+});
+
+test("subs variant carries Contract / Total Billed / Total Remaining per line", () => {
+  const { sheets } = buildInvoiceGridSheets({
+    variant: "subs", baseRows: rows, allRows: rows, subInvoices,
+    monthDescs: manishMonthDescsBetween(2026, 0, 2026, 11),
+  });
+  const s = sheets[0];
+  assert.ok(s.hasSummary);
+  const proj = s.rows.find(r => r.level === 0);
+  const sub = s.rows.find(r => r.name.startsWith("Sub · Delta"));
+  const msmm = s.rows.find(r => r.name === "MSMM");
+  // Project scope: rollforward defaults to the full contract, so Total Billed
+  // collapses to the attached Actuals (Mar 2026 total = 3000).
+  assert.equal(proj.contract, 10000);
+  assert.equal(proj.billed, 3000);
+  assert.equal(proj.remaining, 7000);
+  // Sub scope: no attachments on the sub's own cells → nothing billed yet.
+  assert.equal(sub.contract, 5000);
+  assert.equal(sub.billed, 0);
+  assert.equal(sub.remaining, 5000);
+  // MSMM scope: Mar 2026 prime attachment → MSMM portion 2000 billed.
+  assert.equal(msmm.contract, 5000);
+  assert.equal(msmm.billed, 2000);
+  assert.equal(msmm.remaining, 3000);
+});
+
+test("plain Mark grid variant is unchanged — no summary columns", () => {
+  const { sheets } = buildInvoiceGridSheets({
+    variant: "grid", baseRows: rows, allRows: rows, subInvoices,
+    monthDescs: manishMonthDescsBetween(2025, 0, 2025, 11),
+  });
+  assert.equal(sheets[0].hasSummary, false);
+  assert.equal(sheets[0].rows[0].contract, undefined);
 });
 
 test("custom range shows only the in-scope months for the year", () => {

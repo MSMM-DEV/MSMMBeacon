@@ -4739,6 +4739,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const built = buildInvoiceGridSheets({
       variant, baseRows, allRows: invoiceMerged, subInvoices,
       monthDescs, titleFor, isActualMonth: isActualInvoiceMonth, exportedAt,
+      actualsMinYear: INVOICE_ACTUALS_MIN_YEAR,
     });
     if (!built.includedCount || built.sheets.length === 0) {
       throw new Error("No invoice data for the selected type(s) / range.");

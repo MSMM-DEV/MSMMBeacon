@@ -16,6 +16,12 @@
 //     colors, and styling as "grid"; only the values differ. Backs the
 //     "Print for Randy" button.
 //
+// The "subs" and "msmm" variants additionally carry three whole-project-scope
+// summary columns per line — Contract (before the months) and Total Billed /
+// Total Remaining (after the in-scope Total) — computed with the exact
+// InvoiceTable math (Total Billed = Contract − Rollforward + attachment-gated
+// Actuals from INVOICE_ACTUALS_MIN_YEAR onward; Remaining = Contract − Billed).
+//
 // Value resolution is shared with the InvoiceTable via the invoice-perspectives
 // helpers so the numbers match the app exactly (incl. the independent MSMM sub
 // on linked ENG↔MHZ / PM↔MHZ PM projects). Every sheet carries an export
@@ -73,7 +79,10 @@ function groupByYear(monthDescs) {
 
 // Per-(row, year, monthIdx) resolvers. `allRows` lets an HZ row locate its
 // linked base (ENG/PM) row that owns the authoritative MSMM figures.
-function makeResolvers(allRows, subInvoices) {
+// `actualsMinYear` gates the Total-Billed "Actuals" sum (attachment-counted
+// months) to INVOICE_ACTUALS_MIN_YEAR onward, mirroring the InvoiceTable —
+// pre-2026 billing is already captured by Contract − Rollforward.
+function makeResolvers(allRows, subInvoices, actualsMinYear = 2026) {
   const entriesFor   = (r) => subInvoices?.get(r.sourceId) || [];
   const subListFor   = (r) => entriesFor(r).filter(s => (s.kind || "sub") === "sub");
   const primeListFor = (r) => entriesFor(r).filter(s => s.kind === "prime");
@@ -113,9 +122,62 @@ function makeResolvers(allRows, subInvoices) {
     msmmAt(r, y, i),
   ]);
 
+  // ---- Contract / Total Billed / Total Remaining (whole-project scope) ----
+  // Mirrors the InvoiceTable math exactly (tables.jsx):
+  //   Total Billed    = Contract − Rollforward + Actuals(attached, ≥ actualsMinYear)
+  //   Total Remaining = Contract − Total Billed
+  // Rollforward = the stored "remaining to bill at year start", else the line's
+  // full contract (nothing billed before the loaded window).
+  const yearsOfRow = (r) => Object.keys(r?.byYear || {}).map(Number);
+  const projectBilledAttached = (r) => yearsOfRow(r).reduce((a, y) => {
+    if (y < actualsMinYear) return a;
+    const yr = r.byYear?.[y]; if (!yr) return a;
+    let t = 0;
+    for (let m = 0; m < 12; m++) if (((yr.primeFiles || [])[m] || []).length > 0) t += Number(yr.values?.[m] || 0);
+    return a + t;
+  }, 0);
+  const subBilledAttached = (s) => Object.entries(s?.byYear || {}).reduce((a, [y, yr]) => {
+    if (Number(y) < actualsMinYear) return a;
+    let t = 0;
+    for (let m = 0; m < 12; m++) if (((yr?.files || [])[m] || []).length > 0) t += Number(yr?.amounts?.[m] || 0);
+    return a + t;
+  }, 0);
+  // MSMM Actuals — a month's MSMM value counts only when the base row's
+  // total/prime cell has an invoice attached (MSMM's attachments live on the
+  // base ENG/PM row's prime store).
+  const msmmBilledAttached = (r) => {
+    const src = msmmSourceFor(r);
+    return yearsOfRow(src).reduce((a, y) => {
+      if (y < actualsMinYear) return a;
+      const yr = src.byYear?.[y]; if (!yr) return a;
+      let t = 0;
+      for (let m = 0; m < 12; m++) if (((yr.primeFiles || [])[m] || []).length > 0) t += msmmAt(src, y, m);
+      return a + t;
+    }, 0);
+  };
+  const msmmContract = (r) => {
+    const src = msmmSourceFor(r);
+    return linkedMsmmValue({
+      linked: isMhzPerspectiveSub(src, allRows),
+      storedValue: src.msmmAmount,
+      total: src.amount,
+      subValues: subListFor(src).map(x => x.contractAmount),
+    });
+  };
+  const projectRollforward = (r) => (r.totalRemainingStart != null && r.totalRemainingStart !== "") ? Number(r.totalRemainingStart) : Number(r.amount || 0);
+  const subRollforward     = (s) => (s.remainingStart != null && s.remainingStart !== "") ? Number(s.remainingStart) : Number(s.contractAmount || 0);
+  const msmmRollforward    = (r) => {
+    const src = msmmSourceFor(r);
+    return (src.remainingStart != null && src.remainingStart !== "") ? Number(src.remainingStart) : msmmContract(r);
+  };
+  const projectTotalBilled = (r) => Number(r.amount || 0) - projectRollforward(r) + projectBilledAttached(r);
+  const subTotalBilled     = (s) => Number(s.contractAmount || 0) - subRollforward(s) + subBilledAttached(s);
+  const msmmTotalBilled    = (r) => msmmContract(r) - msmmRollforward(r) + msmmBilledAttached(r);
+
   return {
     subListFor, primeListFor, partyAmt, partyPaid, partyFile,
     msmmAt, projTotalAt, primePaidAt, primeFileAt, hzRemainderAt,
+    msmmContract, projectTotalBilled, subTotalBilled, msmmTotalBilled,
   };
 }
 
@@ -132,9 +194,14 @@ export function buildInvoiceGridSheets({
   titleFor = null,
   isActualMonth = () => true,
   exportedAt = "",
+  actualsMinYear = 2026,
 } = {}) {
-  const R = makeResolvers(allRows, subInvoices);
+  const R = makeResolvers(allRows, subInvoices, actualsMinYear);
   const groups = groupByYear(monthDescs);
+  // "subs" + "msmm" carry three whole-project-scope summary columns per line
+  // (Contract · Total Billed · Total Remaining), mirroring the InvoiceTable's
+  // pinned pair + Contract column. The plain Mark grid stays unchanged.
+  const hasSummary = variant !== "grid";
   const displayNumber = (r) => isHzPrimeType(r.type) ? (r.mhzProjectNumber || r.projectNumber) : r.projectNumber;
   const displayName   = (r) => isHzPrimeType(r.type) ? (r.mhzProjectName || r.name) : r.name;
 
@@ -162,6 +229,14 @@ export function buildInvoiceGridSheets({
       const name = displayName(r);
       const type = r.type || "ENG";
 
+      // Whole-project-scope summaries (year-independent — the same on every
+      // sheet). summarize() derives Remaining as Contract − Billed at each line.
+      const summarize = (contract, billed) => ({
+        contract: Number(contract || 0),
+        billed: Number(billed || 0),
+        remaining: Number(contract || 0) - Number(billed || 0),
+      });
+
       // "msmm" (Print for Randy) exports MSMM's own portion per month instead
       // of the project total; the skip rule then keys off the exported metric.
       const valueAt = variant === "msmm"
@@ -176,13 +251,23 @@ export function buildInvoiceGridSheets({
       if (!projCells.some(c => c.value)) continue;
       included += 1;
 
+      if (variant === "msmm") {
+        rows.push({
+          proj, name, type, level: 0, bold: false, cells: projCells,
+          ...summarize(R.msmmContract(r), R.msmmTotalBilled(r)),
+        });
+        continue;
+      }
       if (variant !== "subs") {
         rows.push({ proj, name, type, level: 0, bold: false, cells: projCells });
         continue;
       }
 
       // subs variant — total row + constituent lines.
-      rows.push({ proj, name, type, level: 0, bold: true, cells: projCells });
+      rows.push({
+        proj, name, type, level: 0, bold: true, cells: projCells,
+        ...summarize(Number(r.amount || 0), R.projectTotalBilled(r)),
+      });
 
       // HZ prime remainder (base ENG/PM projects have none: total = MSMM + subs).
       if (isHzPrimeType(r.type)) {
@@ -191,7 +276,16 @@ export function buildInvoiceGridSheets({
           (i) => R.primeFileAt(r, year, i),
           (i) => R.hzRemainderAt(r, year, i),
         );
-        if (rem.some(c => c.value)) rows.push({ proj: "", name: "MHZ (prime)", type: "Prime", level: 1, bold: false, cells: rem });
+        // Remainder summary mirrors the in-app HZ white first row: project-scope
+        // value minus every constituent line (real subs + MSMM), per column.
+        const remContract = invoiceRemainderValue(r.amount, [
+          ...R.subListFor(r).map(s => s.contractAmount), R.msmmContract(r)]);
+        const remBilled = invoiceRemainderValue(R.projectTotalBilled(r), [
+          ...R.subListFor(r).map(R.subTotalBilled), R.msmmTotalBilled(r)]);
+        if (rem.some(c => c.value)) rows.push({
+          proj: "", name: "MHZ (prime)", type: "Prime", level: 1, bold: false, cells: rem,
+          ...summarize(remContract, remBilled),
+        });
       }
 
       for (const s of R.subListFor(r)) {
@@ -199,12 +293,14 @@ export function buildInvoiceGridSheets({
         rows.push({
           proj: "", name: `Sub · ${s.companyName || "Sub"}${disc}`, type: "Sub", level: 1, bold: false,
           cells: cellsFor((i) => R.partyPaid(s, year, i), (i) => R.partyFile(s, year, i), (i) => R.partyAmt(s, year, i)),
+          ...summarize(Number(s.contractAmount || 0), R.subTotalBilled(s)),
         });
       }
       for (const p of R.primeListFor(r)) {
         rows.push({
           proj: "", name: `Prime · ${p.companyName || "Prime"}`, type: "Prime", level: 1, bold: false,
           cells: cellsFor((i) => R.partyPaid(p, year, i), (i) => R.partyFile(p, year, i), (i) => R.partyAmt(p, year, i)),
+          ...summarize(Number(p.contractAmount || 0), R.subTotalBilled(p)),
         });
       }
 
@@ -213,7 +309,10 @@ export function buildInvoiceGridSheets({
         (i) => R.primeFileAt(r, year, i),
         (i) => R.msmmAt(r, year, i),
       );
-      if (msmm.some(c => c.value)) rows.push({ proj: "", name: "MSMM", type: "MSMM", level: 1, bold: false, cells: msmm });
+      if (msmm.some(c => c.value)) rows.push({
+        proj: "", name: "MSMM", type: "MSMM", level: 1, bold: false, cells: msmm,
+        ...summarize(R.msmmContract(r), R.msmmTotalBilled(r)),
+      });
 
       rows.push({ spacer: true, cells: monthCols.map(() => ({ value: null })) });
     }
@@ -233,6 +332,7 @@ export function buildInvoiceGridSheets({
       exportedAt,
       monthCols,
       rows,
+      hasSummary,
       includedCount: included,
     };
   }).filter(s => s.rows.length > 0);
@@ -241,9 +341,16 @@ export function buildInvoiceGridSheets({
 }
 
 function paintGridSheet(ws, sheet, exportedAt) {
-  const { monthCols = [], rows = [], title = "" } = sheet;
-  const totalCol = FIRST_MONTH_COL + monthCols.length;
-  const lastCol = totalCol;
+  const { monthCols = [], rows = [], title = "", hasSummary = false } = sheet;
+  // With summaries, a "Contract" column slots in before the months and the
+  // "Total Billed" / "Total Remaining" pair follows the in-scope "Total" —
+  // mirroring the InvoiceTable's Contract column + pinned end pair.
+  const contractCol = hasSummary ? FIRST_MONTH_COL : null;
+  const firstMonthCol = hasSummary ? FIRST_MONTH_COL + 1 : FIRST_MONTH_COL;
+  const totalCol = firstMonthCol + monthCols.length;
+  const billedCol = hasSummary ? totalCol + 1 : null;
+  const remainCol = hasSummary ? totalCol + 2 : null;
+  const lastCol = hasSummary ? remainCol : totalCol;
 
   const styleC = (cell, { money = false, bold = false, fill = null, size = null, italic = false, color = null, indent = 0, align = "left" } = {}) => {
     cell.font = {
@@ -286,8 +393,10 @@ function paintGridSheet(ws, sheet, exportedAt) {
   setH(PROJ_COL, "Project No.");
   setH(NAME_COL, "Project Name");
   setH(TYPE_COL, "Type");
-  monthCols.forEach((mc, i) => setH(FIRST_MONTH_COL + i, mc.label));
+  if (hasSummary) setH(contractCol, "Contract");
+  monthCols.forEach((mc, i) => setH(firstMonthCol + i, mc.label));
   setH(totalCol, "Total");
+  if (hasSummary) { setH(billedCol, "Total Billed"); setH(remainCol, "Total Remaining"); }
   rowNum++;
 
   // Data rows.
@@ -308,15 +417,21 @@ function paintGridSheet(ws, sheet, exportedAt) {
     typeCell.value = row.type || "";
     styleC(typeCell, { bold: row.bold });
 
+    const moneyAt = (col, value, { bold = row.bold } = {}) => {
+      const cell = r.getCell(col);
+      cell.value = (value != null && value !== 0) ? Number(value) : null;
+      styleC(cell, { money: true, bold });
+    };
+    if (hasSummary) moneyAt(contractCol, row.contract);
+
     row.cells.forEach((c, i) => {
-      const cell = r.getCell(FIRST_MONTH_COL + i);
+      const cell = r.getCell(firstMonthCol + i);
       cell.value = (c.value != null && c.value !== 0) ? Number(c.value) : null;
       styleC(cell, { money: true, bold: row.bold, fill: c.fill });
     });
 
-    const tot = r.getCell(totalCol);
-    tot.value = (row.total != null && row.total !== 0) ? Number(row.total) : null;
-    styleC(tot, { money: true, bold: true });
+    moneyAt(totalCol, row.total, { bold: true });
+    if (hasSummary) { moneyAt(billedCol, row.billed); moneyAt(remainCol, row.remaining); }
 
     rowNum++;
   }
@@ -325,8 +440,10 @@ function paintGridSheet(ws, sheet, exportedAt) {
   ws.getColumn(PROJ_COL).width = 12;
   ws.getColumn(NAME_COL).width = 34;
   ws.getColumn(TYPE_COL).width = 9;
-  monthCols.forEach((_, i) => { ws.getColumn(FIRST_MONTH_COL + i).width = 13; });
+  if (hasSummary) ws.getColumn(contractCol).width = 14;
+  monthCols.forEach((_, i) => { ws.getColumn(firstMonthCol + i).width = 13; });
   ws.getColumn(totalCol).width = 15;
+  if (hasSummary) { ws.getColumn(billedCol).width = 14; ws.getColumn(remainCol).width = 16; }
 }
 
 export async function buildInvoiceGridWorkbookObject({ sheets = [], exportedAt = "" } = {}) {
