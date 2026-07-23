@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./icons.jsx";
 import { TweaksPanel } from "./tweaks.jsx";
 import { AlertsAdmin } from "./admin-alerts.jsx";
@@ -254,14 +255,48 @@ export const AdminPanel = ({
 // ----------------------------------------------------------------------------
 const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggleBan, onToggleRole }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState(null);
+  const btnRef = useRef(null);
   const menuRef = useRef(null);
+
+  // The menu is PORTALED to document.body with viewport-fixed coordinates
+  // (mirrors SearchableSelect in primitives.jsx). Rendered in-row it kept
+  // ending up inaccessible: a banned row's opacity (.admin-row.banned) creates
+  // a stacking context that traps the menu's z-index under every later row,
+  // and rows near the drawer's bottom get clipped by its scroll container.
+  const toggleMenu = () => {
+    if (menuOpen) { setMenuOpen(false); return; }
+    const rect = btnRef.current.getBoundingClientRect();
+    // Flip upward when the ~5-item menu wouldn't fit below the button.
+    const below = window.innerHeight - rect.bottom;
+    const flipUp = below < 230 && rect.top > below;
+    setMenuPos({
+      top:    flipUp ? "auto" : rect.bottom + 6,
+      bottom: flipUp ? (window.innerHeight - rect.top + 6) : "auto",
+      right:  window.innerWidth - rect.right,
+    });
+    setMenuOpen(true);
+  };
+
+  // Dismiss on outside click, any ancestor scroll (capture phase catches the
+  // drawer body), or resize — position is snapshotted on open, so close rather
+  // than chase the button.
   useEffect(() => {
     if (!menuOpen) return;
-    const close = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
     };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    const dismiss = () => setMenuOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
   }, [menuOpen]);
 
   const banned = !row.is_enabled;
@@ -290,12 +325,13 @@ const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggl
           </span>
         )}
       </div>
-      <div className="admin-row-actions" ref={menuRef}>
-        <button className="row-btn" title="More" onClick={() => setMenuOpen(v => !v)}>
+      <div className="admin-row-actions">
+        <button className="row-btn" title="More" ref={btnRef} onClick={toggleMenu}>
           <Icon name="more" size={14}/>
         </button>
-        {menuOpen && (
-          <div className="menu admin-menu">
+        {menuOpen && menuPos && createPortal(
+          <div className="menu admin-menu" ref={menuRef}
+               style={{ top: menuPos.top, bottom: menuPos.bottom, right: menuPos.right }}>
             <button className="menu-item" onClick={() => { setMenuOpen(false); onChangePassword(); }}>
               <Icon name="lock" size={13}/><span>Change password</span>
             </button>
@@ -322,7 +358,8 @@ const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggl
                          : undefined}>
               <Icon name="trash" size={13}/><span>Delete user…</span>
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </li>

@@ -4103,12 +4103,14 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .ban-badge { background: #3A1D18; border-color: #6E3326; color: #F0A69A; }
 
 .admin-row-actions { position: relative; }
+/* Portaled to document.body (see UserRow in admin.jsx) — viewport-fixed, with
+   top/bottom/right set inline from the button rect. Must sit above the admin
+   drawer (60) + its overlay (70), below toasts (90+). Rendered in-row it got
+   trapped under later rows by the banned-row opacity stacking context. */
 .admin-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
+  position: fixed;
   min-width: 220px;
-  z-index: 30;
+  z-index: 85;
 }
 .menu-item.danger { color: var(--rose); }
 .menu-item:disabled { opacity: .45; cursor: not-allowed; }
