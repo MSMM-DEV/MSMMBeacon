@@ -9,6 +9,12 @@
 // (Central by default). Each interval becomes a colored bar; the tooltip
 // surfaces punch IN/OUT times, source, the linked Outlook event subject,
 // and the classification source ('auto'/'rule'/'outlook'/'user'/'admin').
+//
+// Presentation (ui-v2.0): every segment is a real button with a spoken label
+// ("At desk, 9:02 AM to 11:30 AM, Working, 2h 28m") so presence never depends
+// on colour alone, and away time is hatched as well as tinted. Segments carry
+// a floor width and a hairline separator so two back-to-back punches stay
+// distinguishable at 360 px without ever painting over each other.
 
 import React from "react";
 import { Icon } from "../icons";
@@ -77,16 +83,17 @@ export function DayTimeline({
     .filter(Boolean);
 
   return (
-    <div className="tk-day-timeline" style={{ height }}>
+    <div className={`tsx-tl ${showHourGrid ? "has-ruler" : ""}`}>
       {showHourGrid && (
-        <div className="tk-day-grid" aria-hidden="true">
+        <div className="tsx-tl-ruler" aria-hidden="true">
           {hours.map(h => (
             <span
               key={h}
-              className="tk-day-tick"
+              className="tsx-tl-tick"
+              data-major={h % 2 === 0 ? "true" : "false"}
               style={{ left: `${((h - TRACK_START_HOUR) / span) * 100}%` }}
             >
-              <span className="tk-day-tick-label">
+              <span className="tsx-tl-tick-label">
                 {h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`}
               </span>
             </span>
@@ -94,14 +101,15 @@ export function DayTimeline({
         </div>
       )}
 
-      <div className="tk-day-track">
+      <div className="tsx-tl-track" style={{ height }}>
         {/* Approved-leave band — spans the full track behind everything else. */}
         {leave && (
           <div
-            className={`tk-day-leave-band tone-${leave.leaveType === "sick" ? "blue" : "sage"}`}
+            className={`tsx-tl-leave tone-${leave.leaveType === "sick" ? "blue" : "sage"}`}
             title={`${leave.leaveType === "sick" ? "Sick leave" : "Vacation"} · ${leave.hoursPerDay}h (approved)`}
           >
-            <span className="tk-day-leave-label">
+            <span className="tsx-tl-leave-label">
+              <Icon name="sun" size={11}/>
               {leave.leaveType === "sick" ? "Sick" : "Vacation"} · {leave.hoursPerDay}h
             </span>
           </div>
@@ -114,16 +122,16 @@ export function DayTimeline({
           if (right <= left) return null;
           return (
             <div
-              className="tk-day-track-workday"
+              className="tsx-tl-workday"
               style={{ left: `${left}%`, width: `${right - left}%` }}
               aria-hidden="true"
             />
           );
         })()}
 
-        {/* Red OUT-gap overlay — behind interval cards so cards still click.
+        {/* OUT-gap overlay — behind interval cards so cards still click.
             Labeled with the gap duration when wide enough, mirroring the
-            "Working" label on green segment bars. */}
+            "Working" label on at-desk segment bars. */}
         {date && computeOutGaps({ intervals, date }).map(([sMin, eMin], i) => {
           const leftFrac  = trackFractionForMin(sMin);
           const rightFrac = trackFractionForMin(eMin);
@@ -134,13 +142,13 @@ export function DayTimeline({
           return (
             <div
               key={`gap-${i}`}
-              className="tk-day-gap"
+              className="tsx-tl-gap"
               style={{ left: `${leftFrac * 100}%`, width: `${widthPct}%` }}
               title={`Out ${fmtHM(durMin)}`}
               aria-hidden="true"
             >
               {widthPct > 4 && (
-                <span className="tk-day-gap-label">
+                <span className="tsx-tl-gap-label">
                   {widthPct > 8 ? `Out · ${fmtHM(durMin)}` : "Out"}
                 </span>
               )}
@@ -156,33 +164,50 @@ export function DayTimeline({
             <button
               key={iv.id}
               type="button"
-              className={`tk-day-seg tone-${tone}`}
+              className={`tsx-tl-seg tone-${tone}`}
               style={{ left: `${left}%`, width: `${width}%` }}
               onClick={(e) => { e.stopPropagation(); onIntervalClick?.(iv); }}
               title={tooltipFor(iv)}
+              aria-label={ariaLabelFor(iv)}
               data-category={iv.category}
               data-source={iv.categorySource}
             >
-              {width > 5 && (
-                <span className="tk-day-seg-label">
-                  {iv.outlookEventSubject || TK_CATEGORY_LABEL[iv.category] || "—"}
-                </span>
-              )}
-              {iv.outlookEventId && width > 8 && (
-                <Icon name="link" size={11} />
-              )}
-              {iv.notes && width > 4 && (
-                <span className="tk-day-seg-note-dot" aria-hidden="true"/>
-              )}
+              <span className="tsx-tl-seg-inner" aria-hidden="true">
+                {width > 5 && (
+                  <span className="tsx-tl-seg-label">
+                    {iv.outlookEventSubject || TK_CATEGORY_LABEL[iv.category] || "–"}
+                  </span>
+                )}
+                {iv.outlookEventId && width > 8 && (
+                  <Icon name="link" size={11} />
+                )}
+                {iv.notes && width > 4 && (
+                  <span className="tsx-tl-seg-note-dot"/>
+                )}
+              </span>
             </button>
           );
         })}
         {segments.length === 0 && !leave && (
-          <div className="tk-day-empty">No punches on this day</div>
+          <p className="tsx-tl-empty">No punches on this day</p>
         )}
       </div>
     </div>
   );
+}
+
+// Spoken label. Presence comes first because colour is the only other thing
+// carrying it, and a screen reader user never sees the tone.
+function ariaLabelFor(iv) {
+  const parts = [
+    iv.isOut ? "Away" : "At desk",
+    `${fmtClock(iv.startAt)} to ${iv.endAt ? fmtClock(iv.endAt) : "now"}`,
+    TK_CATEGORY_LABEL[iv.category] || iv.category,
+    iv.durationMinutes != null ? fmtHM(iv.durationMinutes) : null,
+    iv.outlookEventSubject ? `Calendar event ${iv.outlookEventSubject}` : null,
+    iv.notes ? `Note ${iv.notes}` : null,
+  ].filter(Boolean);
+  return `${parts.join(", ")}. Open to change the category.`;
 }
 
 function tooltipFor(iv) {
@@ -190,9 +215,9 @@ function tooltipFor(iv) {
     `${fmtClock(iv.startAt)} – ${iv.endAt ? fmtClock(iv.endAt) : "now"}`,
     TK_CATEGORY_LABEL[iv.category] || iv.category,
     iv.durationMinutes != null ? fmtHM(iv.durationMinutes) : null,
-    iv.outlookEventSubject ? `📅 ${iv.outlookEventSubject}` : null,
-    iv.outlookEventLocation ? `📍 ${iv.outlookEventLocation}` : null,
-    iv.notes ? `📝 ${iv.notes}` : null,
+    iv.outlookEventSubject ? `Calendar: ${iv.outlookEventSubject}` : null,
+    iv.outlookEventLocation ? `Location: ${iv.outlookEventLocation}` : null,
+    iv.notes ? `Note: ${iv.notes}` : null,
     iv.categorySource === "user"   ? "set by user" :
     iv.categorySource === "admin"  ? "set by admin" :
     iv.categorySource === "outlook"? "auto-tagged from calendar" :

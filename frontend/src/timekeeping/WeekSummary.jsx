@@ -2,12 +2,24 @@
 // retired (everyone edits their own time directly), so this no longer submits
 // or shows approval state — just the week's worked hours per day + any
 // attention flags (missing_out, untagged_meeting).
+//
+// Presentation (ui-v2.0): a real table rather than a row of stat cards, so the
+// seven days line up as one column of tabular figures and a screen reader gets
+// day/hours pairs instead of a pile of divs. The bar behind each row is the
+// same 8-hour reference the previous version used; a day that runs past it
+// keeps the full bar and is called out with a label as well as a tone, never
+// with colour on its own.
 
 import React from "react";
 import { Icon } from "../icons";
+import { EmptyState } from "@/ui";
 import { fmtHM } from "../data";
 
 const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// The reference day length the bars are drawn against (8 h). Unchanged from
+// the original: fill = min(100%, minutes / FULL_DAY_MIN).
+const FULL_DAY_MIN = 480;
 
 export function WeekSummary({
   weekStart,
@@ -46,54 +58,102 @@ export function WeekSummary({
     return list;
   });
 
+  const anyHours = slots.some(s => (s.day?.minutesWork || 0) > 0);
+
   return (
-    <section className="tk-week-card">
-      <header className="tk-week-head">
-        <div>
-          <div className="tk-week-eyebrow">Week of</div>
-          <h3 className="tk-week-title">{fmtWeekRange(weekStart)}</h3>
+    <section className="tsx-week" aria-labelledby="tsx-week-title">
+      <header className="tsx-week-head">
+        <div className="tsx-week-headline">
+          <span className="tsx-week-eyebrow">Week of</span>
+          <h3 className="tsx-week-title" id="tsx-week-title">{fmtWeekRange(weekStart)}</h3>
         </div>
-        <div className="tk-week-meta">
-          <div className="tk-week-total">{fmtHM(total)}</div>
-        </div>
+        <p className="tsx-week-total">
+          <span className="tsx-week-total-val num">{fmtHM(total)}</span>
+          <span className="tsx-week-total-key">worked this week</span>
+        </p>
       </header>
 
-      <ul className="tk-week-days">
-        {slots.map(s => {
-          const minutes = s.day?.minutesWork || 0;
-          const f = s.day?.flags || {};
-          const attention = attentionFor(f);
-          return (
-            <li key={s.date} className={`tk-week-day ${attention ? "has-attention" : ""}`}>
-              <span className="tk-week-day-label">{s.label}</span>
-              <span className="tk-week-day-bar">
-                <span className="tk-week-day-bar-fill"
-                  style={{ width: `${Math.min(100, (minutes / 480) * 100)}%` }} />
-              </span>
-              <span className="tk-week-day-total">{fmtHM(minutes)}</span>
-              {attention && (
-                <button
-                  type="button"
-                  className={`tk-week-day-flag tone-${attention.tone}`}
-                  title={attention.label}
-                  aria-label={`${attention.label}. Open ${fullDayLabel(s.date)}.`}
-                  onClick={() => onSelectDate?.(s.date)}
-                >
-                  <Icon name={attention.icon} size={11}/>
-                  {attention.short}
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {anyHours ? (
+        <div className="tsx-week-tablewrap">
+          <table className="tsx-week-table">
+            <caption className="sr-only">
+              Hours worked each day this week. Bars are drawn against an eight hour day.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Day</th>
+                <th scope="col" className="tsx-week-col-bar">Share of an eight hour day</th>
+                <th scope="col" className="tsx-week-col-h">Worked</th>
+                <th scope="col" className="tsx-week-col-flag">Needs attention</th>
+              </tr>
+            </thead>
+            <tbody>
+              {slots.map(s => {
+                const minutes = s.day?.minutesWork || 0;
+                const f = s.day?.flags || {};
+                const attention = attentionFor(f);
+                const over = minutes > FULL_DAY_MIN;
+                return (
+                  <tr
+                    key={s.date}
+                    className={`tsx-week-row ${minutes === 0 ? "is-empty" : ""} ${over ? "is-over" : ""} ${attention ? "has-attention" : ""}`}
+                  >
+                    <th scope="row" className="tsx-week-cell-day">
+                      <span className="tsx-week-dow">{s.label}</span>
+                      <span className="tsx-week-dom num">{dayOfMonth(s.date)}</span>
+                    </th>
+                    <td className="tsx-week-cell-bar">
+                      <span className="tsx-week-bar" aria-hidden="true">
+                        <span
+                          className="tsx-week-bar-fill"
+                          style={{ width: `${Math.min(100, (minutes / FULL_DAY_MIN) * 100)}%` }}
+                        />
+                      </span>
+                    </td>
+                    <td className="tsx-week-cell-h">
+                      <span className="tsx-week-hours num">{minutes === 0 ? "–" : fmtHM(minutes)}</span>
+                      {over && (
+                        <span className="tsx-week-over">
+                          <Icon name="trend" size={11}/> Over 8h
+                        </span>
+                      )}
+                    </td>
+                    <td className="tsx-week-cell-flag">
+                      {attention ? (
+                        <button
+                          type="button"
+                          className={`tsx-week-flag tone-${attention.tone}`}
+                          title={attention.label}
+                          aria-label={`${attention.label}. Open ${fullDayLabel(s.date)}.`}
+                          onClick={() => onSelectDate?.(s.date)}
+                        >
+                          <Icon name={attention.icon} size={11}/>
+                          <span>{attention.short}</span>
+                        </button>
+                      ) : (
+                        <span className="tsx-week-noflag" aria-hidden="true">–</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState
+          compact
+          title="No hours logged this week yet"
+          description="Punch in from the button above, or tap a badge from a Pi reader, and the day will fill in here."
+        />
+      )}
 
       {flags.length > 0 && (
-        <ul className="tk-week-flags">
+        <ul className="tsx-week-flags">
           {flags.map((f, i) => (
             <li key={i}>
-              <Icon name="warn" size={13}/>
-              <span className="tk-week-flag-copy">
+              <span className="tsx-week-flags-icon" aria-hidden="true"><Icon name="warn" size={13}/></span>
+              <span className="tsx-week-flag-copy">
                 <strong>{f.dayLabel}: {f.title}</strong>
                 <span>{f.detail}</span>
               </span>
@@ -120,6 +180,10 @@ function attentionFor(flags = {}) {
 
 function fullDayLabel(dateStr) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+}
+
+function dayOfMonth(dateStr) {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", { day: "numeric" });
 }
 
 function fmtWeekRange(weekStart) {

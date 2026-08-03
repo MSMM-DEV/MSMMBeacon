@@ -1,5 +1,22 @@
 import React from "react";
 import { Icon } from "./icons.jsx";
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  RadioGroup,
+  RadioGroupItem,
+  Switch,
+} from "@/ui";
 
 // Each accent ships TWO palettes — light + dark — for the three derived
 // tokens (ink / soft / softer). applyTweaks selects the right set based on
@@ -43,51 +60,216 @@ export const FONT_PAIRS = [
   { key: "geist_jetbrains",  label: "Geist · JetBrains" },
 ];
 
-export const TweaksPanel = ({ tweaks, setTweak, onClose }) => (
-  <div className="tweaks-panel">
-    <div className="tweaks-head">
-      <span><Icon name="settings" size={13}/> &nbsp;Tweaks</span>
-      <button className="drawer-close" onClick={onClose}><Icon name="x" size={14}/></button>
+// The stacks each pair actually resolves to, mirroring the [data-font="…"]
+// blocks in design/tokens.css. `inter_plex` has no block of its own, so it
+// renders with the :root defaults — the preview shows what will really be
+// painted rather than a family the app never loads.
+const FONT_PREVIEW = {
+  inter_plex: {
+    display: '"Geist", ui-sans-serif, system-ui, sans-serif',
+    mono: '"JetBrains Mono", ui-monospace, monospace',
+  },
+  fraunces_plex: {
+    display: '"Fraunces", Georgia, "Times New Roman", serif',
+    mono: '"IBM Plex Mono", ui-monospace, monospace',
+  },
+  instrument_geist: {
+    display: '"Instrument Serif", Georgia, "Times New Roman", serif',
+    mono: '"JetBrains Mono", ui-monospace, monospace',
+  },
+  geist_jetbrains: {
+    display: '"Geist", ui-sans-serif, system-ui, sans-serif',
+    mono: '"JetBrains Mono", ui-monospace, monospace',
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Live preview — a miniature of the real chrome (display type, tabular money,
+// a status badge, a row at the current density) so every control below shows
+// its effect instead of describing it. Inert: aria-hidden + not focusable, so
+// it is never a stop for keyboard or screen-reader users.
+// ---------------------------------------------------------------------------
+const AppearancePreview = () => (
+  <div className="tw-preview" aria-hidden="true">
+    <div className="tw-preview-bar">
+      <span className="tw-preview-mark" />
+      <span className="tw-preview-title">Quad Sheet</span>
+      <Badge tone="brand">Awaiting</Badge>
     </div>
-    <div className="tweaks-body">
-      <div className="tweak-row">
-        <div className="tweak-label">Accent color</div>
-        <div className="swatches">
-          {ACCENTS.map(a => (
-            <div key={a.key}
-              className={"swatch" + (tweaks.accent === a.key ? " active" : "")}
-              style={{ background: a.accent }}
-              title={a.label}
-              onClick={() => setTweak("accent", a.key)}/>
-          ))}
-        </div>
+    <div className="tw-preview-rows">
+      <div className="tw-preview-row">
+        <span className="tw-preview-cell">Levee inspection</span>
+        <span className="tw-preview-num num">$184,000</span>
       </div>
-      <div className="tweak-row">
-        <div className="tweak-label">Theme</div>
-        <div className="seg">
-          <button className={"seg-btn" + (tweaks.theme === "light" ? " active" : "")} onClick={() => setTweak("theme","light")}>
-            <Icon name="sun" size={12}/> Light
-          </button>
-          <button className={"seg-btn" + (tweaks.theme === "dark" ? " active" : "")} onClick={() => setTweak("theme","dark")}>
-            <Icon name="moon" size={12}/> Dark
-          </button>
-        </div>
+      <div className="tw-preview-row">
+        <span className="tw-preview-cell">Pump station rehab</span>
+        <span className="tw-preview-num num">$62,400</span>
       </div>
-      <div className="tweak-row">
-        <div className="tweak-label">Density</div>
-        <div className="seg">
-          <button className={"seg-btn" + (tweaks.density === "comfortable" ? " active" : "")} onClick={() => setTweak("density","comfortable")}>Comfortable</button>
-          <button className={"seg-btn" + (tweaks.density === "compact" ? " active" : "")} onClick={() => setTweak("density","compact")}>Compact</button>
-        </div>
-      </div>
-      <div className="tweak-row">
-        <div className="tweak-label">Font pairing</div>
-        <select className="select" value={tweaks.fontPair} onChange={e => setTweak("fontPair", e.target.value)}>
-          {FONT_PAIRS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-        </select>
-      </div>
+    </div>
+    <div className="tw-preview-foot">
+      <span className="tw-preview-btn tw-preview-btn-primary">Save</span>
+      <span className="tw-preview-btn">Cancel</span>
     </div>
   </div>
+);
+
+// One settings row: label + explanation on the left, control on the right.
+const TweakRow = ({ id, title, hint, children, stacked = false }) => (
+  <div className={"tw-row" + (stacked ? " tw-row-stacked" : "")}>
+    <div className="tw-row-text">
+      <Label
+        htmlFor={id}
+        className="tw-row-title normal-case tracking-[var(--tracking-snug)] text-[length:var(--fs-sm)] font-semibold text-[var(--text)]"
+      >
+        {title}
+      </Label>
+      {hint ? <p className="tw-row-hint">{hint}</p> : null}
+    </div>
+    <div className="tw-row-control">{children}</div>
+  </div>
+);
+
+const AccentPicker = ({ id, value, onSelect }) => {
+  const current = ACCENTS.find(a => a.key === value) || ACCENTS[0];
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button id={id} variant="default" size="sm" className="tw-accent-trigger justify-start gap-2">
+          <span className="tw-swatch" style={{ background: current.accent }} aria-hidden="true" />
+          <span>{current.label}</span>
+          <Icon name="chevronDown" size={14} className="ml-auto" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[228px] p-2">
+        <RadioGroup
+          value={value}
+          onValueChange={onSelect}
+          aria-label="Accent color"
+          className="gap-0.5"
+        >
+          {ACCENTS.map(a => {
+            const id = `tw-accent-${a.name}`;
+            const on = a.key === value;
+            return (
+              <label key={a.key} htmlFor={id} className={"tw-accent-opt" + (on ? " is-on" : "")}>
+                <RadioGroupItem id={id} value={a.key} className="sr-only" />
+                <span className="tw-swatch tw-swatch-lg" style={{ background: a.accent }} aria-hidden="true" />
+                <span className="tw-accent-name">{a.label}</span>
+                {on ? <Icon name="check" size={14} className="tw-accent-check" /> : null}
+              </label>
+            );
+          })}
+        </RadioGroup>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+const FontPicker = ({ value, onSelect }) => (
+  <RadioGroup
+    value={value}
+    onValueChange={onSelect}
+    aria-label="Font pairing"
+    className="tw-fonts"
+  >
+    {FONT_PAIRS.map(f => {
+      const id = `tw-font-${f.key}`;
+      const on = f.key === value;
+      const stacks = FONT_PREVIEW[f.key] || FONT_PREVIEW.geist_jetbrains;
+      return (
+        <label key={f.key} htmlFor={id} className={"tw-font" + (on ? " is-on" : "")}>
+          <RadioGroupItem id={id} value={f.key} className="tw-font-radio" />
+          <span className="tw-font-body">
+            <span className="tw-font-sample" style={{ fontFamily: stacks.display }}>Aa</span>
+            <span className="tw-font-meta">
+              <span className="tw-font-label">{f.label}</span>
+              <span className="tw-font-num" style={{ fontFamily: stacks.mono }}>1,284.06</span>
+            </span>
+          </span>
+        </label>
+      );
+    })}
+  </RadioGroup>
+);
+
+// ---------------------------------------------------------------------------
+// AppearanceSettings — the preferences panel itself, with no chrome of its
+// own so it can sit inline (Admin → Appearance) or inside the standalone
+// TweaksPanel dialog below.
+// ---------------------------------------------------------------------------
+export const AppearanceSettings = ({ tweaks, setTweak }) => {
+  const isDark = tweaks.theme === "dark";
+  const isCompact = tweaks.density === "compact";
+
+  return (
+    <div className="tw-panel">
+      <AppearancePreview />
+
+      <div className="tw-rows">
+        <TweakRow
+          id="tw-theme"
+          title="Dark theme"
+          hint={isDark ? "Warm charcoal surfaces for low light." : "Warm paper surfaces for daylight."}
+        >
+          <span className="tw-switch-wrap">
+            <Icon name="sun" size={14} className={isDark ? "tw-mode-off" : "tw-mode-on"} />
+            <Switch
+              id="tw-theme"
+              checked={isDark}
+              onCheckedChange={(on) => setTweak("theme", on ? "dark" : "light")}
+            />
+            <Icon name="moon" size={14} className={isDark ? "tw-mode-on" : "tw-mode-off"} />
+          </span>
+        </TweakRow>
+
+        <TweakRow
+          id="tw-density"
+          title="Compact rows"
+          hint={isCompact ? "Tighter rows, more records per screen." : "Roomier rows, easier to scan."}
+        >
+          <Switch
+            id="tw-density"
+            checked={isCompact}
+            onCheckedChange={(on) => setTweak("density", on ? "compact" : "comfortable")}
+          />
+        </TweakRow>
+
+        <TweakRow
+          id="tw-accent"
+          title="Accent color"
+          hint="Used for primary actions, selection and in-progress status."
+        >
+          <AccentPicker id="tw-accent" value={tweaks.accent} onSelect={(v) => setTweak("accent", v)} />
+        </TweakRow>
+
+        <TweakRow
+          title="Font pairing"
+          hint="Headings and figures. Body copy stays on the same reading size."
+          stacked
+        >
+          <FontPicker value={tweaks.fontPair} onSelect={(v) => setTweak("fontPair", v)} />
+        </TweakRow>
+      </div>
+    </div>
+  );
+};
+
+// Standalone floating panel (topbar entry point). A Dialog rather than a
+// hand-rolled box so Escape, focus trapping and aria wiring come for free.
+export const TweaksPanel = ({ tweaks, setTweak, onClose }) => (
+  <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <DialogContent size="sm">
+      <DialogHeader>
+        <DialogTitle>Appearance</DialogTitle>
+        <DialogDescription>
+          Saved to this browser only. Every signed-in device keeps its own settings.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogBody>
+        <AppearanceSettings tweaks={tweaks} setTweak={setTweak} />
+      </DialogBody>
+    </DialogContent>
+  </Dialog>
 );
 
 export const applyTweaks = (tweaks) => {

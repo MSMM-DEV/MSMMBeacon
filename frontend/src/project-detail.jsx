@@ -4,6 +4,15 @@ import { SearchableSelect, EditableCell } from "./primitives.jsx";
 import { InvoiceTable } from "./tables.jsx";
 import { noteStamp, noteTimeAgo } from "./invoice-notes-thread.jsx";
 import {
+  Alert, Badge, Button, Checkbox,
+  Dialog, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle, DialogDescription,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+  EmptyState, Field, Input, Kbd, Separator, Skeleton,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Tabs, TabsContent, TabsList, TabsTrigger, Textarea, Tooltip, TooltipProvider,
+} from "@/ui";
+import {
   getCurrentBeaconUser, isAdmin, userById, companyById, getUsers, getCompanies,
   fmtMoney, fmtDate,
   projectItemTypeLabel, projectItemStatusLabel, contractTypeLabel,
@@ -24,6 +33,91 @@ const TABS = [
   { key: "notes",     label: "Notes",     icon: "note" },
   { key: "settings",  label: "Settings",  icon: "settings" },
 ];
+
+// The empty-cell placeholder for the whole page (en dash, never an em dash).
+const DASH = "–";
+
+// Radix Select can't carry an empty-string item value, so the "no selection"
+// option travels under a sentinel and is mapped straight back to "" before it
+// reaches any handler. The stored value is unchanged.
+const NONE = "__none__";
+
+// `EmptyState` takes an icon COMPONENT; the Beacon registry is keyed by name.
+// These adapters keep pages away from a direct lucide-react import.
+const glyph = (name) => function BeaconGlyph(props) { return <Icon name={name} {...props} />; };
+const GLYPH_OVERVIEW  = glyph("alignLeft");
+const GLYPH_DOCUMENTS = glyph("files");
+const GLYPH_TODOS     = glyph("checklist");
+const GLYPH_NOTES     = glyph("note");
+const GLYPH_SELECT    = glyph("columns");
+
+// Semantic status mapping, fixed product-wide: sage = on track, steel =
+// paused / in between, clay = closed out. Never signalled by colour alone —
+// every badge carries its label and a glyph.
+const STATUS_TONE = { active: "success", between: "info", closed_out: "danger" };
+const STATUS_ICON = { active: "play",    between: "pause", closed_out: "ban" };
+
+function StatusBadge({ value, size }) {
+  const key = value || "active";
+  return (
+    <Badge tone={STATUS_TONE[key] || "neutral"} size={size}>
+      <Icon name={STATUS_ICON[key] || "dot"} size={11}/>
+      {projectItemStatusLabel(value)}
+    </Badge>
+  );
+}
+
+function TypeBadge({ value, size }) {
+  const isMain = value === "main";
+  return (
+    <Badge tone="neutral" size={size}>
+      <Icon name={isMain ? "blocks" : "square"} size={11}/>
+      {projectItemTypeLabel(value)}
+    </Badge>
+  );
+}
+
+const PRIORITY_TONE = { urgent: "danger", high: "brand", medium: "neutral", low: "outline" };
+
+function PriorityBadge({ value }) {
+  return (
+    <Badge tone={PRIORITY_TONE[value] || "neutral"} size="sm">
+      <Icon name="flag" size={10}/>
+      {todoPriorityLabel(value)}
+    </Badge>
+  );
+}
+
+// Loading placeholder for the To-Do / Note feeds.
+function RowsSkeleton({ rows = 4, lead = "check" }) {
+  return (
+    <div className="pdx-skel">
+      <p className="sr-only" role="status">Loading…</p>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="pdx-skel-row" aria-hidden="true">
+          <Skeleton className={lead === "check" ? "size-[18px] rounded-[var(--radius-xs)]" : "size-[22px] rounded-full"}/>
+          <div className="pdx-skel-lines">
+            <Skeleton className="h-3.5" style={{ width: `${64 - i * 7}%` }}/>
+            <Skeleton className="h-2.5" style={{ width: `${34 - i * 4}%` }}/>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// A page section: heading, a hairline rule that eats the remaining width, and
+// an optional trailing action. Sections sit on the page canvas, not in cards.
+function SectionHead({ title, count, children, id, as: Heading = "h2" }) {
+  return (
+    <div className="pdx-sectionhead">
+      <Heading id={id}>{title}</Heading>
+      {count != null ? <span className="pdx-count num">{count}</span> : null}
+      <span className="pdx-rule" aria-hidden="true"/>
+      {children}
+    </div>
+  );
+}
 
 // Depth-first walk of one root + its whole subtree → flat [{...item, _depth}].
 // Children sort by sort_ord then numeric-aware local_id (mirrors ProjectsTable).
@@ -51,7 +145,7 @@ function buildSubtree(items, rootId) {
 
 // Resolve the merged Client/Prime display name (the picker spans clients +
 // companies; companyById searches the merged directory list).
-const clientPrimeName = (id) => (id ? (companyById(id)?.name || "—") : "—");
+const clientPrimeName = (id) => (id ? (companyById(id)?.name || DASH) : DASH);
 
 // ============================================================================
 // ProjectDetailPage — the per-project detail surface. Replaces the table area
@@ -69,55 +163,90 @@ export function ProjectDetailPage({
   const subtree = useMemo(() => buildSubtree(items, project.id), [items, project.id]);
   const subtreeIds = useMemo(() => subtree.map(n => n.id), [subtree]);
   const nodeOptions = useMemo(
-    () => subtree.map(n => ({ value: n.id, label: `${"— ".repeat(n._depth)}${n.localId} · ${n.name}` })),
+    () => subtree.map(n => ({ value: n.id, label: `${"– ".repeat(n._depth)}${n.localId} · ${n.name}` })),
     [subtree]);
 
   return (
-    <div className="pd">
-      {/* Header */}
-      <div className="pd-head">
-        <button className="pd-back" onClick={onClose}>
-          <Icon name="back" size={14}/> Projects
-        </button>
-        <div className="pd-head-main">
-          <div className="pd-eyebrow">
-            <Icon name="briefcase" size={12}/> Project {project.localId}
-            <span className={"pd-type-badge " + (project.itemType === "main" ? "is-main" : "is-standard")}>
-              {projectItemTypeLabel(project.itemType)}
-            </span>
-            <span className={"pd-status-badge st-" + (project.status || "active")}>
-              {projectItemStatusLabel(project.status)}
-            </span>
+    <TooltipProvider>
+      <div className="pdx bx-enter">
+        {/* Record header — identity first, figures second. */}
+        <header className="pdx-head">
+          <Button variant="ghost" size="sm" className="pdx-back" onClick={onClose}>
+            <Icon name="back" size={15}/>
+            Back to projects
+          </Button>
+
+          <div className="pdx-head-body">
+            <div className="pdx-head-identity">
+              <p className="pdx-eyebrow">
+                <Icon name="briefcase" size={13}/>
+                <span>Project</span>
+                <span className="pdx-eyebrow-id num">{project.localId}</span>
+              </p>
+              <h1 className="pdx-title">{project.name}</h1>
+              <div className="pdx-badges">
+                <TypeBadge value={project.itemType}/>
+                <StatusBadge value={project.status}/>
+              </div>
+            </div>
+
+            <dl className="pdx-facts">
+              <div className="pdx-fact">
+                <dt>Client / Prime</dt>
+                <dd>{clientPrimeName(project.clientId)}</dd>
+              </div>
+              <div className="pdx-fact">
+                <dt>Project manager</dt>
+                <dd>{userById(project.managerId)?.name || DASH}</dd>
+              </div>
+              <div className="pdx-fact">
+                <dt>Contract</dt>
+                <dd className="num">
+                  {project.contractAmount != null ? fmtMoney(project.contractAmount, false) : DASH}
+                </dd>
+              </div>
+            </dl>
           </div>
-          <h1 className="pd-title">{project.name}</h1>
-        </div>
-      </div>
+        </header>
 
-      {/* Sub-tabs */}
-      <div className="pd-tabs" role="tablist">
-        {TABS.map(t => (
-          <button key={t.key} role="tab" aria-selected={tab === t.key}
-            className={"pd-tab" + (tab === t.key ? " active" : "")}
-            onClick={() => setTab(t.key)}>
-            <Icon name={t.icon} size={13}/> {t.label}
-          </button>
-        ))}
-      </div>
+        <Tabs value={tab} onValueChange={setTab} className="pdx-tabs">
+          <TabsList variant="underline" aria-label="Project sections">
+            {TABS.map(t => (
+              <TabsTrigger key={t.key} value={t.key}>
+                <Icon name={t.icon} size={14}/>
+                <span>{t.label}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-      <div className="pd-body">
-        {tab === "overview"  && <OverviewTab project={project} subtree={subtree}/>}
-        {tab === "structure" && <StructureTab subtree={subtree} project={project} updateItem={updateItem} onAddChild={onAddChild}/>}
-        {tab === "invoices"  && <InvoicesTab project={project} invoiceTableProps={invoiceTableProps}/>}
-        {tab === "documents" && <DocumentsTab/>}
-        {tab === "todos"     && <TodosTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>}
-        {tab === "notes"     && <NotesTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>}
-        {tab === "settings"  && (
-          <SettingsTab subtree={subtree} items={items} updateItem={updateItem}
-            onAddItemSub={onAddItemSub} onUpdateItemSub={onUpdateItemSub} onRemoveItemSub={onRemoveItemSub}
-            onDeleteItem={onDeleteItem} onAddChild={onAddChild}/>
-        )}
+          <div className="pdx-body">
+            <TabsContent value="overview">
+              <OverviewTab project={project} subtree={subtree}/>
+            </TabsContent>
+            <TabsContent value="structure">
+              <StructureTab subtree={subtree} project={project} updateItem={updateItem} onAddChild={onAddChild}/>
+            </TabsContent>
+            <TabsContent value="invoices">
+              <InvoicesTab project={project} invoiceTableProps={invoiceTableProps}/>
+            </TabsContent>
+            <TabsContent value="documents">
+              <DocumentsTab/>
+            </TabsContent>
+            <TabsContent value="todos">
+              <TodosTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>
+            </TabsContent>
+            <TabsContent value="notes">
+              <NotesTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>
+            </TabsContent>
+            <TabsContent value="settings">
+              <SettingsTab subtree={subtree} items={items} updateItem={updateItem}
+                onAddItemSub={onAddItemSub} onUpdateItemSub={onUpdateItemSub} onRemoveItemSub={onRemoveItemSub}
+                onDeleteItem={onDeleteItem} onAddChild={onAddChild}/>
+            </TabsContent>
+          </div>
+        </Tabs>
       </div>
-    </div>
+    </TooltipProvider>
   );
 }
 
@@ -125,20 +254,42 @@ export function ProjectDetailPage({
 function OverviewTab({ project, subtree }) {
   const phases = subtree.length - 1;
   return (
-    <div className="pd-pane">
-      <div className="pd-empty">
-        <Icon name="alignLeft" size={26}/>
-        <h3>Overview coming soon</h3>
-        <p>This space will hold the project summary, key metrics, and important details.</p>
-      </div>
-      <div className="pd-overview-facts">
-        <div className="pd-fact"><span>Project ID</span><strong>{project.localId}</strong></div>
-        <div className="pd-fact"><span>Client / Prime</span><strong>{clientPrimeName(project.clientId)}</strong></div>
-        <div className="pd-fact"><span>Manager</span><strong>{userById(project.managerId)?.name || "—"}</strong></div>
-        <div className="pd-fact"><span>Contract</span><strong>{project.contractAmount != null ? fmtMoney(project.contractAmount, false) : "—"}</strong></div>
-        <div className="pd-fact"><span>Sub-items</span><strong>{phases}</strong></div>
-        <div className="pd-fact"><span>Status</span><strong>{projectItemStatusLabel(project.status)}</strong></div>
-      </div>
+    <div className="pdx-pane">
+      <section className="pdx-section" aria-labelledby="pdx-overview-record">
+        <SectionHead title="Record" id="pdx-overview-record"/>
+        <dl className="pdx-deflist">
+          <div className="pdx-def">
+            <dt>Project ID</dt>
+            <dd className="num">{project.localId}</dd>
+          </div>
+          <div className="pdx-def">
+            <dt>Client / Prime</dt>
+            <dd>{clientPrimeName(project.clientId)}</dd>
+          </div>
+          <div className="pdx-def">
+            <dt>Manager</dt>
+            <dd>{userById(project.managerId)?.name || DASH}</dd>
+          </div>
+          <div className="pdx-def">
+            <dt>Contract</dt>
+            <dd className="num">{project.contractAmount != null ? fmtMoney(project.contractAmount, false) : DASH}</dd>
+          </div>
+          <div className="pdx-def">
+            <dt>Sub-items</dt>
+            <dd className="num">{phases}</dd>
+          </div>
+          <div className="pdx-def">
+            <dt>Status</dt>
+            <dd><StatusBadge value={project.status}/></dd>
+          </div>
+        </dl>
+      </section>
+
+      <EmptyState
+        icon={GLYPH_OVERVIEW}
+        title="Overview is not built yet"
+        description="This section will carry the written project summary, the key dates and the rolled-up figures for the whole tree. Until then, the Structure tab holds the financial breakdown."
+      />
     </div>
   );
 }
@@ -147,8 +298,9 @@ function OverviewTab({ project, subtree }) {
 // A spreadsheet-style breakdown: root + phases + subphases, every money/percent
 // cell click-to-edit (persists via updateItem → the same roll-up validation).
 // Columns mirror the imported accounting figures (contract, billed, cost).
+// `w` is the column's minimum width; the tree column absorbs the slack.
 const STRUCT_COLS = [
-  { key: "tree",      label: "Project / Phase", group: "",         w: "minmax(240px, 1.6fr)" },
+  { key: "tree",      label: "Project / Phase", group: "",         w: "260px" },
   { key: "type",      label: "Contract Type",   group: "Project",  w: "128px" },
   { key: "status",    label: "Status",          group: "Project",  w: "118px" },
   { key: "pct",       label: "% Complete",      group: "Project",  w: "104px" },
@@ -173,7 +325,6 @@ const STRUCT_GROUPS = [
 
 function StructureTab({ subtree, project, updateItem, onAddChild }) {
   const [collapsed, setCollapsed] = useState(() => new Set());
-  const gridCols = STRUCT_COLS.map(c => c.w).join(" ");
 
   const parentIds = useMemo(
     () => new Set(subtree.filter(n => n.parentId).map(n => n.parentId)), [subtree]);
@@ -196,98 +347,130 @@ function StructureTab({ subtree, project, updateItem, onAddChild }) {
     .reduce((a, n) => a + Number(n.contractAmount || 0), 0);
   const available = rootContract - allocated;
 
-  const pctText = (v) => (v == null ? "—" : `${v.toFixed(1)}%`);
+  const pctText = (v) => (v == null ? DASH : `${v.toFixed(1)}%`);
   const pctOfProject = (n) => (rootContract && n.contractAmount != null ? Number(n.contractAmount) / rootContract * 100 : null);
   const billedPct = (n) => { const c = Number(n.contractAmount || 0); return c && n.totalBilled != null ? Number(n.totalBilled) / c * 100 : null; };
 
   // Inline-editable money cell → persists via updateItem (roll-up validated).
   const money = (n, key) => (
-    <div className="pds-cell right mono">
+    <td className="pdx-c pdx-c-num num">
       <EditableCell value={n[key]} type="number" align="right"
-        render={(v) => (v == null || v === "") ? <span className="empty-cell">—</span> : fmtMoney(v, false)}
+        render={(v) => (v == null || v === "") ? <span className="empty-cell">{DASH}</span> : fmtMoney(v, false)}
         onChange={(v) => updateItem(n.id, { [key]: v })}/>
-    </div>
+    </td>
   );
-  const calc = (txt) => <div className="pds-cell right mono soft">{txt}</div>;
+  const calc = (txt) => <td className="pdx-c pdx-c-num pdx-c-calc num">{txt}</td>;
 
   return (
-    <div className="pd-pane pd-pane-flush">
-      <div className="pds-toolbar">
-        <div className="pds-avail">
-          <strong>{fmtMoney(available, false)}</strong> available of{" "}
-          <strong>{fmtMoney(rootContract, false)}</strong> main project contract
-          {available < -0.005 && <span className="pds-over"> · over-allocated</span>}
+    <div className="pdx-pane">
+      <div className="pdx-alloc">
+        <div className="pdx-alloc-figs">
+          <div className="pdx-alloc-fig">
+            <span className="pdx-alloc-label">Available</span>
+            <strong className={"num" + (available < -0.005 ? " is-over" : "")}>{fmtMoney(available, false)}</strong>
+          </div>
+          <Separator orientation="vertical" className="pdx-alloc-sep h-[30px] self-center"/>
+          <div className="pdx-alloc-fig">
+            <span className="pdx-alloc-label">Main project contract</span>
+            <strong className="num">{fmtMoney(rootContract, false)}</strong>
+          </div>
+          {available < -0.005 && (
+            <Badge tone="danger">
+              <Icon name="warn" size={11}/>
+              Over-allocated
+            </Badge>
+          )}
         </div>
-        <button className="btn sm" onClick={() => onAddChild?.(project.id)}>
-          <Icon name="plus" size={12}/> Add phase
-        </button>
+        <Button size="sm" onClick={() => onAddChild?.(project.id)}>
+          <Icon name="plus" size={14}/>
+          Add phase
+        </Button>
       </div>
 
-      <div className="pds-scroll">
-        <div className="pds-grid" style={{ minWidth: "max-content" }}>
-          {/* Group header row */}
-          <div className="pds-grouprow" style={{ gridTemplateColumns: gridCols }}>
-            {STRUCT_GROUPS.map((g, i) => (
-              <div key={i} className={"pds-gcell" + (g.label ? "" : " empty")} style={{ gridColumn: `span ${g.span}` }}>
-                {g.label}
-              </div>
-            ))}
-          </div>
-          {/* Column header row */}
-          <div className="pds-labelrow" style={{ gridTemplateColumns: gridCols }}>
-            {STRUCT_COLS.map(c => (
-              <div key={c.key} className={"pds-lcell" + (c.key === "tree" ? "" : " right")}>{c.label}</div>
-            ))}
-          </div>
-          {/* Body */}
-          {rows.map(n => {
-            const hasKids = parentIds.has(n.id);
-            const isRoot = n._depth === 0;
-            return (
-              <div key={n.id} className={"pds-row" + (isRoot ? " is-root" : "")} style={{ gridTemplateColumns: gridCols }}>
-                <div className="pds-cell pds-tree" style={{ paddingLeft: 8 + n._depth * 20 }}>
-                  {hasKids ? (
-                    <button className="pds-toggle" onClick={() => toggle(n.id)} title={collapsed.has(n.id) ? "Expand" : "Collapse"}>
-                      <Icon name={collapsed.has(n.id) ? "chevronRight" : "chevronDown"} size={12}/>
-                    </button>
-                  ) : <span className="pds-toggle-spacer"/>}
-                  <span className={"pd-tree-dot " + (n.itemType === "main" ? "main" : "standard")}/>
-                  <span className="pds-tree-id">{n.localId}</span>
-                  <span className="pds-tree-name" title={n.name}>{n.name}</span>
-                  <button className="pds-addkid" title="Add subphase" onClick={() => onAddChild?.(n.id)}>
-                    <Icon name="plus" size={11}/>
-                  </button>
-                </div>
-                <div className="pds-cell">
-                  <EditableCell value={n.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
-                    render={(v) => <span className={"pd-type-badge sm " + (v === "main" ? "is-main" : "is-standard")}>{projectItemTypeLabel(v)}</span>}
-                    onChange={(v) => updateItem(n.id, { itemType: v })}/>
-                </div>
-                <div className="pds-cell">
-                  <EditableCell value={n.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
-                    render={(v) => <span className={"pd-status-badge sm st-" + (v || "active")}>{projectItemStatusLabel(v)}</span>}
-                    onChange={(v) => updateItem(n.id, { status: v })}/>
-                </div>
-                <div className="pds-cell right mono">
-                  <EditableCell value={n.percentComplete} type="number" align="right"
-                    render={(v) => (v == null || v === "") ? <span className="empty-cell">—</span> : `${v}%`}
-                    onChange={(v) => updateItem(n.id, { percentComplete: v })}/>
-                </div>
-                {money(n, "contractAmount")}
-                {calc(pctText(pctOfProject(n)))}
-                {money(n, "totalBilled")}
-                {calc(pctText(billedPct(n)))}
-                {money(n, "billedServices")}
-                {money(n, "billedExpenses")}
-                {money(n, "billedTaxes")}
-                {money(n, "laborCost")}
-                {money(n, "expenseCost")}
-                {calc((n.laborCost == null && n.expenseCost == null)
-                  ? "—" : fmtMoney(Number(n.laborCost || 0) + Number(n.expenseCost || 0), false))}
-              </div>
-            );
-          })}
-        </div>
+      <div className="bx-scroll-x pdx-structwrap">
+        <table className="pdx-struct">
+          <caption className="sr-only">
+            Contract, billed and cost figures for this project and each of its phases. Money and
+            percent cells can be edited in place.
+          </caption>
+          <thead>
+            <tr className="pdx-struct-grouprow">
+              {STRUCT_GROUPS.map((g, i) => (
+                <th key={i} colSpan={g.span} scope="colgroup"
+                  className={"pdx-gcell" + (g.label ? "" : " is-empty")}>
+                  {g.label || <span className="sr-only">Project or phase</span>}
+                </th>
+              ))}
+            </tr>
+            <tr className="pdx-struct-labelrow">
+              {STRUCT_COLS.map(c => (
+                <th key={c.key} scope="col" style={{ "--pdx-colw": c.w }}
+                  className={c.key === "tree" ? "pdx-lcell pdx-c-tree" : "pdx-lcell pdx-c-num"}>
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(n => {
+              const hasKids = parentIds.has(n.id);
+              const isRoot = n._depth === 0;
+              const isCollapsed = collapsed.has(n.id);
+              return (
+                <tr key={n.id} className={"pdx-row" + (isRoot ? " is-root" : "")}>
+                  <th scope="row" className="pdx-c pdx-c-tree">
+                    <div className="pdx-tree" style={{ paddingLeft: n._depth * 18 }}>
+                      {hasKids ? (
+                        <button type="button" className="pdx-toggle"
+                          aria-expanded={!isCollapsed}
+                          aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${n.name}`}
+                          onClick={() => toggle(n.id)}>
+                          <Icon name={isCollapsed ? "chevronRight" : "chevronDown"} size={13}/>
+                        </button>
+                      ) : <span className="pdx-toggle-spacer" aria-hidden="true"/>}
+                      <span className={"pdx-dot " + (n.itemType === "main" ? "is-main" : "is-standard")} aria-hidden="true"/>
+                      <span className="pdx-tree-id num">{n.localId}</span>
+                      <span className="pdx-tree-name" title={n.name}>{n.name}</span>
+                      <Tooltip label="Add subphase">
+                        <button type="button" className="pdx-addkid"
+                          aria-label={`Add a subphase under ${n.name}`}
+                          onClick={() => onAddChild?.(n.id)}>
+                          <Icon name="plus" size={13}/>
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </th>
+                  <td className="pdx-c pdx-c-sel">
+                    <EditableCell value={n.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
+                      render={(v) => <TypeBadge value={v} size="sm"/>}
+                      onChange={(v) => updateItem(n.id, { itemType: v })}/>
+                  </td>
+                  <td className="pdx-c pdx-c-sel">
+                    <EditableCell value={n.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
+                      render={(v) => <StatusBadge value={v} size="sm"/>}
+                      onChange={(v) => updateItem(n.id, { status: v })}/>
+                  </td>
+                  <td className="pdx-c pdx-c-num num">
+                    <EditableCell value={n.percentComplete} type="number" align="right"
+                      render={(v) => (v == null || v === "") ? <span className="empty-cell">{DASH}</span> : `${v}%`}
+                      onChange={(v) => updateItem(n.id, { percentComplete: v })}/>
+                  </td>
+                  {money(n, "contractAmount")}
+                  {calc(pctText(pctOfProject(n)))}
+                  {money(n, "totalBilled")}
+                  {calc(pctText(billedPct(n)))}
+                  {money(n, "billedServices")}
+                  {money(n, "billedExpenses")}
+                  {money(n, "billedTaxes")}
+                  {money(n, "laborCost")}
+                  {money(n, "expenseCost")}
+                  {calc((n.laborCost == null && n.expenseCost == null)
+                    ? DASH : fmtMoney(Number(n.laborCost || 0) + Number(n.expenseCost || 0), false))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -297,14 +480,13 @@ function StructureTab({ subtree, project, updateItem, onAddChild }) {
 function InvoicesTab({ project, invoiceTableProps }) {
   const rows = invoiceTableProps?.rows || [];
   return (
-    <div className="pd-pane pd-pane-flush">
+    <div className="pdx-pane pdx-pane-flush">
       {rows.length === 0 && (
-        <div className="pd-inv-note">
-          <Icon name="warn" size={13}/>
-          No invoice records match project number <strong>{project.localId}</strong> yet.
-          Invoice rows link by project number — create one on the Invoice page (or set the
-          project's ID to match its invoice number) and it will appear here.
-        </div>
+        <Alert tone="warning" title="No invoice records match this project yet">
+          Invoice rows link by project number. Create one for{" "}
+          <strong className="num">{project.localId}</strong> on the Invoice page, or set this
+          project's ID to match its invoice number, and it will appear here.
+        </Alert>
       )}
       <InvoiceTable {...invoiceTableProps} tab="invoice"/>
     </div>
@@ -314,12 +496,12 @@ function InvoicesTab({ project, invoiceTableProps }) {
 // ── Documents (placeholder) ─────────────────────────────────────────────────
 function DocumentsTab() {
   return (
-    <div className="pd-pane">
-      <div className="pd-empty">
-        <Icon name="copy" size={26}/>
-        <h3>Documents coming soon</h3>
-        <p>Project-related documents will live here.</p>
-      </div>
+    <div className="pdx-pane">
+      <EmptyState
+        icon={GLYPH_DOCUMENTS}
+        title="No documents yet"
+        description="Contracts, drawings, submittals and correspondence filed against this project will be listed here. Until this section ships, attach files to a project note instead."
+      />
     </div>
   );
 }
@@ -345,7 +527,7 @@ function TodosTab({ subtreeIds, nodeOptions, rootId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtreeIds.join(",")]);
 
-  const nodeLabel = (id) => nodeOptions.find(o => o.value === id)?.label?.replace(/^(— )+/, "") || "";
+  const nodeLabel = (id) => nodeOptions.find(o => o.value === id)?.label?.replace(/^(– )+/, "") || "";
 
   const sorted = useMemo(() => {
     return [...todos].sort((a, b) =>
@@ -370,19 +552,20 @@ function TodosTab({ subtreeIds, nodeOptions, rootId }) {
     setTodos(rs => isEdit ? rs.map(r => r.id === saved.id ? saved : r) : [saved, ...rs]);
     setShowForm(false); setEditing(null);
   };
+  const openNew = () => { setEditing(null); setShowForm(true); };
 
   return (
-    <div className="pd-pane">
-      <div className="pd-pane-head">
-        <h3>To-Dos {todos.length ? <span className="pd-count">{todos.filter(t => !t.done).length} open</span> : null}</h3>
+    <div className="pdx-pane">
+      <SectionHead title="To-Dos" count={todos.length ? `${todos.filter(t => !t.done).length} open` : null}>
         {!showForm && (
-          <button className="btn primary sm" onClick={() => { setEditing(null); setShowForm(true); }}>
-            <Icon name="plus" size={12}/> New to-do
-          </button>
+          <Button variant="primary" size="sm" onClick={openNew}>
+            <Icon name="plus" size={14}/>
+            New to-do
+          </Button>
         )}
-      </div>
+      </SectionHead>
 
-      {error && <div className="pd-error"><Icon name="warn" size={12}/> {error}</div>}
+      {error && <Alert tone="danger">{error}</Alert>}
 
       {showForm && (
         <TodoForm
@@ -397,49 +580,69 @@ function TodosTab({ subtreeIds, nodeOptions, rootId }) {
       )}
 
       {loading ? (
-        <div className="pd-loading">Loading…</div>
+        <RowsSkeleton rows={4} lead="check"/>
       ) : sorted.length === 0 && !showForm ? (
-        <div className="pd-empty sm">
-          <Icon name="check" size={22}/>
-          <span>No to-dos yet</span>
-          <small>Create a task to track work on this project.</small>
-        </div>
+        <EmptyState
+          icon={GLYPH_TODOS}
+          title="No to-dos on this project"
+          description="Add a to-do to track a piece of work against this project or any of its phases. Each one carries a priority, a date range and an assignee."
+          action={<Button variant="primary" size="sm" onClick={openNew}><Icon name="plus" size={14}/> New to-do</Button>}
+        />
       ) : (
-        <div className="pd-todo-list">
+        <ul className="pdx-todo-list">
           {sorted.map(t => (
-            <div key={t.id} className={"pd-todo" + (t.done ? " is-done" : "")}>
-              <button className={"pd-check" + (t.done ? " on" : "")} onClick={() => toggleDone(t)}
-                title={t.done ? "Mark not done" : "Mark done"}>
-                {t.done && <Icon name="check" size={12}/>}
-              </button>
-              <div className="pd-todo-main">
-                <div className="pd-todo-top">
-                  <span className={"pd-prio pd-prio-" + t.priority}>
-                    <Icon name="flag" size={10}/> {todoPriorityLabel(t.priority)}
-                  </span>
-                  <span className="pd-todo-desc">{t.description}</span>
-                </div>
-                <div className="pd-todo-meta">
+            <li key={t.id} className={"pdx-todo" + (t.done ? " is-done" : "")}>
+              <Checkbox
+                className="pdx-todo-check"
+                checked={!!t.done}
+                onCheckedChange={() => toggleDone(t)}
+                aria-label={t.done ? `Mark "${t.description}" not done` : `Mark "${t.description}" done`}
+              />
+              <div className="pdx-todo-main">
+                <p className="pdx-todo-desc">{t.description}</p>
+                <div className="pdx-todo-meta">
+                  <PriorityBadge value={t.priority}/>
                   {(t.startDate || t.endDate) && (
-                    <span><Icon name="calendar" size={11}/> {fmtDate(t.startDate) || "—"} → {fmtDate(t.endDate) || "—"}</span>
-                  )}
-                  {t.assignedTo && (
-                    <span title="Assigned to">
-                      <span className={`avatar xs ${userById(t.assignedTo)?.color || ""}`}>{userById(t.assignedTo)?.initials || "··"}</span>
-                      {userById(t.assignedTo)?.name || "—"}
+                    <span className="pdx-meta">
+                      <Icon name="calendar" size={12}/>
+                      <span className="num">{fmtDate(t.startDate) || DASH}</span>
+                      <Icon name="forward" size={11}/>
+                      <span className="num">{fmtDate(t.endDate) || DASH}</span>
                     </span>
                   )}
-                  {t.assignedBy && <span className="pd-muted">by {userById(t.assignedBy)?.name || "—"}</span>}
-                  <span className="pd-muted">· {nodeLabel(t.itemId)}</span>
+                  {t.assignedTo && (
+                    <span className="pdx-meta">
+                      <span className={`avatar xs ${userById(t.assignedTo)?.color || ""}`} aria-hidden="true">
+                        {userById(t.assignedTo)?.initials || "··"}
+                      </span>
+                      <span className="pdx-truncate">{userById(t.assignedTo)?.name || DASH}</span>
+                    </span>
+                  )}
+                  {t.assignedBy && <span className="pdx-meta pdx-soft">by {userById(t.assignedBy)?.name || DASH}</span>}
+                  <span className="pdx-meta pdx-soft pdx-truncate">{nodeLabel(t.itemId)}</span>
                 </div>
               </div>
-              <div className="pd-todo-actions">
-                <button title="Edit" onClick={() => { setEditing(t); setShowForm(true); }}><Icon name="edit" size={13}/></button>
-                <button title="Delete" onClick={() => remove(t)}><Icon name="trash" size={13}/></button>
-              </div>
-            </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label={`Actions for to-do: ${t.description}`}>
+                    <Icon name="more" size={16}/>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => { setEditing(t); setShowForm(true); }}>
+                    <Icon name="edit" size={14}/>
+                    Edit to-do
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator/>
+                  <DropdownMenuItem destructive onSelect={() => remove(t)}>
+                    <Icon name="trash" size={14}/>
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
@@ -471,45 +674,74 @@ function TodoForm({ initial, nodeOptions, rootId, me, onCancel, onSaved, onError
   };
 
   return (
-    <div className="pd-form">
-      <div className="pd-form-row">
-        <label className="pd-field full">
-          <span>Description</span>
-          <textarea className="input" rows={2} value={f.description}
-            autoFocus placeholder="What needs to be done?"
-            onChange={e => set("description", e.target.value)}/>
-        </label>
-      </div>
-      <div className="pd-form-row">
-        <label className="pd-field"><span>Start date</span>
-          <input type="date" className="input" value={f.startDate} onChange={e => set("startDate", e.target.value)}/></label>
-        <label className="pd-field"><span>End date</span>
-          <input type="date" className="input" value={f.endDate} onChange={e => set("endDate", e.target.value)}/></label>
-        <label className="pd-field"><span>Priority</span>
-          <select className="input" value={f.priority} onChange={e => set("priority", e.target.value)}>
-            {TODO_PRIORITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select></label>
-      </div>
-      <div className="pd-form-row">
-        <label className="pd-field"><span>Assigned to</span>
-          <select className="input" value={f.assignedTo} onChange={e => set("assignedTo", e.target.value)}>
-            <option value="">— Unassigned —</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select></label>
-        <label className="pd-field"><span>Assigned by</span>
-          <input className="input" disabled value={userById(me?.id)?.name || "You"}/></label>
-        <label className="pd-field"><span>Attach to</span>
-          <select className="input" value={f.itemId} onChange={e => set("itemId", e.target.value)}>
-            {nodeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select></label>
-      </div>
-      <div className="pd-form-foot">
-        <button className="btn ghost sm" onClick={onCancel}>Cancel</button>
-        <button className="btn primary sm" onClick={submit} disabled={!f.description.trim() || busy}>
-          {busy ? "Saving…" : isEdit ? "Save changes" : "Add to-do"}
-        </button>
-      </div>
-    </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent size="md">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Edit to-do" : "New to-do"}</DialogTitle>
+          <DialogDescription>
+            Track a piece of work against this project or one of its phases.
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody className="pdx-form">
+          <Field label="Description" htmlFor="pdx-todo-desc">
+            <Textarea id="pdx-todo-desc" rows={3} value={f.description}
+              autoFocus placeholder="What needs to be done?"
+              onChange={e => set("description", e.target.value)}/>
+          </Field>
+
+          <div className="pdx-formgrid">
+            <Field label="Start date" htmlFor="pdx-todo-start">
+              <Input id="pdx-todo-start" type="date" value={f.startDate}
+                onChange={e => set("startDate", e.target.value)}/>
+            </Field>
+            <Field label="End date" htmlFor="pdx-todo-end">
+              <Input id="pdx-todo-end" type="date" value={f.endDate}
+                onChange={e => set("endDate", e.target.value)}/>
+            </Field>
+            <Field label="Priority" htmlFor="pdx-todo-priority">
+              <Select value={f.priority} onValueChange={v => set("priority", v)}>
+                <SelectTrigger id="pdx-todo-priority"><SelectValue/></SelectTrigger>
+                <SelectContent>
+                  {TODO_PRIORITY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+
+          <div className="pdx-formgrid">
+            <Field label="Assigned to" htmlFor="pdx-todo-assignee">
+              <Select value={f.assignedTo || NONE}
+                onValueChange={v => set("assignedTo", v === NONE ? "" : v)}>
+                <SelectTrigger id="pdx-todo-assignee"><SelectValue/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Unassigned</SelectItem>
+                  {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Assigned by" htmlFor="pdx-todo-assigner">
+              <Input id="pdx-todo-assigner" disabled value={userById(me?.id)?.name || "You"}/>
+            </Field>
+            <Field label="Attach to" htmlFor="pdx-todo-node">
+              <Select value={f.itemId} onValueChange={v => set("itemId", v)}>
+                <SelectTrigger id="pdx-todo-node"><SelectValue/></SelectTrigger>
+                <SelectContent>
+                  {nodeOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+        </DialogBody>
+
+        <DialogFooter>
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button variant="primary" onClick={submit} loading={busy} disabled={!f.description.trim() || busy}>
+            {busy ? "Saving…" : isEdit ? "Save changes" : "Add to-do"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -540,7 +772,7 @@ function NotesTab({ subtreeIds, nodeOptions, rootId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtreeIds.join(",")]);
 
-  const nodeLabel = (id) => nodeOptions.find(o => o.value === id)?.label?.replace(/^(— )+/, "") || "";
+  const nodeLabel = (id) => nodeOptions.find(o => o.value === id)?.label?.replace(/^(– )+/, "") || "";
   const canModify = (n) => admin || (n.authorId && me?.id === n.authorId);
 
   const post = async () => {
@@ -592,100 +824,152 @@ function NotesTab({ subtreeIds, nodeOptions, rootId }) {
   };
 
   return (
-    <div className="pd-pane">
+    <div className="pdx-pane">
       {/* Composer */}
-      <div className="pd-note-composer">
-        <span className={`avatar sm ${meUser?.color || ""}`}>{meUser?.initials || "··"}</span>
-        <div className="pd-note-composer-main">
-          <textarea className="input" rows={2} value={draft}
-            placeholder="Add a note — billing status, client update, contract change…"
+      <section className="pdx-composer" aria-label="Add a note">
+        <span className={`avatar sm ${meUser?.color || ""}`} aria-hidden="true">{meUser?.initials || "··"}</span>
+        <div className="pdx-composer-main">
+          <Textarea rows={3} value={draft} aria-label="Note text"
+            placeholder="Add a note: billing status, client update, contract change…"
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } }}/>
-          <div className="pd-note-composer-controls">
-            <select className="input sm" value={category} onChange={e => setCategory(e.target.value)}>
-              {NOTE_CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <select className="input sm" value={attachTo} onChange={e => setAttachTo(e.target.value)} title="Attach to">
-              {nodeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+          <div className="pdx-composer-controls">
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger size="sm" aria-label="Note category" className="pdx-composer-select w-auto">
+                <SelectValue/>
+              </SelectTrigger>
+              <SelectContent>
+                {NOTE_CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={attachTo} onValueChange={setAttachTo}>
+              <SelectTrigger size="sm" aria-label="Attach note to" className="pdx-composer-select w-auto">
+                <SelectValue/>
+              </SelectTrigger>
+              <SelectContent>
+                {nodeOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <input ref={fileInput} type="file" multiple hidden
               onChange={e => { setFiles(Array.from(e.target.files || [])); e.target.value = ""; }}/>
-            <button className="btn ghost sm" onClick={() => fileInput.current?.click()}>
-              <Icon name="link" size={12}/> Attach
-            </button>
-            <span className="pd-note-flex"/>
-            <button className="btn primary sm" onClick={post} disabled={!draft.trim() || busy}>
-              <Icon name="forward" size={12}/> {busy ? "Posting…" : "Post note"}
-            </button>
+            <Button variant="ghost" size="sm" onClick={() => fileInput.current?.click()}>
+              <Icon name="attachment" size={14}/>
+              Attach
+            </Button>
+            <span className="pdx-flex" aria-hidden="true"/>
+            <span className="pdx-kbdhint">
+              <Kbd>Ctrl</Kbd><Kbd>Enter</Kbd> to post
+            </span>
+            <Button variant="primary" size="sm" onClick={post} loading={busy} disabled={!draft.trim() || busy}>
+              {busy ? "Posting…" : "Post note"}
+            </Button>
           </div>
           {files.length > 0 && (
-            <div className="pd-note-files staged">
+            <ul className="pdx-chips">
               {files.map((f, i) => (
-                <span key={i} className="pd-file-chip">
-                  <Icon name="link" size={10}/> {f.name}
-                  <button onClick={() => setFiles(fs => fs.filter((_, j) => j !== i))} title="Remove"><Icon name="x" size={10}/></button>
-                </span>
+                <li key={i} className="pdx-chip">
+                  <span className="pdx-chip-face">
+                    <Icon name="attachment" size={11}/>
+                    <span className="pdx-chip-name">{f.name}</span>
+                  </span>
+                  <button type="button" className="pdx-chip-rm"
+                    aria-label={`Remove ${f.name} from this note`}
+                    onClick={() => setFiles(fs => fs.filter((_, j) => j !== i))}>
+                    <Icon name="x" size={11}/>
+                  </button>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
-      </div>
+      </section>
 
-      {error && <div className="pd-error"><Icon name="warn" size={12}/> {error}</div>}
+      {error && <Alert tone="danger">{error}</Alert>}
 
       {/* Feed */}
       {loading ? (
-        <div className="pd-loading">Loading…</div>
+        <RowsSkeleton rows={3} lead="avatar"/>
       ) : notes.length === 0 ? (
-        <div className="pd-empty sm">
-          <Icon name="note" size={22}/>
-          <span>No notes yet</span>
-          <small>Be the first to add a note for this project.</small>
-        </div>
+        <EmptyState
+          icon={GLYPH_NOTES}
+          title="No notes on this project"
+          description="Post a note above to record a billing status, a client update or a contract change. Notes are visible to everyone on the project and can carry file attachments."
+        />
       ) : (
-        <div className="pd-note-list">
+        <div className="pdx-note-list">
           {notes.map(n => {
             const u = userById(n.authorId);
             return (
-              <div key={n.id} className="pd-note">
-                <span className={`avatar xs ${u?.color || ""}`} title={u?.name || "Unknown"}>{u?.initials || "··"}</span>
-                <div className="pd-note-main">
-                  <div className="pd-note-head">
-                    <span className="pd-note-author">{u?.name || "Unknown"}</span>
-                    <span className={"pd-cat-badge cat-" + n.category}>{noteCategoryLabel(n.category)}</span>
-                    <span className="pd-note-time" title={noteStamp(n.createdAt)}>
-                      {noteStamp(n.createdAt)}<span className="pd-muted"> · {noteTimeAgo(n.createdAt)}</span>
-                    </span>
-                    {n.editedAt && <span className="pd-note-edited">edited</span>}
-                    <span className="pd-muted pd-note-node">· {nodeLabel(n.itemId)}</span>
+              <article key={n.id} className="pdx-note">
+                <span className={`avatar xs ${u?.color || ""}`} title={u?.name || "Unknown"} aria-hidden="true">
+                  {u?.initials || "··"}
+                </span>
+                <div className="pdx-note-main">
+                  <header className="pdx-note-head">
+                    <span className="pdx-note-author">{u?.name || "Unknown"}</span>
+                    <Badge tone="neutral" size="sm">{noteCategoryLabel(n.category)}</Badge>
+                    <time className="pdx-note-time num" dateTime={n.createdAt || undefined} title={noteStamp(n.createdAt)}>
+                      {noteStamp(n.createdAt)}
+                    </time>
+                    <span className="pdx-soft">{noteTimeAgo(n.createdAt)}</span>
+                    {n.editedAt && <span className="pdx-note-edited">edited</span>}
+                    <span className="pdx-soft pdx-truncate">{nodeLabel(n.itemId)}</span>
+                    <span className="pdx-flex" aria-hidden="true"/>
                     {canModify(n) && editingId !== n.id && (
-                      <span className="pd-note-actions">
-                        <button title="Edit" onClick={() => setEditingId(n.id)}><Icon name="edit" size={12}/></button>
-                        <button title="Delete" onClick={() => remove(n)}><Icon name="trash" size={12}/></button>
-                      </span>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm"
+                            aria-label={`Actions for note by ${u?.name || "Unknown"}`}>
+                            <Icon name="more" size={16}/>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => setEditingId(n.id)}>
+                            <Icon name="edit" size={14}/>
+                            Edit note
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator/>
+                          <DropdownMenuItem destructive onSelect={() => remove(n)}>
+                            <Icon name="trash" size={14}/>
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
-                  </div>
+                  </header>
 
                   {editingId === n.id ? (
                     <NoteEdit note={n} onCancel={() => setEditingId(null)} onSave={(patch) => saveEdit(n.id, patch)}/>
                   ) : (
                     <>
-                      <div className="pd-note-body">{n.body}</div>
+                      <div className="pdx-note-body">{n.body}</div>
                       {(n.files.length > 0 || canModify(n)) && (
-                        <div className="pd-note-files">
+                        <ul className="pdx-chips">
                           {n.files.map(f => (
-                            <span key={f.id} className="pd-file-chip">
-                              <button className="pd-file-open" onClick={() => openFile(f)}><Icon name="link" size={10}/> {f.name}</button>
-                              {canModify(n) && <button onClick={() => removeFile(n, f)} title="Remove"><Icon name="x" size={10}/></button>}
-                            </span>
+                            <li key={f.id} className="pdx-chip">
+                              <button type="button" className="pdx-chip-face pdx-chip-open"
+                                onClick={() => openFile(f)}>
+                                <Icon name="attachment" size={11}/>
+                                <span className="pdx-chip-name">{f.name}</span>
+                              </button>
+                              {canModify(n) && (
+                                <button type="button" className="pdx-chip-rm"
+                                  aria-label={`Remove attachment ${f.name}`}
+                                  onClick={() => removeFile(n, f)}>
+                                  <Icon name="x" size={11}/>
+                                </button>
+                              )}
+                            </li>
                           ))}
-                          {canModify(n) && <NoteAddFile onPick={(file) => addFileToNote(n, file)}/>}
-                        </div>
+                          {canModify(n) && (
+                            <li><NoteAddFile onPick={(file) => addFileToNote(n, file)}/></li>
+                          )}
+                        </ul>
                       )}
                     </>
                   )}
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>
@@ -698,18 +982,23 @@ function NoteEdit({ note, onCancel, onSave }) {
   const [body, setBody] = useState(note.body);
   const [cat, setCat] = useState(note.category);
   return (
-    <div className="pd-note-edit">
-      <textarea className="input" autoFocus rows={2} value={body}
+    <div className="pdx-note-edit">
+      <Textarea autoFocus rows={3} value={body} aria-label="Edit note text"
         onChange={e => setBody(e.target.value)}
         onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}/>
-      <div className="pd-note-edit-foot">
-        <select className="input sm" value={cat} onChange={e => setCat(e.target.value)}>
-          {NOTE_CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-        <span className="pd-note-flex"/>
-        <button className="btn ghost sm" onClick={onCancel}>Cancel</button>
-        <button className="btn primary sm" disabled={!body.trim()}
-          onClick={() => onSave({ body: body.trim(), category: cat })}>Save</button>
+      <div className="pdx-note-edit-foot">
+        <Select value={cat} onValueChange={setCat}>
+          <SelectTrigger size="sm" aria-label="Note category" className="pdx-composer-select w-auto">
+            <SelectValue/>
+          </SelectTrigger>
+          <SelectContent>
+            {NOTE_CATEGORY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <span className="pdx-flex" aria-hidden="true"/>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" size="sm" disabled={!body.trim()}
+          onClick={() => onSave({ body: body.trim(), category: cat })}>Save</Button>
       </div>
     </div>
   );
@@ -720,8 +1009,9 @@ function NoteAddFile({ onPick }) {
   return (
     <>
       <input ref={ref} type="file" hidden onChange={e => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ""; }}/>
-      <button className="pd-file-add" onClick={() => ref.current?.click()} title="Attach a file">
-        <Icon name="plus" size={10}/> Attach
+      <button type="button" className="pdx-chip-add" onClick={() => ref.current?.click()}>
+        <Icon name="plus" size={11}/>
+        Attach a file
       </button>
     </>
   );
@@ -734,24 +1024,32 @@ function SettingsTab({ subtree, items, updateItem, onAddItemSub, onUpdateItemSub
   const sel = items.find(it => it.id === selId) || subtree[0] || null;
 
   return (
-    <div className="pd-settings">
-      <div className="pd-settings-list">
+    <div className="pdx-settings">
+      <nav className="pdx-settings-list" aria-label="Project items">
         {subtree.map(n => (
-          <button key={n.id}
-            className={"pd-settings-item depth-" + Math.min(n._depth, 5) + (sel?.id === n.id ? " active" : "")}
-            style={{ "--pd-depth": n._depth }}
+          <button key={n.id} type="button"
+            className={"pdx-settings-item" + (sel?.id === n.id ? " is-active" : "")}
+            style={{ "--pdx-depth": Math.min(n._depth, 5) }}
+            aria-current={sel?.id === n.id ? "true" : undefined}
             onClick={() => setSelId(n.id)}>
-            <span className="pd-settings-id">{n.localId}</span>
-            <span className="pd-settings-name">{n.name}</span>
+            <span className="pdx-settings-id num">{n.localId}</span>
+            <span className="pdx-settings-name">{n.name}</span>
           </button>
         ))}
-      </div>
-      <div className="pd-settings-editor">
+      </nav>
+      <div className="pdx-settings-editor">
         {sel ? (
           <ItemEditor key={sel.id} item={sel} items={items} updateItem={updateItem}
             onAddItemSub={onAddItemSub} onUpdateItemSub={onUpdateItemSub} onRemoveItemSub={onRemoveItemSub}
             onDeleteItem={onDeleteItem} onAddChild={onAddChild}/>
-        ) : <div className="pd-empty sm"><span>Select an item to edit.</span></div>}
+        ) : (
+          <EmptyState
+            icon={GLYPH_SELECT}
+            title="Nothing selected"
+            description="Pick a project, phase or subphase from the list to edit its details, managers and subs."
+            compact
+          />
+        )}
       </div>
     </div>
   );
@@ -787,11 +1085,10 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
   // A render FUNCTION (not a nested component) so the input keeps focus across
   // re-renders — a nested component type would remount on every keystroke.
   const field = (label, k, type = "text") => (
-    <label className="pd-field" key={k}>
-      <span>{label}</span>
-      <input className="input" type={type}
+    <Field key={k} label={label} htmlFor={`pdx-f-${k}`}>
+      <Input id={`pdx-f-${k}`} type={type}
         value={val(k)} onChange={e => setLocal(k, e.target.value)} onBlur={() => commit(k)}/>
-    </label>
+    </Field>
   );
 
   // Subs management (companies) wired to App's item-sub handlers.
@@ -799,62 +1096,92 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
   const subCompanyOptions = getCompanies()
     .filter(c => c.type !== "Client" && !(item.subs || []).some(s => s.cId === c.id))
     .map(c => ({ value: c.id, label: c.name }));
+  // Same commit path the old picker used: clear the pending id, then hand the
+  // company to App's handler.
+  const pickSub = (v) => { setAddSubId(""); if (v) onAddItemSub(item.id, v); };
+  const availablePms = users.filter(u => !(item.pmIds || []).includes(u.id));
 
   return (
-    <div className="pd-editor">
-      <div className="pd-editor-head">
-        <h3>{item.localId} · {item.name}</h3>
-        <div className="pd-editor-head-actions">
-          <button className="btn ghost sm" onClick={() => onAddChild(item.id)}><Icon name="plus" size={12}/> Add child</button>
-          <button className="btn danger sm" onClick={() => onDeleteItem(item.id)}><Icon name="trash" size={12}/> Delete</button>
+    <div className="pdx-editor">
+      <div className="pdx-editor-head">
+        <div className="pdx-editor-title">
+          <span className="pdx-editor-id num">{item.localId}</span>
+          <h3>{item.name}</h3>
+        </div>
+        <div className="pdx-editor-actions">
+          <Button variant="subtle" size="sm" onClick={() => onAddChild(item.id)}>
+            <Icon name="plus" size={14}/>
+            Add child
+          </Button>
+          <Button variant="destructive-soft" size="sm" onClick={() => onDeleteItem(item.id)}>
+            <Icon name="trash" size={14}/>
+            Delete
+          </Button>
         </div>
       </div>
 
-      <div className="pd-editor-grid">
+      <div className="pdx-editor-grid">
         {field(idLabel, "localId")}
         {field("Name", "name")}
 
-        <label className="pd-field"><span>Type</span>
-          <select className="input" value={item.itemType || "standard"} onChange={e => save("itemType", e.target.value)}>
-            {PROJECT_ITEM_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <em className="pd-field-hint">{item.itemType === "main" ? "Container — no time/expense logging." : "Work item — time/expense can be logged."}</em>
-        </label>
-        <label className="pd-field"><span>Status</span>
-          <select className="input" value={item.status || "active"} onChange={e => save("status", e.target.value)}>
-            {PROJECT_ITEM_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </label>
+        <Field label="Type" htmlFor="pdx-f-itemType"
+          hint={item.itemType === "main"
+            ? "Container: no time or expense logging."
+            : "Work item: time and expense can be logged."}>
+          <Select value={item.itemType || "standard"} onValueChange={v => save("itemType", v)}>
+            <SelectTrigger id="pdx-f-itemType"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              {PROJECT_ITEM_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Status" htmlFor="pdx-f-status">
+          <Select value={item.status || "active"} onValueChange={v => save("status", v)}>
+            <SelectTrigger id="pdx-f-status"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              {PROJECT_ITEM_STATUS_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
 
-        <label className="pd-field"><span>Client / Prime</span>
+        <Field label="Client / Prime">
           <SearchableSelect value={item.clientId || ""} options={dirOptions}
             onChange={v => save("clientId", v)} allowClear placeholder="Search clients / companies…"/>
-        </label>
-        <label className="pd-field"><span>Parent</span>
+        </Field>
+        <Field label="Parent" hint={isRoot ? "The top of this project tree." : undefined}>
           {isRoot
-            ? <input className="input" disabled value="Root (no parent)"/>
+            ? <Input disabled value="Root (no parent)"/>
             : <SearchableSelect value={item.parentId || ""} options={parentOptions}
                 onChange={v => save("parentId", v)} allowClear placeholder="Search items…"/>}
-        </label>
+        </Field>
 
-        <label className="pd-field"><span>Contract Type</span>
-          <select className="input" value={item.contractType || ""} onChange={e => save("contractType", e.target.value)}>
-            <option value="">— None —</option>
-            {CONTRACT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </label>
+        <Field label="Contract Type" htmlFor="pdx-f-contractType"
+          hint={item.contractType ? `Billed as ${contractTypeLabel(item.contractType).toLowerCase()}.` : "No contract structure set."}>
+          <Select value={item.contractType || NONE}
+            onValueChange={v => save("contractType", v === NONE ? "" : v)}>
+            <SelectTrigger id="pdx-f-contractType"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>None</SelectItem>
+              {CONTRACT_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
         {field("Contract Amount", "contractAmount", "number")}
 
         {field("Start Date", "startDate", "date")}
         {field("Due Date", "dueDate", "date")}
 
         {field("Percent Complete", "percentComplete", "number")}
-        <label className="pd-field"><span>Manager</span>
-          <select className="input" value={item.managerId || ""} onChange={e => save("managerId", e.target.value)}>
-            <option value="">— None —</option>
-            {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </label>
+        <Field label="Manager" htmlFor="pdx-f-managerId">
+          <Select value={item.managerId || NONE}
+            onValueChange={v => save("managerId", v === NONE ? "" : v)}>
+            <SelectTrigger id="pdx-f-managerId"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>None</SelectItem>
+              {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
 
         {field("Address Line 1", "addressLine1")}
         {field("Address Line 2", "addressLine2")}
@@ -864,44 +1191,93 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
       </div>
 
       {/* Additional PMs */}
-      <div className="pd-editor-sub">
-        <div className="pd-editor-sub-head"><span>Additional Project Managers</span></div>
-        <div className="pd-chip-row">
+      <section className="pdx-editor-sub">
+        <SectionHead as="h4" title="Additional project managers"/>
+        {(item.pmIds || []).length === 0 && (
+          <p className="pdx-subempty">No additional managers. Add one to give them the same visibility as the primary manager.</p>
+        )}
+        <div className="pdx-chiprow">
           {(item.pmIds || []).map(id => (
-            <span key={id} className="pd-user-chip">
-              <span className={`avatar xs ${userById(id)?.color || ""}`}>{userById(id)?.initials || "··"}</span>
-              {userById(id)?.name || "—"}
-              <button onClick={() => save("pmIds", (item.pmIds || []).filter(x => x !== id))} title="Remove"><Icon name="x" size={10}/></button>
+            <span key={id} className="pdx-chip">
+              <span className="pdx-chip-face">
+                <span className={`avatar xs ${userById(id)?.color || ""}`} aria-hidden="true">
+                  {userById(id)?.initials || "··"}
+                </span>
+                <span className="pdx-chip-name">{userById(id)?.name || DASH}</span>
+              </span>
+              <button type="button" className="pdx-chip-rm"
+                aria-label={`Remove ${userById(id)?.name || "manager"}`}
+                onClick={() => save("pmIds", (item.pmIds || []).filter(x => x !== id))}>
+                <Icon name="x" size={11}/>
+              </button>
             </span>
           ))}
-          <select className="input sm" value="" onChange={e => { if (e.target.value) save("pmIds", [...(item.pmIds || []), e.target.value]); }}>
-            <option value="">+ Add PM…</option>
-            {users.filter(u => !(item.pmIds || []).includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="subtle" size="sm" disabled={availablePms.length === 0}>
+                <Icon name="userPlus" size={14}/>
+                Add manager
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Add project manager</DropdownMenuLabel>
+              {availablePms.map(u => (
+                <DropdownMenuItem key={u.id} onSelect={() => save("pmIds", [...(item.pmIds || []), u.id])}>
+                  {u.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
+      </section>
 
       {/* Subs */}
-      <div className="pd-editor-sub">
-        <div className="pd-editor-sub-head"><span>Subs</span></div>
-        <div className="pd-sub-list">
+      <section className="pdx-editor-sub">
+        <SectionHead as="h4" title="Subs"/>
+        {(item.subs || []).length === 0 && (
+          <p className="pdx-subempty">No subconsultants on this item. Add a company to track its discipline and contracted amount.</p>
+        )}
+        <div className="pdx-sub-list">
           {(item.subs || []).map(s => (
-            <div key={s.cId} className="pd-sub-row">
-              <span className="pd-sub-name">{companyById(s.cId)?.name || "—"}</span>
-              <input className="input sm" placeholder="Discipline" defaultValue={s.desc || ""}
+            <div key={s.cId} className="pdx-sub-row">
+              <span className="pdx-sub-name" title={companyById(s.cId)?.name || DASH}>
+                {companyById(s.cId)?.name || DASH}
+              </span>
+              <Input className="h-[var(--control-h-sm)]" placeholder="Discipline"
+                aria-label={`Discipline for ${companyById(s.cId)?.name || "sub"}`}
+                defaultValue={s.desc || ""}
                 onBlur={e => { if (e.target.value !== (s.desc || "")) onUpdateItemSub(item.id, s.cId, { desc: e.target.value }); }}/>
-              <input className="input sm" type="number" placeholder="Amount" defaultValue={s.amt ?? ""}
+              <Input className="h-[var(--control-h-sm)] num text-right" type="number" placeholder="Amount"
+                aria-label={`Amount for ${companyById(s.cId)?.name || "sub"}`}
+                defaultValue={s.amt ?? ""}
                 onBlur={e => { const v = e.target.value === "" ? 0 : Number(e.target.value); if (v !== (s.amt ?? 0)) onUpdateItemSub(item.id, s.cId, { amt: v }); }}/>
-              <button className="pd-sub-rm" onClick={() => onRemoveItemSub(item.id, s.cId)} title="Remove sub"><Icon name="x" size={11}/></button>
+              <button type="button" className="pdx-sub-rm"
+                aria-label={`Remove ${companyById(s.cId)?.name || "sub"}`}
+                onClick={() => onRemoveItemSub(item.id, s.cId)}>
+                <Icon name="x" size={13}/>
+              </button>
             </div>
           ))}
-          <select className="input sm" value={addSubId}
-            onChange={e => { const v = e.target.value; setAddSubId(""); if (v) onAddItemSub(item.id, v); }}>
-            <option value="">+ Add sub company…</option>
-            {subCompanyOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <div className="pdx-chiprow">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="subtle" size="sm" disabled={subCompanyOptions.length === 0}>
+                  <Icon name="plus" size={14}/>
+                  Add sub company
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuLabel>Add sub company</DropdownMenuLabel>
+                {subCompanyOptions.map(o => (
+                  <DropdownMenuItem key={o.value} onSelect={() => pickSub(o.value)}>
+                    {o.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

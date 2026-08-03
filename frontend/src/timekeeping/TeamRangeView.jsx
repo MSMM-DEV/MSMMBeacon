@@ -10,9 +10,14 @@
 // an accent stripe. Hours bars cap at a 8 h workday by default; overtime
 // shows as a deeper accent extension. Click any cell or name → opens the
 // per-user day drawer via onOpenUserDay.
+//
+// Week / Month / Custom render as real <table> markup inside a scroller that
+// pins the person column and the column header — the grid is comparison of
+// many people across the same fields, so it must stay aligned at any width.
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import { Badge, Button, EmptyState, Alert, SkeletonTable, Tooltip } from "@/ui";
 import {
   todayInCT, weekStartCT, fmtHM, fmtClock,
   loadTeamDay, loadTeamRange, getUsers,
@@ -26,6 +31,10 @@ const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const LIVE_TICK_MS = 30_000;   // refresh "in since" + open-interval totals
 const TRACK_START_HOUR = 6;
 const TRACK_END_HOUR   = 20;
+const EMPTY = "–";             // en dash placeholder for an empty numeric cell
+
+const UsersGlyph = (props) => <Icon name="users" {...props} />;
+const ClockGlyph = (props) => <Icon name="clock" {...props} />;
 
 // ---------------------------------------------------------------------------
 // Date helpers (all in CT business tz logic, matching the rest of the system)
@@ -279,9 +288,10 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
 
   // ---------- Render
   const isCompact = prefs.density === "compact";
+  const noPeople  = stats.peopleShown === 0;
 
   return (
-    <div className={`tk-range ${isCompact ? "is-compact" : ""}`}>
+    <section className={`tka-range ${isCompact ? "is-compact" : ""}`} aria-busy={busy || undefined}>
 
       <RangeHeader
         range={range}
@@ -304,54 +314,60 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
 
       <StatTiles stats={stats} range={range} />
 
-      {err && <div className="tk-range-err">Couldn't load: {err}</div>}
+      {err && (
+        <Alert tone="danger" title="Could not load the team range">{err}</Alert>
+      )}
 
-      <div className="tk-range-canvas">
-        {range === "day" && (
-          <DayMatrix
-            rows={sortRows(dayRows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "day")}
-            date={anchorDate}
-            onOpenUserDay={onOpenUserDay}
-            isCompact={isCompact}
+      <div className="tka-canvas">
+        {busy && noPeople ? (
+          <SkeletonTable rows={6} cols={6} />
+        ) : noPeople ? (
+          <EmptyState
+            icon={UsersGlyph}
+            title="No people match this view"
+            description="Widen the People selection or clear the name search to bring rows back."
           />
-        )}
-        {range === "week" && (
-          <WeekMatrix
-            rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
-            columns={window.columns}
-            today={today}
-            onOpenUserDay={onOpenUserDay}
-            isCompact={isCompact}
-          />
-        )}
-        {range === "month" && (
-          <MonthMatrix
-            rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
-            weeks={window.columns}
-            anchorDate={anchorDate}
-            today={today}
-            onOpenUserDay={onOpenUserDay}
-            isCompact={isCompact}
-          />
-        )}
-        {range === "custom" && (
-          <CustomMatrix
-            rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
-            start={window.start}
-            endExclusive={window.endExclusive}
-            onOpenUserDay={onOpenUserDay}
-          />
-        )}
-
-        {!busy && stats.peopleShown === 0 && (
-          <div className="tk-range-empty">
-            <Icon name="users" size={20}/>
-            <p>No people match the current filter.</p>
-            <p className="tk-range-empty-sub">Use the People menu to widen the selection or clear the search.</p>
-          </div>
+        ) : (
+          <>
+            {range === "day" && (
+              <DayMatrix
+                rows={sortRows(dayRows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "day")}
+                date={anchorDate}
+                onOpenUserDay={onOpenUserDay}
+                isCompact={isCompact}
+              />
+            )}
+            {range === "week" && (
+              <WeekMatrix
+                rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
+                columns={window.columns}
+                today={today}
+                onOpenUserDay={onOpenUserDay}
+                isCompact={isCompact}
+              />
+            )}
+            {range === "month" && (
+              <MonthMatrix
+                rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
+                weeks={window.columns}
+                anchorDate={anchorDate}
+                today={today}
+                onOpenUserDay={onOpenUserDay}
+                isCompact={isCompact}
+              />
+            )}
+            {range === "custom" && (
+              <CustomMatrix
+                rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
+                start={window.start}
+                endExclusive={window.endExclusive}
+                onOpenUserDay={onOpenUserDay}
+              />
+            )}
+          </>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -374,47 +390,44 @@ function RangeHeader({
   : range === "month" ? firstOfMonth(today) === firstOfMonth(anchorDate)
   :                     false;
 
+  const eyebrow =
+    range === "day" ? "Day" : range === "week" ? "Week" : range === "month" ? "Month" : "Custom range";
+
   return (
-    <header className="tk-range-head">
-      <div className="tk-range-nav">
+    <header className="tka-rangehead">
+      <div className="tka-rangehead-main">
         {range !== "custom" && (
-          <>
-            <button type="button" className="tk-icon-btn" onClick={() => onShift(-1)} aria-label="Previous">
+          <div className="tka-rangehead-steps">
+            <Button variant="default" size="icon-sm" onClick={() => onShift(-1)} aria-label={`Previous ${eyebrow.toLowerCase()}`}>
               <Icon name="back" size={14}/>
-            </button>
-            <button type="button" className="tk-icon-btn" onClick={() => onShift(+1)} aria-label="Next">
+            </Button>
+            <Button variant="default" size="icon-sm" onClick={() => onShift(+1)} aria-label={`Next ${eyebrow.toLowerCase()}`}>
               <Icon name="forward" size={14}/>
-            </button>
-          </>
+            </Button>
+          </div>
         )}
-        <div className="tk-range-title-wrap">
-          <span className="tk-range-eyebrow">
-            {range === "day" ? "Day" : range === "week" ? "Week" : range === "month" ? "Month" : "Custom range"}
-            {busy && <span className="tk-range-busy"> · refreshing</span>}
+
+        <div className="tka-rangehead-titles">
+          <span className="tka-eyebrow">
+            {eyebrow}
+            {busy && <span className="tka-eyebrow-busy"> · refreshing</span>}
           </span>
-          <h2 className="tk-range-title">{title}</h2>
+          <h2 className="tka-rangetitle">{title}</h2>
         </div>
+
         {!isToday && range !== "custom" && (
-          <button type="button" className="tk-pill-btn" onClick={onJumpToday}>
-            <Icon name="clock" size={11}/> Today
-          </button>
+          <Button variant="subtle" size="xs" onClick={onJumpToday}>
+            <Icon name="clock" size={12}/> Today
+          </Button>
         )}
       </div>
 
-      <div className="tk-range-side">
-        {range === "day" && (
+      <div className="tka-rangehead-side">
+        {(range === "day" || range === "week") && (
           <input
             type="date"
-            className="tk-day-input"
-            value={anchorDate}
-            max={today}
-            onChange={e => onAnchorPick(e.target.value || today)}
-          />
-        )}
-        {range === "week" && (
-          <input
-            type="date"
-            className="tk-day-input"
+            className="tka-dateinput"
+            aria-label={range === "day" ? "Pick a day" : "Pick a day inside the week"}
             value={anchorDate}
             max={today}
             onChange={e => onAnchorPick(e.target.value || today)}
@@ -423,26 +436,27 @@ function RangeHeader({
         {range === "month" && (
           <input
             type="month"
-            className="tk-day-input"
+            className="tka-dateinput"
+            aria-label="Pick a month"
             value={anchorDate.slice(0, 7)}
             max={today.slice(0, 7)}
             onChange={e => onAnchorPick(e.target.value ? `${e.target.value}-01` : today)}
           />
         )}
         {range === "custom" && (
-          <span className="tk-custom-inputs">
+          <span className="tka-daterange">
             <input
               type="date"
-              className="tk-day-input"
+              className="tka-dateinput"
               value={customStart || today}
               max={today}
               onChange={e => onCustomStart(e.target.value || today)}
               aria-label="Start date"
             />
-            <span className="tk-custom-sep">→</span>
+            <Icon name="forward" size={13} className="tka-daterange-sep"/>
             <input
               type="date"
-              className="tk-day-input"
+              className="tka-dateinput"
               value={customEnd || today}
               max={today}
               min={customStart || undefined}
@@ -461,21 +475,24 @@ function RangeHeader({
 // ---------------------------------------------------------------------------
 function StatTiles({ stats, range }) {
   const tiles = [
-    { key: "in",     label: "Currently in",  value: stats.inNow,      sub: "right now",  tone: "accent", pulse: stats.inNow > 0 },
-    { key: "active", label: "Active",        value: stats.activeUsers, sub: "people",     tone: "sage" },
-    { key: "hours",  label: "Hours logged",  value: fmtHM(stats.totalMin, { always: true }), sub: rangeWord(range), tone: "blue", asString: true },
-    { key: "flags",  label: "Needs review",  value: stats.daysWithFlags, sub: "flagged days", tone: stats.daysWithFlags > 0 ? "rose" : "muted" },
+    { key: "in",     label: "Currently in",  value: stats.inNow,      sub: "right now",  tone: "accent", icon: "userCheck", pulse: stats.inNow > 0 },
+    { key: "active", label: "Active",        value: stats.activeUsers, sub: "people",     tone: "sage",  icon: "users" },
+    { key: "hours",  label: "Hours logged",  value: fmtHM(stats.totalMin, { always: true }), sub: rangeWord(range), tone: "blue", icon: "clock", asString: true },
+    { key: "flags",  label: "Needs review",  value: stats.daysWithFlags, sub: "flagged days", tone: stats.daysWithFlags > 0 ? "rose" : "muted", icon: stats.daysWithFlags > 0 ? "warn" : "check" },
   ];
   return (
-    <div className="tk-stat-grid">
+    <div className="tka-stats">
       {tiles.map(t => (
-        <div key={t.key} className={`tk-stat-tile tone-${t.tone}`}>
-          <div className="tk-stat-tile-label">{t.label}</div>
-          <div className="tk-stat-tile-value">
-            {t.pulse && <span className="tk-pulse-dot tk-stat-pulse"/>}
+        <div key={t.key} className={`tka-stat tone-${t.tone}`}>
+          <div className="tka-stat-label">
+            <Icon name={t.icon} size={13}/>
+            <span>{t.label}</span>
+          </div>
+          <div className="tka-stat-value num">
+            {t.pulse && <span className="tka-livedot" aria-hidden="true"/>}
             {t.asString ? t.value : Number(t.value).toLocaleString()}
           </div>
-          <div className="tk-stat-tile-sub">{t.sub}</div>
+          <div className="tka-stat-sub">{t.sub}</div>
         </div>
       ))}
     </div>
@@ -484,6 +501,16 @@ function StatTiles({ stats, range }) {
 
 function rangeWord(r) {
   return r === "day" ? "this day" : r === "week" ? "this week" : r === "month" ? "this month" : "in range";
+}
+
+// In-office chip — never colour alone: a live dot plus the word "In".
+function InChip() {
+  return (
+    <Badge tone="brand" size="sm" className="tka-inchip">
+      <span className="tka-livedot" aria-hidden="true"/>
+      In
+    </Badge>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +528,7 @@ function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
   // the full UserDayModal (vertical day calendar) for the chosen user.
   if (isMobile) {
     return (
-      <ul className="tk-day-matrix tk-day-matrix-mobile">
+      <ul className="tka-daylist">
         {rows.map(r => (
           <DayMatrixMobileRow
             key={r.user.id}
@@ -511,70 +538,87 @@ function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
           />
         ))}
         {rows.length === 0 && (
-          <li className="tk-range-empty-row">No activity for the visible people on this day.</li>
+          <li>
+            <EmptyState
+              compact
+              icon={ClockGlyph}
+              title="Nothing recorded on this day"
+              description="Punches from a fob reader or the web timesheet will appear here."
+            />
+          </li>
         )}
       </ul>
     );
   }
 
   return (
-    <div className="tk-day-matrix-wrap">
-      {/* Shared hour grid above all rows so positions are readable. */}
-      <div className="tk-day-matrix-axis" aria-hidden="true">
-        <div className="tk-day-matrix-axis-spacer"/>
-        <div className="tk-day-matrix-axis-track">
-          {hourTicks.map(h => (
-            <span key={h} className="tk-day-matrix-axis-tick"
-              style={{ left: `${((h - TRACK_START_HOUR) / span) * 100}%` }}>
-              {h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`}
-            </span>
-          ))}
+    <div className="bx-scroll-x tka-daymx-scroll">
+      <div className="tka-daymx">
+        {/* Shared hour grid above all rows so positions are readable. */}
+        <div className="tka-daymx-axis" aria-hidden="true">
+          <div className="tka-daymx-axis-track">
+            {hourTicks.map(h => (
+              <span key={h} className="tka-daymx-tick num"
+                style={{ left: `${((h - TRACK_START_HOUR) / span) * 100}%` }}>
+                {h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`}
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="tk-day-matrix-axis-spacer"/>
-      </div>
 
-      <ul className="tk-day-matrix">
-        {rows.map(r => {
-          const openSince = openSinceFromDayRow(r);
-          const isIn  = !!openSince;
-          const total = workMinutesFromIntervals(r.intervals, date);
-          const flags = r.day?.flags || {};
-          const showFlag = flags.missing_out || flags.untagged_meeting;
-          const bounds = dayPunchBounds(r);
-          return (
-            <li key={r.user.id} className={`tk-day-matrix-row ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
-              <button className="tk-day-matrix-name" onClick={() => onOpenUserDay?.({ userId: r.user.id, date })}>
-                <div className="tk-day-matrix-name-top">
-                  <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
-                  <span className="tk-day-matrix-name-label">{r.user.name}</span>
-                  {isIn && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
+        <ul className="tka-daymx-rows">
+          {rows.map(r => {
+            const openSince = openSinceFromDayRow(r);
+            const isIn  = !!openSince;
+            const total = workMinutesFromIntervals(r.intervals, date);
+            const flags = r.day?.flags || {};
+            const showFlag = flags.missing_out || flags.untagged_meeting;
+            const bounds = dayPunchBounds(r);
+            return (
+              <li key={r.user.id} className={`tka-daymx-row ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
+                <button
+                  type="button"
+                  className="tka-daymx-name"
+                  onClick={() => onOpenUserDay?.({ userId: r.user.id, date })}
+                >
+                  <span className="tka-daymx-name-top">
+                    <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
+                    <span className="tka-daymx-name-label">{r.user.name}</span>
+                    {isIn && <InChip/>}
+                  </span>
+                  <PunchTimesLine
+                    firstIn={bounds.firstIn}
+                    lastOut={bounds.lastOut}
+                    openSince={openSince}
+                  />
+                </button>
+                <div className="tka-daymx-tl">
+                  <DayTimeline
+                    date={date}
+                    intervals={r.intervals}
+                    onIntervalClick={() => onOpenUserDay?.({ userId: r.user.id, date })}
+                    height={isCompact ? 18 : 24}
+                    showHourGrid={false}
+                  />
                 </div>
-                <PunchTimesLine
-                  firstIn={bounds.firstIn}
-                  lastOut={bounds.lastOut}
-                  openSince={openSince}
-                />
-              </button>
-              <div className="tk-day-matrix-timeline">
-                <DayTimeline
-                  date={date}
-                  intervals={r.intervals}
-                  onIntervalClick={() => onOpenUserDay?.({ userId: r.user.id, date })}
-                  height={isCompact ? 18 : 24}
-                  showHourGrid={false}
-                />
-              </div>
-              <div className="tk-day-matrix-total">
-                <span className="tk-num">{fmtHM(total, { always: true })}</span>
-                {showFlag && <span className="tk-flag-dot" title={flagTitle(flags)}/>}
-              </div>
-            </li>
-          );
-        })}
-        {rows.length === 0 && (
-          <li className="tk-range-empty-row">No activity for the visible people on this day.</li>
-        )}
-      </ul>
+                <div className="tka-daymx-total">
+                  <span className="num">{fmtHM(total, { always: true })}</span>
+                  {showFlag && (
+                    <Tooltip label={flagTitle(flags)}>
+                      <span className="tka-flag" tabIndex={0} role="img" aria-label={`Needs review: ${flagTitle(flags)}`}>
+                        <Icon name="warn" size={12}/>
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+          {rows.length === 0 && (
+            <li className="tka-emptyrow">No activity for the visible people on this day.</li>
+          )}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -597,9 +641,9 @@ function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
     statusKind = "in";
     statusBody = (
       <>
-        <span className="tk-day-matrix-mob-status-cat">Working</span>
-        <span className="tk-day-matrix-mob-status-sep">·</span>
-        <span>since {fmtClock(openSince)}</span>
+        <span className="tka-daylist-cat">Working</span>
+        <span className="tka-dot" aria-hidden="true">·</span>
+        <span className="num">since {fmtClock(openSince)}</span>
       </>
     );
   } else {
@@ -612,17 +656,15 @@ function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
       statusKind = "last";
       statusBody = (
         <>
-          <span className="tk-day-matrix-mob-status-tag">Last</span>
-          <span className={`tk-day-matrix-mob-cat-chip tone-${intervalTone(lastClosed)}`}>
-            {catLabel}
-          </span>
-          <span className="tk-day-matrix-mob-status-sep">·</span>
-          <span>{fmtClock(lastClosed.endAt)}</span>
+          <span className="tka-daylist-tag">Last</span>
+          <span className={`tka-catchip tone-${intervalTone(lastClosed)}`}>{catLabel}</span>
+          <span className="tka-dot" aria-hidden="true">·</span>
+          <span className="num">{fmtClock(lastClosed.endAt)}</span>
         </>
       );
     } else {
       statusKind = "empty";
-      statusBody = <span className="tk-day-matrix-mob-empty">No activity today</span>;
+      statusBody = <span className="tka-daylist-none">No activity today</span>;
     }
   }
 
@@ -633,32 +675,32 @@ function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
     (statusKind === "last" && (row.intervals || []).find(i => i.endAt && i.notes)?.notes);
 
   return (
-    <li className={`tk-day-matrix-row tk-day-matrix-mob ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
+    <li className={`tka-daylist-item ${isIn ? "is-in" : ""} ${showFlag ? "has-flag" : ""}`}>
       <button
         type="button"
-        className="tk-day-matrix-mob-btn"
+        className="tka-daylist-btn"
         onClick={() => onOpenUserDay?.({ userId: row.user.id, date })}
       >
-        <div className="tk-day-matrix-mob-head">
+        <span className="tka-daylist-head">
           <span className={`avatar xs ${row.user.color}`}>{row.user.initials}</span>
-          <span className="tk-day-matrix-mob-name">{row.user.name}</span>
-          {isIn && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
-          <span className="tk-day-matrix-mob-total">
+          <span className="tka-daylist-name">{row.user.name}</span>
+          {isIn && <InChip/>}
+          <span className="tka-daylist-total num">
             {fmtHM(total, { always: true })}
-            {showFlag && <span className="tk-flag-dot" title={flagTitle(flags)}/>}
+            {showFlag && <Icon name="warn" size={12} className="tka-flag-inline"/>}
           </span>
-        </div>
+        </span>
 
-        <div className={`tk-day-matrix-mob-status is-${statusKind}`}>
-          <Icon name="clock" size={11}/>
-          <span className="tk-day-matrix-mob-status-text">{statusBody}</span>
-        </div>
+        <span className={`tka-daylist-status is-${statusKind}`}>
+          <Icon name="clock" size={12}/>
+          <span className="tka-daylist-status-text">{statusBody}</span>
+        </span>
 
         {noteToShow && (
-          <div className="tk-day-matrix-mob-note">
-            <Icon name="edit" size={11}/>
+          <span className="tka-daylist-note">
+            <Icon name="note" size={12}/>
             <span>{noteToShow}</span>
-          </div>
+          </span>
         )}
       </button>
     </li>
@@ -671,30 +713,45 @@ function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
 function PunchTimesLine({ firstIn, lastOut, openSince }) {
   if (openSince) {
     return (
-      <div className="tk-day-matrix-times is-in">
-        <Icon name="clock" size={10}/>
-        <span className="tk-num">In since {fmtClock(openSince)}</span>
+      <span className="tka-daymx-times is-in">
+        <Icon name="clock" size={11}/>
+        <span className="num">In since {fmtClock(openSince)}</span>
         {firstIn && firstIn !== openSince && (
-          <span className="tk-day-matrix-times-extra">
+          <span className="tka-daymx-times-extra num">
             · first in {fmtClock(firstIn)}
           </span>
         )}
-      </div>
+      </span>
     );
   }
   if (firstIn) {
     return (
-      <div className="tk-day-matrix-times">
-        <Icon name="clock" size={10}/>
-        <span className="tk-num">{fmtClock(firstIn)} → {lastOut ? fmtClock(lastOut) : "—"}</span>
-      </div>
+      <span className="tka-daymx-times">
+        <Icon name="clock" size={11}/>
+        <span className="num">{fmtClock(firstIn)} → {lastOut ? fmtClock(lastOut) : EMPTY}</span>
+      </span>
     );
   }
   return (
-    <div className="tk-day-matrix-times is-empty">
-      <Icon name="clock" size={10}/>
+    <span className="tka-daymx-times is-empty">
+      <Icon name="clock" size={11}/>
       <span>No punches yet</span>
-    </div>
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Person cell shared by the three table grids — pinned to the left edge.
+// ---------------------------------------------------------------------------
+function PersonCell({ user, isIn, onClick }) {
+  return (
+    <th scope="row" className="tka-grid-person">
+      <button type="button" className="tka-grid-personbtn" onClick={onClick}>
+        <span className={`avatar xs ${user.color}`}>{user.initials}</span>
+        <span className="tka-grid-personname">{user.name}</span>
+        {isIn && <InChip/>}
+      </button>
+    </th>
   );
 }
 
@@ -702,60 +759,73 @@ function PunchTimesLine({ firstIn, lastOut, openSince }) {
 // WeekMatrix — 7 cells per user
 // ---------------------------------------------------------------------------
 function WeekMatrix({ rows, columns, today, onOpenUserDay, isCompact }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={ClockGlyph}
+        title="No hours logged this week"
+        description="Once anyone in the current People selection punches in, their days fill in here."
+      />
+    );
+  }
   return (
-    <div className="tk-week-matrix">
-      <div className="tk-week-matrix-head">
-        <div className="tk-week-matrix-spacer"/>
-        {columns.map((d, i) => (
-          <div key={d} className={`tk-week-matrix-col-head ${d === today ? "is-today" : ""}`}>
-            <div className="tk-week-matrix-col-dow">{DOW_LABELS[i]}</div>
-            <div className="tk-week-matrix-col-date">{fmtDateShort(d).split(" ")[1]}</div>
-          </div>
-        ))}
-        <div className="tk-week-matrix-total-head">Total</div>
-      </div>
-      <ul className="tk-week-matrix-rows">
-        {rows.map(r => {
-          const byDate = new Map(r.days.map(d => [d.date, d]));
-          const weekTotal = r.days.reduce((acc, d) => acc + totalMinForDay(d), 0);
-          return (
-            <li key={r.user.id} className={`tk-week-matrix-row ${r.openSince ? "is-in" : ""}`}>
-              <button className="tk-week-matrix-name" onClick={() => onOpenUserDay?.({ userId: r.user.id, date: today })}>
-                <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
-                <span className="tk-week-matrix-name-label">{r.user.name}</span>
-                {r.openSince && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
-              </button>
-              {columns.map((d) => {
-                const day = byDate.get(d);
-                const mins = day ? totalMinForDay(day) : 0;
-                const pct = Math.min(100, (mins / TARGET_DAY_MIN) * 100);
-                const ot  = mins > TARGET_DAY_MIN;
-                const isToday = d === today;
-                const future = d > today;
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    className={`tk-week-cell ${isToday ? "is-today" : ""} ${future ? "is-future" : ""} ${mins === 0 ? "is-empty" : ""} ${ot ? "is-ot" : ""}`}
-                    onClick={() => onOpenUserDay?.({ userId: r.user.id, date: d })}
-                    title={`${fmtDateShort(d)} · ${fmtHM(mins, { always: true })}`}
-                  >
-                    <div className="tk-week-cell-num">{mins > 0 ? fmtHM(mins, { always: true }) : "—"}</div>
-                    <div className="tk-week-cell-bar">
-                      <div className="tk-week-cell-bar-fill" style={{ width: `${pct}%` }}/>
-                      {ot && <div className="tk-week-cell-bar-ot"/>}
-                    </div>
-                  </button>
-                );
-              })}
-              <div className="tk-week-matrix-total">{fmtHM(weekTotal, { always: true })}</div>
-            </li>
-          );
-        })}
-        {rows.length === 0 && (
-          <li className="tk-range-empty-row">No activity for the visible people this week.</li>
-        )}
-      </ul>
+    <div className="bx-scroll-x tka-gridscroll">
+      <table className="tka-grid">
+        <caption className="sr-only">Hours worked per person for each day of the week</caption>
+        <thead>
+          <tr>
+            <th scope="col" className="tka-grid-person tka-grid-corner">Person</th>
+            {columns.map((d, i) => (
+              <th key={d} scope="col" className={`tka-grid-col ${d === today ? "is-today" : ""}`}>
+                <span className="tka-grid-col-dow">{DOW_LABELS[i]}</span>
+                <span className="tka-grid-col-date num">{fmtDateShort(d).split(" ")[1]}</span>
+              </th>
+            ))}
+            <th scope="col" className="tka-grid-total tka-grid-totalhead">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const byDate = new Map(r.days.map(d => [d.date, d]));
+            const weekTotal = r.days.reduce((acc, d) => acc + totalMinForDay(d), 0);
+            return (
+              <tr key={r.user.id} className={r.openSince ? "is-in" : ""}>
+                <PersonCell
+                  user={r.user}
+                  isIn={!!r.openSince}
+                  onClick={() => onOpenUserDay?.({ userId: r.user.id, date: today })}
+                />
+                {columns.map((d) => {
+                  const day = byDate.get(d);
+                  const mins = day ? totalMinForDay(day) : 0;
+                  const pct = Math.min(100, (mins / TARGET_DAY_MIN) * 100);
+                  const ot  = mins > TARGET_DAY_MIN;
+                  const isToday = d === today;
+                  const future = d > today;
+                  return (
+                    <td key={d} className={`tka-grid-cell ${isToday ? "is-today" : ""} ${future ? "is-future" : ""}`}>
+                      <button
+                        type="button"
+                        className={`tka-cell ${mins === 0 ? "is-empty" : ""} ${ot ? "is-ot" : ""}`}
+                        onClick={() => onOpenUserDay?.({ userId: r.user.id, date: d })}
+                        aria-label={`${r.user.name}, ${fmtDateShort(d)}, ${mins > 0 ? fmtHM(mins, { always: true }) : "no hours"}`}
+                        title={`${fmtDateShort(d)} · ${fmtHM(mins, { always: true })}`}
+                      >
+                        <span className="tka-cell-num num">{mins > 0 ? fmtHM(mins, { always: true }) : EMPTY}</span>
+                        <span className="tka-cell-bar" aria-hidden="true">
+                          <span className="tka-cell-bar-fill" style={{ width: `${pct}%` }}/>
+                          {ot && <span className="tka-cell-bar-ot"/>}
+                        </span>
+                      </button>
+                    </td>
+                  );
+                })}
+                <td className="tka-grid-total num">{fmtHM(weekTotal, { always: true })}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -767,68 +837,81 @@ function MonthMatrix({ rows, weeks, anchorDate, today, onOpenUserDay, isCompact 
   const monthStart = firstOfMonth(anchorDate);
   const monthEndX  = endOfMonthExclusive(anchorDate);
 
-  const styleVar = { "--mm-cols": weeks.length };
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={ClockGlyph}
+        title="No hours logged this month"
+        description="Weeks fill in as people punch. Change the month or widen the People selection to see more."
+      />
+    );
+  }
+
   return (
-    <div className="tk-month-matrix" style={styleVar}>
-      <div className="tk-month-matrix-head">
-        <div className="tk-month-matrix-spacer"/>
-        {weeks.map((wkStart, i) => (
-          <div key={wkStart} className="tk-month-matrix-col-head">
-            <div className="tk-month-matrix-col-wk">W{i + 1}</div>
-            <div className="tk-month-matrix-col-range">{fmtDateShort(wkStart)}</div>
-          </div>
-        ))}
-        <div className="tk-month-matrix-total-head">Month total</div>
-      </div>
-      <ul className="tk-month-matrix-rows">
-        {rows.map(r => {
-          const byDate = new Map(r.days.map(d => [d.date, d]));
-          let monthTotal = 0;
-          const weekTotals = weeks.map(wkStart => {
-            let total = 0;
-            for (let i = 0; i < 7; i++) {
-              const dt = addDays(wkStart, i);
-              if (dt < monthStart || dt >= monthEndX) continue;
-              const day = byDate.get(dt);
-              if (day) total += totalMinForDay(day);
-            }
-            monthTotal += total;
-            return total;
-          });
-          const maxWeekMin = Math.max(40 * 60, ...weekTotals);   // 40h baseline
-          return (
-            <li key={r.user.id} className={`tk-month-matrix-row ${r.openSince ? "is-in" : ""}`}>
-              <button className="tk-month-matrix-name" onClick={() => onOpenUserDay?.({ userId: r.user.id, date: today })}>
-                <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
-                <span className="tk-month-matrix-name-label">{r.user.name}</span>
-                {r.openSince && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
-              </button>
-              {weekTotals.map((mins, i) => {
-                const pct = Math.max(4, (mins / maxWeekMin) * 100);
-                const wkStart = weeks[i];
-                return (
-                  <button
-                    key={wkStart}
-                    type="button"
-                    className={`tk-month-cell ${mins === 0 ? "is-empty" : ""}`}
-                    onClick={() => onOpenUserDay?.({ userId: r.user.id, date: wkStart })}
-                    title={`Week of ${fmtDateShort(wkStart)} · ${fmtHM(mins, { always: true })}`}
-                  >
-                    <div className="tk-month-cell-num">{mins > 0 ? fmtHM(mins, { always: true }) : "—"}</div>
-                    <div className="tk-month-cell-bar">
-                      <div className="tk-month-cell-bar-fill" style={{ width: `${pct}%` }}/>
-                    </div>
-                  </button>
-                );
-              })}
-              <div className="tk-month-matrix-total">{fmtHM(monthTotal, { always: true })}</div>
-            </li>
-          );
-        })}
-        {rows.length === 0 && (
-          <li className="tk-range-empty-row">No activity for the visible people this month.</li>
-        )}
-      </ul>
+    <div className="bx-scroll-x tka-gridscroll">
+      <table className="tka-grid">
+        <caption className="sr-only">Hours worked per person for each week of the month</caption>
+        <thead>
+          <tr>
+            <th scope="col" className="tka-grid-person tka-grid-corner">Person</th>
+            {weeks.map((wkStart, i) => (
+              <th key={wkStart} scope="col" className="tka-grid-col">
+                <span className="tka-grid-col-dow">W{i + 1}</span>
+                <span className="tka-grid-col-date num">{fmtDateShort(wkStart)}</span>
+              </th>
+            ))}
+            <th scope="col" className="tka-grid-total tka-grid-totalhead">Month total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const byDate = new Map(r.days.map(d => [d.date, d]));
+            let monthTotal = 0;
+            const weekTotals = weeks.map(wkStart => {
+              let total = 0;
+              for (let i = 0; i < 7; i++) {
+                const dt = addDays(wkStart, i);
+                if (dt < monthStart || dt >= monthEndX) continue;
+                const day = byDate.get(dt);
+                if (day) total += totalMinForDay(day);
+              }
+              monthTotal += total;
+              return total;
+            });
+            const maxWeekMin = Math.max(40 * 60, ...weekTotals);   // 40h baseline
+            return (
+              <tr key={r.user.id} className={r.openSince ? "is-in" : ""}>
+                <PersonCell
+                  user={r.user}
+                  isIn={!!r.openSince}
+                  onClick={() => onOpenUserDay?.({ userId: r.user.id, date: today })}
+                />
+                {weekTotals.map((mins, i) => {
+                  const pct = Math.max(4, (mins / maxWeekMin) * 100);
+                  const wkStart = weeks[i];
+                  return (
+                    <td key={wkStart} className="tka-grid-cell">
+                      <button
+                        type="button"
+                        className={`tka-cell ${mins === 0 ? "is-empty" : ""}`}
+                        onClick={() => onOpenUserDay?.({ userId: r.user.id, date: wkStart })}
+                        aria-label={`${r.user.name}, week of ${fmtDateShort(wkStart)}, ${mins > 0 ? fmtHM(mins, { always: true }) : "no hours"}`}
+                        title={`Week of ${fmtDateShort(wkStart)} · ${fmtHM(mins, { always: true })}`}
+                      >
+                        <span className="tka-cell-num num">{mins > 0 ? fmtHM(mins, { always: true }) : EMPTY}</span>
+                        <span className="tka-cell-bar" aria-hidden="true">
+                          <span className="tka-cell-bar-fill" style={{ width: `${pct}%` }}/>
+                        </span>
+                      </button>
+                    </td>
+                  );
+                })}
+                <td className="tka-grid-total num">{fmtHM(monthTotal, { always: true })}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -848,38 +931,58 @@ function CustomMatrix({ rows, start, endExclusive, onOpenUserDay }) {
 
   const max = Math.max(60, ...enriched.map(e => e.total));
 
+  if (enriched.length === 0) {
+    return (
+      <EmptyState
+        icon={ClockGlyph}
+        title="No hours in this range"
+        description="Pick a wider start and end date, or widen the People selection."
+      />
+    );
+  }
+
   return (
-    <div className="tk-custom-matrix">
-      <div className="tk-custom-matrix-head">
-        <div>Person</div>
-        <div>Distribution</div>
-        <div className="tk-custom-avg">Avg / day</div>
-        <div className="tk-custom-flags">Flags</div>
-        <div className="tk-custom-total">Total</div>
-      </div>
-      <ul className="tk-custom-matrix-rows">
-        {enriched.map(r => {
-          const pct = Math.max(2, (r.total / max) * 100);
-          return (
-            <li key={r.user.id} className={`tk-custom-matrix-row ${r.openSince ? "is-in" : ""}`}>
-              <button className="tk-custom-matrix-name" onClick={() => onOpenUserDay?.({ userId: r.user.id, date: start })}>
-                <span className={`avatar xs ${r.user.color}`}>{r.user.initials}</span>
-                <span className="tk-custom-matrix-name-label">{r.user.name}</span>
-                {r.openSince && <span className="tk-in-chip"><span className="tk-pulse-dot"/>In</span>}
-              </button>
-              <div className="tk-custom-bar">
-                <div className="tk-custom-bar-fill" style={{ width: `${pct}%` }}/>
-              </div>
-              <div className="tk-custom-avg">{fmtHM(r.avg, { always: true })}</div>
-              <div className="tk-custom-flags">{r.flagDays > 0 ? `${r.flagDays}` : "—"}</div>
-              <div className="tk-custom-total">{fmtHM(r.total, { always: true })}</div>
-            </li>
-          );
-        })}
-        {enriched.length === 0 && (
-          <li className="tk-range-empty-row">No activity in this range.</li>
-        )}
-      </ul>
+    <div className="bx-scroll-x tka-gridscroll">
+      <table className="tka-grid tka-grid-custom">
+        <caption className="sr-only">Total hours per person across the selected range</caption>
+        <thead>
+          <tr>
+            <th scope="col" className="tka-grid-person tka-grid-corner">Person</th>
+            <th scope="col" className="tka-grid-col tka-grid-col-wide">Distribution</th>
+            <th scope="col" className="tka-grid-num">Avg / day</th>
+            <th scope="col" className="tka-grid-num">Flags</th>
+            <th scope="col" className="tka-grid-total tka-grid-totalhead">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {enriched.map(r => {
+            const pct = Math.max(2, (r.total / max) * 100);
+            return (
+              <tr key={r.user.id} className={r.openSince ? "is-in" : ""}>
+                <PersonCell
+                  user={r.user}
+                  isIn={!!r.openSince}
+                  onClick={() => onOpenUserDay?.({ userId: r.user.id, date: start })}
+                />
+                <td className="tka-grid-cell tka-grid-col-wide">
+                  <span className="tka-distbar" aria-hidden="true">
+                    <span className="tka-distbar-fill" style={{ width: `${pct}%` }}/>
+                  </span>
+                </td>
+                <td className="tka-grid-num num">{fmtHM(r.avg, { always: true })}</td>
+                <td className="tka-grid-num num">
+                  {r.flagDays > 0 ? (
+                    <Badge tone="danger" size="sm">
+                      <Icon name="warn" size={11}/> {r.flagDays}
+                    </Badge>
+                  ) : EMPTY}
+                </td>
+                <td className="tka-grid-total num">{fmtHM(r.total, { always: true })}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

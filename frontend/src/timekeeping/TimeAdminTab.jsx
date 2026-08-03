@@ -1,6 +1,6 @@
 // TimeAdminTab — admin-only shell for the timekeeping system.
 //
-// View picker: Team · Approvals · NFC enrollment · Settings
+// View picker: Team · Leaves · NFC enrollment · Settings
 //
 // Within Team, the user chooses a range mode (Day / Week / Month / Custom)
 // and which people are visible. All of this is persisted per-admin via
@@ -10,8 +10,12 @@
 // A small "Reclassify now" button kicks the timeclock-classify Edge Function
 // against the current admin so the impact of a settings change is visible.
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Icon } from "../icons";
+import React, { useState, useEffect, useCallback } from "react";
+import { Icon } from "@/icons";
+import {
+  Button, InputGroup, Tabs, TabsList, TabsTrigger, TabsContent,
+  Tooltip, TooltipProvider,
+} from "@/ui";
 import {
   todayInCT, tkRunClassifier, getCurrentBeaconUser, loadTeamDay,
 } from "../data";
@@ -117,129 +121,134 @@ export function TimeAdminTab({ onOpenUserDay }) {
   }, [updatePrefs]);
 
   return (
-    <div className="tk-admin-page">
-      {/* Top nav — tabs + global tools */}
-      <header className="tk-admin-head">
-        <nav className="tk-admin-nav" aria-label="Admin sections">
-          {VIEWS.map(v => (
-            <button key={v.key} type="button"
-              className={`tk-admin-tab ${view === v.key ? "is-active" : ""}`}
-              onClick={() => setView(v.key)}
-              aria-current={view === v.key ? "page" : undefined}>
-              <Icon name={v.icon} size={13}/> {v.label}
-            </button>
-          ))}
-        </nav>
-        <div className="tk-admin-tools">
-          {reMsg && <span className="tk-admin-msg">{reMsg}</span>}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={runReclassify} disabled={reBusy}>
-            <Icon name="sparkles" size={13}/> {reBusy ? "Running…" : "Reclassify now"}
-          </button>
-        </div>
-      </header>
+    <TooltipProvider delayDuration={280}>
+      <div className="tka">
+        <Tabs value={view} onValueChange={setView} className="flex min-w-0 flex-col gap-5">
 
-      {/* Team-specific control bar — range selector, search, people filter */}
-      {view === "team" && (
-        <div className="tk-admin-controls">
-          <div className="tk-admin-controls-left">
-            <SegmentedRange value={prefs.range} onChange={setRange}/>
-          </div>
-          <div className="tk-admin-controls-right">
-            <SearchBox
-              value={prefs.search}
-              onChange={(v) => updatePrefs({ search: v })}
-            />
-            <PeopleFilter
-              visibleUsers={prefs.visibleUsers}
-              onChange={(next) => updatePrefs({ visibleUsers: next })}
-              signals={signals}
-            />
-            <DensityToggle
-              value={prefs.density}
-              onChange={(v) => updatePrefs({ density: v })}
-            />
-          </div>
-        </div>
-      )}
+          {/* Section switcher + global tools, sharing one hairline. */}
+          <div className="tka-tabbar">
+            <TabsList aria-label="Admin sections" className="tka-tablist border-b-0">
+              {VIEWS.map(v => (
+                <TabsTrigger key={v.key} value={v.key}>
+                  <Icon name={v.icon} size={15}/>
+                  <span>{v.label}</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-      {/* Body */}
-      <div className="tk-admin-body">
-        {view === "team" && (
-          <TeamRangeView
-            prefs={prefs}
-            onPrefsChange={updatePrefs}
-            dataVersion={dataVersion}
-            onOpenUserDay={openUserDay}
+            <div className="tka-tabtools">
+              {reMsg && (
+                <span className="tka-toolmsg" role="status">{reMsg}</span>
+              )}
+              <Button
+                variant="default"
+                size="sm"
+                onClick={runReclassify}
+                disabled={reBusy}
+                loading={reBusy}
+              >
+                {!reBusy && <Icon name="bolt" size={14}/>}
+                {reBusy ? "Running" : "Reclassify now"}
+              </Button>
+            </div>
+          </div>
+
+          <TabsContent value="team" className="flex min-w-0 flex-col gap-4">
+            {/* Team-specific control bar — range selector, search, people filter */}
+            <div className="tka-controls">
+              <Tabs value={prefs.range} onValueChange={setRange} className="min-w-0">
+                <TabsList variant="segmented" aria-label="Range">
+                  {RANGES.map(r => (
+                    <TabsTrigger key={r.key} value={r.key}>{r.label}</TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+
+              <div className="tka-controls-right">
+                <SearchBox
+                  value={prefs.search}
+                  onChange={(v) => updatePrefs({ search: v })}
+                />
+                <PeopleFilter
+                  visibleUsers={prefs.visibleUsers}
+                  onChange={(next) => updatePrefs({ visibleUsers: next })}
+                  signals={signals}
+                />
+                <DensityToggle
+                  value={prefs.density}
+                  onChange={(v) => updatePrefs({ density: v })}
+                />
+              </div>
+            </div>
+
+            <TeamRangeView
+              prefs={prefs}
+              onPrefsChange={updatePrefs}
+              dataVersion={dataVersion}
+              onOpenUserDay={openUserDay}
+            />
+          </TabsContent>
+
+          <TabsContent value="leaves"><LeavesPanel/></TabsContent>
+          <TabsContent value="nfc"><NfcEnrollPanel/></TabsContent>
+          <TabsContent value="settings"><TimeSettingsPanel/></TabsContent>
+        </Tabs>
+
+        {userDay && (
+          <UserDayModal
+            userId={userDay.userId}
+            initialDate={userDay.date}
+            onClose={() => setUserDay(null)}
+            onDirty={bumpData}
           />
         )}
-        {view === "leaves"    && <LeavesPanel/>}
-        {view === "nfc"       && <NfcEnrollPanel/>}
-        {view === "settings"  && <TimeSettingsPanel/>}
       </div>
-
-      {userDay && (
-        <UserDayModal
-          userId={userDay.userId}
-          initialDate={userDay.date}
-          onClose={() => setUserDay(null)}
-          onDirty={bumpData}
-        />
-      )}
-    </div>
+    </TooltipProvider>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components: segmented range picker, search, density toggle
+// Sub-components: search, density toggle
 // ---------------------------------------------------------------------------
-
-function SegmentedRange({ value, onChange }) {
-  return (
-    <div className="tk-segmented" role="tablist" aria-label="Range">
-      {RANGES.map(r => (
-        <button key={r.key} type="button" role="tab"
-          aria-selected={value === r.key}
-          className={`tk-segmented-btn ${value === r.key ? "is-active" : ""}`}
-          onClick={() => onChange(r.key)}>
-          {r.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function SearchBox({ value, onChange }) {
   return (
-    <label className="tk-search-box">
-      <Icon name="search" size={13}/>
-      <input
-        type="search"
-        className="tk-search-input"
-        placeholder="Search names…"
-        value={value || ""}
-        onChange={e => onChange(e.target.value)}
-      />
-      {value && (
-        <button type="button" className="tk-search-clear"
-          onClick={() => onChange("")} aria-label="Clear search">
-          <Icon name="x" size={11}/>
+    <InputGroup
+      type="search"
+      className="tka-search sm:w-[230px]"
+      aria-label="Search people by name"
+      placeholder="Search names"
+      value={value || ""}
+      onChange={e => onChange(e.target.value)}
+      leading={<Icon name="search" size={14}/>}
+      trailing={value ? (
+        <button
+          type="button"
+          className="tka-search-clear"
+          onClick={() => onChange("")}
+          aria-label="Clear search"
+        >
+          <Icon name="x" size={12}/>
         </button>
-      )}
-    </label>
+      ) : null}
+    />
   );
 }
 
 function DensityToggle({ value, onChange }) {
   const next = value === "compact" ? "comfortable" : "compact";
+  const label = `Switch to ${next} density`;
   return (
-    <button
-      type="button"
-      className={`tk-density-btn ${value === "compact" ? "is-compact" : ""}`}
-      onClick={() => onChange(next)}
-      title={`Switch to ${next} density`}
-      aria-label={`Switch to ${next} density`}
-    >
-      <Icon name={value === "compact" ? "columns" : "more"} size={13}/>
-    </button>
+    <Tooltip label={label}>
+      <Button
+        variant="default"
+        size="icon"
+        aria-label={label}
+        aria-pressed={value === "compact"}
+        onClick={() => onChange(next)}
+      >
+        <Icon name={value === "compact" ? "columns" : "more"} size={15}/>
+      </Button>
+    </Tooltip>
   );
 }

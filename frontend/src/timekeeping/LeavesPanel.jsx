@@ -11,6 +11,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Icon } from "../icons";
+import { Badge, Button, EmptyState, Input } from "@/ui";
 import {
   loadAllLeaveRequests, loadLeaveBalances, computeLeaveAvailable,
   approveLeaveRequest, rejectLeaveRequest, revertLeaveRequest,
@@ -69,105 +70,156 @@ export function LeavesPanel() {
   };
 
   return (
-    <div className="leave-panel">
-      {err && <div className="leave-err"><Icon name="warn" size={12}/> {err}</div>}
+    <div className="tsx-leaveadmin-panel">
+      {err && (
+        <p className="tsx-note tone-bad" role="alert">
+          <Icon name="warn" size={13}/><span>{err}</span>
+        </p>
+      )}
 
       {/* 1. Pending */}
-      <section className="leave-panel-sec">
-        <header className="leave-panel-sec-head">
-          <h3>Pending requests</h3>
-          <span className="leave-panel-count">{pending.length}{busy ? " · refreshing…" : ""}</span>
+      <section className="tsx-leave-sec" aria-labelledby="tsx-leaveadmin-pending">
+        <header className="tsx-leave-sechead">
+          <h4 id="tsx-leaveadmin-pending">
+            Pending requests
+            <span className="tsx-count num">{pending.length}</span>
+          </h4>
+          <p>Approve or reject. Balances update the moment you decide.</p>
+          {busy && <span className="tsx-leave-refresh" role="status">refreshing…</span>}
         </header>
-        {pending.length === 0 && !busy && (
-          <p className="leave-empty-note">No requests awaiting review.</p>
-        )}
-        <ul className="leave-req-cards">
-          {pending.map(r => {
-            const u = userById(r.userId);
-            const avail = availableFor(r.userId, r.leaveType);
-            const over = avail != null && r.totalHours > avail;
-            const inFlight = acting === r.id;
-            return (
-              <li key={r.id} className={`leave-req-card ${over ? "is-over" : ""}`}>
-                <div className="leave-req-card-main">
-                  <div className="leave-req-card-who">
-                    {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
-                    <span className="leave-req-card-name">{u?.name || "Unknown"}</span>
-                    <span className={`leave-type-pill tone-${r.leaveType === "sick" ? "blue" : "sage"}`}>
-                      {r.leaveType === "sick" ? "Sick" : "Vacation"}
-                    </span>
-                  </div>
-                  <div className="leave-req-card-facts">
-                    <span><Icon name="calendar" size={12}/> {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}</span>
-                    <span><Icon name="clock" size={12}/> {r.businessDays}d · {hrs(r.totalHours)}</span>
-                    {avail != null && <span className="leave-req-card-avail">Balance {hrs(avail)}</span>}
-                  </div>
-                  {r.reason && <div className="leave-req-card-reason">“{r.reason}”</div>}
-                  {over && (
-                    <div className="leave-warn leave-warn-inline">
-                      <Icon name="warn" size={12}/>
-                      Exceeds accrued balance by {hrs(r.totalHours - avail)} — approving will take it negative.
+
+        {pending.length === 0 && !busy ? (
+          <EmptyState
+            compact
+            title="No requests awaiting review"
+            description="When someone submits vacation or sick leave from their timesheet, it lands here for approval."
+          />
+        ) : (
+          <ul className="tsx-leavereq-list">
+            {pending.map(r => {
+              const u = userById(r.userId);
+              const avail = availableFor(r.userId, r.leaveType);
+              const over = avail != null && r.totalHours > avail;
+              const inFlight = acting === r.id;
+              return (
+                <li key={r.id} className={`tsx-leavereq ${over ? "is-over" : ""}`}>
+                  <div className="tsx-leavereq-main">
+                    <div className="tsx-leavereq-who">
+                      {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
+                      <span className="tsx-leavereq-name">{u?.name || "Unknown"}</span>
+                      <Badge tone={r.leaveType === "sick" ? "info" : "success"}>
+                        {r.leaveType === "sick" ? "Sick" : "Vacation"}
+                      </Badge>
                     </div>
-                  )}
-                  <input
-                    className="form-input leave-note-input"
-                    placeholder="Note (optional)"
-                    value={notes[r.id] || ""}
-                    onChange={e => setNotes(n => ({ ...n, [r.id]: e.target.value }))}
-                  />
-                </div>
-                <div className="leave-req-card-actions">
-                  <button className="btn btn-ghost btn-sm" disabled={inFlight}
-                    onClick={() => act(r.id, () => rejectLeaveRequest(r.id, notes[r.id]?.trim() || null))}>
-                    Reject
-                  </button>
-                  <button className="btn btn-primary btn-sm" disabled={inFlight}
-                    onClick={() => act(r.id, () => approveLeaveRequest(r.id, notes[r.id]?.trim() || null))}>
-                    {inFlight ? "…" : "Approve"}
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+
+                    <dl className="tsx-leavereq-facts">
+                      <div>
+                        <dt><Icon name="calendar" size={12}/><span className="sr-only">Dates</span></dt>
+                        <dd className="num">
+                          {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt><Icon name="clock" size={12}/><span className="sr-only">Amount</span></dt>
+                        <dd className="num">{r.businessDays}d · {hrs(r.totalHours)}</dd>
+                      </div>
+                      {avail != null && (
+                        <div>
+                          <dt>Balance</dt>
+                          <dd className="num">{hrs(avail)}</dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    {r.reason && <blockquote className="tsx-leavereq-reason">{r.reason}</blockquote>}
+
+                    {over && (
+                      <p className="tsx-note tone-warn">
+                        <Icon name="warn" size={12}/>
+                        <span>
+                          Exceeds the accrued balance by {hrs(r.totalHours - avail)}.
+                          Approving takes the balance negative.
+                        </span>
+                      </p>
+                    )}
+
+                    <div className="tsx-leavereq-note">
+                      <label className="sr-only" htmlFor={`tsx-leave-note-${r.id}`}>
+                        Review note for {u?.name || "this request"} (optional)
+                      </label>
+                      <Input
+                        id={`tsx-leave-note-${r.id}`}
+                        placeholder="Note (optional)"
+                        value={notes[r.id] || ""}
+                        onChange={e => setNotes(n => ({ ...n, [r.id]: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="tsx-leavereq-actions">
+                    <Button variant="ghost" size="sm" disabled={inFlight}
+                      onClick={() => act(r.id, () => rejectLeaveRequest(r.id, notes[r.id]?.trim() || null))}>
+                      Reject
+                    </Button>
+                    <Button variant="primary" size="sm" disabled={inFlight} loading={inFlight}
+                      onClick={() => act(r.id, () => approveLeaveRequest(r.id, notes[r.id]?.trim() || null))}>
+                      Approve
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       {/* 2. Approved */}
-      <section className="leave-panel-sec">
-        <header className="leave-panel-sec-head">
-          <h3>Approved leave</h3>
-          <span className="leave-panel-count">{approved.length}</span>
+      <section className="tsx-leave-sec" aria-labelledby="tsx-leaveadmin-approved">
+        <header className="tsx-leave-sechead">
+          <h4 id="tsx-leaveadmin-approved">
+            Approved leave
+            <span className="tsx-count num">{approved.length}</span>
+          </h4>
+          <p>Reverting adds the hours back and returns the request to pending.</p>
         </header>
-        {approved.length === 0 && !busy && (
-          <p className="leave-empty-note">Nothing approved yet.</p>
+
+        {approved.length === 0 && !busy ? (
+          <EmptyState
+            compact
+            title="Nothing approved yet"
+            description="Approved requests stay listed here so you can revert one if plans change."
+          />
+        ) : (
+          <ul className="tsx-leaveapproved">
+            {approved.map(r => {
+              const u = userById(r.userId);
+              const inFlight = acting === r.id;
+              return (
+                <li key={r.id} className="tsx-leaveapproved-row">
+                  <span className="tsx-leaveapproved-who">
+                    {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
+                    <span className="tsx-leaveapproved-name">{u?.name || "Unknown"}</span>
+                  </span>
+                  <Badge tone={r.leaveType === "sick" ? "info" : "success"}>
+                    {r.leaveType === "sick" ? "Sick" : "Vacation"}
+                  </Badge>
+                  <span className="tsx-leaveapproved-dates num">
+                    {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
+                  </span>
+                  <span className="tsx-leaveapproved-hours num">{hrs(r.totalHours)}</span>
+                  <LeaveStatusChip status="approved"/>
+                  <Button
+                    variant="ghost" size="sm" disabled={inFlight} loading={inFlight}
+                    title="Add these hours back and return the request to pending"
+                    aria-label={`Revert approved leave for ${u?.name || "this request"}`}
+                    onClick={() => act(r.id, () => revertLeaveRequest(r.id))}>
+                    <Icon name="undo" size={12}/> Revert
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
         )}
-        <ul className="leave-approved-list">
-          {approved.map(r => {
-            const u = userById(r.userId);
-            const inFlight = acting === r.id;
-            return (
-              <li key={r.id} className="leave-approved-row">
-                <div className="leave-approved-who">
-                  {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
-                  <span className="leave-approved-name">{u?.name || "Unknown"}</span>
-                </div>
-                <span className={`leave-type-pill tone-${r.leaveType === "sick" ? "blue" : "sage"}`}>
-                  {r.leaveType === "sick" ? "Sick" : "Vacation"}
-                </span>
-                <span className="leave-approved-dates">
-                  {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
-                </span>
-                <span className="leave-approved-hours">{hrs(r.totalHours)}</span>
-                <LeaveStatusChip status="approved"/>
-                <button className="btn btn-ghost btn-sm" disabled={inFlight}
-                  title="Add these hours back and return the request to pending"
-                  onClick={() => act(r.id, () => revertLeaveRequest(r.id))}>
-                  <Icon name="undo" size={12}/> {inFlight ? "…" : "Revert"}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
       </section>
 
       {/* 3. Balances */}

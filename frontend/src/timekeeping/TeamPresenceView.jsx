@@ -9,7 +9,8 @@
 // SELECT only; the UI never offers a mutate path.
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import { Alert, Button, EmptyState } from "@/ui";
 import {
   loadTeamDay, todayInCT, fmtHM, fmtClock,
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
@@ -19,6 +20,8 @@ import { DayTimeline } from "./DayTimeline";
 
 const LIVE_TICK_MS = 30_000;
 
+const UsersGlyph = (props) => <Icon name="users" {...props} />;
+
 // Friendlier phrasing for an OUT interval's category — reads as a status, not a
 // label ("At lunch" rather than "Lunch"). Falls back to the plain label.
 const OUT_PHRASE = {
@@ -27,12 +30,15 @@ const OUT_PHRASE = {
   travel:           "On a site visit",
   break:            "On a break",
   eod:              "Left for the day",
-  meeting_untagged: "Out — untagged",
+  meeting_untagged: "Out, untagged",
   vacation:         "On vacation",
   holiday:          "Holiday",
   off:              "Off",
   work:             "Stepped out",
 };
+
+// Icon per status key, so presence never reads by colour alone.
+const STATUS_ICON = { in: "check", out: "logout", done: "moon", none: "dot" };
 
 // Derive a person's current status from their day's intervals. Punch direction
 // is the source of truth: an open IN interval = at desk (Working); an open OUT
@@ -114,115 +120,153 @@ export function TeamPresenceView({ date: controlledDate = null, onDate = null, e
   });
 
   return (
-    <div className={`tk-presence ${embedded ? "is-embedded" : ""}`}>
-      <header className="tk-presence-head">
-        <div className="tk-presence-head-titles">
-          <h3 className="tk-presence-title">
+    <div className={`tka-presence ${embedded ? "is-embedded" : ""}`}>
+      <header className="tka-presence-head">
+        <div className="tka-presence-titles">
+          <h3 className="tka-presence-title">
             {isToday ? "Team right now" : "Team snapshot"}
-            {isToday && <span className="tk-presence-live"><span className="tk-pulse-dot"/>live</span>}
+            {isToday && (
+              <span className="tka-presence-live">
+                <span className="tka-livedot" aria-hidden="true"/>live
+              </span>
+            )}
           </h3>
-          <p className="tk-presence-sub">
+          <p className="tka-presence-sub">
             {isToday ? "Who is in, out, or done for the day." : "Read-only view for the selected date."}
           </p>
         </div>
+
         {!embedded && (
-          <div className="tk-presence-daybar">
-            <button className="btn btn-ghost btn-sm" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day">
+          <div className="tka-presence-daybar">
+            <Button variant="default" size="icon-sm" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day">
               <Icon name="back" size={14}/>
-            </button>
+            </Button>
             <input
-              type="date" className="tk-day-input"
+              type="date" className="tka-dateinput num"
+              aria-label="Presence date"
               value={date} max={todayInCT()}
               onChange={e => setDate(e.target.value || todayInCT())}
             />
-            <button className="btn btn-ghost btn-sm" onClick={() => setDate(shiftDay(date, +1))}
-              disabled={date >= todayInCT()} aria-label="Next day">
+            <Button
+              variant="default" size="icon-sm"
+              onClick={() => setDate(shiftDay(date, +1))}
+              disabled={date >= todayInCT()}
+              aria-label="Next day"
+            >
               <Icon name="forward" size={14}/>
-            </button>
+            </Button>
             {!isToday && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>Today</button>
+              <Button variant="subtle" size="xs" onClick={() => setDate(todayInCT())}>
+                <Icon name="clock" size={12}/> Today
+              </Button>
             )}
           </div>
         )}
       </header>
 
-      <div className="tk-presence-stats">
-        <span className="tk-presence-stat is-in"><strong>{inNow}</strong> in the office</span>
-        <span className="tk-presence-stat is-out"><strong>{outNow}</strong> out / away</span>
-        <span className="tk-presence-stat"><strong>{active}</strong> active today</span>
-        {busy && <span className="tk-loading">refreshing…</span>}
+      <div className="tka-presence-stats">
+        <span className="tka-presence-stat tone-green">
+          <Icon name="check" size={12}/><strong className="num">{inNow}</strong> in the office
+        </span>
+        <span className="tka-presence-stat tone-rose">
+          <Icon name="logout" size={12}/><strong className="num">{outNow}</strong> out / away
+        </span>
+        <span className="tka-presence-stat">
+          <Icon name="users" size={12}/><strong className="num">{active}</strong> active today
+        </span>
+        {busy && <span className="tka-muted" role="status">refreshing</span>}
       </div>
 
-      {err && <div className="tk-range-err">Couldn't load team presence: {err}</div>}
+      {err && <Alert tone="danger" title="Could not load team presence">{err}</Alert>}
 
-      <ul className="tk-presence-rows">
-        {enriched.map(({ user, intervals, day, status }) => {
-          const expanded = open.has(user.id);
-          return (
-            <li key={user.id} className={`tk-presence-row tone-${status.tone}`}>
-              <button className="tk-presence-main" onClick={() => toggle(user.id)} aria-expanded={expanded}>
-                <span className={`tk-presence-dot ${status.key}`}/>
-                <span className={`avatar sm ${user.color}`}>{user.initials}</span>
+      {enriched.length === 0 && !busy ? (
+        <EmptyState
+          compact
+          icon={UsersGlyph}
+          title="No one to show"
+          description="Presence appears as soon as a teammate is enabled and starts punching."
+        />
+      ) : (
+        <ul className="tka-presence-rows">
+          {enriched.map(({ user, intervals, day, status }) => {
+            const expanded = open.has(user.id);
+            return (
+              <li key={user.id} className={`tka-presence-row tone-${status.tone}`}>
+                <button
+                  type="button"
+                  className="tka-presence-main"
+                  onClick={() => toggle(user.id)}
+                  aria-expanded={expanded}
+                >
+                  <span className={`avatar sm ${user.color}`}>{user.initials}</span>
 
-                <span className="tk-presence-who">
-                  <span className="tk-presence-name">{user.name}</span>
-                  <span className="tk-presence-status">
-                    <span className={`tk-presence-pill tone-${status.tone}`}>{status.label}</span>
-                    {status.since && (
-                      <span className="tk-presence-since">since {fmtClock(status.since)}</span>
-                    )}
-                    {status.lastOut && (
-                      <span className="tk-presence-since">last seen {fmtClock(status.lastOut)}</span>
+                  <span className="tka-presence-who">
+                    <span className="tka-presence-name">{user.name}</span>
+                    <span className="tka-presence-statusline">
+                      <span className={`tka-statuspill tone-${status.tone}`}>
+                        <Icon name={STATUS_ICON[status.key] || "dot"} size={11}/>
+                        {status.label}
+                      </span>
+                      {status.since && (
+                        <span className="tka-presence-since num">since {fmtClock(status.since)}</span>
+                      )}
+                      {status.lastOut && (
+                        <span className="tka-presence-since num">last seen {fmtClock(status.lastOut)}</span>
+                      )}
+                    </span>
+                    {status.note && (
+                      <span className="tka-presence-note" title={status.note}>
+                        <Icon name="note" size={11}/> {status.note}
+                      </span>
                     )}
                   </span>
-                  {status.note && (
-                    <span className="tk-presence-note" title={status.note}>
-                      <Icon name="note" size={11}/> {status.note}
-                    </span>
-                  )}
-                </span>
 
-                <span className="tk-presence-timeline">
-                  <DayTimeline date={date} intervals={intervals} height={22} showHourGrid={false}/>
-                </span>
-                <span className="tk-presence-total">{day ? fmtHM(day.minutesWork || 0) : "—"}</span>
-                <span className="tk-presence-caret"><Icon name={expanded ? "chevronDown" : "chevronRight"} size={14}/></span>
-              </button>
+                  <span className="tka-presence-tl">
+                    <DayTimeline date={date} intervals={intervals} height={22} showHourGrid={false}/>
+                  </span>
+                  <span className="tka-presence-total num">{day ? fmtHM(day.minutesWork || 0) : "–"}</span>
+                  <span className="tka-presence-caret">
+                    <Icon name={expanded ? "chevronDown" : "chevronRight"} size={15}/>
+                  </span>
+                </button>
 
-              {expanded && (
-                <div className="tk-presence-detail">
-                  {intervals.length === 0 ? (
-                    <div className="tk-presence-detail-empty">No punches recorded {isToday ? "yet today" : "this day"}.</div>
-                  ) : (
-                    <ul className="tk-presence-ivs">
-                      {mergeDisplaySegments(intervals).map(iv => (
-                        <li key={iv.id} className={`tk-presence-iv ${iv.isOut ? "is-out" : "is-in"}`}>
-                          <span className="tk-presence-iv-time">
-                            {fmtClock(iv.startAt)} – {iv.endAt ? fmtClock(iv.endAt) : "now"}
-                          </span>
-                          <span className={`tk-presence-iv-tag tone-${iv.isOut ? (TK_CATEGORY_TONE[iv.category] || "rose") : "green"}`}>
-                            {iv.isOut ? (TK_CATEGORY_LABEL[iv.category] || "Out") : "At desk"}
-                          </span>
-                          {iv.outlookEventSubject && (
-                            <span className="tk-presence-iv-cal"><Icon name="calendar" size={10}/> {iv.outlookEventSubject}</span>
-                          )}
-                          {iv.notes && <span className="tk-presence-iv-note">“{iv.notes}”</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </li>
-          );
-        })}
-        {enriched.length === 0 && !busy && (
-          <li className="tk-presence-empty">
-            <Icon name="users" size={20}/>
-            <span>No one to show.</span>
-          </li>
-        )}
-      </ul>
+                {expanded && (
+                  <div className="tka-presence-detail">
+                    {intervals.length === 0 ? (
+                      <p className="tka-presence-detail-empty">
+                        No punches recorded {isToday ? "yet today" : "this day"}.
+                      </p>
+                    ) : (
+                      <ul className="tka-presence-ivs">
+                        {mergeDisplaySegments(intervals).map(iv => (
+                          <li key={iv.id} className={`tka-presence-iv ${iv.isOut ? "is-out" : "is-in"}`}>
+                            <span className="tka-presence-iv-time num">
+                              {fmtClock(iv.startAt)} – {iv.endAt ? fmtClock(iv.endAt) : "now"}
+                            </span>
+                            <span className={`tka-statuspill tone-${iv.isOut ? (TK_CATEGORY_TONE[iv.category] || "rose") : "green"}`}>
+                              {iv.isOut ? (TK_CATEGORY_LABEL[iv.category] || "Out") : "At desk"}
+                            </span>
+                            {iv.outlookEventSubject && (
+                              <span className="tka-presence-iv-cal">
+                                <Icon name="calendar" size={11}/> {iv.outlookEventSubject}
+                              </span>
+                            )}
+                            {iv.notes && (
+                              <span className="tka-presence-iv-note">
+                                <Icon name="note" size={11}/> {iv.notes}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

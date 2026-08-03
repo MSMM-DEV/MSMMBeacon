@@ -7,16 +7,36 @@
 // does NOT block submission — a soft warning surfaces here and again in the
 // admin approval row.
 //
-// Built on the shared modal/form primitives (mirrors CorrectionModal).
+// Built on the shared Dialog primitive from @/ui, so focus trapping, escape,
+// the phone bottom-sheet treatment and the aria wiring are Radix's problem.
+//
+// One rule the UI has to make impossible to misread: CUSTOM HOURS ARE THE
+// TOTAL FOR THE WHOLE LEAVE, not a per-day figure. Full and Half are per
+// weekday. The field label, its hint, and the preview row all say so.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../icons";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  DialogBody, DialogFooter, Button, Input, Textarea, Label,
+} from "@/ui";
 import {
   submitLeaveRequest, loadLeaveBalances, computeLeaveAvailable,
   leaveBusinessDays, getCurrentBeaconUser, getAppSettings, todayInCT,
 } from "../data";
 
 const hrs = (n) => `${(Math.round((n || 0) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} hrs`;
+
+const TYPE_CHOICES = [
+  { key: "vacation", label: "Vacation",   icon: "sun",  tone: "sage" },
+  { key: "sick",     label: "Sick leave", icon: "bell", tone: "blue" },
+];
+
+const BASIS_CHOICES = [
+  { key: "full",   label: "Full day",  meta: "8h per weekday" },
+  { key: "half",   label: "Half day",  meta: "4h per weekday" },
+  { key: "custom", label: "Custom",    meta: "total hours" },
+];
 
 export function LeaveRequestModal({ onClose, onSubmitted }) {
   const me       = getCurrentBeaconUser();
@@ -100,122 +120,170 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
   const typeLabel = leaveType === "sick" ? "sick leave" : "vacation";
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow leave-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="modal-eyebrow">Timesheet</div>
-            <h3 className="modal-title">Request leave</h3>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={16}/>
-          </button>
-        </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose?.(); }}>
+      <DialogContent size="sm" className="tsx-dialog">
+        <DialogHeader>
+          <DialogTitle>Request leave</DialogTitle>
+          <DialogDescription>
+            Weekends and company holidays are skipped, so they never come off your balance.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="modal-body">
+        <DialogBody className="tsx-form">
           {/* Type */}
-          <div className="form-row">
-            <label className="form-label">Type</label>
-            <div className="leave-seg" role="group" aria-label="Leave type">
-              <button type="button"
-                className={`leave-seg-btn ${leaveType === "vacation" ? "is-active tone-sage" : ""}`}
-                onClick={() => setLeaveType("vacation")}>
-                <Icon name="sun" size={13}/> Vacation
-              </button>
-              <button type="button"
-                className={`leave-seg-btn ${leaveType === "sick" ? "is-active tone-blue" : ""}`}
-                onClick={() => setLeaveType("sick")}>
-                <Icon name="bell" size={13}/> Sick
-              </button>
+          <div className="tsx-field">
+            <Label id="tsx-leave-type-label">Type</Label>
+            <div className="tsx-seg" role="radiogroup" aria-labelledby="tsx-leave-type-label">
+              {TYPE_CHOICES.map(t => (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={leaveType === t.key}
+                  className={`tsx-seg-btn tone-${t.tone} ${leaveType === t.key ? "is-active" : ""}`}
+                  onClick={() => setLeaveType(t.key)}
+                >
+                  <Icon name={t.icon} size={14}/>
+                  <span>{t.label}</span>
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Dates */}
-          <div className="form-row leave-date-row">
-            <div className="leave-date-field">
-              <label className="form-label">From</label>
-              <input type="date" className="form-input" value={start}
+          <div className="tsx-field-row">
+            <div className="tsx-field">
+              <Label htmlFor="tsx-leave-from">From</Label>
+              <Input id="tsx-leave-from" type="date" value={start}
                 onChange={e => onStart(e.target.value)}/>
             </div>
-            <div className="leave-date-field">
-              <label className="form-label">To</label>
-              <input type="date" className="form-input" value={end} min={start}
+            <div className="tsx-field">
+              <Label htmlFor="tsx-leave-to">To</Label>
+              <Input id="tsx-leave-to" type="date" value={end} min={start}
                 onChange={e => setEnd(e.target.value || start)}/>
             </div>
           </div>
 
           {/* Basis */}
-          <div className="form-row">
-            <label className="form-label">Hours</label>
-            <div className="leave-seg" role="group" aria-label="How many hours">
-              <button type="button" className={`leave-seg-btn ${basis === "full"   ? "is-active" : ""}`} onClick={() => setBasis("full")}>Full · 8h/day</button>
-              <button type="button" className={`leave-seg-btn ${basis === "half"   ? "is-active" : ""}`} onClick={() => setBasis("half")}>Half · 4h/day</button>
-              <button type="button" className={`leave-seg-btn ${basis === "custom" ? "is-active" : ""}`} onClick={() => setBasis("custom")}>Custom</button>
+          <div className="tsx-field">
+            <Label id="tsx-leave-basis-label">How much time</Label>
+            <div className="tsx-seg tsx-seg-stack" role="radiogroup" aria-labelledby="tsx-leave-basis-label">
+              {BASIS_CHOICES.map(b => (
+                <button
+                  key={b.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={basis === b.key}
+                  className={`tsx-seg-btn ${basis === b.key ? "is-active" : ""}`}
+                  onClick={() => setBasis(b.key)}
+                >
+                  <span className="tsx-seg-btn-label">{b.label}</span>
+                  <span className="tsx-seg-btn-meta">{b.meta}</span>
+                </button>
+              ))}
             </div>
-            {basis === "custom" && (
-              <div className="leave-custom-hrs">
-                <input type="number" className="form-input" min="0" step="0.5"
-                  value={customHrs}
-                  onChange={e => setCustomHrs(e.target.value)}
-                  onFocus={e => e.target.select()}/>
-                <span className="form-help" style={{ margin: 0 }}>total hours for the whole leave</span>
+
+            {isCustom ? (
+              <div className="tsx-leave-custom">
+                <Label htmlFor="tsx-leave-custom-hrs">Total hours for the whole leave</Label>
+                <div className="tsx-leave-custom-input">
+                  <Input
+                    id="tsx-leave-custom-hrs"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.5"
+                    value={customHrs}
+                    onChange={e => setCustomHrs(e.target.value)}
+                    onFocus={e => e.target.select()}
+                    aria-describedby="tsx-leave-custom-help"
+                  />
+                  <span className="tsx-leave-custom-unit" aria-hidden="true">hrs</span>
+                </div>
+                <p className="tsx-help" id="tsx-leave-custom-help">
+                  <Icon name="info" size={12}/>
+                  <span>
+                    This is the total across the whole leave, not a figure per day.
+                    Enter 12 for a three day trip and 12 hours come off your balance.
+                  </span>
+                </p>
               </div>
+            ) : (
+              <p className="tsx-help">
+                <Icon name="info" size={12}/>
+                <span>
+                  Full and Half apply to every eligible weekday in the range.
+                  Weekends and company holidays do not count against your balance.
+                </span>
+              </p>
             )}
-            <p className="form-help">
-              {isCustom
-                ? "Custom is the total hours you want off across the selected weekdays — not per day."
-                : "Full and Half are per weekday. Weekends and company holidays don’t count against your balance."}
-            </p>
           </div>
 
           {/* Reason */}
-          <div className="form-row">
-            <label className="form-label">Reason <span className="form-optional">(optional)</span></label>
-            <textarea className="form-input" rows={2} maxLength={500}
+          <div className="tsx-field">
+            <Label htmlFor="tsx-leave-reason">
+              Reason <span className="tsx-optional">(optional)</span>
+            </Label>
+            <Textarea
+              id="tsx-leave-reason"
+              rows={2}
+              maxLength={500}
               placeholder="Add a note for your manager…"
               value={reason}
-              onChange={e => setReason(e.target.value)}/>
+              onChange={e => setReason(e.target.value)}
+            />
           </div>
 
           {/* Live preview */}
-          <div className={`leave-preview ${calc.over ? "is-over" : ""}`}>
-            <div className="leave-preview-row">
-              <span>Eligible weekdays</span>
-              <strong>{calc.days}{calc.days === 1 ? " day" : " days"}</strong>
+          <dl className={`tsx-leave-preview ${calc.over ? "is-over" : ""}`}>
+            <div className="tsx-leave-preview-row">
+              <dt>Eligible weekdays</dt>
+              <dd className="num">{calc.days}{calc.days === 1 ? " day" : " days"}</dd>
             </div>
-            <div className="leave-preview-row">
-              <span>Requested</span>
-              <strong>{hrs(calc.requested)}</strong>
+            <div className="tsx-leave-preview-row">
+              <dt>Requested{isCustom ? " (total)" : ""}</dt>
+              <dd className="num">{hrs(calc.requested)}</dd>
             </div>
-            <div className="leave-preview-row">
-              <span>Current {typeLabel}</span>
-              <strong>{hrs(calc.avail)}</strong>
+            <div className="tsx-leave-preview-row">
+              <dt>Current {typeLabel}</dt>
+              <dd className="num">{hrs(calc.avail)}</dd>
             </div>
-            <div className="leave-preview-row leave-preview-after">
-              <span>After approval</span>
-              <strong className={calc.after < 0 ? "is-neg" : ""}>{hrs(calc.after)}</strong>
+            <div className="tsx-leave-preview-row is-total">
+              <dt>After approval</dt>
+              <dd className={`num ${calc.after < 0 ? "is-neg" : ""}`}>{hrs(calc.after)}</dd>
             </div>
-          </div>
+          </dl>
 
           {calc.over && (
-            <div className="leave-warn">
+            <p className="tsx-note tone-warn">
               <Icon name="warn" size={13}/>
-              This is more than your accrued {typeLabel} balance. You can still submit — an admin will review.
-            </div>
+              <span>
+                This is more than your accrued {typeLabel} balance. You can still submit it,
+                and an admin will review.
+              </span>
+            </p>
           )}
           {calc.days === 0 && (
-            <div className="form-help">No eligible weekdays in this range — pick dates that include a weekday.</div>
+            <p className="tsx-note tone-muted">
+              <Icon name="calendar" size={13}/>
+              <span>No eligible weekdays in this range. Pick dates that include a weekday.</span>
+            </p>
           )}
-          {err && <div className="form-error">{err}</div>}
-        </div>
+          {err && (
+            <p className="tsx-note tone-bad" role="alert">
+              <Icon name="warn" size={13}/>
+              <span>{err}</span>
+            </p>
+          )}
+        </DialogBody>
 
-        <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn btn-primary" onClick={submit} disabled={!canSubmit}>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={!canSubmit} loading={busy}>
             {busy ? "Submitting…" : "Submit request"}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

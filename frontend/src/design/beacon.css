@@ -587,3 +587,352 @@ body {
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ======================================================================
+   SHELL ADDITIONS — the pieces App.jsx mounts into the frame above.
+   Everything below reads tokens only; nothing hard-codes a colour.
+   ====================================================================== */
+
+/* The rail is a peer of the page, not an overlay, so it has to sit BELOW
+   the legacy record drawers / modals (z 50–60) or their scrim would stop
+   dimming it. The mobile drawer is a Radix <Sheet> (z 100+), which is why
+   this can be lowered without trapping the user behind a scrim. */
+.bx-shell > .bx-rail { z-index: 30; }
+
+/* Monogram inside .bx-mark. A letterform, not an emoji or a glyph that
+   could be mistaken for status. */
+.bx-mark {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  user-select: none;
+}
+
+/* Nav items are <button>s. The legacy reset zeroes their padding, so the
+   frame rules above need these to reassert the control's own box. */
+.bx-navitem {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+.bx-navitem:disabled { opacity: .45; cursor: not-allowed; }
+.bx-navlabel { margin: 0; }
+
+/* Collapse toggle: same item metrics, quieter resting colour. */
+.bx-railtoggle { color: var(--text-soft); }
+.bx-railtoggle:hover { color: var(--text); }
+
+/* The drawer copy of the rail lives in a Radix Sheet, outside .bx-shell,
+   so it never inherits the collapsed-rail rules. */
+.bx-rail-sheet { padding: 0; border-radius: 0; }
+.bx-rail-sheet .bx-rail-head { padding-right: 48px; }
+
+/* ------------------------------------------------------------ topbar */
+.bx-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.bx-crumb-sep { color: var(--text-soft); flex: 0 0 auto; }
+/* The root crumb is dropped at phone widths (rule in the frame section
+   above), so its separator has to go with it. */
+@media (max-width: 640px) { .bx-crumb-sep { display: none; } }
+
+/* Width is set with a Tailwind max-w utility at the call site: the kit's
+   InputGroup already carries `w-full`, and the utilities layer outranks
+   this one, so a `width` here would never apply. */
+.bx-search {
+  flex: 0 1 auto;
+  margin-inline: var(--sp-2);
+}
+
+/* Account trigger. A button, so it is keyboard reachable and announces
+   the signed-in identity even when the name is visually truncated. */
+.bx-account {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: 200px;
+  height: var(--control-h);
+  padding: 0 var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.bx-account:hover { background: var(--surface-2); border-color: var(--border); }
+.bx-account:active { background: var(--surface-3); }
+.bx-account[data-state="open"] { background: var(--surface-2); border-color: var(--border-strong); }
+.bx-account-avatar {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.bx-account-caret { color: var(--text-soft); flex: 0 0 auto; }
+@media (max-width: 900px) {
+  .bx-account-name, .bx-account-caret { display: none; }
+  .bx-account { max-width: none; padding: 0 var(--sp-1); }
+}
+
+.bx-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-3);
+}
+.bx-account-card-name { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+.bx-account-card-mail { font-size: var(--fs-xs); color: var(--text-soft); }
+
+/* ---------------------------------------------------- page head extras */
+.bx-pagehead-compact { align-items: center; }
+.bx-pagedesc-short { display: none; }
+@media (max-width: 640px) {
+  /* Pages that ship a short mobile description swap to it wholesale
+     rather than truncating a long sentence mid-clause. */
+  .bx-pagedesc-dual .bx-pagedesc-full { display: none; }
+  .bx-pagedesc-dual .bx-pagedesc-short { display: inline; }
+}
+
+/* --------------------------------------------------------- metric row
+   Not a deck of cards: one bordered strip, hairline-divided. The 1px grid
+   gap over a border-coloured background draws the dividers, so the rules
+   stay correct at every wrap point without per-breakpoint border resets. */
+.bx-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--border);
+  overflow: hidden;
+}
+@media (min-width: 560px)  { .bx-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .bx-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.bx-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-elev);
+}
+.bx-metric-label {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+.bx-metric-value {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text);
+}
+
+/* Sub-breakdown (hot leads by star band): a definition list, two up. */
+.bx-metric-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  min-width: 0;
+}
+.bx-metric-splititem { min-width: 0; }
+.bx-metric-splititem dt {
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.bx-metric-splititem dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  color: var(--text);
+}
+
+.bx-metric-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin-top: auto;
+  padding-top: 2px;
+}
+.bx-metric-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+/* The shared Sparkline hard-codes .stat-sparkline, which the legacy stat
+   card positioned absolutely. In the strip it is an inline trend mark. */
+.bx-metric .stat-sparkline {
+  position: static;
+  flex: 0 0 auto;
+  opacity: .45;
+}
+
+/* --------------------------------------------------- section scaffolding */
+.bx-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+.bx-subsection { min-width: 0; }
+.bx-sectioncount {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-soft);
+}
+.bx-sectionnote {
+  margin: calc(var(--sp-3) * -1) 0 var(--sp-3);
+  max-width: 68ch;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.bx-viewswitch {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------- toast
+   Bottom-centre, above every legacy overlay (z 50–60) and drawer. */
+.bx-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--sp-6) + env(safe-area-inset-bottom));
+  translate: -50% 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: min(560px, calc(100vw - var(--sp-6)));
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--fs-sm);
+  animation: bx-toast-in var(--dur-normal) var(--ease-out) both;
+}
+.bx-toast-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px; height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.bx-toast-msg { min-width: 0; text-wrap: pretty; }
+.bx-toast-action { flex: 0 0 auto; }
+@keyframes bx-toast-in {
+  from { opacity: 0; translate: -50% 10px; }
+  to   { opacity: 1; translate: -50% 0; }
+}
+@media (max-width: 480px) {
+  .bx-toast {
+    left: var(--sp-3);
+    right: var(--sp-3);
+    max-width: none;
+    translate: 0 0;
+    animation-name: bx-toast-in-sm;
+  }
+}
+@keyframes bx-toast-in-sm {
+  from { opacity: 0; translate: 0 10px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+
+/* ---------------------------------------------------------- boot screen */
+.bx-boot {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: var(--bg);
+  color: var(--text);
+}
+.bx-boot-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 520px;
+  min-width: 0;
+  text-align: center;
+}
+.bx-boot-mark {
+  width: 44px; height: 44px;
+  font-size: var(--fs-xl);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-2);
+  animation: bx-boot-pulse 1.4s var(--ease-in-out) infinite;
+}
+.bx-boot-mark[data-idle="true"] { animation: none; }
+@keyframes bx-boot-pulse {
+  0%, 100% { scale: 1;    opacity: 1;   }
+  50%      { scale: 1.07; opacity: .85; }
+}
+.bx-boot-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+}
+.bx-boot-sub {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.bx-boot-error {
+  margin: var(--sp-4) 0 0;
+  max-width: 100%;
+  max-height: 240px;
+  overflow: auto;
+  text-align: left;
+  padding: var(--sp-3);
+  border: 1px solid var(--rose-line);
+  border-radius: var(--radius-md);
+  background: var(--rose-soft);
+  color: var(--rose-ink);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------- print */
+@media print {
+  .bx-rail, .bx-topbar, .bx-skip, .bx-toast, .bx-pageactions { display: none !important; }
+  .bx-shell { display: block; min-height: 0; }
+  .bx-main, .bx-scroll { height: auto; overflow: visible; display: block; }
+  .bx-page { padding: 0; max-width: none; display: block; }
+}

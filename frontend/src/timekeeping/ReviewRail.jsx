@@ -10,9 +10,14 @@
 // Re-fetches on `dataVersion` (bumped by the parent after any approval/edit),
 // on mount, and via its own Refresh. Collapses to a slim "all caught up" bar
 // when both queues are empty so it never wastes canvas real estate.
+//
+// Rail-level controls (collapse, refresh) live in the header; the decisions
+// that mutate one record live inside that record's card. Pending state is
+// carried by a badge with an icon and a word, never by colour alone.
 
 import React, { useCallback, useEffect, useState } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import { Alert, Badge, Button, Input, TooltipProvider } from "@/ui";
 import {
   loadPendingCorrections, loadPendingApprovals,
   tkResolveCorrection, fmtClock, userById,
@@ -51,80 +56,128 @@ export function ReviewRail({ dataVersion = 0, onResolved, onOpenUserDay }) {
   // Empty → slim, quiet "caught up" bar (still shows the refresh affordance).
   if (total === 0) {
     return (
-      <div className="tk-rr is-empty">
-        <span className="tk-rr-empty-text"><Icon name="check" size={13} /> Review queue clear — nothing awaiting approval.</span>
-        <button className="tk-rr-refresh" onClick={refresh} disabled={busy} aria-label="Refresh review queue">
-          <Icon name="refresh" size={12} />
-        </button>
+      <div className="tka-rail is-clear">
+        <span className="tka-rail-clear">
+          <span className="tka-rail-clear-icon"><Icon name="check" size={13}/></span>
+          Review queue clear. Nothing is awaiting approval.
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={refresh}
+          disabled={busy}
+          aria-label="Refresh review queue"
+        >
+          <Icon name="refresh" size={13}/>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className={`tk-rr ${collapsed ? "is-collapsed" : ""}`}>
-      <header className="tk-rr-head">
-        <button className="tk-rr-toggle" onClick={() => setCollapsed((c) => !c)} aria-expanded={!collapsed}>
-          <Icon name={collapsed ? "chevronRight" : "chevronDown"} size={14} />
-          <span className="tk-rr-title">Awaiting your review</span>
-          <span className="tk-rr-count">{total}</span>
-        </button>
-        <div className="tk-rr-head-tools">
-          {err && <span className="tk-rr-err">{err}</span>}
-          <button className="tk-rr-refresh" onClick={refresh} disabled={busy} aria-label="Refresh">
-            <Icon name="refresh" size={12} /> {busy ? "…" : "Refresh"}
+    <TooltipProvider delayDuration={280}>
+      <div className={`tka-rail ${collapsed ? "is-collapsed" : ""}`}>
+        <header className="tka-rail-head">
+          <button
+            type="button"
+            className="tka-rail-toggle"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-expanded={!collapsed}
+          >
+            <Icon name={collapsed ? "chevronRight" : "chevronDown"} size={15}/>
+            <span className="tka-rail-title">Awaiting your review</span>
+            <Badge tone="brand" size="sm" className="num">{total}</Badge>
           </button>
-        </div>
-      </header>
 
-      {!collapsed && (
-        <div className="tk-rr-body">
-          {corrections.length > 0 && (
-            <section className="tk-rr-group">
-              <div className="tk-rr-group-label"><Icon name="edit" size={12} /> Corrections <span className="tk-rr-group-n">{corrections.length}</span></div>
-              <div className="tk-rr-cards">
-                {corrections.map((c) => (
-                  <CorrectionCard key={c.id} c={c} onResolved={afterResolve} onOpenUserDay={onOpenUserDay} />
-                ))}
-              </div>
-            </section>
-          )}
+          <div className="tka-rail-tools">
+            {err && <span className="tka-rail-err" role="alert">{err}</span>}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={refresh}
+              disabled={busy}
+              loading={busy}
+              aria-label="Refresh review queue"
+            >
+              {!busy && <Icon name="refresh" size={13}/>}
+              <span className="tka-rail-refresh-label">Refresh</span>
+            </Button>
+          </div>
+        </header>
 
-          {weeks.length > 0 && (
-            <section className="tk-rr-group">
-              <div className="tk-rr-group-label"><Icon name="calendar" size={12} /> Week submissions <span className="tk-rr-group-n">{weeks.length}</span></div>
-              <div className="tk-rr-cards">
-                {weeks.map((w) => {
-                  const u = userById(w.userId);
-                  return (
-                    <div key={`${w.userId}:${w.weekStart}`} className="tk-rr-card tk-rr-week">
-                      <div className="tk-rr-card-who">
-                        {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
-                        <span className="tk-rr-card-name">{u?.name || "User"}</span>
-                      </div>
-                      <div className="tk-rr-card-what">Week of {w.weekStart}</div>
-                      <div className="tk-rr-card-sub">submitted {timeAgo(w.submittedAt)}</div>
-                      <div className="tk-rr-card-actions">
-                        <button className="btn btn-ghost btn-sm" onClick={() => onOpenUserDay?.({ userId: w.userId, date: w.weekStart })}>Open day</button>
-                        <button className="btn btn-primary btn-sm" onClick={() => setOpenWeek({ userId: w.userId, weekStart: w.weekStart })}>Review week</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
+        {!collapsed && (
+          <div className="tka-rail-body">
+            {corrections.length > 0 && (
+              <section className="tka-rail-group">
+                <h4 className="tka-rail-grouphead">
+                  <Icon name="edit" size={13}/>
+                  Corrections
+                  <Badge tone="neutral" size="sm" className="num">{corrections.length}</Badge>
+                </h4>
+                <div className="tka-rail-cards">
+                  {corrections.map((c) => (
+                    <CorrectionCard key={c.id} c={c} onResolved={afterResolve} onOpenUserDay={onOpenUserDay} />
+                  ))}
+                </div>
+              </section>
+            )}
 
-      {openWeek && (
-        <WeekApprovalModal
-          userId={openWeek.userId}
-          weekStart={openWeek.weekStart}
-          onClose={() => setOpenWeek(null)}
-          onResolved={() => { setOpenWeek(null); afterResolve({ kind: "week", weekStart: openWeek.weekStart }); }}
-        />
-      )}
-    </div>
+            {weeks.length > 0 && (
+              <section className="tka-rail-group">
+                <h4 className="tka-rail-grouphead">
+                  <Icon name="calendar" size={13}/>
+                  Week submissions
+                  <Badge tone="neutral" size="sm" className="num">{weeks.length}</Badge>
+                </h4>
+                <div className="tka-rail-cards">
+                  {weeks.map((w) => {
+                    const u = userById(w.userId);
+                    return (
+                      <article key={`${w.userId}:${w.weekStart}`} className="tka-rail-card">
+                        <header className="tka-rail-card-who">
+                          {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
+                          <span className="tka-rail-card-name">{u?.name || "User"}</span>
+                          <Badge tone="brand" size="sm">
+                            <Icon name="hourglass" size={11}/> Pending
+                          </Badge>
+                        </header>
+                        <p className="tka-rail-card-what num">Week of {w.weekStart}</p>
+                        <p className="tka-rail-card-sub">submitted {timeAgo(w.submittedAt)}</p>
+                        <div className="tka-rail-card-actions">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onOpenUserDay?.({ userId: w.userId, date: w.weekStart })}
+                          >
+                            Open day
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => setOpenWeek({ userId: w.userId, weekStart: w.weekStart })}
+                          >
+                            Review week
+                          </Button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
+        {openWeek && (
+          <WeekApprovalModal
+            userId={openWeek.userId}
+            weekStart={openWeek.weekStart}
+            onClose={() => setOpenWeek(null)}
+            onResolved={() => { setOpenWeek(null); afterResolve({ kind: "week", weekStart: openWeek.weekStart }); }}
+          />
+        )}
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -148,45 +201,104 @@ function CorrectionCard({ c, onResolved, onOpenUserDay }) {
   };
 
   return (
-    <div className="tk-rr-card tk-rr-corr">
-      <div className="tk-rr-card-who">
+    <article className="tka-rail-card">
+      <header className="tka-rail-card-who">
         {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
-        <span className="tk-rr-card-name">{u?.name || "User"}</span>
+        <span className="tka-rail-card-name">{u?.name || "User"}</span>
         <KindChip kind={c.kind} />
-      </div>
-      <div className="tk-rr-card-what">{label(c)}</div>
-      <div className="tk-rr-card-sub">{fmtFriendlyDate(c.date)} · {timeAgo(c.submittedAt)}</div>
-      {c.reason && <div className="tk-rr-card-reason">“{c.reason}”</div>}
+      </header>
 
-      {err && <div className="tk-rr-card-err">{err}</div>}
+      <p className="tka-rail-card-what">{label(c)}</p>
+      <p className="tka-rail-card-sub num">{fmtFriendlyDate(c.date)} · {timeAgo(c.submittedAt)}</p>
+      {c.reason && (
+        <p className="tka-rail-card-quote">
+          <Icon name="note" size={12}/>
+          <span>{c.reason}</span>
+        </p>
+      )}
+
+      {err && <Alert tone="danger" className="mt-1">{err}</Alert>}
 
       {!rejecting ? (
-        <div className="tk-rr-card-actions">
-          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => onOpenUserDay?.({ userId: c.userId, date: c.date })}>Open day</button>
-          <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setRejecting(true)}>Reject</button>
-          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => act("approved")}>{busy ? "…" : "Approve"}</button>
+        <div className="tka-rail-card-actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => onOpenUserDay?.({ userId: c.userId, date: c.date })}
+          >
+            Open day
+          </Button>
+          <Button
+            variant="destructive-soft"
+            size="sm"
+            disabled={busy}
+            onClick={() => setRejecting(true)}
+          >
+            Reject
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={busy}
+            loading={busy}
+            onClick={() => act("approved")}
+          >
+            {!busy && <Icon name="check" size={14}/>}
+            Approve
+          </Button>
         </div>
       ) : (
-        <div className="tk-rr-reject">
-          <input type="text" className="form-input" placeholder="Reason (optional, shared with user)" value={reason} maxLength={300} autoFocus onChange={(e) => setReason(e.target.value)} />
-          <div className="tk-rr-card-actions">
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setRejecting(false); setReason(""); }}>Cancel</button>
-            <button className="btn btn-warn btn-sm" disabled={busy} onClick={() => act("rejected", reason.trim())}>{busy ? "…" : "Send back"}</button>
+        <div className="tka-rail-card-reject">
+          <Input
+            type="text"
+            placeholder="Reason (optional, shared with user)"
+            value={reason}
+            maxLength={300}
+            autoFocus
+            aria-label="Rejection reason"
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <div className="tka-rail-card-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => { setRejecting(false); setReason(""); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={busy}
+              loading={busy}
+              onClick={() => act("rejected", reason.trim())}
+            >
+              Send back
+            </Button>
           </div>
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
 function KindChip({ kind }) {
   const map = {
-    add_punch: ["accent", "Punch"], add_interval: ["accent", "Block"],
-    edit_punch: ["blue", "Edit"], delete_punch: ["rose", "Delete"],
-    reclassify_interval: ["sage", "Retag"], note: ["muted", "Note"],
+    add_punch:           ["brand",   "plus",  "Punch"],
+    add_interval:        ["brand",   "plus",  "Block"],
+    edit_punch:          ["info",    "edit",  "Edit"],
+    delete_punch:        ["danger",  "trash", "Delete"],
+    reclassify_interval: ["success", "tag",   "Retag"],
+    note:                ["neutral", "note",  "Note"],
   };
-  const [tone, lbl] = map[kind] || map.note;
-  return <span className={`tk-rr-kind tone-${tone}`}>{lbl}</span>;
+  const [tone, icon, lbl] = map[kind] || map.note;
+  return (
+    <Badge tone={tone} size="sm">
+      <Icon name={icon} size={11}/> {lbl}
+    </Badge>
+  );
 }
 
 function label(c) {
@@ -204,7 +316,7 @@ function label(c) {
 }
 
 function fmtFriendlyDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "–";
   return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 

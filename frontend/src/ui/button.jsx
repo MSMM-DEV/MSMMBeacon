@@ -47,10 +47,13 @@ const buttonVariants = cva(
           "bg-transparent text-[var(--accent)] underline-offset-4 hover:underline p-0 h-auto",
       },
       size: {
-        xs: "h-[var(--control-h-sm)] px-2 text-[var(--fs-xs)] [&_svg]:size-3.5",
-        sm: "h-[calc(var(--control-h)-2px)] px-2.5 text-[var(--fs-sm)] [&_svg]:size-4",
-        md: "h-[var(--control-h)] px-3.5 text-[var(--fs-sm)] [&_svg]:size-4",
-        lg: "h-[var(--control-h-lg)] px-5 text-[var(--fs-md)] [&_svg]:size-[18px]",
+        // NOTE the `length:` hint. Without it Tailwind reads `text-[var(--x)]`
+        // as a COLOUR utility, which both emits an invalid `color` declaration
+        // and makes tailwind-merge drop the variant's real text colour.
+        xs: "h-[var(--control-h-sm)] px-2 text-[length:var(--fs-xs)] [&_svg]:size-3.5",
+        sm: "h-[calc(var(--control-h)-2px)] px-2.5 text-[length:var(--fs-sm)] [&_svg]:size-4",
+        md: "h-[var(--control-h)] px-3.5 text-[length:var(--fs-sm)] [&_svg]:size-4",
+        lg: "h-[var(--control-h-lg)] px-5 text-[length:var(--fs-md)] [&_svg]:size-[18px]",
         icon: "h-[var(--control-h)] w-[var(--control-h)] p-0 [&_svg]:size-4",
         "icon-sm": "h-[var(--control-h-sm)] w-[var(--control-h-sm)] p-0 [&_svg]:size-3.5",
         "icon-lg": "h-[var(--control-h-lg)] w-[var(--control-h-lg)] p-0 [&_svg]:size-[18px]",

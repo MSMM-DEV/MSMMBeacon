@@ -43,7 +43,10 @@
   --oc-300: #E4B77C;
   --oc-400: #D59A52;
   --oc-500: #C4832F;
-  --oc-600: #A66A22;
+  /* 600 is the light-theme interactive step: it carries white button text and
+     is also the accent text colour on paper. Held at 5.1:1 against #FFFFFF,
+     so 14px labels on a primary button clear WCAG AA. */
+  --oc-600: #9A6120;
   --oc-700: #85521B;
   --oc-800: #663E17;
   --oc-900: #4A2D12;
@@ -305,6 +308,11 @@
   --control-h-lg: 36px;
 }
 
+[data-font="inter_plex"] {
+  --font-display: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "IBM Plex Mono", ui-monospace, monospace;
+}
 [data-font="fraunces_plex"] {
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --font-body:    "Inter Tight", ui-sans-serif, system-ui, sans-serif;

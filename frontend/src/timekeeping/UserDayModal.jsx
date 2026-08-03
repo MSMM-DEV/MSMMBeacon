@@ -2,11 +2,14 @@
 // for one user's day. Opened from the Team range canvas (click a person/cell)
 // and from the ReviewRail "Open day" action.
 //
-// Layout (desktop): a draggable vertical timeline (EditableDayTimeline) on the
-// left + a context "inspector" on the right that morphs between three states —
+// Layout (lg and up): a vertical timeline (EditableDayTimeline) on the left +
+// a context "inspector" on the right that morphs between three states —
 //   • a selected block      → retag (chip grid) · comment · fine-tune times · delete
 //   • create mode           → carve a new Worked/Away block
 //   • idle                  → legend + gesture tips + Add-block
+// Below lg the inspector falls in under the canvas inside the dialog's single
+// scroll region, so nothing overlaps and everything stays reachable.
+//
 // A familiar horizontal "day at a glance" bar sits above the canvas. Pending
 // corrections for the day and a locked-week notice surface as inline banners so
 // the admin can approve / unlock without leaving the canvas.
@@ -16,7 +19,14 @@
 // Edge Function round-trip.
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import {
+  Alert, AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+  Badge, Button, Dialog, DialogBody, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle, Textarea, TooltipProvider,
+} from "@/ui";
 import {
   loadDayDetail, loadWeekLock, loadCorrectionsForDay,
   fmtHM, fmtClock, todayInCT, userById,
@@ -104,8 +114,8 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
   const editingBlocked = locked && !allowLockedEdit;
   const selected = day.intervals.find((iv) => iv.id === selectedId) || null;
   const isToday = date === todayInCT();
-  // The inspector has actionable content (edit or create) — drives the mobile
-  // bottom-sheet reveal + its scrim.
+  // The inspector has actionable content (edit or create) — drives the emphasis
+  // treatment on the inspector column.
   const inspectorActive = (mode === "create" && !!createDraft) || !!selected;
 
   const minutesWork = day.day?.minutesWork || 0;
@@ -115,7 +125,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
 
   // ---- actions ----
   const guard = async (fn) => {
-    if (editingBlocked) { setActionErr("This week is locked — unlock it (or choose Edit anyway) first."); return; }
+    if (editingBlocked) { setActionErr("This week is locked. Unlock it (or choose Edit anyway) first."); return; }
     if (savingRef.current) return;          // a write is already in flight
     savingRef.current = true;
     setSaving(true); setActionErr(null);
@@ -152,7 +162,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
 
   const saveSelected = (draft) => guard(async () => {
     const sel = day.intervals.find((iv) => iv.id === draft.id);
-    if (!sel) throw new Error("block no longer exists — reopen it");
+    if (!sel) throw new Error("block no longer exists, reopen it");
     const baseStart = ctMinutesOfIso(sel.startAt);
     const baseEnd = sel.endAt ? ctMinutesOfIso(sel.endAt) : null;
     const newStart = hhmmToMin(draft.start);
@@ -191,7 +201,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
       }
     }
     await refresh(); onDirty?.(); setMode("idle"); setSelectedId(null);
-    flash(relocated ? "Block updated" : "Times saved — reopen the block to retag");
+    flash(relocated ? "Block updated" : "Times saved, reopen the block to retag");
   });
 
   const deleteSelected = (sel) => guard(async () => {
@@ -209,180 +219,200 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
     await refresh(); onDirty?.(); flash(decision === "approved" ? "Correction approved" : "Correction rejected");
   });
 
+  const weekState = locked ? "locked" : (weekLock?.approvalStatus === "submitted" ? "submitted" : "open");
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className={`modal tk-de ${selfMode ? "is-self" : ""} ${inspectorActive ? "has-active-sheet" : ""}`}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tk-de-title"
-      >
-
-        {/* Header */}
-        <header className="tk-de-head">
-          <div className="tk-de-id">
-            {user && <span className={`avatar sm ${user.color}`}>{user.initials}</span>}
-            <div>
-              <div className="tk-de-eyebrow">{selfMode ? "My timesheet · Day editor" : "Time Admin · Day editor"}</div>
-              <h2 id="tk-de-title" className="tk-de-title">{selfMode ? "My day" : (user?.name || "User")}</h2>
+    <TooltipProvider delayDuration={280}>
+      <Dialog open onOpenChange={(o) => { if (!o) onClose?.(); }}>
+        <DialogContent
+          size="full"
+          className="tka-de"
+          // The component keeps its own Escape handling: the first press drops
+          // the inspector back to idle, the second closes the editor.
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader className="tka-de-head gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="tka-de-id">
+              {user && <span className={`avatar sm ${user.color}`}>{user.initials}</span>}
+              <div className="min-w-0">
+                <p className="tka-eyebrow">{selfMode ? "My timesheet · Day editor" : "Time Admin · Day editor"}</p>
+                <DialogTitle className="truncate">{selfMode ? "My day" : (user?.name || "User")}</DialogTitle>
+              </div>
             </div>
-          </div>
 
-          <div className="tk-de-nav">
-            <button type="button" className="tk-icon-btn" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day"><Icon name="back" size={14} /></button>
-            <input type="date" className="tk-day-input" aria-label="Day editor date" value={date} max={todayInCT()} onChange={(e) => setDate(e.target.value || todayInCT())} />
-            <button type="button" className="tk-icon-btn" onClick={() => setDate(shiftDay(date, +1))} disabled={date >= todayInCT()} aria-label="Next day"><Icon name="forward" size={14} /></button>
-            {!isToday && <button type="button" className="tk-pill-btn" onClick={() => setDate(todayInCT())}><Icon name="clock" size={11} /> Today</button>}
-          </div>
+            <DialogDescription className="sr-only">
+              Edit punches, tags and comments for the selected day. Changes apply immediately.
+            </DialogDescription>
 
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close"><Icon name="x" size={16} /></button>
-        </header>
-
-        {/* Everything between the pinned header and footer scrolls as one
-            column on mobile (display:contents on desktop, so the desktop
-            grid layout is untouched). This is what keeps the footer's "Done"
-            and the canvas reachable instead of clipped under 100vh. */}
-        <div className="tk-de-scroll">
-        <div className="tk-de-subhead">
-          <span className="tk-de-date">{fmtLong(date)}</span>
-          {loading && <span className="tk-de-loading">refreshing…</span>}
-          <span className={`tk-de-weekchip is-${weekLock?.approvalStatus || "open"}`}>
-            {locked ? <><Icon name="lock" size={11} /> Locked</> : (weekLock?.approvalStatus === "submitted" ? "Submitted" : "Open")}
-          </span>
-        </div>
-
-        {/* Stat strip */}
-        <div className="tk-de-stats">
-          <Stat label="Worked" value={fmtHM(minutesWork, { always: true })} tone="green" big />
-          <Stat label="Meetings" value={fmtHM(minutesMeeting, { always: true })} tone="blue" dim={minutesMeeting === 0} />
-          <Stat label="Site visits" value={fmtHM(minutesTravel, { always: true })} tone="rose" dim={minutesTravel === 0} />
-          <Stat label="Untagged" value={fmtHM(minutesUntagged, { always: true })} tone="rose" dim={minutesUntagged === 0} />
-          <Stat label="Punches" value={(day.punches || []).length} tone="muted" />
-        </div>
-
-        {err && <div className="tk-de-banner is-error"><Icon name="ban" size={13} /> Couldn't load: {err}</div>}
-
-        {/* Pending corrections banner */}
-        {corrections.length > 0 && (
-          <div className="tk-de-banner is-review">
-            <Icon name="bell" size={13} />
-            <div className="tk-de-banner-body">
-              <strong>{corrections.length} correction request{corrections.length === 1 ? "" : "s"}</strong> for this day from the user.
-              <ul className="tk-de-corr-list">
-                {corrections.map((c) => (
-                  <li key={c.id} className="tk-de-corr">
-                    <span className="tk-de-corr-text">{correctionLabel(c)}</span>
-                    {c.reason && <span className="tk-de-corr-reason">“{c.reason}”</span>}
-                    <span className="tk-de-corr-actions">
-                      <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => resolveCorrection(c, "rejected")}>Reject</button>
-                      <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => resolveCorrection(c, "approved")}>Approve</button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {/* Locked week banner */}
-        {locked && (
-          <div className="tk-de-banner is-locked">
-            <Icon name="lock" size={13} />
-            <div className="tk-de-banner-body">
-              This week was approved &amp; locked{weekLock?.approvedAt ? ` on ${new Date(weekLock.approvedAt).toLocaleDateString()}` : ""}. Editing changes the approved record.
-            </div>
-            <div className="tk-de-banner-actions">
-              {!allowLockedEdit && <button className="btn btn-ghost btn-sm" disabled={saving} onClick={() => setAllowLockedEdit(true)}>Edit anyway</button>}
-              <button className="btn btn-warn btn-sm" disabled={saving} onClick={unlockWeek}>Unlock week</button>
-            </div>
-          </div>
-        )}
-
-        {/* Hero glance bar */}
-        <div className="tk-de-hero">
-          <span className="tk-de-hero-label">Day at a glance</span>
-          <div className="tk-de-hero-bar">
-            <DayTimeline date={date} intervals={day.intervals} height={28} showHourGrid={false} onIntervalClick={selectInterval} />
-          </div>
-        </div>
-
-        {/* Canvas + inspector */}
-        <div className="tk-de-main">
-          <div className="tk-de-canvas">
-            <EditableDayTimeline
-              date={date}
-              intervals={day.intervals}
-              selectedId={selectedId}
-              disabled={editingBlocked || saving}
-              busy={saving}
-              onSelectInterval={selectInterval}
-            />
-          </div>
-
-          {/* On mobile the inspector is a slide-up bottom sheet (see CSS).
-              `is-active` reveals it when there's something to edit; the scrim
-              below dims the canvas and taps-to-dismiss. On desktop it's the
-              right-hand column and these classes are inert. */}
-          <aside className={`tk-de-inspector ${inspectorActive ? "is-active" : "is-idle"}`}>
-            {mode === "create" && createDraft ? (
-              <CreateForm
-                draft={createDraft}
-                setDraft={setCreateDraft}
-                saving={saving}
-                selfMode={selfMode}
-                onSubmit={submitCreate}
-                onCancel={() => { setMode("idle"); setCreateDraft(null); }}
+            <div className="tka-de-nav">
+              <Button variant="default" size="icon-sm" onClick={() => setDate(shiftDay(date, -1))} aria-label="Previous day">
+                <Icon name="back" size={14}/>
+              </Button>
+              <input
+                type="date"
+                className="tka-dateinput"
+                aria-label="Day editor date"
+                value={date}
+                max={todayInCT()}
+                onChange={(e) => setDate(e.target.value || todayInCT())}
               />
-            ) : selected ? (
-              <InspectorEdit
-                key={selected.id}
-                interval={selected}
-                saving={saving}
-                selfMode={selfMode}
-                onSave={saveSelected}
-                onDelete={() => deleteSelected(selected)}
-                onClose={() => { setMode("idle"); setSelectedId(null); }}
-              />
-            ) : (
-              <IdlePanel onAdd={() => openCreate(null)} disabled={editingBlocked} selfMode={selfMode} />
+              <Button
+                variant="default"
+                size="icon-sm"
+                onClick={() => setDate(shiftDay(date, +1))}
+                disabled={date >= todayInCT()}
+                aria-label="Next day"
+              >
+                <Icon name="forward" size={14}/>
+              </Button>
+              {!isToday && (
+                <Button variant="subtle" size="xs" onClick={() => setDate(todayInCT())}>
+                  <Icon name="clock" size={12}/> Today
+                </Button>
+              )}
+            </div>
+          </DialogHeader>
+
+          <DialogBody className="tka-de-body">
+            <div className="tka-de-subhead">
+              <span className="tka-de-date num">{fmtLong(date)}</span>
+              {loading && <span className="tka-de-loading" role="status">refreshing</span>}
+              <Badge
+                tone={weekState === "locked" ? "danger" : weekState === "submitted" ? "brand" : "neutral"}
+                size="sm"
+              >
+                <Icon name={weekState === "locked" ? "lock" : weekState === "submitted" ? "hourglass" : "dot"} size={11}/>
+                {weekState === "locked" ? "Locked" : weekState === "submitted" ? "Submitted" : "Open"}
+              </Badge>
+            </div>
+
+            {/* Stat strip */}
+            <div className="tka-de-stats">
+              <Stat label="Worked" value={fmtHM(minutesWork, { always: true })} tone="sage" big />
+              <Stat label="Meetings" value={fmtHM(minutesMeeting, { always: true })} tone="blue" dim={minutesMeeting === 0} />
+              <Stat label="Site visits" value={fmtHM(minutesTravel, { always: true })} tone="blue" dim={minutesTravel === 0} />
+              <Stat label="Untagged" value={fmtHM(minutesUntagged, { always: true })} tone="rose" dim={minutesUntagged === 0} />
+              <Stat label="Punches" value={(day.punches || []).length} tone="muted" />
+            </div>
+
+            {err && <Alert tone="danger" title="Could not load this day">{err}</Alert>}
+
+            {/* Pending corrections banner */}
+            {corrections.length > 0 && (
+              <Alert
+                tone="warning"
+                icon={null}
+                title={`${corrections.length} correction request${corrections.length === 1 ? "" : "s"} for this day`}
+              >
+                <ul className="tka-de-corrlist">
+                  {corrections.map((c) => (
+                    <li key={c.id} className="tka-de-corr">
+                      <span className="tka-de-corr-text">{correctionLabel(c)}</span>
+                      {c.reason && <span className="tka-de-corr-reason">{c.reason}</span>}
+                      <span className="tka-de-corr-actions">
+                        <Button variant="destructive-soft" size="sm" disabled={saving} onClick={() => resolveCorrection(c, "rejected")}>Reject</Button>
+                        <Button variant="primary" size="sm" disabled={saving} onClick={() => resolveCorrection(c, "approved")}>Approve</Button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Alert>
             )}
-            {actionErr && <div className="tk-de-inspector-err"><Icon name="ban" size={12} /> {actionErr}</div>}
-          </aside>
-        </div>
-        </div>
 
-        {/* Mobile-only scrim behind the bottom-sheet inspector. */}
-        <div
-          className={`tk-de-insp-scrim ${inspectorActive ? "is-active" : ""}`}
-          onClick={() => { setMode("idle"); setSelectedId(null); setCreateDraft(null); }}
-          aria-hidden="true"
-        />
+            {/* Locked week banner */}
+            {locked && (
+              <Alert tone="danger" icon={null} title="This week was approved and locked" className="tka-de-lockbanner">
+                <p className="m-0">
+                  <Icon name="lock" size={12}/>{" "}
+                  Locked{weekLock?.approvedAt ? ` on ${new Date(weekLock.approvedAt).toLocaleDateString()}` : ""}.
+                  Editing changes the approved record.
+                </p>
+                <div className="tka-de-banner-actions">
+                  {!allowLockedEdit && (
+                    <Button variant="ghost" size="sm" disabled={saving} onClick={() => setAllowLockedEdit(true)}>Edit anyway</Button>
+                  )}
+                  <Button variant="destructive" size="sm" disabled={saving} onClick={unlockWeek}>Unlock week</Button>
+                </div>
+              </Alert>
+            )}
 
-        <footer className={`tk-de-foot ${inspectorActive ? "is-sheet-open" : ""}`}>
-          {/* Mobile-only: the idle inspector (with its Add button) lives in the
-              off-screen sheet, so surface "Add block" here on phones. */}
-          <button type="button" className="btn btn-ghost tk-de-foot-add" onClick={() => openCreate(null)} disabled={editingBlocked}>
-            <Icon name="plus" size={14} /> Add block
-          </button>
-          <span className="tk-de-foot-note">
-            <Icon name="bolt" size={12} /> Edits apply immediately to {selfMode ? "your" : `${user?.name?.split(" ")[0] || "this user"}’s`} timesheet.
-          </span>
-          <button type="button" className="btn btn-primary" onClick={onClose}>Done</button>
-        </footer>
+            {/* Hero glance bar */}
+            <div className="tka-de-hero">
+              <span className="tka-eyebrow">Day at a glance</span>
+              <div className="tka-de-herobar">
+                <DayTimeline date={date} intervals={day.intervals} height={28} showHourGrid={false} onIntervalClick={selectInterval} />
+              </div>
+            </div>
 
-        {toast && <div className="tk-de-toast"><Icon name="check" size={13} /> {toast}</div>}
-      </div>
-    </div>
+            {/* Canvas + inspector */}
+            <div className="tka-de-main">
+              <div className="tka-de-canvas">
+                <EditableDayTimeline
+                  date={date}
+                  intervals={day.intervals}
+                  selectedId={selectedId}
+                  disabled={editingBlocked || saving}
+                  busy={saving}
+                  onSelectInterval={selectInterval}
+                />
+              </div>
+
+              <aside className={`tka-de-inspector ${inspectorActive ? "is-active" : "is-idle"}`} aria-label="Block inspector">
+                {mode === "create" && createDraft ? (
+                  <CreateForm
+                    draft={createDraft}
+                    setDraft={setCreateDraft}
+                    saving={saving}
+                    selfMode={selfMode}
+                    onSubmit={submitCreate}
+                    onCancel={() => { setMode("idle"); setCreateDraft(null); }}
+                  />
+                ) : selected ? (
+                  <InspectorEdit
+                    key={selected.id}
+                    interval={selected}
+                    saving={saving}
+                    selfMode={selfMode}
+                    onSave={saveSelected}
+                    onDelete={() => deleteSelected(selected)}
+                    onClose={() => { setMode("idle"); setSelectedId(null); }}
+                  />
+                ) : (
+                  <IdlePanel onAdd={() => openCreate(null)} disabled={editingBlocked} selfMode={selfMode} />
+                )}
+                {actionErr && <Alert tone="danger" className="mt-2">{actionErr}</Alert>}
+              </aside>
+            </div>
+          </DialogBody>
+
+          <DialogFooter className="tka-de-foot sm:justify-between">
+            <Button variant="default" onClick={() => openCreate(null)} disabled={editingBlocked}>
+              <Icon name="plus" size={15}/> Add block
+            </Button>
+            <span className="tka-de-footnote">
+              <Icon name="bolt" size={12}/>
+              Edits apply immediately to {selfMode ? "your" : `${user?.name?.split(" ")[0] || "this user"}’s`} timesheet.
+            </span>
+            <Button variant="primary" onClick={onClose}>Done</Button>
+          </DialogFooter>
+
+          {toast && (
+            <div className="tka-de-toast" role="status">
+              <Icon name="check" size={13}/> {toast}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </TooltipProvider>
   );
 }
 
 // ---------------------------------------------------------------------------
 function Stat({ label, value, tone, big, dim }) {
   return (
-    <div className={`tk-de-stat tone-${tone} ${dim ? "is-dim" : ""} ${big ? "is-big" : ""}`}>
-      <div className="tk-de-stat-label">{label}</div>
-      <div className="tk-de-stat-value">{value}</div>
+    <div className={`tka-de-stat tone-${tone} ${dim ? "is-dim" : ""} ${big ? "is-big" : ""}`}>
+      <span className="tka-de-stat-label">{label}</span>
+      <span className="tka-de-stat-value num">{value}</span>
     </div>
   );
 }
@@ -403,49 +433,52 @@ function InspectorEdit({ interval, saving, selfMode = false, onSave, onDelete, o
   const notesId = `${id}-notes`;
 
   return (
-    <div className="tk-de-insp">
-      <header className="tk-de-insp-head">
-        <div>
-          <div className="tk-de-insp-eyebrow">Selected block</div>
-          <div className="tk-de-insp-title">
+    <div className="tka-insp">
+      <header className="tka-insp-head">
+        <div className="min-w-0">
+          <p className="tka-eyebrow">Selected block</p>
+          <p className="tka-insp-title num">
             {fmtClock(interval.startAt)} – {interval.endAt ? fmtClock(interval.endAt) : "now"}
-          </div>
+          </p>
         </div>
-        <span className={`tk-de-presence ${interval.isOut ? "is-out" : "is-in"}`}>
-          <span className="tk-de-presence-dot" />{presence}
-        </span>
-        <button type="button" className="tk-icon-btn tk-de-insp-x" onClick={onClose} aria-label="Deselect"><Icon name="x" size={13} /></button>
+        <Badge tone={interval.isOut ? "danger" : "success"} size="sm" dot>{presence}</Badge>
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Deselect block">
+          <Icon name="x" size={14}/>
+        </Button>
       </header>
 
       {interval.outlookEventSubject && (
-        <div className="tk-de-insp-outlook"><Icon name="link" size={12} /> {interval.outlookEventSubject}{interval.outlookEventLocation ? ` · ${interval.outlookEventLocation}` : ""}</div>
+        <p className="tka-insp-outlook">
+          <Icon name="link" size={12}/>
+          {interval.outlookEventSubject}{interval.outlookEventLocation ? ` · ${interval.outlookEventLocation}` : ""}
+        </p>
       )}
 
-      <fieldset className="tk-de-field tk-de-fieldset">
-        <legend className="tk-de-field-label">Tag</legend>
-        <div className="tk-de-chips" role="group" aria-label="Time block tag">
+      <fieldset className="tka-insp-field">
+        <legend className="tka-insp-label">Tag</legend>
+        <div className="tka-chips" role="group" aria-label="Time block tag">
           {ADMIN_CATEGORIES.map(([v, l]) => (
             <button key={v} type="button"
-              className={`tk-de-chip tone-${TK_CATEGORY_TONE[v] || "muted"} ${category === v ? "is-on" : ""}`}
+              className={`tka-chip tone-${TK_CATEGORY_TONE[v] || "muted"} ${category === v ? "is-on" : ""}`}
               aria-pressed={category === v}
               onClick={() => setCategory(v)}>
-              <span className="tk-de-chip-dot" />{l}
+              <span className="tka-chip-dot" aria-hidden="true"/>{l}
             </button>
           ))}
         </div>
       </fieldset>
 
-      <div className="tk-de-field tk-de-field-times">
-        <span className="tk-de-field-label">Times</span>
-        <div className="tk-de-time-row">
+      <div className="tka-insp-field">
+        <span className="tka-insp-label" id={`${id}-timeslabel`}>Times</span>
+        <div className="tka-insp-times" role="group" aria-labelledby={`${id}-timeslabel`}>
           <label className="sr-only" htmlFor={startId}>Start time</label>
-          <input id={startId} type="time" className="form-input" value={start} onChange={(e) => setStart(e.target.value)} disabled={!interval.startPunchId} aria-label="Start time" />
-          <span className="tk-de-time-arrow">→</span>
+          <input id={startId} type="time" className="tka-dateinput num" value={start} onChange={(e) => setStart(e.target.value)} disabled={!interval.startPunchId} aria-label="Start time" />
+          <Icon name="forward" size={13} className="tka-insp-arrow"/>
           <label className="sr-only" htmlFor={endId}>End time</label>
           <input
             id={endId}
             type="time"
-            className="form-input"
+            className="tka-dateinput num"
             value={end}
             onChange={(e) => setEnd(e.target.value)}
             disabled={isOpen || !interval.endPunchId}
@@ -453,33 +486,45 @@ function InspectorEdit({ interval, saving, selfMode = false, onSave, onDelete, o
             title={isOpen ? "Open block ends at now" : "End time"}
           />
         </div>
-        <span className="tk-de-field-hint">
-          {isOpen ? "Open block — end is now." : "Edit the start / end times, then Save changes."}
-        </span>
+        <p className="tka-insp-hint">
+          {isOpen ? "Open block, so the end is now." : "Edit the start / end times, then Save changes."}
+        </p>
       </div>
 
-      <div className="tk-de-field">
-        <label className="tk-de-field-label" htmlFor={notesId}>Comment</label>
-        <textarea id={notesId} className="form-input" rows={3} maxLength={400} value={notes}
-          placeholder="Add a note about this block…" onChange={(e) => setNotes(e.target.value)} />
+      <div className="tka-insp-field">
+        <label className="tka-insp-label" htmlFor={notesId}>Comment</label>
+        <Textarea id={notesId} rows={3} maxLength={400} value={notes}
+          placeholder="Add a note about this block" onChange={(e) => setNotes(e.target.value)} />
       </div>
 
-      <div className="tk-de-insp-foot">
-        {!confirmDel ? (
-          <button type="button" className="btn btn-ghost tk-de-del" disabled={saving} onClick={() => setConfirmDel(true)}>
-            <Icon name="trash" size={13} /> Delete
-          </button>
-        ) : (
-          <div className="tk-de-del-confirm">
-            <span>Delete block?</span>
-            <button type="button" className="btn btn-ghost btn-sm" disabled={saving} onClick={() => setConfirmDel(false)}>No</button>
-            <button type="button" className="btn btn-warn btn-sm" disabled={saving} onClick={onDelete}>Yes, delete</button>
-          </div>
-        )}
-        <button type="button" className="btn btn-primary" disabled={saving}
+      <div className="tka-insp-foot">
+        <AlertDialog open={confirmDel} onOpenChange={setConfirmDel}>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive-soft" size="sm" disabled={saving}>
+              <Icon name="trash" size={14}/> Delete
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this block?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The punches behind {fmtClock(interval.startAt)} to {interval.endAt ? fmtClock(interval.endAt) : "now"} are
+                removed and {selfMode ? "your" : "the user's"} day is re-derived. This cannot be undone from here.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={saving}>Keep block</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" disabled={saving} onClick={onDelete}>
+                Yes, delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <Button variant="primary" disabled={saving} loading={saving}
           onClick={() => onSave({ id: interval.id, category, notes, start, end })}>
-          {saving ? "Saving…" : "Save changes"}
-        </button>
+          {saving ? "Saving" : "Save changes"}
+        </Button>
       </div>
     </div>
   );
@@ -493,62 +538,64 @@ function CreateForm({ draft, setDraft, saving, selfMode = false, onSubmit, onCan
   const endId = `${id}-new-end`;
   const noteId = `${id}-new-note`;
   return (
-    <div className="tk-de-insp">
-      <header className="tk-de-insp-head">
-        <div>
-          <div className="tk-de-insp-eyebrow">Add a block</div>
-          <div className="tk-de-insp-title">New time</div>
+    <div className="tka-insp">
+      <header className="tka-insp-head">
+        <div className="min-w-0">
+          <p className="tka-eyebrow">Add a block</p>
+          <p className="tka-insp-title">New time</p>
         </div>
-        <button type="button" className="tk-icon-btn tk-de-insp-x" onClick={onCancel} aria-label="Cancel"><Icon name="x" size={13} /></button>
+        <Button variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Cancel new block">
+          <Icon name="x" size={14}/>
+        </Button>
       </header>
 
-      <fieldset className="tk-de-field tk-de-fieldset">
-        <legend className="tk-de-field-label">This block was</legend>
-        <div className="tk-de-presence-toggle" role="group" aria-label="Block type">
-          <button type="button" className={`tk-de-seg ${draft.isOut ? "is-on tone-rose" : ""}`} aria-pressed={draft.isOut} onClick={() => set({ isOut: true })}>Away</button>
-          <button type="button" className={`tk-de-seg ${!draft.isOut ? "is-on tone-green" : ""}`} aria-pressed={!draft.isOut} onClick={() => set({ isOut: false, category: "work" })}>Worked</button>
+      <fieldset className="tka-insp-field">
+        <legend className="tka-insp-label">This block was</legend>
+        <div className="tka-seg" role="group" aria-label="Block type">
+          <button type="button" className={`tka-seg-btn ${draft.isOut ? "is-on tone-rose" : ""}`} aria-pressed={draft.isOut} onClick={() => set({ isOut: true })}>Away</button>
+          <button type="button" className={`tka-seg-btn ${!draft.isOut ? "is-on tone-sage" : ""}`} aria-pressed={!draft.isOut} onClick={() => set({ isOut: false, category: "work" })}>Worked</button>
         </div>
       </fieldset>
 
       {draft.isOut && (
-        <fieldset className="tk-de-field tk-de-fieldset">
-          <legend className="tk-de-field-label">Tag</legend>
-          <div className="tk-de-chips" role="group" aria-label="Away block tag">
+        <fieldset className="tka-insp-field">
+          <legend className="tka-insp-label">Tag</legend>
+          <div className="tka-chips" role="group" aria-label="Away block tag">
             {AWAY_CATEGORIES.map((v) => (
               <button key={v} type="button"
-                className={`tk-de-chip tone-${TK_CATEGORY_TONE[v] || "muted"} ${draft.category === v ? "is-on" : ""}`}
+                className={`tka-chip tone-${TK_CATEGORY_TONE[v] || "muted"} ${draft.category === v ? "is-on" : ""}`}
                 aria-pressed={draft.category === v}
                 onClick={() => set({ category: v })}>
-                <span className="tk-de-chip-dot" />{TK_CATEGORY_LABEL[v] || v}
+                <span className="tka-chip-dot" aria-hidden="true"/>{TK_CATEGORY_LABEL[v] || v}
               </button>
             ))}
           </div>
         </fieldset>
       )}
 
-      <div className="tk-de-field tk-de-field-times">
-        <span className="tk-de-field-label">Times</span>
-        <div className="tk-de-time-row">
+      <div className="tka-insp-field">
+        <span className="tka-insp-label" id={`${id}-newtimes`}>Times</span>
+        <div className="tka-insp-times" role="group" aria-labelledby={`${id}-newtimes`}>
           <label className="sr-only" htmlFor={startId}>Start time</label>
-          <input id={startId} type="time" className="form-input" value={minToHHMM(draft.startMin)} onChange={(e) => set({ startMin: hhmmToMin(e.target.value) })} aria-label="Start time" />
-          <span className="tk-de-time-arrow">→</span>
+          <input id={startId} type="time" className="tka-dateinput num" value={minToHHMM(draft.startMin)} onChange={(e) => set({ startMin: hhmmToMin(e.target.value) })} aria-label="Start time" />
+          <Icon name="forward" size={13} className="tka-insp-arrow"/>
           <label className="sr-only" htmlFor={endId}>End time</label>
-          <input id={endId} type="time" className="form-input" value={minToHHMM(draft.endMin)} onChange={(e) => set({ endMin: hhmmToMin(e.target.value) })} aria-label="End time" />
+          <input id={endId} type="time" className="tka-dateinput num" value={minToHHMM(draft.endMin)} onChange={(e) => set({ endMin: hhmmToMin(e.target.value) })} aria-label="End time" />
         </div>
-        <span className="tk-de-field-hint">{fmtHM(Math.max(0, draft.endMin - draft.startMin))} block</span>
+        <p className="tka-insp-hint num">{fmtHM(Math.max(0, draft.endMin - draft.startMin))} block</p>
       </div>
 
-      <div className="tk-de-field">
-        <label className="tk-de-field-label" htmlFor={noteId}>Comment</label>
-        <textarea id={noteId} className="form-input" rows={3} maxLength={400} value={draft.note}
+      <div className="tka-insp-field">
+        <label className="tka-insp-label" htmlFor={noteId}>Comment</label>
+        <Textarea id={noteId} rows={3} maxLength={400} value={draft.note}
           placeholder={draft.isOut ? (selfMode ? "Why were you away?" : "Why were they away?") : (selfMode ? "What were you working on?" : "What were they working on?")} onChange={(e) => set({ note: e.target.value })} />
       </div>
 
-      <div className="tk-de-insp-foot">
-        <button type="button" className="btn btn-ghost" disabled={saving} onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn btn-primary" disabled={saving || draft.endMin - draft.startMin < 5} onClick={onSubmit}>
-          {saving ? "Adding…" : "Add block"}
-        </button>
+      <div className="tka-insp-foot">
+        <Button variant="ghost" disabled={saving} onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" disabled={saving || draft.endMin - draft.startMin < 5} loading={saving} onClick={onSubmit}>
+          {saving ? "Adding" : "Add block"}
+        </Button>
       </div>
     </div>
   );
@@ -557,19 +604,23 @@ function CreateForm({ draft, setDraft, saving, selfMode = false, onSubmit, onCan
 // ---- Inspector: idle ----
 function IdlePanel({ onAdd, disabled, selfMode = false }) {
   return (
-    <div className={`tk-de-idle ${selfMode ? "is-self" : ""}`}>
-      <div className="tk-de-idle-legend">
-        <span className="tk-de-legend-item"><span className="tk-de-legend-sw tone-green" /> At desk · counts</span>
-        <span className="tk-de-legend-item"><span className="tk-de-legend-sw tone-rose" /> Out · never counts</span>
+    <div className={`tka-idle ${selfMode ? "is-self" : ""}`}>
+      <div className="tka-idle-legend">
+        <span className="tka-idle-legenditem">
+          <span className="tka-swatch tone-sage" aria-hidden="true"/> At desk, counts toward worked time
+        </span>
+        <span className="tka-idle-legenditem">
+          <span className="tka-swatch tone-rose" aria-hidden="true"/> Out, never counts
+        </span>
       </div>
-      <ul className="tk-de-tips">
-        <li><Icon name="edit" size={12} /> Tap a block to edit its times, tag, or note</li>
-        <li><Icon name="clock" size={12} /> Set the start &amp; end in the time fields, then Save</li>
-        <li><Icon name="plus" size={12} /> Use Add block to enter time that’s missing</li>
+      <ul className="tka-idle-tips">
+        <li><Icon name="edit" size={13}/> Select a block to edit its times, tag, or note</li>
+        <li><Icon name="clock" size={13}/> Set the start and end in the time fields, then Save</li>
+        <li><Icon name="plus" size={13}/> Use Add block to enter time that is missing</li>
       </ul>
-      <button type="button" className="btn btn-ghost tk-de-idle-add" onClick={onAdd} disabled={disabled}>
-        <Icon name="plus" size={14} /> Add a block
-      </button>
+      <Button variant="default" onClick={onAdd} disabled={disabled} block>
+        <Icon name="plus" size={15}/> Add a block
+      </Button>
     </div>
   );
 }

@@ -21,6 +21,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Icon } from "./icons.jsx";
+import { Badge, EmptyState, Button } from "@/ui";
 import {
   getCurrentBeaconUser, isAdmin, userById, getAppSettings,
   loadLeaveBalances, loadMyLeaveRequests, cancelLeaveRequest,
@@ -41,31 +42,36 @@ export function LeaveBalanceCards({ balance, settings = getAppSettings(), busy =
   const nextPay  = leaveNextPayDate(settings, today);
 
   return (
-    <div className="leave-hero">
-      <div className="leave-hero-head">
-        <div className="leave-hero-heading">
-          <h3 className="leave-hero-title">Availability</h3>
-          <span className="leave-hero-sub">
-            Accrues {vacRate.toFixed(2)} vacation · {sickRate.toFixed(2)} sick hrs each pay period
-            {" · next "}{fmtDate(nextPay)}
-          </span>
+    <section className="tsx-bal" aria-labelledby="tsx-bal-title">
+      <header className="tsx-bal-head">
+        <div className="tsx-bal-headline">
+          <h3 className="tsx-bal-title" id="tsx-bal-title">Leave balance</h3>
+          <p className="tsx-bal-sub">
+            Accrues {vacRate.toFixed(2)} vacation and {sickRate.toFixed(2)} sick hours
+            {" "}each pay period. Next on {fmtDate(nextPay)}.
+          </p>
         </div>
-        {action && <div className="leave-hero-action">{action}</div>}
-      </div>
+        {action && <div className="tsx-bal-action">{action}</div>}
+      </header>
+
       {balance ? (() => {
         const c = computeLeaveAvailable(balance, settings, today);
         return (
-          <div className="leave-hero-cards">
-            <LeaveCard tone="sage" label="Vacation"   available={c.vacationAvailable} used={balance.vacationUsed}/>
-            <LeaveCard tone="blue" label="Sick leave" available={c.sickAvailable}     used={balance.sickUsed}/>
+          <div className="tsx-bal-grid">
+            <LeaveCard tone="sage" icon="sun"  label="Vacation"   available={c.vacationAvailable} used={balance.vacationUsed}/>
+            <LeaveCard tone="blue" icon="bell" label="Sick leave" available={c.sickAvailable}     used={balance.sickUsed}/>
           </div>
         );
-      })() : (
-        <p className="leave-empty-note">
-          {busy ? "Loading…" : "No leave is tracked for your account."}
-        </p>
+      })() : busy ? (
+        <p className="tsx-muted-note">Loading your balance…</p>
+      ) : (
+        <EmptyState
+          compact
+          title="No leave is tracked for your account"
+          description="An admin adds you to the leave roster in Time Admin, and your vacation and sick balances start accruing each pay period."
+        />
       )}
-    </div>
+    </section>
   );
 }
 
@@ -125,83 +131,92 @@ export function MyLeaveSection({ reloadKey = 0, onRequest = null }) {
   }, [ordered, today]);
 
   return (
-    <section className="leave-mine" aria-label="My leave">
-      {err && <div className="leave-err"><Icon name="warn" size={12}/> {err}</div>}
+    <section className="tsx-leave" aria-label="My leave">
+      {err && (
+        <p className="tsx-note tone-bad" role="alert">
+          <Icon name="warn" size={13}/><span>{err}</span>
+        </p>
+      )}
 
-      <section className="leave-planner-top" aria-label="Leave planner">
-        <LeaveBalanceCards
-          balance={balance}
-          settings={settings}
-          busy={busy}
-          action={(
-            <button
-              type="button"
-              className="btn btn-primary leave-request-btn"
-              onClick={onRequest || undefined}
-              disabled={!onRequest}
-            >
-              <Icon name="sun" size={14}/> Request leave
-            </button>
-          )}
-        />
-      </section>
+      <LeaveBalanceCards
+        balance={balance}
+        settings={settings}
+        busy={busy}
+        action={(
+          <Button
+            variant="primary"
+            onClick={onRequest || undefined}
+            disabled={!onRequest}
+          >
+            <Icon name="sun" size={14}/> Request leave
+          </Button>
+        )}
+      />
 
-      <section className="leave-upcoming" aria-labelledby="leave-upcoming-title">
-        <header className="leave-section-head">
-          <div>
-            <h4 id="leave-upcoming-title">Upcoming leave</h4>
-            <p>Approved time off that has not ended yet.</p>
-          </div>
+      <section className="tsx-leave-sec" aria-labelledby="leave-upcoming-title">
+        <header className="tsx-leave-sechead">
+          <h4 id="leave-upcoming-title">Upcoming leave</h4>
+          <p>Approved time off that has not ended yet.</p>
         </header>
 
         {upcoming.length === 0 ? (
-          <div className="leave-upcoming-empty">
-            <Icon name="calendar" size={18}/>
-            <span>{busy ? "Checking approved leave…" : "No upcoming leave."}</span>
-          </div>
+          <EmptyState
+            compact
+            title={busy ? "Checking approved leave" : "No upcoming leave"}
+            description="Approved requests that end today or later show up here with their dates and hours."
+          />
         ) : (
-          <ul className="leave-upcoming-list">
+          <ul className="tsx-leave-upcoming">
             {upcoming.map(r => (
-              <li key={r.id} className={`leave-upcoming-card tone-${r.leaveType === "sick" ? "blue" : "sage"}`}>
-                <span className="leave-upcoming-icon" aria-hidden="true"><Icon name="check" size={15}/></span>
-                <div className="leave-upcoming-main">
-                  <span className="leave-upcoming-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
-                  <span className="leave-upcoming-dates">
+              <li key={r.id} className={`tsx-leave-up tone-${r.leaveType === "sick" ? "blue" : "sage"}`}>
+                <span className="tsx-leave-up-icon" aria-hidden="true"><Icon name="check" size={15}/></span>
+                <span className="tsx-leave-up-main">
+                  <span className="tsx-leave-up-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
+                  <span className="tsx-leave-up-dates num">
                     {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
                   </span>
-                </div>
-                <span className="leave-upcoming-hours">{hrs(r.totalHours)}</span>
+                </span>
+                <span className="tsx-leave-up-hours num">{hrs(r.totalHours)}</span>
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      <section className="leave-reqs" aria-labelledby="leave-requests-title">
-        <header className="leave-section-head leave-reqs-head">
-          <div>
-            <h4 id="leave-requests-title">My requests</h4>
-            <p>Pending items first, older outcomes tucked below.</p>
-          </div>
-          {busy && <span className="leave-reqs-sub">refreshing…</span>}
+      <section className="tsx-leave-sec" aria-labelledby="leave-requests-title">
+        <header className="tsx-leave-sechead">
+          <h4 id="leave-requests-title">My requests</h4>
+          <p>Pending items first, with older outcomes below.</p>
+          {busy && <span className="tsx-leave-refresh" role="status">refreshing…</span>}
         </header>
 
-        {grouped.length === 0 && !busy && (
-          <p className="leave-empty-note">No leave requests yet.</p>
+        {grouped.length === 0 ? (
+          !busy && (
+            <EmptyState
+              compact
+              title="No leave requests yet"
+              description="Use Request leave to book vacation or sick time. Every request you send lands here with its status."
+              action={onRequest ? (
+                <Button variant="default" onClick={onRequest}>
+                  <Icon name="sun" size={14}/> Request leave
+                </Button>
+              ) : null}
+            />
+          )
+        ) : (
+          <div className="tsx-leave-groups">
+            {grouped.map(group => (
+              <section key={group.key} className={`tsx-leave-group is-${group.key}`} aria-label={group.label}>
+                <h5>{group.label}</h5>
+                <ul className="tsx-leave-reqs">
+                  {group.rows.map(r => (
+                    <LeaveRequestRow key={r.id} request={r} onCancel={cancel}/>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
         )}
-
-        <div className="leave-req-groups">
-          {grouped.map(group => (
-            <section key={group.key} className={`leave-req-group is-${group.key}`} aria-label={group.label}>
-              <h5>{group.label}</h5>
-              <ul className="leave-reqs-list">
-                {group.rows.map(r => (
-                  <LeaveRequestRow key={r.id} request={r} onCancel={cancel}/>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
       </section>
     </section>
   );
@@ -209,27 +224,27 @@ export function MyLeaveSection({ reloadKey = 0, onRequest = null }) {
 
 function LeaveRequestRow({ request: r, onCancel }) {
   return (
-    <li className={`leave-req-row is-${r.status}`}>
-      <span className={`leave-type-dot tone-${r.leaveType === "sick" ? "blue" : "sage"}`} aria-hidden="true"/>
-      <div className="leave-req-main">
-        <div className="leave-req-top">
-          <span className="leave-req-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
-          <span className="leave-req-dates">
+    <li className={`tsx-leave-req is-${r.status}`}>
+      <span className={`tsx-leave-req-dot tone-${r.leaveType === "sick" ? "blue" : "sage"}`} aria-hidden="true"/>
+      <div className="tsx-leave-req-main">
+        <div className="tsx-leave-req-top">
+          <span className="tsx-leave-req-kind">{r.leaveType === "sick" ? "Sick leave" : "Vacation"}</span>
+          <span className="tsx-leave-req-dates num">
             {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
           </span>
-          <span className="leave-req-hours">{hrs(r.totalHours)}</span>
+          <span className="tsx-leave-req-hours num">{hrs(r.totalHours)}</span>
         </div>
-        {r.reason && <div className="leave-req-reason">{r.reason}</div>}
+        {r.reason && <p className="tsx-leave-req-reason">{r.reason}</p>}
         {r.status === "rejected" && r.reviewNote && (
-          <div className="leave-req-note">Admin: {r.reviewNote}</div>
+          <p className="tsx-leave-req-note">Admin: {r.reviewNote}</p>
         )}
       </div>
-      <div className="leave-req-side">
+      <div className="tsx-leave-req-side">
         <LeaveStatusChip status={r.status}/>
         {r.status === "pending" && (
-          <button className="link-btn leave-req-cancel" type="button" onClick={() => onCancel(r.id)}>
+          <Button variant="ghost" size="xs" onClick={() => onCancel(r.id)}>
             Cancel
-          </button>
+          </Button>
         )}
       </div>
     </li>
@@ -267,8 +282,8 @@ export function ApprovedLeaveBanners({ reloadKey = 0 }) {
   if (active.length === 0) return null;
 
   return (
-    <div className="tk-approved-leave" role="status" aria-live="polite">
-      {active.map((r, i) => {
+    <div className="tsx-leave-banners" role="status" aria-live="polite">
+      {active.map(r => {
         const admin = userById(r.reviewedBy);
         const kind  = r.leaveType === "sick" ? "Sick leave" : "Vacation";
         const tone  = r.leaveType === "sick" ? "blue" : "sage";
@@ -277,25 +292,24 @@ export function ApprovedLeaveBanners({ reloadKey = 0 }) {
           ? `${fmtDate(r.dateStart)} – ${fmtDate(r.dateEnd)}`
           : fmtDate(r.dateStart);
         return (
-          <div key={r.id} className={`tk-approved-banner tone-${tone}`} style={{ "--i": i }}>
-            <span className="tk-approved-seal" aria-hidden="true"><Icon name="check" size={16}/></span>
-            <div className="tk-approved-copy">
-              <span className="tk-approved-title">
+          <div key={r.id} className={`tsx-leave-banner tone-${tone}`}>
+            <span className="tsx-leave-banner-seal" aria-hidden="true"><Icon name="check" size={16}/></span>
+            <div className="tsx-leave-banner-copy">
+              <span className="tsx-leave-banner-title">
                 {kind} approved{admin ? <> by <strong>{admin.name}</strong></> : null}
               </span>
-              <span className="tk-approved-meta">
-                <span className={`tk-approved-state${onNow ? " is-now" : ""}`}>
+              <span className="tsx-leave-banner-meta">
+                <Badge tone={onNow ? "success" : "neutral"} size="sm">
                   {onNow ? "On leave now" : "Upcoming"}
-                </span>
-                <span className="tk-approved-dot" aria-hidden="true">·</span>
-                <span>{range}</span>
-                <span className="tk-approved-dot" aria-hidden="true">·</span>
-                <span>{hrs(r.totalHours)}</span>
+                </Badge>
+                <span className="num">{range}</span>
+                <span aria-hidden="true">·</span>
+                <span className="num">{hrs(r.totalHours)}</span>
               </span>
             </div>
-            <span className="tk-approved-until">
-              <span className="tk-approved-until-label">until</span>
-              <span className="tk-approved-until-date">{fmtDate(r.dateEnd)}</span>
+            <span className="tsx-leave-banner-until">
+              <span className="tsx-leave-banner-until-key">until</span>
+              <span className="tsx-leave-banner-until-val num">{fmtDate(r.dateEnd)}</span>
             </span>
           </div>
         );
@@ -306,13 +320,18 @@ export function ApprovedLeaveBanners({ reloadKey = 0 }) {
 
 export function LeaveStatusChip({ status }) {
   const map = {
-    pending:   { tone: "warn",  label: "Pending" },
-    approved:  { tone: "sage",  label: "Approved" },
-    rejected:  { tone: "rose",  label: "Rejected" },
-    cancelled: { tone: "muted", label: "Cancelled" },
+    pending:   { tone: "brand",   label: "Pending",   icon: "hourglass" },
+    approved:  { tone: "success", label: "Approved",  icon: "check" },
+    rejected:  { tone: "danger",  label: "Rejected",  icon: "x" },
+    cancelled: { tone: "neutral", label: "Cancelled", icon: "ban" },
   };
   const m = map[status] || map.cancelled;
-  return <span className={`leave-status-chip tone-${m.tone}`}>{m.label}</span>;
+  return (
+    <Badge tone={m.tone}>
+      <Icon name={m.icon} size={11}/>
+      {m.label}
+    </Badge>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -366,62 +385,80 @@ export function LeaveAdminTable({ reloadKey = 0 }) {
   if (!admin) return null;
 
   return (
-    <section className="leave-admin">
-      <header className="leave-admin-head">
-        <h3>Team leave balances</h3>
-        <span className="leave-admin-sub">
-          {adminRows.length} tracked{busy ? " · refreshing…" : ""} · available accrues automatically each pay period
-        </span>
+    <section className="tsx-leave-sec tsx-leaveadmin" aria-labelledby="tsx-leaveadmin-title">
+      <header className="tsx-leave-sechead">
+        <h4 id="tsx-leaveadmin-title">Team leave balances</h4>
+        <p>
+          {adminRows.length} tracked. Available accrues automatically each pay period.
+        </p>
+        {busy && <span className="tsx-leave-refresh" role="status">refreshing…</span>}
       </header>
-      {err && <div className="leave-err"><Icon name="warn" size={12}/> {err}</div>}
-      <div className="leave-table-wrap">
-        <table className="leave-table">
+
+      {err && (
+        <p className="tsx-note tone-bad" role="alert">
+          <Icon name="warn" size={13}/><span>{err}</span>
+        </p>
+      )}
+
+      <div className="bx-scroll-x tsx-leaveadmin-wrap">
+        <table className="tsx-leaveadmin-table">
           <thead>
             <tr>
-              <th className="leave-th-name">Employee</th>
-              <th>Vacation avail.</th>
-              <th>Vacation used</th>
-              <th>Sick avail.</th>
-              <th>Sick used</th>
-              <th className="leave-th-accr">Accrues</th>
+              <th scope="col" className="tsx-leaveadmin-th-name">Employee</th>
+              <th scope="col">Vacation available</th>
+              <th scope="col">Vacation used</th>
+              <th scope="col">Sick available</th>
+              <th scope="col">Sick used</th>
+              <th scope="col" className="tsx-leaveadmin-th-accr">Accrues</th>
             </tr>
           </thead>
           <tbody>
             {adminRows.map(({ r, u }) => {
               const c = computeLeaveAvailable(r, settings, today);
-              const tip = `Net balance as of ${fmtDate(r.asOfDate)} + ${c.periods} pay period${c.periods === 1 ? "" : "s"} accrued`;
+              const tip = `Net balance as of ${fmtDate(r.asOfDate)} plus ${c.periods} pay period${c.periods === 1 ? "" : "s"} accrued`;
               return (
                 <tr key={r.userId} className={r.accrues ? "" : "is-noaccrue"}>
-                  <td className="leave-td-name">
+                  <th scope="row" className="tsx-leaveadmin-td-name">
                     <span className={`avatar xs ${u.color}`}>{u.initials}</span>
-                    <span className="leave-name-label">{u.name}</span>
-                  </td>
+                    <span className="tsx-leaveadmin-name">{u.name}</span>
+                  </th>
                   <td title={r.accrues ? tip : "Not accruing"}>
-                    <LeaveNum value={c.vacationAvailable} onCommit={(n) => setAvailable(r.userId, "vacation", n)}/>
+                    <LeaveNum value={c.vacationAvailable} label={`Vacation available for ${u.name}`}
+                      onCommit={(n) => setAvailable(r.userId, "vacation", n)}/>
                   </td>
                   <td>
-                    <LeaveNum value={r.vacationUsed} muted onCommit={(n) => patchRow(r.userId, { vacationUsed: n })}/>
+                    <LeaveNum value={r.vacationUsed} muted label={`Vacation used by ${u.name}`}
+                      onCommit={(n) => patchRow(r.userId, { vacationUsed: n })}/>
                   </td>
                   <td title={r.accrues ? tip : "Not accruing"}>
-                    <LeaveNum value={c.sickAvailable} onCommit={(n) => setAvailable(r.userId, "sick", n)}/>
+                    <LeaveNum value={c.sickAvailable} label={`Sick available for ${u.name}`}
+                      onCommit={(n) => setAvailable(r.userId, "sick", n)}/>
                   </td>
                   <td>
-                    <LeaveNum value={r.sickUsed} muted onCommit={(n) => patchRow(r.userId, { sickUsed: n })}/>
+                    <LeaveNum value={r.sickUsed} muted label={`Sick used by ${u.name}`}
+                      onCommit={(n) => patchRow(r.userId, { sickUsed: n })}/>
                   </td>
-                  <td className="leave-td-accr">
+                  <td className="tsx-leaveadmin-td-accr">
                     <button
                       type="button"
-                      className={"leave-accr-toggle" + (r.accrues ? " on" : "")}
-                      title={r.accrues ? "Accruing — click to pause" : "Not accruing — click to enable"}
+                      role="switch"
+                      aria-checked={!!r.accrues}
+                      aria-label={`Accrual for ${u.name}`}
+                      className={"tsx-toggle" + (r.accrues ? " is-on" : "")}
+                      title={r.accrues ? "Accruing. Click to pause." : "Not accruing. Click to enable."}
                       onClick={() => patchRow(r.userId, { accrues: !r.accrues })}>
-                      <span className="leave-accr-knob"/>
+                      <span className="tsx-toggle-knob"/>
                     </button>
                   </td>
                 </tr>
               );
             })}
             {adminRows.length === 0 && !busy && (
-              <tr><td colSpan={6} className="leave-table-empty">No leave balances yet. Run the seed (scripts/seed_leave_balances.py) after applying the migration.</td></tr>
+              <tr>
+                <td colSpan={6} className="tsx-leaveadmin-empty">
+                  No leave balances yet. Run the seed (scripts/seed_leave_balances.py) after applying the migration.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -430,24 +467,29 @@ export function LeaveAdminTable({ reloadKey = 0 }) {
   );
 }
 
-function LeaveCard({ tone, label, available, used }) {
+function LeaveCard({ tone, icon, label, available, used }) {
   return (
-    <div className={`leave-card tone-${tone}`}>
-      <div className="leave-card-label">{label}</div>
-      <div className="leave-card-value">{hrs(available)}</div>
-      <div className="leave-card-meta">available · {hrs(used)} used</div>
+    <div className={`tsx-bal-card tone-${tone}`}>
+      <span className="tsx-bal-card-key">
+        <span className="tsx-bal-card-icon" aria-hidden="true"><Icon name={icon} size={14}/></span>
+        {label}
+      </span>
+      <span className="tsx-bal-card-val num">{hrs(available)}</span>
+      <span className="tsx-bal-card-meta">available now</span>
+      <span className="tsx-bal-card-used num">{hrs(used)} used to date</span>
     </div>
   );
 }
 
 // Inline editable number; commits on blur / Enter when changed.
-function LeaveNum({ value, onCommit, muted = false }) {
+function LeaveNum({ value, onCommit, muted = false, label }) {
   const [v, setV] = useState(String(value));
   useEffect(() => { setV(String(value)); }, [value]);
   return (
     <input
-      className={"leave-num" + (muted ? " muted" : "")}
+      className={"tsx-leavenum num" + (muted ? " is-muted" : "")}
       type="number" step="0.01" inputMode="decimal"
+      aria-label={label}
       value={v}
       onChange={(e) => setV(e.target.value)}
       onFocus={(e) => e.target.select()}

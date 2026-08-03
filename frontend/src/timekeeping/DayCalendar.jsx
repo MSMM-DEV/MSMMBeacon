@@ -25,7 +25,8 @@
 // instead of inventing a new metaphor for the same data.
 
 import React, { useEffect, useRef, useState } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import { EmptyState } from "@/ui";
 import {
   intervalTone, TK_CATEGORY_LABEL, fmtClock, fmtHM,
   computeOutGaps, WORKDAY_START_MIN, WORKDAY_END_MIN, ctMinutesOfIso,
@@ -39,6 +40,8 @@ const TRACK_END_HOUR    = 20;
 const HOUR_HEIGHT       = 56;           // px per hour
 const TRACK_HEIGHT      = (TRACK_END_HOUR - TRACK_START_HOUR) * HOUR_HEIGHT;
 const NOW_TICK_MS       = 30_000;
+
+const ClockGlyph = (props) => <Icon name="clock" {...props} />;
 
 // Convert "minutes since midnight CT" to a vertical px position in the track,
 // clamped to the visible 6 AM – 8 PM window. Mirrors pxForHour but for finer
@@ -284,15 +287,16 @@ export function DayCalendar({
                     ? onAddTagForInterval(iv)
                     : onIntervalClick?.(iv)}
                   data-category={iv.category}
-                  data-source={iv.categorySource}>
+                  data-source={iv.categorySource}
+                  aria-label={`${isUntag ? "Tag" : "Edit"} time block: ${fmtClock(iv.startAt)} to ${iv.endAt ? fmtClock(iv.endAt) : "now"}, ${TK_CATEGORY_LABEL[iv.category] || iv.category}`}>
                   {isOpen && <span className="tk-cal-card-pulse" aria-hidden="true"/>}
                   <div className="tk-cal-card-inner">
                     <div className="tk-cal-card-times">
-                      <span className="tk-cal-card-time">{fmtClock(iv.startAt)}</span>
+                      <span className="tk-cal-card-time num">{fmtClock(iv.startAt)}</span>
                       <span className="tk-cal-card-arrow">→</span>
-                      <span className="tk-cal-card-time">{iv.endAt ? fmtClock(iv.endAt) : "now"}</span>
+                      <span className="tk-cal-card-time num">{iv.endAt ? fmtClock(iv.endAt) : "now"}</span>
                       {iv.durationMinutes != null && (
-                        <span className="tk-cal-card-duration">· {fmtHM(iv.durationMinutes)}</span>
+                        <span className="tk-cal-card-duration num">· {fmtHM(iv.durationMinutes)}</span>
                       )}
                       {isOpen && <span className="tk-cal-card-duration">· in progress</span>}
                     </div>
@@ -354,7 +358,7 @@ export function DayCalendar({
                    className={`tk-cal-mark tk-cal-mark-${kind} side-${side}`}
                    style={{ top }}>
                 <span className="tk-cal-mark-dot"/>
-                <span className="tk-cal-mark-time">{fmtClock(p.punchedAt)}</span>
+                <span className="tk-cal-mark-time num">{fmtClock(p.punchedAt)}</span>
                 <span className="tk-cal-mark-kind">{kind === "in" ? "IN" : "OUT"}</span>
                 <span className={`tk-cal-mark-src tk-cal-mark-src-${p.source}`}>{p.source}</span>
               </div>
@@ -363,7 +367,7 @@ export function DayCalendar({
 
           {/* now line */}
           {nowLineTop != null && (
-            <div className="tk-cal-now" style={{ top: nowLineTop }} aria-hidden="true">
+            <div className="tk-cal-now num" style={{ top: nowLineTop }} aria-hidden="true">
               <span className="tk-cal-now-dot"/>
               <span className="tk-cal-now-line"/>
               <span className="tk-cal-now-label">
@@ -411,10 +415,12 @@ function DayList({
   return (
     <div className="tk-day-list">
       {items.length === 0 && (
-        <div className="tk-day-list-empty">
-          <Icon name="clock" size={18}/>
-          <span>No punches on this day</span>
-        </div>
+        <EmptyState
+          compact
+          icon={ClockGlyph}
+          title="No punches on this day"
+          description="Punch in from the Timesheet tab or tap a fob on a reader and the day fills in here."
+        />
       )}
 
       {items.map((item, i) =>
@@ -465,13 +471,13 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
       <div className="tk-day-list-card-head">
         <div className="tk-day-list-card-mainline">
           <div className="tk-day-list-card-time">
-            <span className="tk-day-list-card-time-from">{fmtClock(iv.startAt)}</span>
+            <span className="tk-day-list-card-time-from num">{fmtClock(iv.startAt)}</span>
             <Icon name="forward" size={11}/>
-            <span className="tk-day-list-card-time-to">
+            <span className="tk-day-list-card-time-to num">
               {iv.endAt ? fmtClock(iv.endAt) : "now"}
             </span>
           </div>
-          <div className="tk-day-list-card-dur">
+          <div className="tk-day-list-card-dur num">
             {isOpen && isToday ? <><span className="tk-pulse-dot"/> {fmtHM(minutes)}</> : fmtHM(minutes)}
           </div>
         </div>
@@ -514,8 +520,8 @@ function DayListGapRow({ startMin, endMin }) {
     <div className="tk-day-list-gap" aria-hidden="false">
       <div className="tk-day-list-gap-icon"><Icon name="ban" size={12}/></div>
       <div className="tk-day-list-gap-text">
-        <div className="tk-day-list-gap-label">Out · {fmtHM(endMin - startMin)}</div>
-        <div className="tk-day-list-gap-range">
+        <div className="tk-day-list-gap-label num">Out · {fmtHM(endMin - startMin)}</div>
+        <div className="tk-day-list-gap-range num">
           {fmtFromMin(startMin)} → {fmtFromMin(endMin)}
         </div>
       </div>

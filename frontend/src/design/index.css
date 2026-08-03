@@ -21,6 +21,16 @@
 
 @import "tailwindcss/theme.css"     layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
+
+/* react-big-calendar ships a plain stylesheet that the calendar pages used to
+   pull in from JS. A JS-side CSS import lands UNLAYERED, and an unlayered
+   declaration outranks every layered one at any specificity, so the library's
+   own #ddd hairlines and #eaf6ff today-tint were beating our theming and its
+   `.rbc-calendar { height: 100% }` was collapsing the month grid. Importing it
+   here, into `legacy` and BEFORE styles.css, makes the theming work as written
+   and keeps both calendars themeable without !important. */
+@import "react-big-calendar/lib/css/react-big-calendar.css" layer(legacy);
+
 @import "../styles.css"             layer(legacy);
 @import "./tokens.css"              layer(tokens);
 @import "./beacon.css"              layer(beacon);

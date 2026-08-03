@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
 import { Sparkline } from "./primitives.jsx";
 import {
+  Alert, Avatar, AvatarFallback, Badge, Button, EmptyState, InputGroup, Kbd,
+  Tabs, TabsList, TabsTrigger, TabCount,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+  Sheet, SheetContent, SheetTitle,
+  Tooltip, TooltipProvider,
+} from "@/ui";
+import {
   PotentialTable, AwaitingTable, AwardedTable, ClosedTable,
   InvoiceTable, EventsTable, HotLeadsTable, HotLeadsQuickView, DirectoryTable, OpenBidsTable,
   ProjectsTable,
@@ -141,6 +148,26 @@ const NAV_GROUPS = [
 ];
 const navGroupOf = (tabKey) => NAV_GROUPS.find(g => g.tabs.includes(tabKey));
 
+// Rail glyphs, keyed by NAV_GROUPS.key. Presentation only: the collapsed rail
+// is icon-first, so every navigable group needs one. Names resolve against the
+// Lucide-backed registry in icons.jsx.
+const NAV_ICONS = {
+  leads:       "trend",
+  proposals:   "clipboard",
+  invoice:     "wallet",
+  projects:    "blocks",
+  events:      "calendarDays",
+  directory:   "users",
+  licenses:    "shieldCheck",
+  timesheet:   "timer",
+  "time-admin":"gauge",
+  "team-cal":  "calendar",
+};
+
+// localStorage key for the desktop rail's collapsed state. This is a per-device
+// UI preference (like the theme in beacon-tweaks), never application data.
+const RAIL_COLLAPSED_KEY = "beacon.ui.railCollapsed";
+
 // Sub-tab strip definitions for the multi-tab groups.
 const SUB_TABS = {
   leads: [
@@ -165,14 +192,14 @@ const PAGE_META = {
   potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
   awaiting:  { title: "Proposals", desc: "Submitted proposals awaiting a verdict. Add here, then mark as Awarded or Closed Out when the verdict lands." },
   awarded:   { title: "Awarded Projects", desc: "Won contracts. Attach invoice projects by number, track capacity, or move forward when billing starts." },
-  closed:    { title: "Closed Out Projects", desc: "Archived — every sub, month, attachment, and note is preserved, just like In-Between. Reopen a project to move it back to Invoices; proposals closed without billing are listed below." },
-  invoice:   { title: "Anticipated Invoice", desc: "Monthly billing — Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
-  between:   { title: "In-Between", desc: "Paused projects. Every dollar, sub, attachment, and note stays intact — resume to Invoices or close out." },
-  projects:  { title: "Projects", desc: "Tree-structured work breakdown — projects, phases, and subphases. Main items are containers; Standard items are where time & expenses get logged. Child contract totals can't exceed the parent." },
+  closed:    { title: "Closed Out Projects", desc: "Archived work: every sub, month, attachment, and note is preserved, just like In-Between. Reopen a project to move it back to Invoices; proposals closed without billing are listed below." },
+  invoice:   { title: "Anticipated Invoice", desc: "Monthly billing, with Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
+  between:   { title: "In-Between", desc: "Paused projects. Every dollar, sub, attachment, and note stays intact, so you can resume to Invoices or close out." },
+  projects:  { title: "Projects", desc: "Tree-structured work breakdown of projects, phases, and subphases. Main items are containers; Standard items are where time & expenses get logged. Child contract totals can't exceed the parent." },
   events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
-  "leads-deleted": { title: "Deleted — Leads & Bids", desc: "Deleted Hot Leads and Open Bids. Nothing is lost — every field is preserved. Restore any row to send it back to its tab." },
-  "proposals-deleted": { title: "Deleted — Proposals & Awarded", desc: "Deleted Proposals and Awarded projects. Nothing is lost — every field is preserved. Restore any row to send it back to its tab." },
+  "leads-deleted": { title: "Deleted: Leads & Bids", desc: "Deleted Hot Leads and Open Bids. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
+  "proposals-deleted": { title: "Deleted: Proposals & Awarded", desc: "Deleted Proposals and Awarded projects. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
   licenses:  { title: "Licenses & Certifications", desc: "Every company and individual license with its expiration. Color-coded by days until due; reminder emails go out at 60 / 30 / 14 / 7 / 1 days before expiry." },
   timesheet: {
@@ -181,7 +208,7 @@ const PAGE_META = {
     mobileDesc: "Punch time or request leave.",
   },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, leave requests + balances, NFC enrollment, and timekeeping settings." },
-  "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only — pick the colleagues you want to see and overlay their schedules." },
+  "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only: pick the colleagues you want to see and overlay their schedules." },
 };
 
 const DEFAULT_TWEAKS = {
@@ -651,7 +678,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
   if (table === "clients" || table === "directory-client") {
     return {
       id: dbRow.id,
-      name: dbRow.district ? `${dbRow.name} — ${dbRow.district}` : dbRow.name,
+      name: dbRow.district ? `${dbRow.name} – ${dbRow.district}` : dbRow.name,
       baseName: dbRow.name,
       district: dbRow.district || "",
       type: "Client",
@@ -729,46 +756,17 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
 // ======================================================================
 function LoadingScreen({ error }) {
   return (
-    <div style={{
-      minHeight: "100vh", display: "grid", placeItems: "center",
-      background: "var(--bg, #F7F3EC)", color: "var(--text, #22201C)",
-      fontFamily: "var(--font-body, system-ui)",
-    }}>
-      <div style={{ textAlign: "center", maxWidth: 520, padding: 32 }}>
-        <div style={{
-          width: 48, height: 48, borderRadius: 14, margin: "0 auto 18px",
-          background: "radial-gradient(circle at 50% 35%, #C8823B, #6B3F10)",
-          boxShadow: "0 0 0 2px #F8ECD6, 0 10px 24px -6px rgba(200,130,59,.45)",
-          animation: error ? "none" : "beaconPulse 1.4s ease-in-out infinite",
-          position: "relative",
-        }}>
-          <div style={{
-            position: "absolute", inset: 10, borderRadius: "50%",
-            background: "radial-gradient(circle at 50% 40%, rgba(255,255,255,.9), transparent 60%)",
-          }}/>
-        </div>
-        <div style={{ fontFamily: "var(--font-display, system-ui)", fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em" }}>
-          Beacon
-        </div>
-        <div style={{ color: "var(--text-muted, #6E6659)", fontSize: 13, marginTop: 6 }}>
+    <div className="bx-boot" role="status" aria-live="polite">
+      <div className="bx-boot-inner">
+        <span className="bx-mark bx-boot-mark" data-idle={error ? "true" : "false"} aria-hidden="true">B</span>
+        <h1 className="bx-boot-title">Beacon</h1>
+        <p className="bx-boot-sub">
           {error ? "Couldn't load project data" : "Loading from beacon_v2.*…"}
-        </div>
+        </p>
         {error && (
-          <pre style={{
-            marginTop: 18, textAlign: "left",
-            background: "var(--surface, #FFF)",
-            border: "1px solid var(--border, #E6DFD1)",
-            borderRadius: 10, padding: 14, fontSize: 12, fontFamily: "var(--font-mono, monospace)",
-            color: "var(--rose, #B86B66)", maxHeight: 240, overflow: "auto",
-          }}>{String(error.message || error)}</pre>
+          <pre className="bx-boot-error">{String(error.message || error)}</pre>
         )}
       </div>
-      <style>{`
-        @keyframes beaconPulse {
-          0%,100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.08); opacity: .85; }
-        }
-      `}</style>
     </div>
   );
 }
@@ -825,10 +823,10 @@ const OwnPasswordModal = ({ user, onClose, onSubmit }) => {
       <form className="modal password-modal" onSubmit={submit}>
         <div className="modal-head">
           <div className="icon-badge"><Icon name="lock" size={16}/></div>
-          <div style={{ flex: 1 }}>
+          <div className="min-w-0 flex-1">
             <div className="drawer-eyebrow">Account</div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>Change password</h3>
-            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+            <h3 className="drawer-title text-[length:var(--fs-lg)]">Change password</h3>
+            <div className="mt-[3px] truncate text-[length:var(--fs-sm)] text-[var(--text-soft)]">
               <span className="mono">{user?.email}</span>
             </div>
           </div>
@@ -886,15 +884,17 @@ const OwnPasswordModal = ({ user, onClose, onSubmit }) => {
           )}
         </div>
         <div className="modal-foot">
-          <div style={{ fontSize: 12, color: "var(--text-soft)" }}>
+          <div className="min-w-0 text-[length:var(--fs-sm)] text-[var(--text-soft)]">
             You will stay signed in on this device.
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="btn sm" onClick={onClose} disabled={pending}>Cancel</button>
-            <button className="btn primary sm" disabled={!valid || pending}>
-              <Icon name="check" size={13}/>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" variant="default" size="sm" onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={!valid || pending} loading={pending}>
+              {pending ? null : <Icon name="check" size={14}/>}
               {pending ? "Updating…" : "Update password"}
-            </button>
+            </Button>
           </div>
         </div>
       </form>
@@ -1012,7 +1012,7 @@ const InvoiceExportModal = ({
       <form className="modal manish-export-modal" onSubmit={submit}>
         <div className="modal-head">
           <div className="icon-badge"><Icon name="export" size={16}/></div>
-          <div style={{ flex: 1 }}>
+          <div className="min-w-0 flex-1">
             <div className="modal-eyebrow">Invoice</div>
             <h3 className="modal-title">{title}</h3>
           </div>
@@ -1029,8 +1029,8 @@ const InvoiceExportModal = ({
               </div>
               <small className="form-hint">
                 {isExcel
-                  ? "Excel — one tab per year, month grid, with an export date/time on every sheet."
-                  : "PDF — the current on-screen layout."}
+                  ? "Excel: one tab per year, month grid, with an export date/time on every sheet."
+                  : "PDF: the current on-screen layout."}
               </small>
             </div>
           )}
@@ -1114,11 +1114,13 @@ const InvoiceExportModal = ({
           )}
         </div>
         <div className="modal-foot">
-          <button type="button" className="btn sm" onClick={onClose} disabled={pending}>Cancel</button>
-          <button className="btn primary sm" disabled={exportDisabled}>
-            <Icon name="export" size={13}/>
+          <Button type="button" variant="default" size="sm" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" size="sm" disabled={exportDisabled} loading={pending}>
+            {pending ? null : <Icon name="export" size={14}/>}
             {pending ? "Exporting…" : (isExcel ? "Export Excel" : "Export PDF")}
-          </button>
+          </Button>
         </div>
       </form>
     </>
@@ -1141,6 +1143,29 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     || userDisplayName.slice(0, 2);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  // ---- App-shell chrome state (presentation only) --------------------
+  // `railCollapsed` shrinks the desktop rail to an icon strip; `navOpen`
+  // drives the sub-1024px overlay drawer. Neither touches app data.
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(RAIL_COLLAPSED_KEY, railCollapsed ? "1" : "0"); }
+    catch { /* storage disabled — fine */ }
+  }, [railCollapsed]);
+  const [navOpen, setNavOpen] = useState(false);
+  // Crossing into desktop retires the drawer. The persistent rail takes over
+  // there, and leaving the Sheet mounted would keep a focus trap on a panel
+  // the user can no longer see.
+  useEffect(() => {
+    if (!navOpen || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    if (mq.matches) { setNavOpen(false); return; }
+    const onChange = (e) => { if (e.matches) setNavOpen(false); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [navOpen]);
   const [tweaks, setTweaks] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("beacon-tweaks") || "null");
@@ -1185,15 +1210,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   useEffect(() => { localStorage.setItem("beacon-tweaks", JSON.stringify(tweaks)); }, [tweaks]);
   useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
 
-  // Keep the active tab visible. On narrow viewports the pipeline scrolls
-  // horizontally (overflow-x: auto), so the active tab can sit off-screen
-  // if the user touch-scrolled the rail or switched tabs programmatically.
-  // Scroll the active button into view every time the tab changes.
+  // Keep the active nav item visible. The rail scrolls vertically once the
+  // group list is longer than the viewport, so the current entry can sit
+  // off-screen after a programmatic tab switch (deep link, drawer jump).
+  // Scroll it back into view every time the tab changes.
   const pipelineRef = useRef(null);
   useEffect(() => {
     const rail = pipelineRef.current;
     if (!rail) return;
-    const active = rail.querySelector(".tab.active");
+    const active = rail.querySelector('.bx-navitem[data-active="true"]');
     if (active && active.scrollIntoView) {
       active.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
     }
@@ -1641,7 +1666,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const { title: _t, dateTime: _dt, date: _d, attendees: _a, ...rest } = patch;
       safe = rest;
       if (Object.keys(safe).length === 0) {
-        showToast("Synced from Outlook — edit there to change this field.", "lock");
+        showToast("Synced from Outlook, edit there to change this field.", "lock");
         return;
       }
     }
@@ -1864,7 +1889,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setConfirmState({
       title: n > 0 ? "Delete this project and its children?" : "Delete this project?",
       message: n > 0
-        ? `"${existing.name}" has ${n} item${n === 1 ? "" : "s"} nested under it. Deleting it removes the whole subtree — this can't be undone.`
+        ? `"${existing.name}" has ${n} item${n === 1 ? "" : "s"} nested under it. Deleting it removes the whole subtree, and this can't be undone.`
         : `"${existing.name}" will be permanently deleted.`,
       confirmLabel: n > 0 ? `Delete ${n + 1} items` : "Delete",
       tone: "danger", icon: "trash",
@@ -1925,7 +1950,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if ("baseName" in patch || "district" in patch) {
       const newBase = "baseName" in patch ? patch.baseName : existing.baseName;
       const newDist = "district" in patch ? patch.district : existing.district;
-      p = { ...patch, name: newDist ? `${newBase} — ${newDist}` : newBase };
+      p = { ...patch, name: newDist ? `${newBase} – ${newDist}` : newBase };
     }
     setClients(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
     patchTable("clients", id, buildDbPatch(patch, CLIENTS_COLS));
@@ -2134,7 +2159,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // files modal). Locked for non-admins; admins confirm before it applies.
   const requestPaidUntick = ({ label, onConfirm }) => {
     if (!isAdmin) {
-      showToast("This invoice is marked paid and locked — only an administrator can unmark it.", "lock");
+      showToast("This invoice is marked paid and locked; only an administrator can unmark it.", "lock");
       return;
     }
     setConfirmState({
@@ -2277,7 +2302,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         const clashName = (clash.name || "").trim() || "another project";
         setConfirmState({
           title: "Project number already in use",
-          message: `Project number “${String(patch.projectNumber).trim()}” is already assigned to “${clashName}”. Each project number must be unique — it can't be reused. Enter a different number.`,
+          message: `Project number “${String(patch.projectNumber).trim()}” is already assigned to “${clashName}”. Each project number must be unique and can't be reused. Enter a different number.`,
           confirmLabel: "OK",
           hideCancel: true,
           icon: "warn",
@@ -2710,7 +2735,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (!cfg || !row) return;
     setConfirmState({
       title: `Delete this ${cfg.noun.toLowerCase()}?`,
-      message: `“${cfg.nameOf(row)}” will move to the Deleted tab. Nothing is lost — you can restore it any time.`,
+      message: `“${cfg.nameOf(row)}” will move to the Deleted tab. Nothing is lost, you can restore it any time.`,
       confirmLabel: "Delete",
       tone: "danger",
       icon: "trash",
@@ -2732,7 +2757,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // editing is blocked (the live `update*` handlers only find rows in the live
   // slices, so an edit here would silently vanish). Restore first, then edit.
   const deletedRowReadOnly = () =>
-    showToast("This item is in Deleted — restore it before editing.", "lock");
+    showToast("This item is in Deleted; restore it before editing.", "lock");
 
   // Sub-invoice cell edits + post-write refresh of the invoice artifacts.
   // The invoice rows + sub matrix get re-fetched together so primeFiles/files
@@ -3223,7 +3248,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .in("id", ids);
     if (error) {
       setInvoice(rs => rs.map(r => ids.includes(r.id) ? { ...r, billingState: prevState } : r));
-      showToast(`Move failed: ${error.message} — apply migration 20260611120000 if billing_state is missing.`, "x");
+      showToast(`Move failed: ${error.message}. Apply migration 20260611120000 if billing_state is missing.`, "x");
       return false;
     }
     if (successMsg) showToast(successMsg, successIcon);
@@ -3420,7 +3445,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     } catch (e) {
       setAwarded(rs => rs.map(r => r.id === row.id
         ? { ...r, invoiceLinks: (r.invoiceLinks || []).filter(n => n !== num) } : r));
-      showToast(`Link failed: ${e.message || e} — apply migration 20260611120100 if the links table is missing.`, "x");
+      showToast(`Link failed: ${e.message || e}. Apply migration 20260611120100 if the links table is missing.`, "x");
     }
   };
   const removeInvoiceLink = async (row, number) => {
@@ -3443,7 +3468,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const proj = inv.sourceId ? closed.find(p => p.id === inv.sourceId) : null;
       setTab("closed");
       if (proj) setDrawer({ row: proj, table: "closed" });
-      else showToast("This project is closed out — its billing rows are archived.", "check");
+      else showToast("This project is closed out; its billing rows are archived.", "check");
       return;
     }
     setDrawer(null);
@@ -3591,7 +3616,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         // (its own unique number). When the existing rows are all archived
         // (paused/closed) we fall through to the revive path below instead.
         if (anyActive && awardedAllowsMultipleInvoices(row)) {
-          const existingNum = target.projectNumber || rest.projectNumber || row.projectNumber || "—";
+          const existingNum = target.projectNumber || rest.projectNumber || row.projectNumber || "–";
           setMoving(null);
           setConfirmState({
             title: "Add another project under this contract?",
@@ -3607,7 +3632,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           // Name the category — the row is often a PM / MHZ perspective the
           // user isn't currently filtered to, so "already there" is only
           // actionable once they know WHICH view it's on.
-          showToast(`Already in the Invoice table as ${target.type || "ENG"} — jumping to it.`, "check");
+          showToast(`Already in the Invoice table as ${target.type || "ENG"}, jumping to it.`, "check");
         }
         autoLink(target.projectNumber || rest.projectNumber);
         if (!anyActive) {
@@ -4223,7 +4248,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         return;
       }
       const bidNoteLine =
-        `RFQ #${row.rfqNumber || "—"}` +
+        `RFQ #${row.rfqNumber || "–"}` +
         (row.serviceDescription ? ` · ${row.serviceDescription}` : "") +
         (row.dueAt ? ` · due ${fmtDate(row.dueAt)}` : "");
       const userNotes = (newData.notes || "").trim();
@@ -4561,7 +4586,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         return;
       }
       try { sessionStorage.setItem("beacon.chunkReloaded", "1"); } catch { /* storage off */ }
-      showToast("A newer version is available — reloading to update…", "export");
+      showToast("A newer version is available, reloading to update…", "export");
       setTimeout(() => window.location.reload(), 1200);
       return;
     }
@@ -4671,14 +4696,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (filterKey[tab] && filterKey[tab] !== "all") annotations.push(`Filter: ${filterKey[tab]}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
     annotations.push(`Exported ${exportedAt}`);
-    const subtitle = [meta.desc, annotations.join(" · ")].filter(Boolean).join(" — ");
+    const subtitle = [meta.desc, annotations.join(" · ")].filter(Boolean).join("  ·  ");
 
     try {
       showToast("Preparing PDF…", "export");
       await exportPDF(cols, rows, filename, {
         title: tab === "invoice"
-          ? "MSMM Beacon — Invoice — Print for Mark"
-          : `MSMM Beacon — ${meta.title || tab}`,
+          ? "MSMM Beacon · Invoice · Print for Mark"
+          : `MSMM Beacon · ${meta.title || tab}`,
         subtitle,
         rowColor,
         cellStyle: invoiceCellStyle,
@@ -4718,7 +4743,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // Randy uses it to make the banner self-describing (options/types/sort).
     const titleFor = titleForOverride
       ? (y) => titleForOverride(y, ts)
-      : (y) => `${buttonLabel} — ${y}  ·  ${ts.text}`;
+      : (y) => `${buttonLabel}  ·  ${y}  ·  ${ts.text}`;
 
     let monthDescs;
     if (mode === "all") {
@@ -4786,7 +4811,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       variant: "msmm", options: opts, exportedAt,
       buttonLabel: "Print for Randy", filePrefix: "Randy",
       titleFor: (y, ts) =>
-        `Print for Randy — MSMM values — ${y}  ·  Types: ${ts.text}  ·  ${modeText}  ·  sorted by project number`,
+        `Print for Randy (MSMM values)  ·  ${y}  ·  Types: ${ts.text}  ·  ${modeText}  ·  sorted by project number`,
     });
   };
 
@@ -5158,7 +5183,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       meta.desc,
       annotations.join(" · "),
       `${projectRows.length} ${projectRows.length === 1 ? "project" : "projects"} · ${expandedRows.length} lines`,
-    ].filter(Boolean).join(" — ");
+    ].filter(Boolean).join("  ·  ");
 
     // Bounding-box stroke around each project block. Draws four sides one
     // cell at a time as autotable renders the table — page breaks are
@@ -5188,7 +5213,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try {
       showToast("Preparing PDF…", "export");
       await exportPDF(defs, expandedRows, filename, {
-        title: `MSMM Beacon — Invoice with Sub Breakdown — Print for Mark`,
+        title: `MSMM Beacon · Invoice with Sub Breakdown · Print for Mark`,
         subtitle,
         cellStyle,
         onDidDrawCell,
@@ -5230,7 +5255,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const mode = options?.mode || "default";
     // Bold banner atop each Excel sheet: period · type(s) · sort (req 1.8).
     const titleFor = (periodText) =>
-      `Invoice export — ${periodText}  ·  ${ts.text}  ·  sorted by project number`;
+      `Invoice export  ·  ${periodText}  ·  ${ts.text}  ·  sorted by project number`;
 
     let payload;
     let filename;
@@ -5599,108 +5624,185 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                  : tab === "openbids" ? "New open bid"
                  : "New project";
 
+  // ------------------------------------------------------------------
+  // Rail contents. Rendered twice: once inside the persistent desktop
+  // rail, once inside the mobile <Sheet> drawer (Radix, so focus trap,
+  // Escape and scrim dismissal come for free). Only one of the two is
+  // ever visible/focusable at a given viewport width.
+  // ------------------------------------------------------------------
+  const navItem = (g) => {
+    const active = g.tabs.includes(tab);
+    const count = groupCount(g);
+    return (
+      <Tooltip key={g.key} label={railCollapsed ? g.label : ""} side="right">
+        <button
+          type="button"
+          className="bx-navitem"
+          data-active={active ? "true" : "false"}
+          data-count={count == null ? undefined : count}
+          aria-current={active ? "page" : undefined}
+          onClick={() => { gotoGroup(g); setNavOpen(false); }}
+        >
+          <Icon name={NAV_ICONS[g.key]} size={16}/>
+          <span className="bx-navitem-label">{g.label}</span>
+          {count != null && <span className="bx-navcount">{count}</span>}
+        </button>
+      </Tooltip>
+    );
+  };
+
+  const navBody = (scrollRef) => (
+    <>
+      <div className="bx-rail-head">
+        <span className="bx-mark" aria-hidden="true">B</span>
+        <span className="bx-wordmark">
+          <b>Beacon</b>
+          <span>MSMM Project Lifecycle</span>
+        </span>
+      </div>
+      <div className="bx-rail-scroll" ref={scrollRef}>
+        <div className="bx-navgroup" data-flow="pipeline">
+          <p className="bx-navlabel"><span>Pipeline</span></p>
+          {NAV_GROUPS.filter(g => g.group === "pipeline").map(navItem)}
+        </div>
+        <div className="bx-navgroup">
+          <p className="bx-navlabel"><span>Workspace</span></p>
+          {NAV_GROUPS.filter(g => g.group === "side" && (!g.adminOnly || isAdmin)).map(navItem)}
+        </div>
+      </div>
+      <div className="bx-rail-foot hidden lg:flex">
+        <button
+          type="button"
+          className="bx-navitem bx-railtoggle"
+          onClick={() => setRailCollapsed(v => !v)}
+          aria-pressed={railCollapsed}
+          aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <Icon name={railCollapsed ? "chevronsRight" : "chevronsLeft"} size={16}/>
+          <span className="bx-navitem-label">Collapse</span>
+        </button>
+      </div>
+    </>
+  );
+
   return (
-    <div className="app" data-roster-tick={rosterTick}>
-      <div className="topbar">
-        <div className="brand">
-          <div className="brand-mark"/>
-          <span>Beacon</span>
-          <span className="brand-sub">MSMM · Project Lifecycle</span>
-        </div>
-        <div className="search">
-          <Icon name="search" size={14}/>
-          <input placeholder="Search projects, clients, people…"/>
-          <span className="kbd">⌘K</span>
-        </div>
-        <div className="top-actions">
-          <PwaOfflineChip/>
-          <PwaInstallChip/>
-          <button className="iconbtn" title="Notifications"><Icon name="bell" size={16}/></button>
-          <button
-            className="iconbtn"
-            title={isAdmin ? "Admin · Users & tweaks" : "Tweaks"}
-            onClick={() => isAdmin ? setAdminOpen(v => !v) : setTweaksOpen(v => !v)}
+    <TooltipProvider delayDuration={300} skipDelayDuration={200}>
+    <div className="bx-shell" data-collapsed={railCollapsed ? "true" : "false"} data-roster-tick={rosterTick}>
+      <a className="bx-skip" href="#bx-content">Skip to main content</a>
+
+      {/* Persistent desktop rail. Below 1024px beacon.css parks it off-canvas
+          with visibility:hidden, so it leaves the tab order entirely and the
+          <Sheet> below is the only reachable navigation. */}
+      <nav className="bx-rail" aria-label="Primary">
+        {navBody(pipelineRef)}
+      </nav>
+
+      {/* Tablet / phone drawer. Radix handles the focus trap, Escape and the
+          scrim; nav items close it themselves on activation. */}
+      <Sheet open={navOpen} onOpenChange={setNavOpen}>
+        <SheetContent
+          side="left"
+          aria-describedby={undefined}
+          className="bx-rail-sheet w-[min(88vw,300px)] bg-[var(--bg-elev)] lg:hidden"
+        >
+          <SheetTitle className="sr-only">Beacon navigation</SheetTitle>
+          {navBody(null)}
+        </SheetContent>
+      </Sheet>
+
+      <div className="bx-main">
+        <header className="bx-topbar">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={navOpen}
           >
-            <Icon name="settings" size={16}/>
-          </button>
-          <div style={{ position: "relative" }}>
-            <div className="session-chip" onClick={() => setMenuOpen(v => !v)}
-                 title={`${userDisplayName} · ${currentUser?.role || "User"}`}>
-              <div className="avatar" style={{ width: 26, height: 26, fontSize: 11 }}>
-                {userInitials.toUpperCase()}
-              </div>
-              <span className="session-name">{currentUser?.first_name || userDisplayName}</span>
-              <span className={"session-role" + (isAdmin ? " admin" : "")}>
-                {currentUser?.role || "User"}
-              </span>
-            </div>
-            {menuOpen && (
-              <>
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 40 }}
-                  onClick={() => setMenuOpen(false)}
-                />
-                <div className="menu"
-                     style={{ position: "absolute", right: 0, top: "calc(100% + 6px)",
-                              zIndex: 41, minWidth: 220 }}>
-                  <div style={{ padding: "10px 12px 8px", borderBottom: "1px solid var(--border)" }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text)" }}>{userDisplayName}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--text-soft)" }}>{currentUser?.email}</div>
-                  </div>
-                  <button className="menu-item" onClick={() => { setMenuOpen(false); setPasswordModalOpen(true); }}>
-                    <Icon name="lock" size={13}/>
-                    <span>Change password</span>
-                  </button>
-                  <div className="menu-sep"/>
-                  <button className="menu-item" onClick={() => { setMenuOpen(false); onSignOut?.(); }}>
-                    <Icon name="logout" size={13}/>
-                    <span>Sign out</span>
-                  </button>
-                </div>
-              </>
-            )}
+            <Icon name="menu" size={18}/>
+          </Button>
+
+          <div className="bx-breadcrumb">
+            <span className="bx-crumb-root">Beacon</span>
+            <Icon name="chevronRight" size={12} className="bx-crumb-sep"/>
+            <b className="bx-truncate">{currentMeta?.title || pageTitle}</b>
           </div>
-        </div>
-      </div>
 
-      <div className="tabwrap">
-        <div className="pipeline" role="tablist" ref={pipelineRef}>
-          {NAV_GROUPS.filter(g => g.group === "pipeline").map((g, i, arr) => (
-            <React.Fragment key={g.key}>
-              <button
-                className={`tab ${g.stage} ${g.tabs.includes(tab) ? "active" : ""}`}
-                onClick={() => gotoGroup(g)}
-                role="tab"
-                aria-selected={g.tabs.includes(tab)}
+          <div className="bx-topbar-spacer"/>
+
+          <InputGroup
+            className="bx-search hidden max-w-[300px] md:flex"
+            inputClassName="pr-11"
+            type="search"
+            aria-label="Search"
+            placeholder="Search projects, clients, people…"
+            leading={<Icon name="search" size={14}/>}
+            trailing={<Kbd>⌘K</Kbd>}
+          />
+
+          <div className="bx-topbar-actions">
+            <PwaOfflineChip/>
+            <PwaInstallChip/>
+            <Tooltip label="Notifications">
+              <Button variant="ghost" size="icon" aria-label="Notifications">
+                <Icon name="bell" size={16}/>
+              </Button>
+            </Tooltip>
+            <Tooltip label={isAdmin ? "Admin · Users & tweaks" : "Tweaks"}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={isAdmin ? "Admin · Users & tweaks" : "Tweaks"}
+                onClick={() => isAdmin ? setAdminOpen(v => !v) : setTweaksOpen(v => !v)}
               >
-                {g.label}
-                {groupCount(g) != null && (
-                  <span className="count">{groupCount(g)}</span>
-                )}
-              </button>
-              {i < arr.length - 1 && (
-                <span className="tab-sep" aria-hidden="true">
-                  <Icon name="chevronRight" size={12} stroke={2}/>
-                </span>
-              )}
-            </React.Fragment>
-          ))}
-          <span className="tab-rail-divider" aria-hidden="true"/>
-          {NAV_GROUPS.filter(g => g.group === "side" && (!g.adminOnly || isAdmin)).map(g => (
-            <button key={g.key}
-              className={`tab ${g.stage} ${g.tabs.includes(tab) ? "active" : ""}`}
-              onClick={() => gotoGroup(g)} role="tab"
-              aria-selected={g.tabs.includes(tab)}>
-              {g.label}
-              {groupCount(g) != null && (
-                <span className="count">{groupCount(g)}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
+                <Icon name="settings" size={16}/>
+              </Button>
+            </Tooltip>
 
-      <div className="page">
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="bx-account"
+                  aria-label={`Account: ${userDisplayName}, ${currentUser?.role || "User"}`}
+                >
+                  <Avatar size="sm" className="bx-account-avatar">
+                    <AvatarFallback className="bg-transparent text-current">
+                      {userInitials.toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="bx-account-name bx-truncate">
+                    {currentUser?.first_name || userDisplayName}
+                  </span>
+                  <Icon name="chevronDown" size={13} className="bx-account-caret"/>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[232px]">
+                <div className="bx-account-card">
+                  <span className="bx-account-card-name bx-truncate">{userDisplayName}</span>
+                  <span className="bx-account-card-mail bx-truncate">{currentUser?.email}</span>
+                  <Badge tone={isAdmin ? "brand" : "neutral"} size="sm" className="mt-1 self-start">
+                    {currentUser?.role || "User"}
+                  </Badge>
+                </div>
+                <DropdownMenuSeparator/>
+                <DropdownMenuItem onSelect={() => { setMenuOpen(false); setPasswordModalOpen(true); }}>
+                  <Icon name="lock" size={14}/>
+                  <span>Change password</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator/>
+                <DropdownMenuItem onSelect={() => { setMenuOpen(false); onSignOut?.(); }}>
+                  <Icon name="logout" size={14}/>
+                  <span>Sign out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+
+        <div className="bx-scroll">
+        <main id="bx-content" tabIndex={-1} className="bx-page">
         {detailLive && (
           <ProjectDetailPage
             project={detailLive}
@@ -5754,94 +5856,105 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           />
         )}
         {!detailLive && (<>
-        <div className={`page-head ${tab === "timesheet" ? "page-head-timesheet" : ""}`}>
-          <div>
-            <h1 className="page-title">{pageTitle}</h1>
-            <p className={`page-desc ${currentMeta.mobileDesc ? "has-mobile-desc" : ""}`}>
-              <span className="page-desc-default">{currentMeta.desc}</span>
-              {currentMeta.mobileDesc && <span className="page-desc-mobile">{currentMeta.mobileDesc}</span>}
+        <div className={`bx-pagehead ${tab === "timesheet" ? "bx-pagehead-compact" : ""}`}>
+          <div className="bx-pagehead-text">
+            <h1 className="bx-pagetitle">{pageTitle}</h1>
+            <p className={`bx-pagedesc ${currentMeta.mobileDesc ? "bx-pagedesc-dual" : ""}`}>
+              <span className="bx-pagedesc-full">{currentMeta.desc}</span>
+              {currentMeta.mobileDesc && <span className="bx-pagedesc-short">{currentMeta.mobileDesc}</span>}
             </p>
           </div>
-          <div className="page-actions">
+          <div className="bx-pageactions">
             {tab === "invoice" ? (
-              <>
-                <button className="btn sm" onClick={() => setMarkExportOpen(true)}>
-                  <Icon name="export" size={13}/>Print for Mark
-                </button>
-                <button className="btn sm" onClick={() => setMarkSubsExportOpen(true)}>
-                  <Icon name="export" size={13}/>Print for Mark - Subs
-                </button>
-                <button className="btn sm" onClick={() => setManishExportOpen(true)}>
-                  <Icon name="export" size={13}/>Print for Manish
-                </button>
-                <button className="btn sm" onClick={() => setRandyExportOpen(true)}>
-                  <Icon name="export" size={13}/>Print for Randy
-                </button>
-              </>
+              // Four print/export destinations share one menu so the header
+              // keeps a single row of controls at every width.
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="default" size="sm">
+                    <Icon name="export" size={14}/>
+                    Print and export
+                    <Icon name="chevronDown" size={13}/>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[212px]">
+                  <DropdownMenuItem onSelect={() => setMarkExportOpen(true)}>
+                    <Icon name="export" size={14}/>Print for Mark
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setMarkSubsExportOpen(true)}>
+                    <Icon name="export" size={14}/>Print for Mark - Subs
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setManishExportOpen(true)}>
+                    <Icon name="export" size={14}/>Print for Manish
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setRandyExportOpen(true)}>
+                    <Icon name="export" size={14}/>Print for Randy
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : tab.endsWith("-deleted") ? null : (
-              <button className="btn sm" onClick={handleExport}>
-                <Icon name="export" size={13}/>Export PDF
-              </button>
+              <Button variant="default" size="sm" onClick={handleExport}>
+                <Icon name="export" size={14}/>Export PDF
+              </Button>
             )}
             {tab === "directory" ? (
               <>
-                <button className="btn primary" onClick={() => setCreateTable("clients")}>
-                  <Icon name="plus" size={13}/>New client
-                </button>
-                <button className="btn" onClick={() => setCreateTable("companies")}>
-                  <Icon name="plus" size={13}/>New company
-                </button>
+                <Button variant="primary" size="sm" onClick={() => setCreateTable("clients")}>
+                  <Icon name="plus" size={14}/>New client
+                </Button>
+                <Button variant="default" size="sm" onClick={() => setCreateTable("companies")}>
+                  <Icon name="plus" size={14}/>New company
+                </Button>
               </>
             ) : newTarget && (
-              <button className="btn primary" onClick={() => setCreateTable(newTarget)}>
-                <Icon name="plus" size={13}/>{newLabel}
-              </button>
+              <Button variant="primary" size="sm" onClick={() => setCreateTable(newTarget)}>
+                <Icon name="plus" size={14}/>{newLabel}
+              </Button>
             )}
           </div>
         </div>
 
         {currentGroup && currentGroup.tabs.length > 1 && (
-          <div className="subtabs" role="tablist" aria-label={`${currentGroup.label} sections`}>
-            {(SUB_TABS[currentGroup.key] || []).map(st => (
-              <button key={st.key}
-                role="tab"
-                aria-selected={tab === st.key}
-                className={"subtab" + (tab === st.key ? " active" : "")}
-                onClick={() => setTab(st.key)}>
-                {st.icon && <Icon name={st.icon} size={13}/>}
-                {st.label}
-                {tabCounts[st.key] != null && (
-                  <span className="subtab-count">{tabCounts[st.key]}</span>
-                )}
-              </button>
-            ))}
-          </div>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList aria-label={`${currentGroup.label} sections`}>
+              {(SUB_TABS[currentGroup.key] || []).map(st => (
+                <TabsTrigger key={st.key} value={st.key}>
+                  {st.icon && <Icon name={st.icon} size={14}/>}
+                  {st.label}
+                  {tabCounts[st.key] != null && (
+                    <TabCount>{tabCounts[st.key]}</TabCount>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         )}
 
         {["awaiting","awarded","invoice","between","closed"].includes(tab) && (
-          <div className="stats">
+          <section className="bx-metrics" aria-label="Pipeline summary">
             {stats.map((s, i) => (
-              <div key={i} className="stat">
-                <div className="stat-label">{s.label}</div>
+              <div key={i} className="bx-metric">
+                <h2 className="bx-metric-label">{s.label}</h2>
                 {s.breakdown ? (
-                  <div className="stat-breakdown" aria-label="Hot leads by star rating">
+                  <dl className="bx-metric-split" aria-label="Hot leads by star rating">
                     {s.breakdown.items.map(item => (
-                      <div key={item.key} className="stat-breakdown-item">
-                        <span className="stat-breakdown-label">{item.label}</span>
-                        <span className="stat-breakdown-val">{fmtMoney(item.value, false)}</span>
+                      <div key={item.key} className="bx-metric-splititem">
+                        <dt className="bx-truncate">{item.label}</dt>
+                        <dd className="num bx-truncate">{fmtMoney(item.value, false)}</dd>
                       </div>
                     ))}
-                  </div>
+                  </dl>
                 ) : (
-                  <div className="stat-val">{fmtMoney(s.val, false)}</div>
+                  <p className="bx-metric-value num">{fmtMoney(s.val, false)}</p>
                 )}
-                {s.sub && (
-                  <div className="stat-delta" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{s.sub}</div>
+                {(s.sub || s.spark) && (
+                  <div className="bx-metric-foot">
+                    {s.sub && <span className="bx-metric-sub bx-truncate">{s.sub}</span>}
+                    {s.spark && <Sparkline values={s.spark}/>}
+                  </div>
                 )}
-                {s.spark && <Sparkline values={s.spark}/>}
               </div>
             ))}
-          </div>
+          </section>
         )}
 
         {tab === "openbids" && (
@@ -5865,15 +5978,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onYearChange={(y) => setYear("openbids", y)}/>
         )}
         {tab === "leads-deleted" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="bx-stack">
             {deletedLeads.length === 0 && deletedOpenBids.length === 0 && (
-              <div className="subtle" style={{ padding: "24px 4px", fontSize: 13 }}>
-                Nothing deleted. Deleted Hot Leads and Open Bids land here with every field intact — restore any row to send it back.
-              </div>
+              <EmptyState
+                title="Nothing deleted"
+                description="Deleted Hot Leads and Open Bids land here with every field intact. Restore any row to send it back."
+              />
             )}
             {deletedLeads.length > 0 && (
-              <div>
-                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Hot Leads · {deletedLeads.length}</h3>
+              <section>
+                <div className="bx-sectionhead">
+                  <h2>Deleted Hot Leads</h2>
+                  <span className="bx-sectioncount num">{deletedLeads.length}</span>
+                  <span className="bx-rule" aria-hidden="true"/>
+                </div>
                 <HotLeadsTable rows={deletedLeads}
                   updateRow={deletedRowReadOnly}
                   onOpenDrawer={() => {}}
@@ -5882,11 +6000,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   flashId={flashId}
                   filters={[]}
                   tab="leads-deleted"/>
-              </div>
+              </section>
             )}
             {deletedOpenBids.length > 0 && (
-              <div>
-                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Open Bids · {deletedOpenBids.length}</h3>
+              <section>
+                <div className="bx-sectionhead">
+                  <h2>Deleted Open Bids</h2>
+                  <span className="bx-sectioncount num">{deletedOpenBids.length}</span>
+                  <span className="bx-rule" aria-hidden="true"/>
+                </div>
                 <OpenBidsTable rows={deletedOpenBids}
                   updateRow={deletedRowReadOnly}
                   isAdmin={isAdmin}
@@ -5897,7 +6019,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   flashId={flashId}
                   filters={[]}
                   tab="leads-deleted"/>
-              </div>
+              </section>
             )}
           </div>
         )}
@@ -5946,15 +6068,20 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onOpenInvoiceProject={openInvoiceProject}/>
         )}
         {tab === "proposals-deleted" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="bx-stack">
             {deletedAwaiting.length === 0 && deletedAwarded.length === 0 && (
-              <div className="subtle" style={{ padding: "24px 4px", fontSize: 13 }}>
-                Nothing deleted. Deleted Proposals and Awarded projects land here with every field intact — restore any row to send it back.
-              </div>
+              <EmptyState
+                title="Nothing deleted"
+                description="Deleted Proposals and Awarded projects land here with every field intact. Restore any row to send it back."
+              />
             )}
             {deletedAwaiting.length > 0 && (
-              <div>
-                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Proposals · {deletedAwaiting.length}</h3>
+              <section>
+                <div className="bx-sectionhead">
+                  <h2>Deleted Proposals</h2>
+                  <span className="bx-sectioncount num">{deletedAwaiting.length}</span>
+                  <span className="bx-rule" aria-hidden="true"/>
+                </div>
                 <AwaitingTable rows={deletedAwaiting}
                   updateRow={deletedRowReadOnly}
                   onOpenDrawer={() => {}}
@@ -5963,11 +6090,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   flashId={flashId}
                   filters={[]}
                   tab="proposals-deleted"/>
-              </div>
+              </section>
             )}
             {deletedAwarded.length > 0 && (
-              <div>
-                <h3 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>Deleted Awarded · {deletedAwarded.length}</h3>
+              <section>
+                <div className="bx-sectionhead">
+                  <h2>Deleted Awarded</h2>
+                  <span className="bx-sectioncount num">{deletedAwarded.length}</span>
+                  <span className="bx-rule" aria-hidden="true"/>
+                </div>
                 <AwardedTable rows={deletedAwarded}
                   updateRow={deletedRowReadOnly}
                   onOpenDrawer={() => {}}
@@ -5981,7 +6112,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   onAddInvoiceLink={addInvoiceLink}
                   onRemoveInvoiceLink={removeInvoiceLink}
                   onOpenInvoiceProject={openInvoiceProject}/>
-              </div>
+              </section>
             )}
           </div>
         )}
@@ -6008,14 +6139,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               {showInvoiceTable && (
                 <>
                   {closedInv.length > 0 && (
-                    <div className="closed-archive-note">
-                      <Icon name="check" size={14}/>
-                      <span>
-                        <strong>Closed out — billing history preserved.</strong> Every
-                        sub, month, attachment, and note is kept. Reopen a project
-                        to move it back to Invoices.
-                      </span>
-                    </div>
+                    <Alert tone="success" title="Closed out, with billing history preserved">
+                      Every sub, month, attachment, and note is kept. Reopen a
+                      project to move it back to Invoices.
+                    </Alert>
                   )}
                   <InvoiceTable rows={closedInv}
                     windowMonths={invWindowMonths}
@@ -6056,14 +6183,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 </>
               )}
               {closedNoBilling.length > 0 && (
-                <div className="closed-pipeline-section">
-                  <div className="closed-pipeline-head">
-                    <Icon name="x" size={13}/>
-                    <span className="closed-pipeline-title">Closed without billing · {closedNoBilling.length}</span>
-                    <span className="closed-pipeline-sub">
-                      Proposals and projects closed out before any invoice was raised — no billing rows to show.
-                    </span>
+                <section className="bx-subsection">
+                  <div className="bx-sectionhead">
+                    <h2>Closed without billing</h2>
+                    <span className="bx-sectioncount num">{closedNoBilling.length}</span>
+                    <span className="bx-rule" aria-hidden="true"/>
                   </div>
+                  <p className="bx-sectionnote">
+                    Proposals and projects closed out before any invoice was
+                    raised, so there are no billing rows to show.
+                  </p>
                   <ClosedTable rows={closedNoBilling}
                     updateRow={updateClosed}
                     onOpenDrawer={r => openDrawer(r, "closed")}
@@ -6074,7 +6203,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     yearOptions={availableYears.closed}
                     yearValue={yearFilter.closed}
                     onYearChange={(y) => setYear("closed", y)}/>
-                </div>
+                </section>
               )}
             </>
           );
@@ -6213,25 +6342,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         )}
         {tab === "events" && (
           <>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-              <div className="events-view-toggle" role="tablist" aria-label="Events view">
-                <button
-                  className={eventsViewMode === "list" ? "active" : ""}
-                  onClick={() => setEventsViewMode("list")}
-                  role="tab"
-                  aria-selected={eventsViewMode === "list"}
-                >
-                  <Icon name="columns" size={12}/> List
-                </button>
-                <button
-                  className={eventsViewMode === "calendar" ? "active" : ""}
-                  onClick={() => setEventsViewMode("calendar")}
-                  role="tab"
-                  aria-selected={eventsViewMode === "calendar"}
-                >
-                  <Icon name="calendar" size={12}/> Calendar
-                </button>
-              </div>
+            <div className="bx-viewswitch">
+              <Tabs value={eventsViewMode} onValueChange={setEventsViewMode}>
+                <TabsList variant="segmented" aria-label="Events view">
+                  <TabsTrigger value="list">
+                    <Icon name="columns" size={14}/> List
+                  </TabsTrigger>
+                  <TabsTrigger value="calendar">
+                    <Icon name="calendar" size={14}/> Calendar
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
             {eventsViewMode === "list" ? (
               <EventsTable rows={filtered.events}
@@ -6336,6 +6457,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <TeamCalendarTab />
         )}
         </>)}
+        </main>
+        </div>
       </div>
 
       {drawer && (() => {
@@ -6744,21 +6867,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       )}
 
       {toast && (
-        <div className="toast">
-          <span className="toast-icon"><Icon name={toast.icon} size={11} stroke={2.2}/></span>
-          <span className="toast-msg">{toast.msg}</span>
+        <div className="bx-toast" role="status" aria-live="polite">
+          <span className="bx-toast-icon" aria-hidden="true">
+            <Icon name={toast.icon} size={12} stroke={2.2}/>
+          </span>
+          <span className="bx-toast-msg">{toast.msg}</span>
           {toast.action && (
-            <button
-              className="toast-action"
+            <Button
+              variant="subtle"
+              size="xs"
+              className="bx-toast-action"
               onClick={() => {
                 const fn = toast.action.onClick;
                 dismissToast();
                 fn?.();
               }}
             >
-              <Icon name={toast.action.icon || "undo"} size={11} stroke={2.2}/>
+              <Icon name={toast.action.icon || "undo"} size={12} stroke={2.2}/>
               {toast.action.label}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -6810,6 +6937,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {/* PWA update prompt — bottom-right floating toast when a new SW is waiting. */}
       <PwaUpdateToast/>
     </div>
+    </TooltipProvider>
   );
 }
 

@@ -489,7 +489,7 @@ export const noteCategoryLabel = (v) =>
 export const mkId = () => "r_" + Math.random().toString(36).slice(2, 10);
 
 export const fmtMoney = (n, showCents = true) => {
-  if (n == null || n === "") return "—";
+  if (n == null || n === "") return "–";
   return "$" + Number(n).toLocaleString("en-US", {
     minimumFractionDigits: showCents ? 2 : 0,
     maximumFractionDigits: showCents ? 2 : 0,
@@ -497,18 +497,18 @@ export const fmtMoney = (n, showCents = true) => {
 };
 
 export const fmtDate = (iso) => {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const s = String(iso).substr(0, 10);
   const [y, m, d] = s.split("-").map(Number);
-  if (!y) return "—";
+  if (!y) return "–";
   const dt = new Date(y, (m || 1) - 1, d || 1);
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
 export const fmtDateTime = (iso) => {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const dt = new Date(iso);
-  if (isNaN(dt)) return "—";
+  if (isNaN(dt)) return "–";
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " · " +
     dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 };
@@ -658,7 +658,7 @@ function adaptClient(c) {
     id: c.id,
     // `name` keeps the merged form so existing consumers (project rows' Client column,
     // dropdowns, sub references) continue to show the full USACE — District label.
-    name: c.district ? `${c.name} — ${c.district}` : c.name,
+    name: c.district ? `${c.name} – ${c.district}` : c.name,
     baseName: c.name,
     district: c.district || "",
     type: "Client",
@@ -3261,7 +3261,7 @@ export function fmtHM(min, opts) {
 }
 
 export function fmtClock(iso) {
-  if (!iso) return "—";
+  if (!iso) return "–";
   return new Date(iso).toLocaleTimeString("en-US", {
     timeZone: CT_TZ, hour: "numeric", minute: "2-digit",
   });
