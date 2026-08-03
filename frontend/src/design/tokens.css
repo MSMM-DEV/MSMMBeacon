@@ -1,0 +1,342 @@
+/* ======================================================================
+   Beacon Design System — colour, type, space, motion tokens
+   ----------------------------------------------------------------------
+   ONE source of truth for both worlds:
+
+     • the legacy hand-written CSS in ../styles.css, which reads
+       --bg / --surface / --text / --accent / --border / …
+     • the vendored shadcn/ui components in ../ui/*, which read
+       --background / --foreground / --card / --primary / --ring / …
+
+   Every legacy name below is an ALIAS onto the same palette ramp, so the
+   two systems can never drift apart. Changing a ramp step here restyles
+   the whole application in both themes at once.
+
+   Palette rationale — Beacon is an engineering firm's internal system of
+   record. The canvas is warm paper rather than the blue-grey every other
+   dashboard ships with, and the accent is a burnt ochre drawn from the
+   MSMM mark. Hues stay low-chroma so that money, dates and status are the
+   only things on screen that ever read as "loud".
+   ====================================================================== */
+
+:root {
+  /* ---- Warm neutral ramp ------------------------------------------- */
+  --n-0:   #FFFFFF;
+  --n-25:  #FAF8F5;
+  --n-50:  #F5F2ED;
+  --n-100: #EEEAE3;
+  --n-200: #E3DED5;
+  --n-300: #D0C9BD;
+  --n-400: #A9A196;
+  --n-500: #8B8377;
+  --n-600: #6B655B;
+  --n-700: #4E4941;
+  --n-800: #33302B;
+  --n-850: #262320;
+  --n-900: #1C1A17;
+  --n-950: #131210;
+
+  /* ---- Ochre (brand / accent) -------------------------------------- */
+  --oc-50:  #FDF7EF;
+  --oc-100: #F8E9D4;
+  --oc-200: #F0D3AB;
+  --oc-300: #E4B77C;
+  --oc-400: #D59A52;
+  --oc-500: #C4832F;
+  --oc-600: #A66A22;
+  --oc-700: #85521B;
+  --oc-800: #663E17;
+  --oc-900: #4A2D12;
+
+  /* ---- Sage (positive / awarded / approved) ------------------------ */
+  --sg-50:  #F2F5EE;
+  --sg-100: #E2EAD8;
+  --sg-200: #CBDaBB;
+  --sg-300: #A8BE92;
+  --sg-500: #6F8C55;
+  --sg-600: #5B7545;
+  --sg-700: #465B36;
+
+  /* ---- Clay (negative / closed / overdue) -------------------------- */
+  --cl-50:  #FCF1EF;
+  --cl-100: #F7DCD8;
+  --cl-200: #EFC4BE;
+  --cl-300: #E0A29B;
+  --cl-500: #C25E54;
+  --cl-600: #A84A41;
+  --cl-700: #8A3A32;
+
+  /* ---- Slate blue (informational / in-between) --------------------- */
+  --bl-50:  #F0F3F7;
+  --bl-100: #DCE4EE;
+  --bl-200: #C3D0E1;
+  --bl-300: #9DB1CA;
+  --bl-500: #5C7BA3;
+  --bl-600: #4A6689;
+  --bl-700: #3A526E;
+
+  /* ================================================================
+     LIGHT THEME — semantic assignments
+     ================================================================ */
+  color-scheme: light;
+
+  /* Legacy names (styles.css) */
+  --bg:            var(--n-25);
+  --bg-elev:       var(--n-0);
+  --surface:       var(--n-0);
+  --surface-2:     var(--n-50);
+  --surface-3:     var(--n-100);
+  --surface-hover: var(--n-100);
+  --border:        var(--n-200);
+  --border-strong: var(--n-300);
+  --text:          var(--n-900);
+  --text-muted:    var(--n-600);
+  --text-soft:     var(--n-500);
+
+  --accent:        var(--oc-600);
+  --accent-hover:  var(--oc-700);
+  --accent-ink:    var(--oc-900);
+  --accent-solid:  var(--oc-600);
+  --accent-on:     #FFFFFF;
+  --accent-soft:   var(--oc-100);
+  --accent-softer: var(--oc-50);
+  --accent-line:   var(--oc-200);
+
+  --sage:          var(--sg-600);
+  --sage-ink:      var(--sg-700);
+  --sage-soft:     var(--sg-100);
+  --sage-line:     var(--sg-200);
+  --rose:          var(--cl-600);
+  --rose-ink:      var(--cl-700);
+  --rose-soft:     var(--cl-100);
+  --rose-line:     var(--cl-200);
+  --blue:          var(--bl-600);
+  --blue-ink:      var(--bl-700);
+  --blue-soft:     var(--bl-100);
+  --blue-line:     var(--bl-200);
+
+  /* shadcn/ui names */
+  --background:            var(--bg);
+  --foreground:            var(--text);
+  --card:                  var(--surface);
+  --card-foreground:       var(--text);
+  --popover:               var(--surface);
+  --popover-foreground:    var(--text);
+  --primary:               var(--accent-solid);
+  --primary-foreground:    var(--accent-on);
+  --secondary:             var(--surface-2);
+  --secondary-foreground:  var(--text);
+  --muted:                 var(--surface-2);
+  --muted-foreground:      var(--text-muted);
+  --accent-bg:             var(--surface-2);
+  --accent-fg:             var(--text);
+  --destructive:           var(--cl-600);
+  --destructive-foreground:#FFFFFF;
+  --success:               var(--sg-600);
+  --success-foreground:    #FFFFFF;
+  --warning:               var(--oc-600);
+  --warning-foreground:    #FFFFFF;
+  --info:                  var(--bl-600);
+  --info-foreground:       #FFFFFF;
+  --input:                 var(--border);
+  --ring:                  var(--oc-500);
+
+  /* ---- Elevation ---------------------------------------------------
+     Warm-tinted shadows: a neutral black shadow over a warm canvas
+     reads as dirty grey. These carry a trace of the ochre substrate. */
+  --shadow-xs: 0 1px 1px rgba(58, 44, 22, .04);
+  --shadow-sm: 0 1px 2px rgba(58, 44, 22, .06), 0 0 0 .5px rgba(58, 44, 22, .04);
+  --shadow-md: 0 4px 14px -4px rgba(58, 44, 22, .10), 0 1px 3px rgba(58, 44, 22, .06);
+  --shadow-lg: 0 18px 40px -14px rgba(58, 44, 22, .16), 0 2px 6px rgba(58, 44, 22, .07);
+  --shadow-xl: 0 32px 64px -20px rgba(58, 44, 22, .22), 0 4px 10px rgba(58, 44, 22, .08);
+
+  /* ---- Glass -------------------------------------------------------
+     Used sparingly: the sticky app bar, the sidebar rail and overlay
+     scrims only. Never on content the user has to read numbers off. */
+  --glass-bg:     rgba(255, 255, 255, .72);
+  --glass-bg-2:   rgba(250, 248, 245, .80);
+  --glass-border: rgba(255, 255, 255, .55);
+  --glass-blur:   saturate(180%) blur(20px);
+  --scrim:        rgba(28, 26, 23, .38);
+
+  /* ---- Radius ------------------------------------------------------ */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius:    9px;
+  --radius-md: 11px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* ---- Typography -------------------------------------------------- */
+  --font-display: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body:    "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Type scale — 1.200 minor third, anchored at 14px body */
+  --fs-2xs: 10.5px;
+  --fs-xs:  11.5px;
+  --fs-sm:  12.5px;
+  --fs-md:  14px;
+  --fs-lg:  16px;
+  --fs-xl:  19px;
+  --fs-2xl: 23px;
+  --fs-3xl: 28px;
+  --fs-4xl: 34px;
+
+  --lh-tight:  1.2;
+  --lh-snug:   1.35;
+  --lh-normal: 1.5;
+  --lh-relaxed:1.65;
+
+  --tracking-tight: -0.014em;
+  --tracking-snug:  -0.008em;
+  --tracking-wide:   0.02em;
+  --tracking-caps:   0.06em;
+
+  /* ---- Spacing ramp (4px base) ------------------------------------- */
+  --sp-1: 4px;   --sp-2: 8px;   --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 20px;  --sp-6: 24px;  --sp-8: 32px;  --sp-10: 40px;
+  --sp-12: 48px; --sp-16: 64px;
+
+  /* ---- Layout ------------------------------------------------------ */
+  --sidebar-w:           248px;
+  --sidebar-w-collapsed: 60px;
+  --topbar-h:            56px;
+  --page-max:           1680px;
+  --page-gutter:        clamp(14px, 2.2vw, 28px);
+
+  /* ---- Density ----------------------------------------------------- */
+  --row-h: 42px;
+  --row-pad-y: 9px;
+  --control-h: 34px;
+  --control-h-sm: 28px;
+  --control-h-lg: 40px;
+
+  /* ---- Motion ------------------------------------------------------
+     Two curves only. `--ease-out` for anything entering or responding to
+     a pointer; `--ease-spring` for size/position changes that should feel
+     physical (sidebar collapse, drawer slide). */
+  --ease-out:    cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --ease-spring: cubic-bezier(.34, 1.4, .48, 1);
+  --dur-instant: 90ms;
+  --dur-fast:    150ms;
+  --dur-normal:  220ms;
+  --dur-slow:    340ms;
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring);
+}
+
+/* ====================================================================
+   DARK THEME
+   Warm charcoal, not blue-black — the light theme's paper substrate
+   read in low light. Accent lifts to a 300-weight ochre so it keeps
+   4.5:1 against the elevated surfaces.
+   ==================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:            #161512;
+  --bg-elev:       #1C1B17;
+  --surface:       #201E1A;
+  --surface-2:     #27251F;
+  --surface-3:     #302D26;
+  --surface-hover: #302D26;
+  --border:        #35322B;
+  --border-strong: #494439;
+  --text:          #F2EFE9;
+  --text-muted:    #ADA598;
+  --text-soft:     #837B6E;
+
+  --accent:        var(--oc-300);
+  --accent-hover:  var(--oc-200);
+  --accent-ink:    var(--oc-100);
+  --accent-solid:  var(--oc-400);
+  --accent-on:     #24170A;
+  --accent-soft:   #3A2A15;
+  --accent-softer: #2A1F11;
+  --accent-line:   #4E391D;
+
+  --sage:          var(--sg-300);
+  --sage-ink:      var(--sg-100);
+  --sage-soft:     #28301F;
+  --sage-line:     #3A4630;
+  --rose:          var(--cl-300);
+  --rose-ink:      var(--cl-100);
+  --rose-soft:     #35211E;
+  --rose-line:     #4C302B;
+  --blue:          var(--bl-300);
+  --blue-ink:      var(--bl-100);
+  --blue-soft:     #1F2833;
+  --blue-line:     #2F3D4E;
+
+  --destructive:           var(--cl-500);
+  --destructive-foreground:#FFF3F1;
+  --success:               var(--sg-500);
+  --success-foreground:    #F3F7EE;
+  --warning:               var(--oc-400);
+  --warning-foreground:    #24170A;
+  --info:                  var(--bl-500);
+  --info-foreground:       #F0F4F9;
+  --ring:                  var(--oc-400);
+
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, .32);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .40), 0 0 0 .5px rgba(0, 0, 0, .30);
+  --shadow-md: 0 6px 18px -6px rgba(0, 0, 0, .55), 0 1px 3px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 20px 44px -16px rgba(0, 0, 0, .64), 0 2px 6px rgba(0, 0, 0, .40);
+  --shadow-xl: 0 34px 70px -22px rgba(0, 0, 0, .72), 0 4px 10px rgba(0, 0, 0, .45);
+
+  --glass-bg:     rgba(32, 30, 26, .74);
+  --glass-bg-2:   rgba(28, 27, 23, .82);
+  --glass-border: rgba(255, 255, 255, .07);
+  --scrim:        rgba(8, 7, 6, .58);
+}
+
+/* ====================================================================
+   Density + font-pair tweaks (driven by the existing Tweaks panel —
+   these attribute hooks and their values are unchanged).
+   ==================================================================== */
+[data-density="compact"] {
+  --row-h: 34px;
+  --row-pad-y: 5px;
+  --control-h: 30px;
+  --control-h-sm: 25px;
+  --control-h-lg: 36px;
+}
+
+[data-font="fraunces_plex"] {
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body:    "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "IBM Plex Mono", ui-monospace, monospace;
+}
+[data-font="instrument_geist"] {
+  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, monospace;
+}
+[data-font="geist_jetbrains"] {
+  --font-display: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ====================================================================
+   Reduced motion — every transition token collapses so animation-driven
+   components degrade to instant state changes rather than being
+   individually patched at each call site.
+   ==================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast:    1ms;
+    --dur-normal:  1ms;
+    --dur-slow:    1ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
