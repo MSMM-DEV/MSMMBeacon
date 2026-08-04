@@ -27268,3 +27268,44 @@ button.tsx-tl-seg { cursor: pointer; }
   background: var(--accent);
   width: 2px;
 }
+
+/* ---- borrowed from the reference "bordered table" ------------------------ */
+/* Three patterns, adapted to tokens rather than copied as literals: the
+   source hardcodes gray-900/gray-500/gray-200 and an indigo accent, which
+   would render as light-theme colours in dark mode and would not follow the
+   brand ramp. The structure is what is worth having, not the hex.
+
+   1. ONE PRIMARY COLUMN. The reference puts the row's identity in gray-900
+      medium and drops every other cell to gray-500. That is what makes it
+      scannable: the eye runs down one strong column and treats the rest as
+      supporting detail, instead of weighing nine columns equally. */
+.tablewrap[data-skin="clean"] .td { color: var(--text-muted); }
+.tablewrap[data-skin="clean"] .td.bxt-td-identity,
+.tablewrap[data-skin="clean"] .td.bxt-td-identity .cell-view {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* 2. HEADER AND BODY SHARE A SIZE. The reference sets both to text-sm and
+      separates them by weight alone (semibold vs normal), which reads as one
+      typographic system rather than a label strip bolted above a grid. */
+.tablewrap[data-skin="clean"] .thead { font-size: var(--fs-md); }
+
+/* 3. THE ROW RULE STOPS SHORT OF THE EDGE. In the source this is a pair of
+      absolutely-positioned hairlines inset from the first and last cells, so
+      the rule never collides with the container's rounded corner. Ours is one
+      pseudo-element because the grid row is a single box: inset on the leading
+      edge so the rating rule reads as continuous down the column, and run to
+      the trailing edge, which the scroll container already clips. */
+.tablewrap[data-skin="clean"] .trow { border-bottom: 0; }
+.tablewrap[data-skin="clean"] .trow::after {
+  content: "";
+  position: absolute;
+  left: var(--bxt-cell-x);
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+.tablewrap[data-skin="clean"] .trow:last-child::after { content: none; }
