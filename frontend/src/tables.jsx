@@ -5492,6 +5492,7 @@ export const OpenBidsTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
