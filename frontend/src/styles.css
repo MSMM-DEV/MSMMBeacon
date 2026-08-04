@@ -22880,32 +22880,30 @@ button.tsx-tl-seg { cursor: pointer; }
 .bx-panelkit [class*="overflow-y-auto"] { overscroll-behavior: contain; }
 
 /* ==========================================================================
-   TEAM CALENDAR — lane views, agenda chrome, per-person identity palette
+   TEAM CALENDAR — grid chrome + per-person identity palette
    --------------------------------------------------------------------------
    SCOPE. Exactly two families of selector live here:
 
-     `.bx-teamcal …`   this page's three lane views plus what is left of
-                       react-big-calendar's chrome. `.bx-teamcal` is the root
-                       element rendered by src/team-calendar.jsx, so nothing
-                       here can reach the Events calendar (`.cal-shell`) or
-                       any other page.
-     `.bxtc-…`         the page's own block / strip / swatch skins. These are
-                       NOT nested under `.bx-teamcal`, because the read-only
-                       event dialog is portalled to <body> by Radix and still
-                       has to resolve the same identity colours. The prefix is
-                       unique to this page.
+     `.bx-teamcal …`   the react-big-calendar grid chrome. `.bx-teamcal` is
+                       the root element rendered by src/team-calendar.jsx, so
+                       nothing here can reach the Events calendar
+                       (`.cal-shell`) or any other page.
+     `.bxtc-…`         the page's own event / swatch skins. These are NOT
+                       nested under `.bx-teamcal`, because the read-only event
+                       dialog is portalled to <body> by Radix and still has to
+                       resolve the same identity colours. The prefix is unique
+                       to this page.
 
    WHY THIS LIVES IN CSS AND NOT IN TAILWIND UTILITIES
-   Month, week and day are this page's own components as of the lane redesign,
-   but the agenda is still react-big-calendar's, and the library owns its own
-   internals (`.rbc-agenda-*`); those elements are created inside the library,
-   so a page cannot put a utility class on them. The `.bxtc-*` skins are here
-   for a second reason: a block sets an all-round border colour AND a
-   differently-coloured 3px left rule, and two competing Tailwind border
-   utilities on one element resolve by generated source order rather than by
-   the order they appear in the JSX. Keeping the whole skin in one rule
-   removes that hazard, and keeps the container queries below able to hide a
-   part (a `display` in layer(legacy) cannot beat a `flex` utility).
+   react-big-calendar owns its grid internals (`.rbc-header`, `.rbc-time-*`,
+   `.rbc-month-*`, `.rbc-agenda-*`); those elements are created inside the
+   library, so a page cannot put a utility class on them. The `.bxtc-*` skins
+   are here for a second reason: an event block sets an all-round border
+   colour AND a differently-coloured 3px left rule, and two competing Tailwind
+   border utilities on one element resolve by generated source order rather
+   than by the order they appear in the JSX. Keeping the whole skin in one
+   rule removes that hazard, and keeps the container queries below able to
+   hide a part (a `display` in layer(legacy) cannot beat a `flex` utility).
 
    NO `!important`.
    react-big-calendar's stylesheet is imported into layer(legacy) in
@@ -22922,13 +22920,9 @@ button.tsx-tl-seg { cursor: pointer; }
    and the entire palette flips in one rule.
 
      --u-key    the person's hue. Only ever painted as a 3px rule, a small
-                initials-tile ring, an all-day outline, or a week strip
-                segment. With lanes it does even less work than it used to:
-                the lane head is sticky, so the swatch AND the full name are
-                on screen at all times and the hue inside a block is pure
-                continuity, never the signal.
-     --u-tint   the block body: a near-neutral wash of the same hue, so a
-                lane full of blocks reads as a list, not a paint chart.
+                initials-tile ring, or an all-day outline.
+     --u-tint   the event body: a near-neutral wash of the same hue, so a
+                dozen overlapping blocks read as a list, not a paint chart.
      --u-ink    text on --u-tint / --u-chip. 7.1:1 or better in both themes.
      --u-chip   fill behind a person's initials.
      --u-line   the event hairline: --u-key mixed most of the way to --border.
@@ -22971,298 +22965,77 @@ button.tsx-tl-seg { cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 
-/* ---- merged all-day owners ---------------------------------------------
-   One shared all-day event arrives once per attendee, so the band used to
-   stack four identical bars. They are merged in team-calendar.jsx on a strict
-   identity key and the single surviving bar wears one tile per calendar it
-   came off. The tiles sit tight against each other, like a stack of cards, so
-   four of them cost barely more room than one. */
-.bxtc-owners {
+/* ---- event skins -------------------------------------------------------- */
+.bxtc-evt {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 1px;
   min-width: 0;
-}
-.bxtc-owner {
-  width: 15px;
-  height: 15px;
-  font-size: 8.5px;
-  letter-spacing: 0;
-}
-.bxtc-owner--rest {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  padding: 0 2px;
-  width: auto;
-  min-width: 15px;
+  overflow: hidden;
+  border: 1px solid var(--u-line);
+  border-left: 3px solid var(--u-key);
   border-radius: var(--radius-xs);
-  background: var(--surface-3);
-  color: var(--text-muted);
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  line-height: 1;
-}
-
-/* ==========================================================================
-   THE THREE LANE VIEWS
-   --------------------------------------------------------------------------
-   Day, week and month are this page's own components (see team-calendar.jsx),
-   so unlike the agenda below they are ordinary markup and could in principle
-   be utility classes. They are here for three reasons that utilities cannot
-   cover: the container queries that thin a block out have to be able to
-   `display: none` a part; a block sets an all-round border AND a differently
-   coloured left rule, which two competing Tailwind border utilities resolve
-   by generated source order rather than by authoring order; and the geometry
-   is shared by three views, so it belongs in one place.
-
-   GEOMETRY CONTRACT. A day block's rectangle is written by JS as `left`,
-   `width` and `top` and is never adjusted here: the 2px it is inset by is
-   already inside the `width` calc, so the drawn box is exactly the interval
-   the packer reserved. Nothing in this file may add padding, margin, border
-   width or a min-width to `.bxtc-blockwrap`, or two blocks in one sub-row
-   could touch.
-   ========================================================================== */
-
-/* ---- the scrollers ------------------------------------------------------
-   Each view owns its own scrolling and its own sticky headers, so the page
-   never scrolls sideways and the calendar shell never nests two scrollers on
-   the same axis. */
-.bx-teamcal .bxtc-lanes,
-.bx-teamcal .bxtc-wkwrap,
-.bx-teamcal .bxtc-mowrap {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  background: var(--surface);
-}
-.bx-teamcal .bxtc-lanes:focus-visible,
-.bx-teamcal .bxtc-wkwrap:focus-visible,
-.bx-teamcal .bxtc-mowrap:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-
-/* Column caption shared by the day axis corner and the week corner. */
-.bxtc-colcap {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-/* ==========================================================================
-   DAY — one lane per person
-   ========================================================================== */
-.bx-teamcal .bxtc-lanes-inner {
-  /* 156px still fits "Tomas Lindqvist" at --fs-xs beside a 24px swatch, and
-     90px per hour is the width at which the commonest block on this page, a
-     subject-less half-hour marked busy, still spells out "Busy": 45px, less
-     2px of gutter and 11px of chrome, leaves 32px for a word that measures
-     27.9px at --fs-xs. Twelve hours plus the head is 1236px, so a full
-     working day fits a 1280 viewport without scrolling. */
-  --bxtc-head:  156px;
-  --bxtc-hourw: 90px;
-  min-width: calc(var(--bxtc-head) + var(--bxtc-hours) * var(--bxtc-hourw));
-  width: 100%;
-}
-
-/* ---- the hour axis ---- */
-.bx-teamcal .bxtc-axisrow {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  display: flex;
-  min-width: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-}
-.bx-teamcal .bxtc-axis-head {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  flex: 0 0 var(--bxtc-head);
-  display: flex;
-  align-items: center;
-  padding: 7px 10px;
-  border-right: 1px solid var(--border);
-  background: var(--surface-2);
-}
-.bx-teamcal .bxtc-axis {
-  flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: repeat(var(--bxtc-hours), minmax(0, 1fr));
-  min-width: 0;
-}
-.bx-teamcal .bxtc-axis-tick {
-  overflow: hidden;
-  padding: 7px 0 7px 5px;
-  border-left: 1px solid var(--border);
-  font-size: var(--fs-2xs);
-  line-height: 1;
-  white-space: nowrap;
-  color: var(--text-muted);
-}
-.bx-teamcal .bxtc-axis-tick:first-child { border-left: 0; }
-
-/* ---- a lane ---- */
-.bx-teamcal .bxtc-lane-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.bx-teamcal .bxtc-lane {
-  display: flex;
-  min-width: 0;
-  border-bottom: 1px solid var(--border);
-}
-.bx-teamcal .bxtc-lane:last-child { border-bottom: 0; }
-
-.bx-teamcal .bxtc-lane-head {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  flex: 0 0 var(--bxtc-head);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 0 10px;
-  border-right: 1px solid var(--border);
-  /* Opaque: lanes scroll underneath it. */
-  background: var(--surface);
-}
-.bxtc-lane-id {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.bxtc-lane-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  line-height: 1.25;
-  color: var(--text);
-}
-.bxtc-lane-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-2xs);
-  line-height: 1.25;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-/* Away is the answer this page exists to give, so it is not left as the same
-   grey as a load figure. It is never colour-only: the words "Out of office"
-   are the signal and the colour only reinforces them. Steel, per the product
-   -wide meaning of the token: paused, in between. "Free" deliberately stays
-   on --text-muted rather than dropping to --text-soft, which is under 4:1
-   against --surface in both themes. */
-.bxtc-lane-meta[data-tone="out"] { color: var(--blue-ink); font-weight: 600; }
-
-/* ---- the lane's track ---- */
-.bx-teamcal .bxtc-lane-track {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  /* One hairline per hour, drawn as a background so the gridlines cost no
-     DOM and land on exactly the same fractions as the axis ticks above. */
-  background-image: linear-gradient(
-    to right, var(--border) 0 1px, transparent 1px
-  );
-  background-size: calc(100% / var(--bxtc-hours)) 100%;
-}
-/* Now line. `--bxtc-now` is a bare number, set only when the lane is showing
-   today, so the marker costs no element and can never be stranded. */
-.bx-teamcal .bxtc-lane-track[data-now]::after {
-  content: "";
-  position: absolute;
-  inset-block: 0;
-  left: calc(var(--bxtc-now) * 1%);
-  width: 2px;
-  translate: -1px 0;
-  background: var(--accent);
-  pointer-events: none;
-}
-
-.bxtc-blockwrap {
-  position: absolute;
-  height: 30px;   /* BLOCK_H in team-calendar.jsx */
-}
-
-/* ---- a block ------------------------------------------------------------
-   Identity is asserted by the lane head, which is sticky and therefore always
-   on screen, so the hue here is continuity rather than signal: a 3px rule and
-   a near-neutral wash of the same hue. */
-.bxtc-block {
-  /* Only so the focus ring can lift above its neighbours. No offsets, so the
-     measured box is still exactly the wrapper's. */
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  overflow: hidden;
-  padding: 0 4px 0 3px;
-  border: 1px solid var(--u-line, var(--border));
-  border-left: 3px solid var(--u-key, var(--border-strong));
-  border-radius: var(--radius-xs);
-  background: var(--u-tint, var(--surface-2));
-  color: var(--u-ink, var(--text));
-  text-align: left;
+  background: var(--u-tint);
+  color: var(--u-ink);
   cursor: pointer;
   transition:
     background-color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
-/* 10%, not more: the block's secondary line is --text-muted on --u-tint, and
-   past roughly 12% of the key colour that pair drops under 4.5:1. Hover is
-   also carried by the border going full --u-key, so it is not a colour-only
-   change of this size. */
-.bxtc-block:hover {
-  border-color: var(--u-key, var(--border-strong));
-  background: color-mix(in oklab, var(--u-key) 10%, var(--u-tint));
-}
-/* Pressed is a ring rather than a darker fill, for the same reason: pushing
-   the wash further would take the secondary line under 4.5:1. */
-.bxtc-block:active {
-  background: color-mix(in oklab, var(--u-key) 10%, var(--u-tint));
-  box-shadow: inset 0 0 0 1px var(--u-key);
-}
-.bxtc-block:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-  z-index: 3;
-}
-/* An all-day or out-of-office band spans the whole window, so it carries the
-   hue all the way round rather than reading as a timed block that lost its
-   column. "Out" additionally gets a hatch, so away is legible without relying
-   on the fill alone. */
-.bxtc-block[data-kind] { border-color: var(--u-key, var(--border-strong)); }
-.bxtc-block[data-kind="out"] {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    transparent 0 5px,
-    color-mix(in oklab, var(--u-key) 16%, transparent) 5px 11px
-  );
-}
-.bxtc-block[data-cancelled="true"] { opacity: .62; }
-.bxtc-block[data-cancelled="true"] .bxtc-block-title { text-decoration: line-through; }
+.bxtc-evt:hover { background: color-mix(in oklab, var(--u-key) 12%, var(--u-tint)); }
+/* All-day blocks carry the hue all the way round, so a band across the top of
+   the week never reads as "a timed event that lost its column". */
+.bxtc-evt[data-allday="true"] { border-color: var(--u-key); }
+.bxtc-evt[data-cancelled="true"] { opacity: .62; }
 
-.bxtc-block-title {
+.bxtc-evt--pill {
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 4px 0 3px;
+}
+.bxtc-evt--block {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 1px;
+  /* 2px short of the column so two overlapping blocks never share an edge. */
+  width: calc(100% - 2px);
+  height: 100%;
+  padding: 2px 5px 2px 4px;
+}
+.bxtc-evt--block[data-density="xs"] {
+  gap: 0;
+  justify-content: center;
+  padding: 0 4px 0 3px;
+}
+/* In the week/day all-day row a block has one line of height, so it collapses
+   to a single-line banner rather than clipping a three-line stack. */
+.bxtc-evt--block[data-allday="true"] {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: auto;
+  min-height: 20px;
+  padding: 1px 5px 1px 4px;
+}
+.bxtc-evt--block[data-allday="true"] .bxtc-evt-meta { display: none; }
+
+.bxtc-evt-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.bxtc-evt-initials {
+  flex: 0 0 auto;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.bxtc-evt-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -23272,369 +23045,314 @@ button.tsx-tl-seg { cursor: pointer; }
   font-weight: 600;
   line-height: 1.2;
 }
-/* The secondary line rides the SAME identity ramp as the title rather than
-   --text-muted. --u-ink is designed against --u-tint (7.1:1 at worst across
-   all thirty slots, both themes), so the pair holds up under the hover and
-   pressed washes too, where a neutral grey on a hued tint does not.
-   Hierarchy comes from size and weight instead of from colour. */
-.bxtc-block-time {
-  flex: 0 0 auto;
+.bxtc-evt--pill .bxtc-evt-title { font-size: var(--fs-2xs); font-weight: 500; }
+.bxtc-evt[data-cancelled="true"] .bxtc-evt-title { text-decoration: line-through; }
+
+/* Secondary lines inside a block. --text-muted holds 5.1:1 or better on every
+   tint in the ramp, in both themes, so the time and location stay readable
+   without a second per-person colour. */
+.bxtc-evt-meta {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
   font-size: var(--fs-2xs);
-  font-weight: 500;
-  line-height: 1.2;
-  color: var(--u-ink, var(--text-muted));
+  line-height: 1.25;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.bxtc-evt-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bxtc-evt-meta > svg { flex: 0 0 auto; }
+
+/* "+n others" counter. */
+.bxtc-tick {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border-radius: var(--radius-xs);
+  background: var(--u-chip);
+  color: var(--u-ink);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  line-height: 15px;
   font-variant-numeric: tabular-nums;
 }
 
-/* The width budget, measured rather than guessed.
-   118px is title + gap + a "9:45am" stamp + chrome.
-   38px is chrome plus the width of the shortest real word this page prints.
-   Under that a 15-minute block has 9px of content box, which cannot hold a
-   character, so rather than leave a bordered box with nothing legible inside
-   it (the exact failure this redesign replaces) the block becomes a solid
-   tick in its owner's colour: an unmistakably deliberate mark, with the whole
-   event still on its tooltip and its accessible name. */
-.bx-teamcal .bxtc-blockwrap { container: bxtcblk / inline-size; }
-@container bxtcblk (max-width: 118px) {
-  .bxtc-block-time { display: none; }
+/* ---- dense overlap ------------------------------------------------------
+   react-big-calendar gives each overlapping event a percentage width, so a
+   mid-morning stack of a dozen can leave every block ~15px wide. Rather than
+   painting a sliver of colour around clipped text, a block sheds its contents
+   in steps and finally becomes just the owner's rule on the tint: the number
+   of people busy is still readable as the number of rules, and the dialog is
+   one click away. Height-driven density is handled by [data-density] above. */
+.bx-teamcal .rbc-day-slot .rbc-event { container: bxtcevt / inline-size; }
+
+@container bxtcevt (max-width: 108px) {
+  .bxtc-evt-meta { display: none; }
 }
-@container bxtcblk (max-width: 38px) {
-  .bxtc-block-title { display: none; }
-  .bxtc-block {
+/* Only the owner survives. Kept hard against the left rule rather than
+   centred: rbc's overlap layout parks the NEXT column on top of this one's
+   right-hand side, so the left edge is the part guaranteed to stay visible. */
+@container bxtcevt (max-width: 58px) {
+  .bxtc-evt-title,
+  .bxtc-tick { display: none; }
+  .bxtc-evt--block { justify-content: center; padding-inline: 3px 1px; }
+}
+/* Nothing legible fits. The block gives up its hairline and thins its rule,
+   so twenty simultaneous meetings read as twenty quiet marks on the day
+   rather than twenty filled bars with edges between them. */
+@container bxtcevt (max-width: 30px) {
+  .bxtc-evt-initials { display: none; }
+  .bxtc-evt--block {
+    border-top-color: transparent;
+    border-right-color: transparent;
+    border-bottom-color: transparent;
+    border-left-width: 2px;
     padding: 0;
-    border-width: 1px;
-    border-left-width: 1px;
-    border-color: var(--u-key, var(--border-strong));
-    background: color-mix(in oklab, var(--u-key) 62%, var(--u-tint));
   }
 }
 
 /* ==========================================================================
-   WEEK — person down, day across
-   ========================================================================== */
-.bx-teamcal .bxtc-wk {
-  --bxtc-head: 168px;
-  width: 100%;
-  min-width: calc(var(--bxtc-head) + 7 * 96px);
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
-}
-.bx-teamcal .bxtc-wk th,
-.bx-teamcal .bxtc-wk td {
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  text-align: left;
-  vertical-align: middle;
-}
-.bx-teamcal .bxtc-wk tr > *:last-child { border-right: 0; }
-.bx-teamcal .bxtc-wk tbody tr:last-child > * { border-bottom: 0; }
-
-.bx-teamcal .bxtc-wk-corner,
-.bx-teamcal .bxtc-wk-day {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  padding: 6px 8px;
-  background: var(--surface-2);
-}
-.bx-teamcal .bxtc-wk-corner {
-  left: 0;
-  z-index: 5;
-  width: var(--bxtc-head);
-  padding-inline: 10px;
-}
-.bx-teamcal .bxtc-wk-day { white-space: nowrap; }
-.bx-teamcal .bxtc-wk-day[data-today="true"] { background: var(--accent-soft); }
-.bxtc-wk-dayline,
-.bxtc-wk-loadline {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  overflow: hidden;
-}
-.bxtc-wk-loadline { margin-top: 3px; }
-.bxtc-wk-dow {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.bx-teamcal .bxtc-wk-day[data-today="true"] .bxtc-wk-dow,
-.bx-teamcal .bxtc-wk-day[data-today="true"] .bxtc-wk-dom { color: var(--accent-ink); }
-.bxtc-wk-dom {
-  font-size: var(--fs-sm);
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.bxtc-wk-tally {
-  display: inline-flex;
-  gap: 3px;
-  overflow: hidden;
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The team-load meter. Shared with the month grid. Never the only signal:
-   the figure it summarises is always printed beside it. */
-.bxtc-meter {
-  display: inline-block;
-  flex: 0 0 auto;
-  vertical-align: middle;
-  width: 30px;
-  height: 5px;
-  border-radius: var(--radius-full);
-  background: var(--surface-3);
-  box-shadow: inset 0 0 0 1px var(--border);
-  overflow: hidden;
-}
-.bxtc-meter-fill {
-  display: block;
-  width: calc(var(--bxtc-pct) * 1%);
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent-solid);
-}
-
-.bx-teamcal .bxtc-wk-person {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  display: table-cell;
-  gap: 8px;
-  width: var(--bxtc-head);
-  height: 40px;
-  padding: 4px 10px;
-  background: var(--surface);
-  font-weight: 400;
-}
-/* `display: table-cell` cannot be flex, so the identity pair sits in an inner
-   line box instead. */
-.bx-teamcal .bxtc-wk-person > .bxtc-swatch { float: left; margin-right: 8px; }
-.bx-teamcal .bxtc-wk-person > .bxtc-lane-id { overflow: hidden; }
-
-.bx-teamcal .bxtc-wk-cell {
-  height: 40px;
-  padding: 0;
-}
-.bx-teamcal .bxtc-wk-cell[data-today="true"] { background: var(--accent-softer); }
-.bxtc-wk-none {
-  display: block;
-  padding: 0 10px;
-  color: var(--text-muted);
-}
-.bxtc-wk-btn {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  width: 100%;
-  height: 100%;
-  padding: 4px 8px;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.bxtc-wk-btn:hover  { background: var(--surface-2); }
-.bxtc-wk-btn:active { background: var(--surface-3); }
-.bxtc-wk-btn:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.bxtc-strip {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 9px;
-  border-radius: var(--radius-full);
-  background: var(--surface-3);
-  box-shadow: inset 0 0 0 1px var(--border);
-  overflow: hidden;
-}
-.bxtc-seg {
-  position: absolute;
-  inset-block: 0;
-  min-width: 2px;
-  background: var(--u-key, var(--text-muted));
-}
-/* Away reads as a hatch across the whole strip, so "out" and "booked solid"
-   can never be confused for one another at a glance. */
-.bxtc-seg--out {
-  inset-inline: 0;
-  background: repeating-linear-gradient(
-    -45deg,
-    color-mix(in oklab, var(--u-key) 30%, transparent) 0 4px,
-    color-mix(in oklab, var(--u-key) 72%, transparent) 4px 8px
-  );
-}
-.bxtc-wk-fig {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.bxtc-wk-btn[data-out] .bxtc-wk-fig { color: var(--blue-ink); }
-
-/* ==========================================================================
-   MONTH — the shape of the team's month
-   ========================================================================== */
-.bx-teamcal .bxtc-mo {
-  width: 100%;
-  min-width: 560px;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
-}
-.bx-teamcal .bxtc-mo thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 7px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  text-align: left;
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.bx-teamcal .bxtc-mo-cell {
-  height: 92px;
-  padding: 0;
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  vertical-align: top;
-}
-.bx-teamcal .bxtc-mo tr > td:last-child { border-right: 0; }
-.bx-teamcal .bxtc-mo tbody tr:last-child > td { border-bottom: 0; }
-.bx-teamcal .bxtc-mo-cell[data-off="true"] { background: var(--surface-2); }
-.bx-teamcal .bxtc-mo-cell[data-today="true"] { background: var(--accent-softer); }
-
-.bxtc-mo-day {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  width: 100%;
-  height: 100%;
-  padding: 6px 8px;
-  border: 0;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.bxtc-mo-day:hover  { background: var(--surface-hover); }
-.bxtc-mo-day:active { background: var(--surface-3); }
-.bxtc-mo-day:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
-.bxtc-mo-date {
-  display: grid;
-  place-items: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-/* An out-of-month day is signalled by the cell's --surface-2 wash, not by
-   dimming the date under 4.5:1. */
-.bx-teamcal .bxtc-mo-cell[data-today="true"] .bxtc-mo-date {
-  background: var(--accent-solid);
-  color: var(--accent-on);
-  font-weight: 700;
-}
-.bxtc-mo-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
-}
-.bxtc-mo-body .bxtc-meter {
-  width: 100%;
-  min-width: 40px;
-}
-.bxtc-mo-figs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px 6px;
-  min-width: 0;
-}
-.bxtc-mo-fig {
-  display: inline-flex;
-  gap: 3px;
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.bxtc-mo-fig .num { font-weight: 700; color: var(--text); }
-.bxtc-mo-out {
-  display: inline-flex;
-  gap: 3px;
-  padding: 1px 5px;
-  border-radius: var(--radius-full);
-  background: var(--blue-soft);
-  color: var(--blue-ink);
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.bxtc-mo-quiet {
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-}
-
-/* ---- narrow viewports ---------------------------------------------------
-   Phones never reach any of this: the page falls back to the agenda below
-   640px. Between 640 and the point at which a view's `min-width` is met, the
-   view scrolls inside itself with its head column pinned, so the page body
-   still never scrolls sideways. */
-@media (max-width: 900px) {
-  .bx-teamcal .bxtc-lanes-inner { --bxtc-head: 132px; }
-  .bx-teamcal .bxtc-wk          { --bxtc-head: 140px; }
-  .bx-teamcal .bxtc-mo-cell     { height: 84px; }
-}
-
-/* ==========================================================================
    react-big-calendar chrome
-   --------------------------------------------------------------------------
-   Only the shell and the agenda are left: month, week and day are this page's
-   own components now, so the library's grid internals no longer render.
    ========================================================================== */
 
 /* ---- shell -------------------------------------------------------------- */
 .bx-teamcal .rbc-calendar {
-  /* Height follows the content up to a ceiling, so a five-person day does
-     not leave 400px of empty grid under it, and a sixteen-person day scrolls
-     inside the view rather than pushing the page. */
-  height: auto;
-  max-height: clamp(520px, 68dvh, 880px);
+  height: clamp(520px, 68dvh, 880px);
   font-family: var(--font-body);
   color: var(--text);
 }
 /* Agenda is a list, not a grid: let it grow and ride the page scroller
    instead of trapping the user in a nested one. */
-.bx-teamcal[data-view="agenda"] .rbc-calendar { max-height: none; }
+.bx-teamcal[data-view="agenda"] .rbc-calendar { height: auto; }
 .bx-teamcal[data-view="agenda"] .rbc-agenda-view { overflow: visible; }
 
+.bx-teamcal .rbc-month-view,
+.bx-teamcal .rbc-time-view {
+  border: 0;
+  background: var(--surface);
+}
+/* The seven-column grids stop shrinking before a column becomes unreadable;
+   the `.bx-scroll-x` wrapper around the calendar takes over from there.
+   Phones never reach this because the page falls back to the agenda view,
+   and the single-column day view has nothing to squash. */
+.bx-teamcal[data-view="month"] .rbc-month-view,
+.bx-teamcal[data-view="week"]  .rbc-time-view {
+  min-width: 560px;
+}
 @media (max-width: 767px) {
-  /* Keep the toolbar anchored to the viewport edge while a view scrolls. */
+  /* Keep the toolbar anchored to the viewport edge while the grid scrolls. */
   .bx-teamcal .bx-teamcal-toolbar { position: sticky; left: 0; }
+}
+
+/* ---- column + day headers ---------------------------------------------- */
+.bx-teamcal .rbc-header {
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.bx-teamcal .rbc-header + .rbc-header { border-left: 1px solid var(--border); }
+.bx-teamcal .rbc-time-header .rbc-header { text-transform: none; letter-spacing: 0; }
+.bx-teamcal .rbc-time-header .rbc-header.rbc-today {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+/* ---- month grid --------------------------------------------------------- */
+.bx-teamcal .rbc-month-row + .rbc-month-row { border-top: 1px solid var(--border); }
+.bx-teamcal .rbc-day-bg + .rbc-day-bg { border-left: 1px solid var(--border); }
+.bx-teamcal .rbc-off-range { color: var(--text-soft); }
+.bx-teamcal .rbc-off-range-bg { background: var(--surface-2); }
+.bx-teamcal .rbc-today,
+.bx-teamcal .cal-day-today { background-color: var(--accent-softer); }
+
+.bx-teamcal .rbc-date-cell {
+  padding: 3px 4px 0 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+.bx-teamcal .rbc-button-link {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.bx-teamcal .rbc-button-link:hover { background: var(--surface-3); color: var(--text); }
+.bx-teamcal .rbc-button-link:active { background: var(--border); }
+.bx-teamcal .rbc-button-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.bx-teamcal .rbc-now .rbc-button-link {
+  background: var(--accent-solid);
+  color: var(--accent-on);
+  font-weight: 700;
+}
+
+/* ---- time grid ---------------------------------------------------------- */
+.bx-teamcal .rbc-time-header > .rbc-row:first-child,
+.bx-teamcal .rbc-time-header > .rbc-row.rbc-row-resource,
+.bx-teamcal .rbc-time-header-content > .rbc-row.rbc-row-resource {
+  border-bottom: 1px solid var(--border);
+}
+.bx-teamcal .rbc-time-header.rbc-overflowing { border-right: 1px solid var(--border); }
+.bx-teamcal .rbc-time-header-content { border-left: 1px solid var(--border); }
+.bx-teamcal .rbc-time-content {
+  border-top: 1px solid var(--border);
+  overscroll-behavior-y: contain;
+}
+.bx-teamcal .rbc-time-content > * + * > * { border-left: 1px solid var(--border); }
+.bx-teamcal .rbc-timeslot-group {
+  border-bottom: 1px solid var(--border);
+  min-height: 44px;
+}
+.bx-teamcal .rbc-day-slot .rbc-time-slot {
+  border-top: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
+}
+.bx-teamcal .rbc-day-slot .rbc-time-slot:first-child { border-top: 0; }
+
+.bx-teamcal .rbc-time-gutter,
+.bx-teamcal .rbc-time-view .rbc-time-gutter {
+  background: var(--surface-2);
+  text-align: right;
+}
+.bx-teamcal .rbc-time-gutter .rbc-timeslot-group { border-bottom-color: transparent; }
+.bx-teamcal .rbc-time-gutter .rbc-label {
+  display: block;
+  padding: 2px 8px 0 6px;
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+/* Single-day week headers are noise: the toolbar already names the day. */
+.bx-teamcal .rbc-time-view .rbc-row.rbc-time-header-cell-single-day { display: none; }
+
+.bx-teamcal .rbc-allday-cell { border-color: var(--border); }
+.bx-teamcal .rbc-time-view .rbc-allday-cell + .rbc-allday-cell {
+  border-left: 1px solid var(--border);
+}
+.bx-teamcal .rbc-day-slot.rbc-today {
+  background-color: color-mix(in oklab, var(--accent-softer) 55%, transparent);
+}
+
+.bx-teamcal .rbc-current-time-indicator {
+  height: 2px;
+  background-color: var(--accent);
+}
+.bx-teamcal .rbc-current-time-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: -50% -50%;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+
+/* ---- event tiles -------------------------------------------------------- */
+/* Strip rbc's blue tile so the per-person renderers own the whole block. */
+.bx-teamcal .rbc-event,
+.bx-teamcal .rbc-day-slot .rbc-background-event {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background-color: transparent;
+  background-image: none;
+  color: inherit;
+  box-shadow: none;
+}
+.bx-teamcal .rbc-event.rbc-selected { background-color: transparent; }
+.bx-teamcal .rbc-event.rbc-selected .bxtc-evt {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.bx-teamcal .rbc-event-overlaps { box-shadow: none; }
+.bx-teamcal .rbc-event:focus { outline: none; }
+.bx-teamcal .rbc-event:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  z-index: 7;
+}
+.bx-teamcal .rbc-month-view .rbc-event { margin: 1px 2px; }
+.bx-teamcal .rbc-row-segment { padding: 0 1px 1px; }
+
+/* Time grid: the rbc-event carries the exact pixel height for the duration,
+   so the renderer inside must fill it edge to edge. */
+.bx-teamcal .rbc-day-slot .rbc-event {
+  min-height: 18px;
+  overflow: hidden;
+}
+.bx-teamcal .rbc-day-slot .rbc-event-label { display: none; }
+.bx-teamcal .rbc-day-slot .rbc-event-content {
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  line-height: var(--lh-tight);
+}
+.bx-teamcal .rbc-day-slot .rbc-events-container { margin-right: 6px; }
+
+/* "+3 more" affordance and its popup. */
+.bx-teamcal .rbc-show-more {
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  background-color: transparent;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.bx-teamcal .rbc-show-more:hover,
+.bx-teamcal .rbc-show-more:focus {
+  background-color: var(--surface-3);
+  color: var(--text);
+  text-decoration: none;
+}
+.bx-teamcal .rbc-show-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.bx-teamcal .rbc-overlay {
+  z-index: 60;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.bx-teamcal .rbc-overlay-header {
+  margin: -6px -6px 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bx-teamcal .rbc-overlay > * + * { margin-top: 2px; }
+
+/* Read-only view: no slot selection UI should ever paint. */
+.bx-teamcal .rbc-slot-selection,
+.bx-teamcal .rbc-selected-cell {
+  background-color: transparent;
+  color: inherit;
 }
 
 /* ---- agenda ------------------------------------------------------------- */
@@ -23681,33 +23399,7 @@ button.tsx-tl-seg { cursor: pointer; }
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
-/* The event cell surrenders its padding to the button that fills it, so the
-   whole row is the hit target. Matched at the same specificity as the padding
-   rule above (and its phone override below) rather than fought with a weight
-   bump. */
-.bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td.rbc-agenda-event-cell {
-  padding: 0;
-  cursor: pointer;
-}
-/* The agenda row is a real <button> filling its cell, because rbc puts the
-   click handler on the <td> and gives it no tab stop and no key handling.
-   The click still bubbles to rbc's own handler, so `onSelectEvent` fires
-   once, from a pointer or from the keyboard. */
-.bxtc-agenda-row {
-  padding: 8px 10px;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.bxtc-agenda-row:hover  { background: var(--surface-2); }
-.bxtc-agenda-row:active { background: var(--surface-3); }
-.bxtc-agenda-row:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--ring);
-}
+.bx-teamcal .rbc-agenda-event-cell { cursor: pointer; }
 .bx-teamcal .rbc-agenda-empty {
   display: block;
   padding: var(--sp-4) 0;
@@ -23754,12 +23446,6 @@ button.tsx-tl-seg { cursor: pointer; }
   .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td:last-child {
     padding-bottom: var(--sp-2);
   }
-  /* Stacked rows: the button keeps owning the event line's box, so it stays
-     the full-width hit target it is on a desktop. */
-  .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td.rbc-agenda-event-cell {
-    padding: 0;
-  }
-  .bxtc-agenda-row { padding: var(--sp-1) var(--sp-3) var(--sp-2); }
   .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr + tr > td { border-top: 0; }
   .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr + tr > td:first-child {
     border-top: 1px solid var(--border);

@@ -17,58 +17,22 @@
 //
 // Presentation notes (ui-v2.0)
 // ---------------------------------------------------------------------------
-// PEOPLE ARE THE ROWS, NOT THE EVENTS.
+// The chrome is built entirely from the Beacon kit in `@/ui`. react-big-
+// calendar's own grid internals cannot be reached with utility classes, so
+// they are themed in ONE clearly-bannered block in src/styles.css, scoped
+// under `.bx-teamcal` (the root element rendered below). That same block also
+// owns this page's `.bxtc-*` event and swatch skins, which cannot live under
+// `.bx-teamcal` because the event dialog is portalled to <body>.
 //
-// A week/day TIME GRID is a one-person primitive. Overlaying sixteen people's
-// calendars on a single shared time axis makes every concurrent event fight
-// for the same horizontal space: on the real roster a Monday mid-morning has
-// thirty concurrent events, which rbc's stock `overlap` layout renders as
-// thirty 8-to-18px slivers. Measured on that data, 54 of 188 week blocks came
-// out with ZERO legible characters: the 3px identity rule plus the hairline
-// plus the 9px of padding consumed the whole box, and `overflow: hidden` ate
-// the rest. Those were the user's "unlabelled bordered boxes". Capping the
-// columns only converted the slivers into a "+55 more" slab.
-//
-// So Day, Week and Month are CUSTOM react-big-calendar views (the `views`
-// prop takes a component, and `Calendar` hands it every prop it was given):
-//
-//   day    one horizontal LANE per selected person, time on the X axis. Two
-//          events can only ever collide if ONE person is double-booked, which
-//          is real information, and that case stacks into sub-rows inside the
-//          lane. A person with nothing booked still gets a lane, which is how
-//          this view answers "who is free at 2pm".
-//   week   a real <table>, one row per person, seven day columns. Each cell
-//          is a compact busy strip plus the day's load, so sixteen people are
-//          one screen and one pass.
-//   month  a real <table> of days, each carrying how much of the TEAM is busy
-//          or out, rather than a pile of per-person chips.
-//   agenda react-big-calendar's own list view, unchanged. It already worked.
-//
-// `onNavigate`, `onView`, `onSelectEvent`, `onDrillDown` and the toolbar all
-// still run through `Calendar`; the custom views copy rbc's own `navigate`,
-// `range` and `title` statics verbatim, so the date window logic in
-// `windowForView` and every label is byte-identical to before.
-//
-// Most events carry NO SUBJECT. They are Outlook busy blocks: no subject, no
-// attendees, no location. `smartTitle` names those honestly from `showAs`
-// ("Busy", "Tentative"), because a block that says "Untitled event" spends
-// its most valuable space saying nothing. For those events the information is
-// WHO and WHEN, and the lane header is what carries the who.
-//
-// The chrome is built entirely from the Beacon kit in `@/ui`. Everything that
-// cannot be reached with a utility class (rbc's agenda internals, the lane
-// geometry, the container queries that thin a block out) is themed in ONE
-// clearly-bannered block in src/styles.css, scoped under `.bx-teamcal` plus
-// this page's `.bxtc-*` skins, which cannot be nested under `.bx-teamcal`
-// because the event dialog is portalled to <body>.
-//
-// Per-person colour is DELIBERATELY QUIET, and with lanes it does even less
-// than before: the lane header carries the swatch AND the full name, so the
-// hue inside a block is pure continuity, never the signal. Colour is never
-// the only signal anywhere on this page.
+// Per-person colour is DELIBERATELY QUIET. A week with twenty colleagues on
+// it puts a hundred blocks on screen, so the hue is confined to a 3px left
+// rule, a small initials tile and an all-day outline; the block body is a
+// near-neutral wash and the type is Beacon's. Colour is also never the only
+// signal: every chip, block, agenda row and legend entry carries the owner's
+// initials, and the legend spells out the full name next to the swatch.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import {
   format, parse, startOfWeek, getDay,
@@ -151,10 +115,7 @@ const RESPONSE_TONE = {
 
 // ----- Outlook free/busy status → honest block copy ------------------------
 // Graph `showAs`: 'free' | 'tentative' | 'busy' | 'oof' | 'workingElsewhere'
-// | 'unknown'. On the real roster the majority of events are subject-less
-// busy blocks, so this is what most blocks on the page actually say. It is UI
-// copy derived from a column already on the row; nothing is fetched, adapted
-// or stored differently because of it.
+// | 'unknown'. Used as the fallback below when the row has no subject.
 const SHOW_AS_LABEL = {
   busy:             "Busy",
   tentative:        "Tentative",
@@ -197,11 +158,10 @@ function smartTitle(r) {
   if (SHOW_AS_LABEL[r.showAs]) return SHOW_AS_LABEL[r.showAs];
   // Last resort, and on the live roster it is the COMMON case: 192 of the 224
   // rows in a sample week carry no subject, no showAs and no sensitivity at
-  // all. Those rows are not "untitled" in any meaningful sense, they are
-  // records that only ever captured a person and a time range, so the one
-  // thing we can say truthfully is that the person is occupied. Saying "Busy"
-  // is honest; "Untitled event" implies a title went missing from an
-  // otherwise-complete record, which misdescribes the data.
+  // all. Those rows only ever captured a person and a time range, so the one
+  // thing we can say truthfully is that the person is occupied. "Untitled
+  // event" implies a title went missing from an otherwise-complete record,
+  // which misdescribes the data.
   return "Busy";
 }
 
@@ -333,31 +293,6 @@ const NEUTRAL_IDENT = {
   "--u-tint-l": "var(--surface-2)",     "--u-tint-d": "var(--surface-2)",
   "--u-chip-l": "var(--surface-3)",     "--u-chip-d": "var(--surface-3)",
 };
-
-/**
- * The identity a block should wear for its owner.
- *
- * An event can outlive its owner's place on the roster: `roster` drops anyone
- * disabled, but the saved selection still carries their id, so their events
- * still load and the id no longer resolves to a person. The old code rendered
- * `··` for that case, which on a narrow block that had already dropped its
- * title left a fully-bordered box with nothing legible inside it. That was the
- * stray empty box. Unknown owners now get the neutral ramp and a real glyph,
- * so a block is never contentless.
- */
-const UNKNOWN_OWNER = "Not on the roster";
-
-function ownerIdentity(r) {
-  const u = r?._user;
-  if (u) {
-    return {
-      style: identityVars(r.userId),
-      initials: u.initials || "?",
-      name: u.name || UNKNOWN_OWNER,
-    };
-  }
-  return { style: NEUTRAL_IDENT, initials: "?", name: UNKNOWN_OWNER };
-}
 
 /**
  * Initials tile in the owner's colour. `aria-hidden` because the owner's
@@ -645,10 +580,12 @@ function PeopleBar({ users, selected, onToggle, onSelectAll, onClearAll, onSetMa
 }
 
 // ---------------------------------------------------------------------------
-// Shared formatting.
+// Event renderers — month/agenda use a compact pill, week/day use a full
+// time-block that fills the absolutely-positioned rbc-event slot so a
+// 10:00–15:00 event visually spans those five rows in the grid.
 //
-// Every renderer on this page clips: the outer element is `overflow: hidden`
-// and the title truncates, so a long subject can never spill past its slot.
+// Every renderer clips: the outer element is `overflow-hidden` and the title
+// truncates, so a long subject can never spill past its slot.
 // ---------------------------------------------------------------------------
 const fmtTime = (d) => {
   if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
@@ -662,912 +599,110 @@ const fmtTime = (d) => {
 // Total attendees on an event (resource shape). The Pass-B mirror stores
 // every attendee — internal + external — in a single jsonb array.
 function attendeeCount(r) {
-  return (r?.attendees || []).filter(a => a?.email).length;
+  return (r.attendees || []).filter(a => a?.email).length;
 }
 
-// ---------------------------------------------------------------------------
-// LOSSLESS ALL-DAY MERGE
-//
-// Every attendee's Outlook mirror carries its OWN copy of a shared all-day
-// event, so "Randy Vacation out of country" arrives four times and the week's
-// all-day band renders four identical full-width bars. They are folded into
-// one bar that wears every owner's initials.
-//
-// The identity key is deliberately strict — all-day flag + start + end +
-// title, all four — so two genuinely different events that merely share a
-// title (two separate "PTO" blocks on different days, or a morning and an
-// afternoon "Site visit") can never collapse into each other. Timed events
-// are never merged: overlapping timed work is what the column cap below is
-// for, and merging it would hide real double-booking.
-//
-// The merge is presentational only. Nothing is dropped: every input event
-// ends up in exactly one output bar's `_members`, which is what the merged
-// bar's owner chips and the detail dialog's owner list read from.
-// ---------------------------------------------------------------------------
-function allDayIdentity(e) {
-  return `${+e.start}|${+e.end}|${e.title}`;
-}
+// Event skins live in the `.bxtc-evt*` rules in styles.css. Two reasons they
+// are not utility strings: an event sets an all-round border colour AND a
+// differently-coloured 3px left rule, and two competing Tailwind border
+// utilities on one element resolve by generated source order rather than by
+// the order they appear here; and the container queries that thin a block out
+// on a narrow column have to be able to `display: none` a part, which a
+// layered rule cannot do to an element carrying a display utility.
 
-function mergeAllDayEvents(list) {
-  const byKey = new Map();
-  const out = [];
-  for (const ev of list) {
-    if (!ev.allDay) { out.push(ev); continue; }
-    const key = allDayIdentity(ev);
-    const bar = byKey.get(key);
-    if (bar) {
-      bar.resource._members.push(ev);
-      continue;
-    }
-    const merged = {
-      ...ev,
-      id: `bxtc-allday:${key}`,
-      resource: { ...ev.resource, _members: [ev] },
-    };
-    byKey.set(key, merged);
-    out.push(merged);
-  }
-  return out;
-}
-
-// Distinct calendar owners behind a merged bar, in the order they merged.
-// Returns null for an unmerged event so call sites can fall back to the
-// single initials tile.
-function mergedOwners(r) {
-  const members = r?._members;
-  if (!members || members.length < 2) return null;
-  const seen = new Set();
-  const owners = [];
-  for (const m of members) {
-    const id = m.resource?.userId;
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    owners.push({
-      id,
-      initials: m.resource?._user?.initials || "?",
-      name: m.resource?._user?.name || UNKNOWN_OWNER,
-    });
-  }
-  return owners.length > 1 ? owners : null;
-}
-
-// ---------------------------------------------------------------------------
-// LANE GEOMETRY
-//
-// Everything the three custom views need to place a rectangle. All of it is
-// pure arithmetic over the events already loaded: no fetch, no adapter, no
-// stored value is touched, and the per-person colour SLOT still comes from
-// data.js exactly as before.
-//
-// The one invariant worth stating: the extent a block is PACKED at and the
-// extent it is DRAWN at are the same interval, so two blocks that share a
-// sub-row cannot overlap however narrow the track gets.
-// ---------------------------------------------------------------------------
-const DAY_MS  = 24 * 60 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
-
-// The floor on a block's span. 15 minutes is 23px at the day view's minimum
-// zoom, which is the point at which a block still reads as a deliberate mark
-// rather than a scratch. Applying it to the SPAN rather than to the layout
-// afterwards is what keeps packed and drawn geometry identical. It also gives
-// the two degenerate shapes Outlook really sends (zero length, and end before
-// start) a real rectangle instead of a 0px one.
-const MIN_SPAN_MS = 15 * 60 * 1000;
-
-// Default visible window, widened but never narrowed to cover the day.
-const WIN_OPEN_H  = 7;
-const WIN_CLOSE_H = 19;
-
-// Lane metrics, in px. Mirrored by the same numbers in styles.css; they live
-// here too because a lane's height is a function of how deep its stack packs,
-// which only JS knows.
-const BLOCK_H   = 30;
-const BLOCK_GAP = 3;
-const LANE_PAD  = 5;
-const laneHeight = (rows) => {
-  const r = Math.max(1, rows);
-  return LANE_PAD * 2 + r * BLOCK_H + (r - 1) * BLOCK_GAP;
-};
-
-const dayKey  = (d) => +startOfDay(d);
-const sameCalDay = (a, b) => dayKey(a) === dayKey(b);
-
-// An event's span inside one local day, in ms, or null if it never reaches it.
-function spanInDay(ev, dayStart, dayEnd) {
-  const s0 = +ev.start;
-  const e0 = Math.max(+ev.end, s0 + MIN_SPAN_MS);
-  const s = Math.max(s0, dayStart);
-  const e = Math.min(e0, dayEnd);
-  return e > s ? [s, e] : null;
-}
-
-// An event that occupies a whole day rather than a slice of one. `oof` is
-// called out separately because "out of office" and "booked all day" are
-// different answers to "is this person around".
-function outKind(ev) {
-  if (ev.resource?.showAs === "oof") return "out";
-  if (ev.allDay) return "allday";
-  return null;
-}
-
-// First-fit packing into sub-rows. On a start-sorted list this uses exactly
-// the stack's peak concurrency, and it only ever shares a sub-row between two
-// items when the earlier one ends at or before the later one starts.
-function packRows(items) {
-  const rowEnd = [];
-  for (const it of items) {
-    let row = -1;
-    for (let r = 0; r < rowEnd.length; r++) {
-      if (rowEnd[r] <= it.s) { row = r; break; }
-    }
-    if (row === -1) { row = rowEnd.length; rowEnd.push(0); }
-    rowEnd[row] = it.e;
-    it.row = row;
-  }
-  return rowEnd.length;
-}
-
-// Union of a set of spans. `gapMs` merges anything closer than that, so the
-// week's segments can carry a minimum rendered width and still never touch.
-function unionSpans(spans, gapMs = 0) {
-  const sorted = spans.map(s => [s[0], s[1]]).sort((a, b) => a[0] - b[0]);
-  const out = [];
-  for (const sp of sorted) {
-    const last = out[out.length - 1];
-    if (last && sp[0] - last[1] <= gapMs) last[1] = Math.max(last[1], sp[1]);
-    else out.push(sp);
-  }
-  return out;
-}
-
-// Widen the default window until it covers every timed span given to it.
-// `from`/`to` are ms from that span's own midnight, so a week can pool spans
-// from seven different days into one window.
-function windowHours(spans) {
-  let lo = WIN_OPEN_H;
-  let hi = WIN_CLOSE_H;
-  for (const sp of spans) {
-    lo = Math.min(lo, Math.floor(sp.from / HOUR_MS));
-    hi = Math.max(hi, Math.ceil(sp.to / HOUR_MS));
-  }
-  lo = Math.max(0, lo);
-  hi = Math.min(24, Math.max(hi, lo + 2));
-  return [lo, hi];
-}
-
-// Bucket the loaded events by owner, in the lane order handed in. Every event
-// whose owner has a lane lands in exactly one bucket; the parent guarantees a
-// lane exists for every owner present in the data, including someone who has
-// since left the roster.
-function bucketByOwner(lanes, events) {
-  const by = new Map(lanes.map(l => [l.id, []]));
-  for (const ev of events) {
-    const bucket = by.get(ev.resource?.userId);
-    if (bucket) bucket.push(ev);
-  }
-  return by;
-}
-
-const hourLabel = (h) => {
-  const hh = ((h + 11) % 12) + 1;
-  if (h === 0)  return "12am";
-  if (h === 12) return "noon";
-  return `${hh}${h < 12 ? "am" : "pm"}`;
-};
-
-// "4.5h" / "45m". Tabular figures, no unit word, because it sits in a 96px
-// cell next to sixteen others.
-function loadLabel(ms) {
-  const mins = Math.round(ms / 60000);
-  if (mins <= 0) return EMPTY;
-  if (mins < 60) return `${mins}m`;
-  const h = mins / 60;
-  return `${h % 1 === 0 ? h : h.toFixed(1)}h`;
-}
-function loadSpoken(ms) {
-  const mins = Math.round(ms / 60000);
-  if (mins < 60) return `${mins} minutes booked`;
-  const h = mins / 60;
-  const n = h % 1 === 0 ? h : h.toFixed(1);
-  return `${n} hours booked`;
-}
-
-// ---------------------------------------------------------------------------
-// Shared chrome: the person cell that opens every lane and every week row.
-// It is the only place identity is asserted, which is why the block skins can
-// afford to be as quiet as they are.
-// ---------------------------------------------------------------------------
-function LaneIdentity({ user, meta, tone }) {
+function MonthPill({ event }) {
+  const r = event.resource;
+  const n = attendeeCount(r);
   return (
-    <>
-      <Swatch initials={user.initials} className="size-6 text-[10px]" />
-      <span className="bxtc-lane-id">
-        <span className="bxtc-lane-name" title={user.name}>{user.name}</span>
-        <span className="bxtc-lane-meta" data-tone={tone || undefined}>{meta}</span>
+    <div
+      className={`${IDENT} bxtc-evt bxtc-evt--pill`}
+      data-allday={r.isAllDay ? "true" : undefined}
+      data-cancelled={r.isCancelled ? "true" : undefined}
+      style={identityVars(r.userId)}
+    >
+      <span className="bxtc-evt-initials" aria-hidden="true">
+        {r._user?.initials || "··"}
       </span>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// DAY: one lane per person, time on the X axis.
-//
-// This is the scheduling-assistant primitive, and it is the whole point of
-// the restructure. Because a lane holds exactly one calendar, the only way
-// two blocks can compete is a genuine double-booking, which stacks into
-// sub-rows instead of shredding the column. A person with nothing booked
-// still gets a lane: an empty row IS the answer to "who is free at 2pm".
-// ---------------------------------------------------------------------------
-function DayLanes({ date, laneEvents = [], laneUsers = [], onSelectEvent }) {
-  const model = useMemo(() => {
-    const dStart = dayKey(date);
-    const dEnd   = dStart + DAY_MS;
-    const buckets = bucketByOwner(laneUsers, laneEvents);
-
-    // Window first: every timed span in the day, pooled.
-    const pool = [];
-    for (const list of buckets.values()) {
-      for (const ev of list) {
-        if (outKind(ev)) continue;
-        const sp = spanInDay(ev, dStart, dEnd);
-        if (sp) pool.push({ from: sp[0] - dStart, to: sp[1] - dStart });
-      }
-    }
-    // Window before geometry: an all-day band spans whatever the timed events
-    // opened the day out to.
-    const [openH, closeH] = windowHours(pool);
-    const winStart = dStart + openH * HOUR_MS;
-    const winEnd   = dStart + closeH * HOUR_MS;
-    const span     = winEnd - winStart;
-
-    const lanes = laneUsers.map(user => {
-      const items = [];
-      const busySpans = [];
-      let out = null;
-      for (const ev of buckets.get(user.id) || []) {
-        // Reach is decided the same way for every event, INCLUDING all-day
-        // ones. An Outlook all-day block ends at the next midnight, so
-        // Thursday's runs to Friday 00:00 and must not paint a band across
-        // Friday; only the geometry differs once the event is known to land
-        // on this day.
-        const sp = spanInDay(ev, dStart, dEnd);
-        if (!sp) continue;
-        const kind = outKind(ev);
-        if (kind) {
-          // "Out of office" outranks "booked all day" when both are present.
-          out = out === "out" ? out : kind;
-          items.push({ ev, s: winStart, e: winEnd, kind });
-          continue;
-        }
-        busySpans.push(sp);
-        items.push({ ev, s: sp[0], e: sp[1], kind: null });
-      }
-      const busyMs = unionSpans(busySpans).reduce((n, sp) => n + (sp[1] - sp[0]), 0);
-      // All-day bands first so they take the top sub-row, then by start.
-      items.sort((a, b) =>
-        (a.kind ? 0 : 1) - (b.kind ? 0 : 1) || a.s - b.s || b.e - a.e
-      );
-      const rows = packRows(items);
-      const timed = items.filter(i => !i.kind).length;
-      const meta =
-        out === "out"    ? "Out of office"
-      : out === "allday" ? "Booked all day"
-      : timed === 0      ? "Free all day"
-      : `${timed} ${timed === 1 ? "event" : "events"}, ${loadLabel(busyMs)}`;
-      return {
-        user, items, meta,
-        tone: out ? "out" : undefined,
-        height: laneHeight(rows),
-      };
-    });
-
-    const now = new Date();
-    const nowPct = sameCalDay(now, date)
-      ? ((+now - winStart) / span) * 100
-      : null;
-
-    return {
-      lanes,
-      hours: closeH - openH,
-      ticks: Array.from({ length: closeH - openH }, (_, i) => openH + i),
-      winStart, span,
-      nowPct: nowPct != null && nowPct >= 0 && nowPct <= 100 ? nowPct : null,
-    };
-  }, [date, laneEvents, laneUsers]);
-
-  const heading = `Team schedule for ${format(date, "EEEE, MMMM d, yyyy")}`;
-
-  return (
-    // A scrollable region needs to be reachable by keyboard in its own right,
-    // because a lane with nothing booked has no focusable child to scroll to.
-    <div className="bxtc-lanes" role="region" aria-label={heading} tabIndex={0}>
-      <div className="bxtc-lanes-inner" style={{ "--bxtc-hours": model.hours }}>
-        <div className="bxtc-axisrow">
-          <div className="bxtc-axis-head">
-            <span className="bxtc-colcap">Person</span>
-          </div>
-          <div className="bxtc-axis" aria-hidden="true">
-            {model.ticks.map(h => (
-              <span key={h} className="bxtc-axis-tick num">{hourLabel(h)}</span>
-            ))}
-          </div>
-        </div>
-
-        <ul className="bxtc-lane-list" role="list" aria-label="People">
-          {model.lanes.map(lane => (
-            <li key={lane.user.id} className="bxtc-lane" style={{ height: `${lane.height}px` }}>
-              <div
-                className={`${IDENT} bxtc-lane-head`}
-                style={lane.user.identity}
-              >
-                <LaneIdentity user={lane.user} meta={lane.meta} tone={lane.tone} />
-              </div>
-              <ul
-                className="bxtc-lane-track"
-                role="list"
-                data-now={model.nowPct != null ? "true" : undefined}
-                style={model.nowPct != null ? { "--bxtc-now": model.nowPct } : undefined}
-              >
-                {lane.items.map(item => {
-                  const label = fullEventLabel(item.ev);
-                  const r = item.ev.resource || {};
-                  const left  = ((item.s - model.winStart) / model.span) * 100;
-                  const width = ((item.e - item.s) / model.span) * 100;
-                  return (
-                    // The <li> carries the geometry and the button fills it,
-                    // so the measured box of a block IS its packed interval.
-                    <li
-                      key={item.ev.id}
-                      className="bxtc-blockwrap"
-                      style={{
-                        left: `${left}%`,
-                        width: `calc(${width}% - 2px)`,
-                        top: `${LANE_PAD + item.row * (BLOCK_H + BLOCK_GAP)}px`,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className={`${IDENT} bxtc-block`}
-                        style={lane.user.identity}
-                        data-kind={item.kind || undefined}
-                        data-cancelled={r.isCancelled ? "true" : undefined}
-                        title={label}
-                        onClick={(e) => onSelectEvent && onSelectEvent(item.ev, e)}
-                      >
-                        <span className="sr-only">{label}</span>
-                        <span className="bxtc-block-title" aria-hidden="true">
-                          {item.ev.title}
-                        </span>
-                        {!item.kind && (
-                          <span className="bxtc-block-time num" aria-hidden="true">
-                            {fmtTime(item.ev.start)}
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <span className="bxtc-evt-title">{event.title}</span>
+      {n > 1 && (
+        <span className="bxtc-tick" title={`${n} attendees`}>+{n}</span>
+      )}
     </div>
   );
 }
-DayLanes.range    = (date, { localizer }) => [localizer.startOf(date, "day")];
-DayLanes.navigate = (date, action, { localizer }) => {
-  if (action === "PREV") return localizer.add(date, -1, "day");
-  if (action === "NEXT") return localizer.add(date, 1, "day");
-  return date;
-};
-DayLanes.title    = (date, { localizer }) => localizer.format(date, "dayHeaderFormat");
 
-// ---------------------------------------------------------------------------
-// WEEK: a real matrix, person down, day across.
-//
-// Sixteen people over seven days is 112 cells, which is a table and should be
-// marked up as one: `scope="col"` on the day, `scope="row"` on the person, so
-// a screen reader announces "Randy Patel, MON 3, 4.5 hours booked" from any
-// cell. Each cell is a busy STRIP rather than a list of blocks, because at
-// this scale the question is "is this person around", not "what is the 11am".
-// The strip's segments are the UNION of that day's events, so a person who is
-// triple-booked at 10am gets one bar, not three.
-// ---------------------------------------------------------------------------
-// Segments closer together than 1/40th of the strip are merged, so that the
-// 2px minimum on a segment can never make two of them touch.
-const SEG_MERGE_FRACTION = 40;
-
-function WeekMatrix({ date, laneEvents = [], laneUsers = [], onOpenDayList }) {
-  const model = useMemo(() => {
-    const first = dfnsStartOfWeek(date, { weekStartsOn: 0 });
-    const days = Array.from({ length: 7 }, (_, i) => addDays(first, i));
-    const buckets = bucketByOwner(laneUsers, laneEvents);
-
-    const pool = [];
-    for (const list of buckets.values()) {
-      for (const ev of list) {
-        if (outKind(ev)) continue;
-        for (const d of days) {
-          const ds = dayKey(d);
-          const sp = spanInDay(ev, ds, ds + DAY_MS);
-          if (sp) pool.push({ from: sp[0] - ds, to: sp[1] - ds });
-        }
-      }
-    }
-    const [openH, closeH] = windowHours(pool);
-    const spanMs = (closeH - openH) * HOUR_MS;
-    const gapMs  = spanMs / SEG_MERGE_FRACTION;
-
-    const rows = laneUsers.map(user => {
-      const mine = buckets.get(user.id) || [];
-      let weekMs = 0;
-      let outDays = 0;
-      const cells = days.map(d => {
-        const ds = dayKey(d);
-        const winStart = ds + openH * HOUR_MS;
-        const winEnd   = ds + closeH * HOUR_MS;
-        const events = [];
-        const spans = [];
-        let out = null;
-        for (const ev of mine) {
-          const kind = outKind(ev);
-          const sp = spanInDay(ev, ds, ds + DAY_MS);
-          if (!sp) continue;
-          events.push(ev);
-          if (kind) { out = out === "out" ? out : kind; continue; }
-          spans.push([
-            Math.max(sp[0], winStart),
-            Math.min(Math.max(sp[1], winStart + MIN_SPAN_MS), winEnd),
-          ]);
-        }
-        const merged = unionSpans(spans.filter(sp => sp[1] > sp[0]), gapMs);
-        const busyMs = merged.reduce((n, sp) => n + (sp[1] - sp[0]), 0);
-        weekMs += busyMs;
-        if (out) outDays += 1;
-        return {
-          day: d,
-          events,
-          out,
-          busyMs,
-          segments: merged.map(sp => ({
-            left:  ((sp[0] - winStart) / spanMs) * 100,
-            width: ((sp[1] - sp[0]) / spanMs) * 100,
-          })),
-        };
-      });
-      return { user, cells, weekMs, outDays };
-    });
-
-    // Column tally: how much of the team is on something that day.
-    const tallies = days.map((d, i) => {
-      let busy = 0;
-      let out  = 0;
-      for (const row of rows) {
-        const c = row.cells[i];
-        if (c.out) out += 1;
-        else if (c.events.length > 0) busy += 1;
-      }
-      return { busy, out, total: rows.length };
-    });
-
-    return { days, rows, tallies };
-  }, [date, laneEvents, laneUsers]);
-
-  const today = new Date();
-
-  return (
-    <div
-      className="bxtc-wkwrap"
-      role="region"
-      aria-label="Who is booked this week"
-      tabIndex={0}
-    >
-      <table className="bxtc-wk">
-        <caption className="sr-only">
-          Who is booked each day this week, one row per person.
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col" className="bxtc-wk-corner">
-              <span className="bxtc-colcap">Person</span>
-            </th>
-            {model.days.map((d, i) => {
-              const t = model.tallies[i];
-              const isToday = sameCalDay(d, today);
-              const pct = t.total ? ((t.busy + t.out) / t.total) * 100 : 0;
-              return (
-                <th
-                  key={+d}
-                  scope="col"
-                  className="bxtc-wk-day"
-                  data-today={isToday ? "true" : undefined}
-                  aria-current={isToday ? "date" : undefined}
-                >
-                  <span className="bxtc-wk-dayline" aria-hidden="true">
-                    <span className="bxtc-wk-dow">{format(d, "EEE")}</span>
-                    <span className="bxtc-wk-dom num">{format(d, "d")}</span>
-                  </span>
-                  <span className="bxtc-wk-loadline" aria-hidden="true">
-                    <span className="bxtc-meter">
-                      <span className="bxtc-meter-fill" style={{ "--bxtc-pct": pct }} />
-                    </span>
-                    <span className="bxtc-wk-tally">
-                      <span className="num">{t.busy + t.out}</span>
-                      <span>of</span>
-                      <span className="num">{t.total}</span>
-                    </span>
-                  </span>
-                  <span className="sr-only">
-                    {`${t.busy + t.out} of ${t.total} people booked`}
-                    {t.out > 0 ? `, ${t.out} out of office` : ""}
-                  </span>
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {model.rows.map(row => (
-            <tr key={row.user.id}>
-              <th
-                scope="row"
-                className={`${IDENT} bxtc-wk-person`}
-                style={row.user.identity}
-              >
-                <LaneIdentity
-                  user={row.user}
-                  meta={
-                    row.weekMs > 0
-                      ? `${loadLabel(row.weekMs)} this week`
-                      : row.outDays > 0 ? "Away this week" : "Nothing booked"
-                  }
-                  tone={row.weekMs === 0 && row.outDays > 0 ? "out" : undefined}
-                />
-              </th>
-              {row.cells.map(cell => {
-                const isToday = sameCalDay(cell.day, today);
-                const dayName = format(cell.day, "EEEE MMMM d");
-                if (cell.events.length === 0) {
-                  return (
-                    <td
-                      key={+cell.day}
-                      className="bxtc-wk-cell"
-                      data-today={isToday ? "true" : undefined}
-                    >
-                      <span className="bxtc-wk-none" aria-hidden="true">{EMPTY}</span>
-                      <span className="sr-only">Nothing booked</span>
-                    </td>
-                  );
-                }
-                const fig =
-                  cell.out === "out"    ? "Out"
-                : cell.out === "allday" ? "All day"
-                : loadLabel(cell.busyMs);
-                const spoken =
-                  cell.out === "out"    ? "Out of office"
-                : cell.out === "allday" ? "Booked all day"
-                : loadSpoken(cell.busyMs);
-                return (
-                  <td
-                    key={+cell.day}
-                    className="bxtc-wk-cell"
-                    data-today={isToday ? "true" : undefined}
-                  >
-                    <button
-                      type="button"
-                      className={`${IDENT} bxtc-wk-btn`}
-                      style={row.user.identity}
-                      data-out={cell.out || undefined}
-                      onClick={() => onOpenDayList({
-                        start: startOfDay(cell.day),
-                        end: endOfDay(cell.day),
-                        events: cell.events,
-                        heading: `${row.user.name}, ${dayName}`,
-                      })}
-                    >
-                      <span className="sr-only">
-                        {`${spoken}, ${cell.events.length} ${cell.events.length === 1 ? "event" : "events"}. Open the list.`}
-                      </span>
-                      <span className="bxtc-strip" aria-hidden="true">
-                        {cell.out ? (
-                          <span className="bxtc-seg bxtc-seg--out" />
-                        ) : (
-                          cell.segments.map((sg, i) => (
-                            <span
-                              key={i}
-                              className="bxtc-seg"
-                              style={{ left: `${sg.left}%`, width: `${sg.width}%` }}
-                            />
-                          ))
-                        )}
-                      </span>
-                      <span className="bxtc-wk-fig num" aria-hidden="true">{fig}</span>
-                    </button>
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-WeekMatrix.navigate = (date, action, { localizer }) => {
-  if (action === "PREV") return localizer.add(date, -1, "week");
-  if (action === "NEXT") return localizer.add(date, 1, "week");
-  return date;
-};
-WeekMatrix.range = (date, { localizer }) => {
-  const firstOfWeek = localizer.startOfWeek();
-  const start = localizer.startOf(date, "week", firstOfWeek);
-  const end   = localizer.endOf(date, "week", firstOfWeek);
-  return localizer.range(start, end);
-};
-WeekMatrix.title = (date, { localizer }) => {
-  const range = WeekMatrix.range(date, { localizer });
-  return localizer.format(
-    { start: range[0], end: range[range.length - 1] },
-    "dayRangeHeaderFormat"
-  );
-};
-
-// ---------------------------------------------------------------------------
-// MONTH: the team, not the people.
-//
-// A month cell is 130px wide and there are 194 events in a week, so per-person
-// chips here were always going to be a pile. What a month is actually good at
-// is the shape of the month: which days the team is loaded, and which days
-// people are away. Each cell answers that with one meter and two figures, and
-// drills into the day lanes through react-big-calendar's own `onDrillDown`,
-// so the view switch and the date change run through `onView` / `onNavigate`
-// exactly as clicking a date always has.
-// ---------------------------------------------------------------------------
-function TeamMonth({ date, laneEvents = [], laneUsers = [], localizer, onDrillDown }) {
-  const model = useMemo(() => {
-    const first = localizer.firstVisibleDay(date, localizer);
-    const last  = localizer.lastVisibleDay(date, localizer);
-    const days = [];
-    for (let d = first; d <= last; d = addDays(d, 1)) days.push(d);
-
-    const buckets = bucketByOwner(laneUsers, laneEvents);
-    const stats = new Map();
-    for (const d of days) {
-      stats.set(dayKey(d), { busy: new Set(), out: new Set(), events: 0 });
-    }
-    for (const [uid, list] of buckets) {
-      for (const ev of list) {
-        const kind = outKind(ev);
-        for (const d of days) {
-          const ds = dayKey(d);
-          if (!spanInDay(ev, ds, ds + DAY_MS)) continue;
-          const s = stats.get(ds);
-          s.events += 1;
-          if (kind) s.out.add(uid); else s.busy.add(uid);
-        }
-      }
-    }
-
-    const weeks = [];
-    for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
-    return { days, weeks, stats, month: date.getMonth() };
-  }, [date, laneEvents, laneUsers, localizer]);
-
-  const today = new Date();
-  const total = laneUsers.length;
-
-  return (
-    <div
-      className="bxtc-mowrap"
-      role="region"
-      aria-label="Team load this month"
-      tabIndex={0}
-    >
-      <table className="bxtc-mo">
-        <caption className="sr-only">
-          How much of the team is booked or away on each day of the month.
-        </caption>
-        <thead>
-          <tr>
-            {model.weeks[0]?.map(d => (
-              <th key={+d} scope="col">{format(d, "EEE")}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {model.weeks.map((week, wi) => (
-            <tr key={wi}>
-              {week.map(d => {
-                const s = model.stats.get(dayKey(d));
-                // Someone who is away AND has a meeting on the books is one
-                // person, not two: `out` wins and `busy` drops them, so the
-                // two figures always add up to the headcount and never past it.
-                const out  = s.out.size;
-                const busy = [...s.busy].filter(id => !s.out.has(id)).length;
-                const on   = busy + out;
-                const pct  = total ? (on / total) * 100 : 0;
-                const isToday = sameCalDay(d, today);
-                const offRange = d.getMonth() !== model.month;
-                const spoken =
-                  on === 0
-                    ? `${format(d, "EEEE MMMM d")}, nobody booked`
-                    : `${format(d, "EEEE MMMM d")}, ${on} of ${total} booked` +
-                      (out > 0 ? `, ${out} out of office` : "") +
-                      `, ${s.events} ${s.events === 1 ? "event" : "events"}`;
-                return (
-                  <td
-                    key={+d}
-                    className="bxtc-mo-cell"
-                    data-today={isToday ? "true" : undefined}
-                    data-off={offRange ? "true" : undefined}
-                  >
-                    <button
-                      type="button"
-                      className="bxtc-mo-day"
-                      onClick={() => onDrillDown && onDrillDown(d, "day")}
-                    >
-                      <span className="sr-only">{spoken}. Open the day.</span>
-                      <span className="bxtc-mo-date num" aria-hidden="true">
-                        {format(d, "d")}
-                      </span>
-                      {on > 0 ? (
-                        <span className="bxtc-mo-body" aria-hidden="true">
-                          <span className="bxtc-meter">
-                            <span className="bxtc-meter-fill" style={{ "--bxtc-pct": pct }} />
-                          </span>
-                          <span className="bxtc-mo-figs">
-                            <span className="bxtc-mo-fig">
-                              <span className="num">{on}</span>
-                              <span>of</span>
-                              <span className="num">{total}</span>
-                              <span>booked</span>
-                            </span>
-                            {out > 0 && (
-                              <span className="bxtc-mo-out">
-                                <span className="num">{out}</span>
-                                <span>out</span>
-                              </span>
-                            )}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className="bxtc-mo-quiet" aria-hidden="true">{EMPTY}</span>
-                      )}
-                    </button>
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-TeamMonth.range = (date, { localizer }) => ({
-  start: localizer.firstVisibleDay(date, localizer),
-  end:   localizer.lastVisibleDay(date, localizer),
-});
-TeamMonth.navigate = (date, action, { localizer }) => {
-  if (action === "PREV") return localizer.add(date, -1, "month");
-  if (action === "NEXT") return localizer.add(date, 1, "month");
-  return date;
-};
-TeamMonth.title = (date, { localizer }) => localizer.format(date, "monthHeaderFormat");
-
-
-// Lane, strip and block skins live in the `.bxtc-*` rules in styles.css.
-// Two reasons they are not utility strings: a block sets an all-round border
-// colour AND a differently-coloured left rule, and two competing Tailwind
-// border utilities on one element resolve by generated source order rather
-// than by the order they appear here; and the container queries that thin a
-// block out on a narrow track have to be able to `display: none` a part,
-// which a layered rule cannot do to an element carrying a display utility.
-
-// One sentence describing an event completely. It is BOTH the block's
-// accessible name (an `.sr-only` span, with every visible part marked
-// `aria-hidden`, so a screen reader gets the whole event rather than whatever
-// survived the layout) and its hover tooltip. Commas, never dashes, so it
-// reads as a sentence when spoken.
-function fullEventLabel(event) {
-  const r = event.resource || {};
-  const owners = mergedOwners(r);
-  const who = owners
-    ? owners.map(o => o.name).join(", ")
-    : ownerIdentity(r).name;
-  const bits = [who, event.title];
-  const sameDay = event.start.toDateString() === event.end.toDateString();
-  bits.push(
-    r.isAllDay ? "all day"
-    : sameDay  ? `${fmtTime(event.start)} to ${fmtTime(event.end)}`
-    : `${format(event.start, "MMM d")} ${fmtTime(event.start)} to ${format(event.end, "MMM d")} ${fmtTime(event.end)}`
-  );
-  if (r.location) bits.push(r.location);
+function TimeBlock({ event }) {
+  const r = event.resource;
+  const minutes = Math.max(0, differenceInMinutes(event.end, event.start));
+  // Density tiers control how much chrome we render inside the block.
+  // <30 min: title + owner only. 30-59: + time. >=60: + location + attendees.
+  // That is the HEIGHT budget. The WIDTH budget is handled by the container
+  // queries on `.rbc-event`, which drop the meta lines, then the title, then
+  // the initials as overlapping columns squeeze a block down to a rule.
+  const density = minutes < 30 ? "xs" : minutes < 60 ? "sm" : "lg";
   const n = attendeeCount(r);
-  if (n > 1) bits.push(`${n} attendees`);
-  if (r.isCancelled) bits.push("cancelled");
-  return bits.join(", ");
-}
-
-/**
- * Initials tiles for the owners behind a merged all-day bar. Decorative: the
- * same names are already in the block's accessible name.
- */
-function OwnerChips({ owners, max = 4 }) {
-  const shown = owners.slice(0, max);
-  const rest  = owners.length - shown.length;
   return (
-    <span className="bxtc-owners" aria-hidden="true">
-      {shown.map(o => (
-        <span
-          key={o.id}
-          className={`${IDENT} bxtc-swatch bxtc-owner`}
-          style={identityVars(o.id)}
-        >
-          {o.initials}
+    <div
+      className={`${IDENT} bxtc-evt bxtc-evt--block`}
+      data-density={density}
+      data-allday={r.isAllDay ? "true" : undefined}
+      data-cancelled={r.isCancelled ? "true" : undefined}
+      style={identityVars(r.userId)}
+    >
+      <span className="bxtc-evt-head">
+        <span className="bxtc-evt-initials" aria-hidden="true">
+          {r._user?.initials || "··"}
         </span>
-      ))}
-      {rest > 0 && <span className="bxtc-owner bxtc-owner--rest num">+{rest}</span>}
-    </span>
+        <span className="bxtc-evt-title">{event.title}</span>
+        {density !== "xs" && n > 1 && (
+          <span className="bxtc-tick" title={`${n} attendees`}>+{n}</span>
+        )}
+      </span>
+
+      {density !== "xs" && (
+        <span className="bxtc-evt-meta">
+          <span>{fmtTime(event.start)} – {fmtTime(event.end)}</span>
+        </span>
+      )}
+
+      {density === "lg" && r.location && (
+        <span className="bxtc-evt-meta">
+          <Icon name="pin" size={10} stroke={2} />
+          <span title={r.location}>{r.location}</span>
+        </span>
+      )}
+    </div>
   );
 }
 
-/**
- * The agenda's event cell. react-big-calendar puts the click handler on the
- * surrounding `<td>` and nothing else: no tab stop, no key handling. Rendering
- * the row as a real `<button>` that fills the cell makes it reachable and
- * operable from the keyboard, and the click still bubbles to rbc's own handler
- * so `onSelectEvent` fires exactly once, exactly as before.
- */
 function AgendaRow({ event }) {
-  const r = event.resource || {};
+  const r = event.resource;
   const n = attendeeCount(r);
-  const owners = mergedOwners(r);
   return (
-    <button
-      type="button"
+    <div
       className={[
         IDENT,
-        "bxtc-agenda-row",
-        "flex w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-left",
+        "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1",
         r.isCancelled ? "opacity-60" : "",
       ].join(" ")}
-      style={ownerIdentity(r).style}
-      title={fullEventLabel(event)}
+      style={identityVars(r.userId)}
     >
-      <span className="sr-only">{fullEventLabel(event)}</span>
-      <span className="flex min-w-0 shrink-0 items-center gap-1.5" aria-hidden="true">
-        {owners ? (
-          <>
-            <OwnerChips owners={owners} max={5} />
-            <span className="max-w-[16ch] truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
-              <span className="num">{owners.length}</span> calendars
-            </span>
-          </>
-        ) : (
-          <>
-            <Swatch initials={ownerIdentity(r).initials} className="size-5 text-[9.5px]" />
-            <span className="max-w-[16ch] truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
-              {ownerIdentity(r).name}
-            </span>
-          </>
-        )}
+      <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+        <Swatch initials={r._user?.initials} className="size-5 text-[9.5px]" />
+        <span className="max-w-[16ch] truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
+          {r._user?.name}
+        </span>
       </span>
       <span
         className={[
           "min-w-0 flex-1 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
           r.isCancelled ? "line-through" : "",
         ].join(" ")}
-        aria-hidden="true"
       >
         {event.title}
       </span>
       {r.location && (
-        <span
-          className="flex min-w-0 max-w-[22ch] shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]"
-          aria-hidden="true"
-        >
+        <span className="flex min-w-0 max-w-[22ch] shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
           <Icon name="pin" size={11} stroke={2} className="shrink-0" />
           <span className="truncate">{r.location}</span>
         </span>
@@ -1575,13 +710,13 @@ function AgendaRow({ event }) {
       {n > 1 && (
         <span
           className="flex shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]"
-          aria-hidden="true"
+          title={`${n} attendees`}
         >
           <Icon name="users" size={11} stroke={1.8} />
           <span className="num">{n}</span>
         </span>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -1712,8 +847,7 @@ function EventPopover({ event, onClose }) {
   : subjectMissing                    ? "No title set in Outlook."
   : null;
 
-  const ownerStyle = ownerIdentity(r).style;
-  const owners = mergedOwners(r);
+  const ownerStyle = identityVars(r.userId);
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
@@ -1779,26 +913,12 @@ function EventPopover({ event, onClose }) {
             )}
 
             <dt className="m-0 pt-px text-[length:var(--fs-2xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
-              {owners ? "Owners" : "Owner"}
+              Owner
             </dt>
-            {/* A merged all-day bar stands for one copy per attendee, so the
-                dialog names every calendar it came off rather than only the
-                first. Nothing is lost by the merge. */}
-            <dd className="m-0 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[length:var(--fs-sm)] text-[var(--text)]">
-              {(owners
-                ? owners.map(o => ({ ...o, style: identityVars(o.id) }))
-                : [{ id: r.userId, ...ownerIdentity(r) }]
-              ).map(o => (
-                <span
-                  key={o.id}
-                  className={`${IDENT} flex min-w-0 items-center gap-2`}
-                  style={o.style}
-                >
-                  <Swatch initials={o.initials} className="size-6 text-[10px]" />
-                  <span className="min-w-0 truncate font-medium">{o.name}</span>
-                </span>
-              ))}
-              {!owners && r._user?._department && (
+            <dd className="m-0 flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--fs-sm)] text-[var(--text)]">
+              <Swatch initials={r._user?.initials} className="size-6 text-[10px]" />
+              <span className="min-w-0 truncate font-medium">{r._user?.name || "Unknown"}</span>
+              {r._user?._department && (
                 <span className="text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
                   {r._user._department}
                 </span>
@@ -1872,94 +992,6 @@ function EventPopover({ event, onClose }) {
           ) : (
             <span className="hidden sm:block" />
           )}
-          <Button variant="default" size="sm" onClick={onClose}>Done</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The day list behind a week cell.
-//
-// The week matrix answers "is this person around" with a strip and a figure.
-// The follow-up question, "around doing what", is one click away: the cell
-// opens this list, and every row opens the same read-only detail dialog a day
-// block would. A Dialog rather than a Popover because the trigger is one cell
-// of a 112-cell table that re-renders on every navigation, so there is no
-// stable node for a popover to anchor to.
-// ---------------------------------------------------------------------------
-function DayListRow({ event, onOpen }) {
-  const r = event.resource || {};
-  const n = attendeeCount(r);
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(event)}
-      style={ownerIdentity(r).style}
-      className={[
-        IDENT,
-        "flex w-full min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 text-left",
-        "border border-transparent",
-        "transition-[background-color,border-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-        "hover:border-[var(--border)] hover:bg-[var(--surface-2)]",
-        "active:bg-[var(--surface-3)]",
-        "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
-      ].join(" ")}
-    >
-      <Swatch initials={ownerIdentity(r).initials} className="size-6 shrink-0 text-[10px]" />
-      <span className="min-w-0 flex-1">
-        <span
-          className={[
-            "block truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
-            r.isCancelled ? "line-through" : "",
-          ].join(" ")}
-        >
-          {event.title}
-        </span>
-        <span className="block truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
-          <span className="num">{fmtTime(event.start)} – {fmtTime(event.end)}</span>
-          {` · ${ownerIdentity(r).name}`}
-          {r.location ? ` · ${r.location}` : ""}
-        </span>
-      </span>
-      {n > 1 && (
-        <span className="flex shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
-          <Icon name="users" size={11} stroke={1.8} />
-          <span className="num">{n}</span>
-        </span>
-      )}
-      <Icon name="chevronRight" size={14} stroke={2} className="shrink-0 text-[var(--text-soft)]" />
-    </button>
-  );
-}
-
-function DayListDialog({ group, onOpenEvent, onClose }) {
-  if (!group) return null;
-  const list = [...group.events].sort(
-    (a, b) => a.start - b.start || String(a.title).localeCompare(String(b.title))
-  );
-  return (
-    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent size="md" aria-describedby={undefined}>
-        <DialogHeader>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="neutral" size="sm" className="num">
-              {list.length} {list.length === 1 ? "event" : "events"}
-            </Badge>
-            <Badge tone="outline" size="sm">Read only</Badge>
-          </div>
-          <DialogTitle>{group.heading}</DialogTitle>
-          <p className="m-0 text-[length:var(--fs-2xs)] text-[var(--text-soft)]">
-            Everything on this day. Pick one to see its full detail.
-          </p>
-        </DialogHeader>
-        <DialogBody className="flex flex-col gap-0.5">
-          {list.map(ev => (
-            <DayListRow key={ev.id} event={ev} onOpen={onOpenEvent} />
-          ))}
-        </DialogBody>
-        <DialogFooter>
           <Button variant="default" size="sm" onClick={onClose}>Done</Button>
         </DialogFooter>
       </DialogContent>
@@ -2171,8 +1203,6 @@ export function TeamCalendarTab() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [popoverEvent, setPopoverEvent] = useState(null);
-  // One person's day, while the week cell's list dialog is open.
-  const [dayList, setDayList] = useState(null);
 
   // Manual refresh wiring. `refreshKey` increments to force the loader effect
   // to re-run even when selected/view/date haven't changed. `syncing` is true
@@ -2248,11 +1278,9 @@ export function TeamCalendarTab() {
     return () => { cancelled = true; };
   }, [selected, view, date, refreshKey]);
 
-  // Build the event array. Attach `_user` so renderers can read initials/name
-  // without a Map lookup on every paint. One entry per row: this is the list
-  // the lane views place, and it is why every input event lands in exactly one
-  // lane, its owner's.
-  const laneEvents = useMemo(() => {
+  // Build the rbc events array. Attach `_user` so renderers can read
+  // initials/name without a Map lookup on every paint.
+  const rbcEvents = useMemo(() => {
     return events.map(r => {
       const start = new Date(r.startAt);
       const end   = new Date(r.endAt);
@@ -2269,52 +1297,6 @@ export function TeamCalendarTab() {
     }).filter(Boolean);
   }, [events, userById]);
 
-  // The AGENDA is the one view that still shares a single stream between
-  // everybody, so it is the one view where a shared all-day event arriving
-  // once per attendee would print four identical rows. The merge folds those
-  // into a single row wearing every owner's initials. It is applied here and
-  // nowhere else: the lane views give each owner their own row already, so
-  // merging there would take a person's own vacation off their own lane.
-  const agendaEvents = useMemo(() => mergeAllDayEvents(laneEvents), [laneEvents]);
-
-  // Events "in range" counts what the calendars actually hold, which is the
-  // unmerged list. Comparing it against the merged bars' `_members` totals is
-  // the merge's losslessness invariant.
-  const eventTotal = laneEvents.length;
-
-  // ---- lanes -------------------------------------------------------------
-  // One lane per selected person, in roster order, plus a lane for any owner
-  // who has events in range but is no longer on the roster (a disabled user
-  // whose id is still in the saved selection). Without that second pass an
-  // event could arrive with nowhere to go; with it, `bucketByOwner` places
-  // every single event, and every selected person is a lane exactly once.
-  const lanes = useMemo(() => {
-    const built = [];
-    const seen = new Set();
-    for (const u of roster) {
-      if (!selected.has(u.id)) continue;
-      seen.add(u.id);
-      built.push({
-        id: u.id,
-        name: u.name,
-        initials: u.initials || "?",
-        identity: identityVars(u.id),
-      });
-    }
-    for (const ev of laneEvents) {
-      const id = ev.resource?.userId;
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      built.push({
-        id,
-        name: UNKNOWN_OWNER,
-        initials: "?",
-        identity: NEUTRAL_IDENT,
-      });
-    }
-    return built;
-  }, [roster, selected, laneEvents]);
-
   const toggle = (id) => setSelected(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2326,7 +1308,7 @@ export function TeamCalendarTab() {
 
   const eventPropGetter = (event) => {
     // The wrapper class kills RBC's default blue tile so our renderers fully
-    // own the visual row. Only the agenda still runs through this.
+    // own the visual block. The data attr is a hook for selected-event focus.
     return { className: "tcal-evt-wrap" };
   };
 
@@ -2342,31 +1324,18 @@ export function TeamCalendarTab() {
   const effectiveView = isMobile ? "agenda" : view;
   const viewsAvailable = isMobile ? ["agenda"] : DESKTOP_VIEWS;
 
-  // ---- event activation -------------------------------------------------
-  // One route for every way an event can be opened: a lane block, an agenda
-  // row, or a row of the week cell's day list.
-  const openEvent = useCallback((e) => {
-    setDayList(null);
-    setPopoverEvent(e);
-  }, []);
-
-  // A week cell hands over its person + day so the list can name itself.
-  const openDayList = useCallback((group) => {
-    setPopoverEvent(null);
-    setDayList(group);
+  const scrollToTime = useMemo(() => {
+    const t = new Date(); t.setHours(7, 0, 0, 0); return t;
   }, []);
 
   const nothingSelected = selected.size === 0;
-  const firstLoad  = !nothingSelected && loading && laneEvents.length === 0;
+  const emptyRange = !nothingSelected && !loading && rbcEvents.length === 0;
+  const firstLoad  = !nothingSelected && loading && rbcEvents.length === 0;
 
-  // The overlay is now the FIRST LOAD only. An empty range used to need a
-  // card explaining itself because an empty time grid says nothing; a lane
-  // view says it perfectly well on its own, with a row per person reading
-  // "Nothing booked" and a per-day tally of nought. Covering that up with a
-  // card would hide the answer to make room for a restatement of it. The
-  // agenda still gets rbc's own `noEventsInRange` slot, which is a list and
-  // therefore genuinely blank when empty.
-  const showGridOverlay = effectiveView !== "agenda" && firstLoad;
+  // The agenda view renders its own "nothing here" slot, so the floating
+  // overlay is reserved for the month/week/day grids and the two never
+  // double up.
+  const showGridOverlay = effectiveView !== "agenda" && (emptyRange || firstLoad);
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -2390,7 +1359,7 @@ export function TeamCalendarTab() {
           <EmptyState
             icon={CalendarGlyph}
             title="No colleagues selected"
-            description="Open the People picker and choose whose Outlook calendars to show. Everyone you pick gets their own row, so nobody's events land on top of anybody else's."
+            description="Open the People picker and choose whose Outlook calendars to overlay. Everyone you pick gets their own colour and initials on the grid."
             action={
               <Button variant="primary" size="sm" onClick={selectAll}>
                 Show everyone
@@ -2402,44 +1371,32 @@ export function TeamCalendarTab() {
             className="relative min-w-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-xs)]"
             aria-busy={loading || undefined}
           >
-            <div className="min-w-0">
+            <div className="bx-scroll-x min-w-0">
               <Calendar
                 localizer={localizer}
-                // The agenda is the only view still fed by rbc's own event
-                // pipeline, so it gets the all-day-merged stream. The lane
-                // views read `laneEvents`, one entry per calendar row.
-                events={agendaEvents}
-                laneEvents={laneEvents}
-                laneUsers={lanes}
-                onOpenDayList={openDayList}
+                events={rbcEvents}
                 view={effectiveView}
                 onView={(v) => { if (!isMobile) setView(v); }}
                 date={date}
                 onNavigate={setDate}
                 startAccessor="start"
                 endAccessor="end"
-                // Month, week and day are this page's own components; agenda
-                // is react-big-calendar's. `Calendar` still owns navigation,
-                // the toolbar, the view switch and event activation for all
-                // four, and each custom view carries the same `navigate`,
-                // `range` and `title` statics the library view it replaces did.
-                views={{
-                  month:  TeamMonth,
-                  week:   WeekMatrix,
-                  day:    DayLanes,
-                  agenda: true,
-                }}
+                views={{ month: true, week: true, day: true, agenda: true }}
                 eventPropGetter={eventPropGetter}
                 dayPropGetter={dayPropGetter}
                 popup
                 // Read-only: NO selectable, NO onSelectSlot, NO drag/drop.
                 selectable={false}
+                step={30}
+                timeslots={2}
+                scrollToTime={scrollToTime}
                 components={{
+                  event: MonthPill,
                   toolbar: (props) => (
                     <CalToolbar
                       {...props}
                       viewsAvailable={viewsAvailable}
-                      eventCount={eventTotal}
+                      eventCount={rbcEvents.length}
                       peopleOn={selected.size}
                       onRefresh={handleRefresh}
                       syncing={syncing || loading}
@@ -2449,9 +1406,11 @@ export function TeamCalendarTab() {
                       refreshError={refreshError}
                     />
                   ),
+                  week:   { event: TimeBlock },
+                  day:    { event: TimeBlock },
                   agenda: { event: AgendaRow },
                 }}
-                onSelectEvent={openEvent}
+                onSelectEvent={(e) => setPopoverEvent(e)}
                 formats={{
                   monthHeaderFormat:    (d, _c, l) => l.format(d, "MMMM yyyy"),
                   dayHeaderFormat:      (d, _c, l) => l.format(d, "EEEE · MMM d"),
@@ -2491,18 +1450,20 @@ export function TeamCalendarTab() {
 
             {showGridOverlay && (
               <GridOverlay>
-                <LoadingCard />
+                {firstLoad ? (
+                  <LoadingCard />
+                ) : (
+                  <EmptyState
+                    className="bg-[var(--surface)] shadow-[var(--shadow-md)]"
+                    compact
+                    icon={ClockGlyph}
+                    title={NO_EVENTS_TITLE}
+                    description={NO_EVENTS_BODY}
+                  />
+                )}
               </GridOverlay>
             )}
           </div>
-        )}
-
-        {dayList && (
-          <DayListDialog
-            group={dayList}
-            onOpenEvent={openEvent}
-            onClose={() => setDayList(null)}
-          />
         )}
 
         {popoverEvent && (
