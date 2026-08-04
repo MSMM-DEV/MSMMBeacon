@@ -32,7 +32,7 @@
 // initials, and the legend spells out the full name next to the swatch.
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import {
   format, parse, startOfWeek, getDay,
@@ -163,6 +163,165 @@ function smartTitle(r) {
   // event" implies a title went missing from an otherwise-complete record,
   // which misdescribes the data.
   return "Busy";
+}
+
+// ---------------------------------------------------------------------------
+// Week / day column layout.
+//
+// react-big-calendar ships two layout algorithms and neither survives sixteen
+// overlaid calendars:
+//
+//   `overlap`     gives every concurrent event an equal share of the column
+//                 and then widens each one to 1.7x that share so blocks
+//                 deliberately sit on top of each other. Columns therefore
+//                 never divide evenly, no block ends flush with the day's
+//                 right edge, and at real density the share is a few pixels.
+//   `no-overlap`  divides evenly with a 3px gutter (good) but subtracts 2px
+//                 from every block's height, so no block ends on its time
+//                 boundary (bad), and it still divides a 131px column by the
+//                 concurrency count, so twelve at once is 11px each.
+//
+// Both produced the unlabelled bordered slivers: a block's identity rule,
+// hairline and padding come to more than its whole width, so `overflow:hidden`
+// ate the label and left an empty box.
+//
+// This is the traditional third option, the one Outlook and Google reach for
+// when a slot is crowded: divide evenly while the columns still clear a
+// measured legibility floor, and cascade past that point so every block keeps
+// its left edge, its colour rule and its initials, and stays clickable.
+//
+// EVT_MIN_PX is that floor, and it is measured rather than chosen: rendered in
+// the roster font at --fs-2xs/700, the widest two-letter monogram ("WM") is
+// 20.7px, or 20.3px once the sub-floor tier drops the tracking. The sub-floor
+// block skin in styles.css spends 3px on the identity rule and 1px of padding
+// and gives up its right-hand hairline, so 3 + 1 + 20.3 = 24.3px of demand,
+// rounded to 26px. That is the narrowest a block can be and still name its
+// owner; below it there is nothing left to say.
+const EVT_MIN_PX    = 26;
+// Gap between evenly-divided columns. Consistent by construction: it is the
+// only px term in the width expression.
+const EVT_GUTTER_PX = 2;
+
+/**
+ * Build a `dayLayoutAlgorithm` for a known day-column width.
+ *
+ * `colPx` is the measured inner width of one day column (0 before the first
+ * measurement lands, which simply means "assume everything fits").
+ *
+ * Returns rbc's `{ event, style }` shape. `top` and `height` are passed
+ * through as exact percentages of the day so a block's edges land on its time
+ * boundaries; only the horizontal arrangement is ours.
+ */
+function makeDayLayout(colPx) {
+  return function beaconDayLayout({ events, slotMetrics, accessors }) {
+    if (!events || events.length === 0) return [];
+
+    const items = events.map((event) => {
+      const r = slotMetrics.getRange(accessors.start(event), accessors.end(event));
+      return { event, top: r.top, height: r.height, start: r.start, end: r.end };
+    });
+    // Earliest first; longer of two equal starts first, so the block a
+    // neighbour is nested inside is the one on the left.
+    items.sort((a, b) => (a.start - b.start) || (b.end - a.end) || 0);
+
+    // Greedy interval-graph colouring. Scanning by start time makes the greedy
+    // choice optimal, so `cols` is exactly the peak concurrency of the cluster
+    // rather than the inflated count rbc's container/row grouping produces.
+    // A cluster ends the moment an event starts after everything before it.
+    const clusters = [];
+    let cur = null;
+    for (const it of items) {
+      if (!cur || it.start >= cur.end) {
+        cur = { items: [], colEnds: [], end: -Infinity };
+        clusters.push(cur);
+      }
+      let c = cur.colEnds.findIndex((e) => e <= it.start);
+      if (c === -1) { c = cur.colEnds.length; cur.colEnds.push(it.end); }
+      else cur.colEnds[c] = it.end;
+      it.col = c;
+      cur.items.push(it);
+      if (it.end > cur.end) cur.end = it.end;
+    }
+
+    // How many blocks can sit side by side and still clear the floor.
+    const capacity = colPx > 0
+      ? Math.max(1, Math.floor((colPx + EVT_GUTTER_PX) / (EVT_MIN_PX + EVT_GUTTER_PX)))
+      : Infinity;
+
+    const out = [];
+    for (const cl of clusters) {
+      const cols = cl.colEnds.length;
+      const cascade = cols > capacity;
+      // Paint order is array order, so leftmost first leaves the cascade's
+      // later columns on top and every earlier block's left edge exposed.
+      cl.items.sort((a, b) => a.col - b.col);
+
+      for (const it of cl.items) {
+        const i = it.col;
+        let width = "100%";
+        let xOffset = "0%";
+        if (cols > 1 && !cascade) {
+          // Even columns: `cols` equal shares separated by exactly one gutter.
+          // The expression is percentage-based, so the last column's right
+          // edge is the container's right edge to the sub-pixel.
+          const g = (cols - 1) * EVT_GUTTER_PX;
+          width   = `calc((100% - ${g}px) / ${cols})`;
+          xOffset = `calc((100% - ${g}px) * ${i} / ${cols} + ${i * EVT_GUTTER_PX}px)`;
+        } else if (cascade) {
+          // Cascade. Every block in the fan is the SAME width, never below
+          // the floor, and the fan spans exactly the column: block i sits at
+          // i/(cols-1) of the leftover space, so block 0 starts on the left
+          // edge and the last block ends on the right one. Once the floor
+          // bites, consecutive blocks overlap by (floor - step) and each one
+          // shows the step-wide left edge that carries its rule and initials,
+          // which is how Outlook and Google draw a slot this crowded.
+          //
+          // Width is the block's OWN box, not a slab reaching the far edge:
+          // a block wider than the sliver its neighbour leaves it would lay
+          // out a title and a time it cannot show, and the visible fragment
+          // of that is half a word, which is worse than the initials alone.
+          const w = `max(${EVT_MIN_PX}px, 100% / ${cols})`;
+          width   = w;
+          xOffset = `calc((100% - ${w}) * ${i} / ${cols - 1})`;
+        }
+        out.push({
+          event: it.event,
+          style: { top: it.top, height: it.height, width, xOffset },
+        });
+      }
+    }
+    return out;
+  };
+}
+
+/**
+ * Measured inner width of one day column, for the layout above. Read from the
+ * live grid rather than computed, so the gutter, the hairlines and whatever
+ * the shell is doing to the page width are all already accounted for.
+ */
+function useDayColumnWidth(ref, deps) {
+  const [colPx, setColPx] = useState(0);
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root || typeof ResizeObserver === "undefined") return undefined;
+    let raf = 0;
+    const read = () => {
+      const c = root.querySelector(".rbc-day-slot .rbc-events-container");
+      const w = c ? c.getBoundingClientRect().width : 0;
+      // Only react to real changes; the layout never feeds back into the
+      // column width, so this settles after one pass.
+      if (w > 0) setColPx((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
+    };
+    read();
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(read);
+    });
+    ro.observe(root);
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return colPx;
 }
 
 function useIsMobile(breakpoint = 640) {
@@ -610,6 +769,29 @@ function attendeeCount(r) {
 // on a narrow column have to be able to `display: none` a part, which a
 // layered rule cannot do to an element carrying a display utility.
 
+// react-big-calendar puts `role="button"` and the click handler on the element
+// that WRAPS these renderers, so the block's accessible name is whatever text
+// they leave in the DOM. On a narrow column the container queries hide the
+// title and the initials tile is decorative, which would leave a focusable
+// button with no name at all. Every renderer therefore states the block in
+// full for a screen reader and marks the visual content decorative, so what is
+// announced does not change as the column narrows.
+function blockLabel(event) {
+  const r = event.resource;
+  const who = r._user?.name || "Unknown";
+  const when = r.isAllDay
+    ? "all day"
+    : `${fmtTime(event.start)} to ${fmtTime(event.end)}`;
+  const n = attendeeCount(r);
+  return [
+    who,
+    event.title,
+    when,
+    r.location || null,
+    n > 1 ? `${n} attendees` : null,
+  ].filter(Boolean).join(", ");
+}
+
 function MonthPill({ event }) {
   const r = event.resource;
   const n = attendeeCount(r);
@@ -620,12 +802,13 @@ function MonthPill({ event }) {
       data-cancelled={r.isCancelled ? "true" : undefined}
       style={identityVars(r.userId)}
     >
+      <span className="sr-only">{blockLabel(event)}</span>
       <span className="bxtc-evt-initials" aria-hidden="true">
         {r._user?.initials || "··"}
       </span>
-      <span className="bxtc-evt-title">{event.title}</span>
+      <span className="bxtc-evt-title" aria-hidden="true">{event.title}</span>
       {n > 1 && (
-        <span className="bxtc-tick" title={`${n} attendees`}>+{n}</span>
+        <span className="bxtc-tick" aria-hidden="true">+{n}</span>
       )}
     </div>
   );
@@ -634,12 +817,20 @@ function MonthPill({ event }) {
 function TimeBlock({ event }) {
   const r = event.resource;
   const minutes = Math.max(0, differenceInMinutes(event.end, event.start));
-  // Density tiers control how much chrome we render inside the block.
-  // <30 min: title + owner only. 30-59: + time. >=60: + location + attendees.
+  // Density tiers control how much chrome we render inside the block, and the
+  // thresholds come out of the row-height arithmetic rather than being round
+  // numbers. At the grid's 52px hour a minute is 0.867px; a line of block text
+  // is a 13px box, and above the "xs" tier the block also spends 2px on
+  // hairlines, 4px on padding and 1px per gap. So one line fits in a
+  // quarter-hour (13px, and the tier drops the padding to make it exact), two
+  // need 33px (39 min) and three need 47px (55 min). Rounded to the slot
+  // boundary above, that is 45 and 60 minutes. Below each threshold the block
+  // DROPS the line rather than clipping it, which is what used to leave a
+  // half-height row of text at the bottom of a short block.
   // That is the HEIGHT budget. The WIDTH budget is handled by the container
-  // queries on `.rbc-event`, which drop the meta lines, then the title, then
-  // the initials as overlapping columns squeeze a block down to a rule.
-  const density = minutes < 30 ? "xs" : minutes < 60 ? "sm" : "lg";
+  // queries on `.rbc-event`, which drop the meta lines, then the title, and
+  // finally the block's own hairline, leaving the owner's rule and initials.
+  const density = minutes < 45 ? "xs" : minutes < 60 ? "sm" : "lg";
   const n = attendeeCount(r);
   return (
     <div
@@ -649,8 +840,9 @@ function TimeBlock({ event }) {
       data-cancelled={r.isCancelled ? "true" : undefined}
       style={identityVars(r.userId)}
     >
-      <span className="bxtc-evt-head">
-        <span className="bxtc-evt-initials" aria-hidden="true">
+      <span className="sr-only">{blockLabel(event)}</span>
+      <span className="bxtc-evt-head" aria-hidden="true">
+        <span className="bxtc-evt-initials">
           {r._user?.initials || "··"}
         </span>
         <span className="bxtc-evt-title">{event.title}</span>
@@ -660,13 +852,13 @@ function TimeBlock({ event }) {
       </span>
 
       {density !== "xs" && (
-        <span className="bxtc-evt-meta">
+        <span className="bxtc-evt-meta" aria-hidden="true">
           <span>{fmtTime(event.start)} – {fmtTime(event.end)}</span>
         </span>
       )}
 
       {density === "lg" && r.location && (
-        <span className="bxtc-evt-meta">
+        <span className="bxtc-evt-meta" aria-hidden="true">
           <Icon name="pin" size={10} stroke={2} />
           <span title={r.location}>{r.location}</span>
         </span>
@@ -1324,6 +1516,12 @@ export function TeamCalendarTab() {
   const effectiveView = isMobile ? "agenda" : view;
   const viewsAvailable = isMobile ? ["agenda"] : DESKTOP_VIEWS;
 
+  // Column width drives only the even-columns / cascade decision in the day
+  // layout below; nothing about the data or the view depends on it.
+  const gridRef = useRef(null);
+  const colPx = useDayColumnWidth(gridRef, [effectiveView, date]);
+  const dayLayout = useMemo(() => makeDayLayout(colPx), [colPx]);
+
   const scrollToTime = useMemo(() => {
     const t = new Date(); t.setHours(7, 0, 0, 0); return t;
   }, []);
@@ -1371,7 +1569,7 @@ export function TeamCalendarTab() {
             className="relative min-w-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-xs)]"
             aria-busy={loading || undefined}
           >
-            <div className="bx-scroll-x min-w-0">
+            <div className="bx-scroll-x min-w-0" ref={gridRef}>
               <Calendar
                 localizer={localizer}
                 events={rbcEvents}
@@ -1387,6 +1585,7 @@ export function TeamCalendarTab() {
                 popup
                 // Read-only: NO selectable, NO onSelectSlot, NO drag/drop.
                 selectable={false}
+                dayLayoutAlgorithm={dayLayout}
                 step={30}
                 timeslots={2}
                 scrollToTime={scrollToTime}

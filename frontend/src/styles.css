@@ -22997,8 +22997,10 @@ button.tsx-tl-seg { cursor: pointer; }
   align-items: stretch;
   justify-content: flex-start;
   gap: 1px;
-  /* 2px short of the column so two overlapping blocks never share an edge. */
-  width: calc(100% - 2px);
+  /* Fills its slot exactly. The gap between two side-by-side blocks is the
+     layout algorithm's gutter, not a margin here, so the gutter is the same
+     whatever the column count and the last column ends flush with the day. */
+  width: 100%;
   height: 100%;
   padding: 2px 5px 2px 4px;
 }
@@ -23020,10 +23022,18 @@ button.tsx-tl-seg { cursor: pointer; }
 }
 .bxtc-evt--block[data-allday="true"] .bxtc-evt-meta { display: none; }
 
+/* The first line of a block is exactly 13px tall whatever it happens to
+   contain. Left to size itself, the head grew with the tallest thing in it —
+   a title line box, an attendee counter — so a block that had shed its title
+   sat its initials 1.7px higher than the block beside it and a row of blocks
+   stopped reading as a row. 13px is the tallest child line box (the title's
+   11.5px at 1.1) rounded up, and it is also exactly one quarter-hour of grid,
+   so the shortest block holds one line with nothing clipped. */
 .bxtc-evt-head {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-height: 13px;
   min-width: 0;
 }
 .bxtc-evt-initials {
@@ -23043,7 +23053,7 @@ button.tsx-tl-seg { cursor: pointer; }
   white-space: nowrap;
   font-size: var(--fs-xs);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.1;
 }
 .bxtc-evt--pill .bxtc-evt-title { font-size: var(--fs-2xs); font-weight: 500; }
 .bxtc-evt[data-cancelled="true"] .bxtc-evt-title { text-decoration: line-through; }
@@ -23078,42 +23088,52 @@ button.tsx-tl-seg { cursor: pointer; }
   color: var(--u-ink);
   font-size: var(--fs-2xs);
   font-weight: 600;
-  line-height: 15px;
+  /* Matches the other line boxes in the head so the counter cannot make the
+     head taller than 13px and shift the line it sits on. */
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
 /* ---- dense overlap ------------------------------------------------------
-   react-big-calendar gives each overlapping event a percentage width, so a
-   mid-morning stack of a dozen can leave every block ~15px wide. Rather than
-   painting a sliver of colour around clipped text, a block sheds its contents
-   in steps and finally becomes just the owner's rule on the tint: the number
-   of people busy is still readable as the number of rules, and the dialog is
-   one click away. Height-driven density is handled by [data-density] above. */
+   The day layout in team-calendar.jsx guarantees every block at least
+   EVT_MIN_PX (26px) of width, and these tiers are the other half of that
+   contract: they say what 26px is enough FOR. A block sheds its meta lines,
+   then its title, then its own hairline, and the last thing standing is the
+   owner's colour rule and initials. Nothing below drops the initials, because
+   a bordered box with no characters in it is exactly the failure this floor
+   exists to prevent. Height-driven density is [data-density] above. */
 .bx-teamcal .rbc-day-slot .rbc-event { container: bxtcevt / inline-size; }
 
 @container bxtcevt (max-width: 108px) {
   .bxtc-evt-meta { display: none; }
 }
 /* Only the owner survives. Kept hard against the left rule rather than
-   centred: rbc's overlap layout parks the NEXT column on top of this one's
-   right-hand side, so the left edge is the part guaranteed to stay visible. */
+   centred: in a cascade the NEXT column sits on top of this one's right-hand
+   side, so the left edge is the part guaranteed to stay visible. */
 @container bxtcevt (max-width: 58px) {
   .bxtc-evt-title,
   .bxtc-tick { display: none; }
-  .bxtc-evt--block { justify-content: center; padding-inline: 3px 1px; }
+  /* Only the horizontal padding tightens. Vertical centring here would put a
+     narrow block's initials 29px below its wide neighbour's, and a row of
+     blocks has to read as a row; the block's height tier already decides
+     where the first line sits. */
+  .bxtc-evt--block { padding-inline: 3px 1px; }
 }
-/* Nothing legible fits. The block gives up its hairline and thins its rule,
-   so twenty simultaneous meetings read as twenty quiet marks on the day
-   rather than twenty filled bars with edges between them. */
+/* The floor itself, and the arithmetic behind EVT_MIN_PX in team-calendar.jsx:
+   a 3px identity rule, 1px of padding, and the rest of the 26px for the
+   monogram, which needs 20.3px for the widest pair of capitals once the
+   tracking is dropped. Everything else the block would normally spend width
+   on — its right hairline, its right padding — is spent on the monogram
+   instead, so a fan of blocks reads as a row of initials against their
+   owners' colours rather than as a row of empty edged rectangles. */
 @container bxtcevt (max-width: 30px) {
-  .bxtc-evt-initials { display: none; }
   .bxtc-evt--block {
     border-top-color: transparent;
-    border-right-color: transparent;
     border-bottom-color: transparent;
-    border-left-width: 2px;
-    padding: 0;
+    border-right-width: 0;
+    padding-inline: 1px 0;
   }
+  .bxtc-evt-initials { letter-spacing: 0; }
 }
 
 /* ==========================================================================
@@ -23160,16 +23180,43 @@ button.tsx-tl-seg { cursor: pointer; }
   color: var(--text-muted);
   background: var(--surface-2);
 }
-.bx-teamcal .rbc-header + .rbc-header { border-left: 1px solid var(--border); }
+/* Column dividers are inset shadows, not borders. A border on a `flex: 1 0 0`
+   column is added on TOP of its zero flex base, so in a bordered row the
+   first column comes out a pixel wider than its six neighbours and the row
+   stops matching the unbordered rows stacked over it (the date numbers, the
+   event segments). Measured drift before: up to 0.86px by the seventh day.
+   An inset shadow paints the same hairline at the same x and leaves the box
+   alone, so every seven-column row in the calendar divides identically. */
+.bx-teamcal .rbc-header + .rbc-header {
+  border-left: 0;
+  box-shadow: inset 1px 0 0 var(--border);
+}
 .bx-teamcal .rbc-time-header .rbc-header { text-transform: none; letter-spacing: 0; }
 .bx-teamcal .rbc-time-header .rbc-header.rbc-today {
   color: var(--accent-ink);
   background: var(--accent-soft);
 }
 
+/* ---- grid geometry ------------------------------------------------------
+   react-big-calendar draws a day's background columns in an absolutely
+   positioned `.rbc-row-bg` that it insets by 1px on the right. Everything
+   stacked on top of it (the column headers, the date numbers, the all-day
+   bars) spans the full width instead, so the background columns run ~0.14px
+   narrower than the columns they are supposed to be, and by the seventh day
+   the tint and the content it is tinting are a whole pixel apart. Removing
+   the inset makes the two grids the same grid. */
+.bx-teamcal .rbc-row-bg { right: 0; }
+
 /* ---- month grid --------------------------------------------------------- */
-.bx-teamcal .rbc-month-row + .rbc-month-row { border-top: 1px solid var(--border); }
-.bx-teamcal .rbc-day-bg + .rbc-day-bg { border-left: 1px solid var(--border); }
+/* Every row carries the same 1px top border, so all six rows are exactly the
+   same height; only the colour tells you which ones are separators. Bordering
+   just `+ .rbc-month-row` left the first week 1px shorter than the other five. */
+.bx-teamcal .rbc-month-row { border-top: 1px solid transparent; }
+.bx-teamcal .rbc-month-row + .rbc-month-row { border-top-color: var(--border); }
+.bx-teamcal .rbc-day-bg + .rbc-day-bg {
+  border-left: 0;
+  box-shadow: inset 1px 0 0 var(--border);
+}
 .bx-teamcal .rbc-off-range { color: var(--text-soft); }
 .bx-teamcal .rbc-off-range-bg { background: var(--surface-2); }
 .bx-teamcal .rbc-today,
@@ -23211,15 +23258,31 @@ button.tsx-tl-seg { cursor: pointer; }
   border-bottom: 1px solid var(--border);
 }
 .bx-teamcal .rbc-time-header.rbc-overflowing { border-right: 1px solid var(--border); }
-.bx-teamcal .rbc-time-header-content { border-left: 1px solid var(--border); }
+/* The divider between the time gutter and the first day belongs INSIDE the
+   first column, not on the wrapper around all seven. On the wrapper it took a
+   pixel out of the header strip that the day columns below still had, so the
+   seven headers divided a width one pixel narrower than the seven columns and
+   every header drifted a fraction further left than the column it names. Both
+   grids now divide the same width and draw their dividers at the same x. */
+.bx-teamcal .rbc-time-header-content { border-left: 0; }
+.bx-teamcal .rbc-time-header-content .rbc-header,
+.bx-teamcal .rbc-allday-cell .rbc-day-bg {
+  box-shadow: inset 1px 0 0 var(--border);
+}
 .bx-teamcal .rbc-time-content {
   border-top: 1px solid var(--border);
   overscroll-behavior-y: contain;
 }
 .bx-teamcal .rbc-time-content > * + * > * { border-left: 1px solid var(--border); }
+/* One hour = 52px, i.e. 13px per quarter hour, which is exactly one block
+   head. That is the smallest hour that lets a 15-minute block sit on its own
+   time boundaries AND print a line inside itself. At the previous 44px hour a
+   quarter-hour block was 11px and had to be stretched to a minimum height to
+   show anything, which is why short blocks used to end below the gridline
+   they belong to. */
 .bx-teamcal .rbc-timeslot-group {
   border-bottom: 1px solid var(--border);
-  min-height: 44px;
+  min-height: 52px;
 }
 .bx-teamcal .rbc-day-slot .rbc-time-slot {
   border-top: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
@@ -23232,12 +23295,17 @@ button.tsx-tl-seg { cursor: pointer; }
   text-align: right;
 }
 .bx-teamcal .rbc-time-gutter .rbc-timeslot-group { border-bottom-color: transparent; }
+/* The label's box top IS the gridline it names; there is no lead-in padding,
+   so an hour label and its hour start at exactly the same y. `--text-muted`
+   rather than `--text-soft`: at 10.5px this is body text, and soft only held
+   3.66:1 on the gutter's surface in dark. */
 .bx-teamcal .rbc-time-gutter .rbc-label {
   display: block;
-  padding: 2px 8px 0 6px;
+  padding: 0 8px 0 6px;
   font-size: var(--fs-2xs);
+  line-height: 13px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-soft);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 /* Single-day week headers are noise: the toolbar already names the day. */
@@ -23293,10 +23361,12 @@ button.tsx-tl-seg { cursor: pointer; }
 .bx-teamcal .rbc-month-view .rbc-event { margin: 1px 2px; }
 .bx-teamcal .rbc-row-segment { padding: 0 1px 1px; }
 
-/* Time grid: the rbc-event carries the exact pixel height for the duration,
-   so the renderer inside must fill it edge to edge. */
+/* Time grid: the rbc-event carries the exact percentage height for the
+   duration, so the renderer inside must fill it edge to edge. `min-height: 0`
+   is load-bearing: the 18px floor this rule used to set (and rbc's own 20px)
+   made every block shorter than 21 minutes end past its own finish time. */
 .bx-teamcal .rbc-day-slot .rbc-event {
-  min-height: 18px;
+  min-height: 0;
   overflow: hidden;
 }
 .bx-teamcal .rbc-day-slot .rbc-event-label { display: none; }
@@ -23306,7 +23376,19 @@ button.tsx-tl-seg { cursor: pointer; }
   padding: 0;
   line-height: var(--lh-tight);
 }
-.bx-teamcal .rbc-day-slot .rbc-events-container { margin-right: 6px; }
+/* The events area IS the day column: 1px in from the column's own hairline on
+   the left, flush with the column's right edge. rbc reserves 10px on the
+   right for click-to-create, which this view does not have, and every pixel
+   reserved there is a pixel the last column stops short of the gridline. */
+.bx-teamcal .rbc-day-slot .rbc-events-container {
+  margin-left: 1px;
+  margin-right: 0;
+}
+/* A cascaded block is only as visible as the block to its right allows, so
+   pointing at one lifts it clear. Same treatment for keyboard focus, which
+   already raised the block; hover just makes the mouse behave like the
+   keyboard does. */
+.bx-teamcal .rbc-day-slot .rbc-event:hover { z-index: 7; }
 
 /* "+3 more" affordance and its popup. */
 .bx-teamcal .rbc-show-more {
