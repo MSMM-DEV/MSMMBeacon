@@ -48,7 +48,7 @@ import { enUS } from "date-fns/locale";
 
 import { Icon } from "./icons.jsx";
 import {
-  getUsers, loadTeamCalendarEvents, userColorTokens,
+  getUsers, loadTeamCalendarEvents,
   runOutlookSyncNow, isAdmin as getIsAdmin,
 } from "./data.js";
 import {
@@ -61,6 +61,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle,
   Tooltip, TooltipProvider,
 } from "@/ui";
+// Per-person colour, the initials tile and two formatters. Shared with the
+// lane layout, so they live in a module neither layout owns.
+import {
+  EMPTY, IDENT, NEUTRAL_IDENT, UNKNOWN_OWNER, Swatch,
+  identityVars, fmtTime, attendeeCount,
+} from "./team-calendar-shared.jsx";
+import {
+  DayLanes, WeekMatrix, TeamMonth, DayListDialog,
+} from "./team-calendar-lanes.jsx";
 
 const locales = { "en-US": enUS };
 const localizer = dateFnsLocalizer({
@@ -72,20 +81,43 @@ const localizer = dateFnsLocalizer({
 const VIEW_LABEL = { month: "Month", week: "Week", day: "Day", agenda: "Agenda" };
 const DESKTOP_VIEWS = ["month", "week", "day", "agenda"];
 
+// ----- Layout ---------------------------------------------------------------
+// Two ways of drawing the same loaded events, chosen by the user rather than
+// picked for them, because the two answer different questions and which one
+// is wanted depends on what is being asked.
+//
+//   grid   the familiar calendar: one shared time axis per day, everybody
+//          stacked into it. Best for "what is happening at 10am" and for
+//          reading one or two people closely.
+//   people one row per person, time across. Best for "who is free at 10am":
+//          a lane holds exactly one calendar, so blocks only compete when
+//          somebody is genuinely double-booked. Holds up as the roster grows,
+//          where the shared grid's day column has to divide by the number of
+//          people busy at once.
+//
+// Only month/week/day differ. Agenda is react-big-calendar's own in both, and
+// so is every navigation control, which is why switching never changes the
+// date, the view, the selection or what has been loaded.
+const CAL_LAYOUTS = [
+  { id: "grid",   label: "Grid",   icon: "calendarDays",
+    hint: "Shared time grid, everyone overlaid" },
+  { id: "people", label: "People", icon: "users",
+    hint: "One row per person, time across" },
+];
+const LAYOUT_IDS = CAL_LAYOUTS.map(l => l.id);
+
 // LocalStorage keys — namespaced so they don't collide with other tabs.
 // .v2 suffix on the selection key forces a fresh "Engineering by default"
 // roll-out for users who'd previously saved the all-internal default.
 const LS_SELECTED   = "beacon.teamCalendar.selectedUserIds.v2";
 const LS_VIEW       = "beacon.teamCalendar.view";
+const LS_LAYOUT     = "beacon.teamCalendar.layout";
 
 // Department name used to anchor the default selection. Stored verbatim in
 // beacon_v2.users.department; case-insensitive match below.
 const DEFAULT_DEPARTMENT = "Engineering";
 
 const INTERNAL_EMAIL_RE = /@msmmeng\.com$/i;
-
-// Placeholder for an empty cell. En dash, per the design contract.
-const EMPTY = "–";
 
 // ----- Outlook attendee response → display chip mapping -------------------
 // Graph values: 'none' | 'organizer' | 'tentativelyAccepted' | 'accepted'
@@ -389,84 +421,6 @@ function timeAgo(date, nowMs) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-person identity colour.
-//
-// WHICH palette slot a person gets is decided in data.js (`userColorTokens`,
-// rotated per department) and is not touched here. What that slot RENDERS AS
-// is decided here, and that is the whole point of this section: the raw slot
-// is a fully-saturated hue, and twenty fully-saturated hues sharing one week
-// grid is a barcode, not information.
-//
-// The projection below keeps the slot's hue exactly, and keeps its *rank* on
-// the two other axes (a slot more saturated than its neighbours stays more
-// saturated; a darker slot stays darker) but compresses both ranks into a
-// narrow, deliberately dull band. The hue then only ever appears as a 3px
-// rule, a small initials tile, or an all-day outline, while the event body
-// sits on a near-neutral wash of the same hue.
-//
-// Measured across all 30 slots in both themes: --u-ink on --u-tint is 7.1:1
-// at worst, --u-ink on --u-chip 5.4:1, --text-muted on --u-tint 5.1:1, and
-// the --u-key rule holds 3.3:1 against whatever it sits on.
-//
-// Four values are emitted per theme; `.bxtc-ident` in styles.css picks the
-// matching pair, so nothing downstream needs a `dark:` variant.
-// ---------------------------------------------------------------------------
-const IDENT = "bxtc-ident";
-
-// `userColorTokens().stripe` is the slot's raw `hsl(H S% L%)`. Hue also comes
-// back on its own; saturation and lightness are only available through this
-// string, so a parse failure falls back to mid chroma and mid tone, which
-// still leaves the hue doing the separating.
-const SLOT_HSL_RE = /hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*\)/;
-
-const clamp01 = (n) => Math.min(1, Math.max(0, n));
-const hslStr = (h, s, l) =>
-  `hsl(${h} ${Math.round(s * 10) / 10}% ${Math.round(l * 10) / 10}%)`;
-
-function identityVars(userId) {
-  const c = userColorTokens(userId);
-  const m = SLOT_HSL_RE.exec(c.stripe || "");
-  const h = m ? Number(m[1]) : (c.hue ?? 0);
-  const s = m ? Number(m[2]) : 55;
-  const l = m ? Number(m[3]) : 48;
-  // Rank of this slot within the source palette's own range (S 22–88, L 30–72).
-  const cr = clamp01((s - 22) / 66);
-  const tr = clamp01((l - 30) / 42);
-  return {
-    "--u-key-l":  hslStr(h, 20 + 34 * cr, 29 + 17 * tr),
-    "--u-key-d":  hslStr(h, 22 + 30 * cr, 54 + 15 * tr),
-    "--u-ink-l":  hslStr(h, 20 + 18 * cr, 23 + 6 * tr),
-    "--u-ink-d":  hslStr(h, 22 + 20 * cr, 76 + 6 * tr),
-    "--u-tint-l": hslStr(h, 30 + 22 * cr, 96),
-    "--u-tint-d": hslStr(h, 14 + 10 * cr, 17),
-    "--u-chip-l": hslStr(h, 28 + 22 * cr, 89),
-    "--u-chip-d": hslStr(h, 18 + 12 * cr, 26),
-  };
-}
-
-// Someone who is not on the roster (an external attendee) gets the neutral
-// surface ramp rather than a colour they do not own.
-const NEUTRAL_IDENT = {
-  "--u-key-l":  "var(--border-strong)", "--u-key-d":  "var(--border-strong)",
-  "--u-ink-l":  "var(--text-muted)",    "--u-ink-d":  "var(--text-muted)",
-  "--u-tint-l": "var(--surface-2)",     "--u-tint-d": "var(--surface-2)",
-  "--u-chip-l": "var(--surface-3)",     "--u-chip-d": "var(--surface-3)",
-};
-
-/**
- * Initials tile in the owner's colour. `aria-hidden` because the owner's
- * name is always rendered (or announced) alongside it: colour is never the
- * only signal. Skin lives in `.bxtc-swatch`; only the size varies per site.
- */
-function Swatch({ initials, className = "" }) {
-  return (
-    <span className={`bxtc-swatch ${className}`} aria-hidden="true">
-      {initials || "··"}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // People picker — a Popover holding the search + department/location Selects
 // + the full roster list, plus an always-visible legend strip of whoever is
 // currently on the calendar. The legend doubles as the colour key: swatch,
@@ -746,20 +700,8 @@ function PeopleBar({ users, selected, onToggle, onSelectAll, onClearAll, onSetMa
 // Every renderer clips: the outer element is `overflow-hidden` and the title
 // truncates, so a long subject can never spill past its slot.
 // ---------------------------------------------------------------------------
-const fmtTime = (d) => {
-  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const hh = ((h + 11) % 12) + 1;
-  const ampm = h < 12 ? "am" : "pm";
-  return m === 0 ? `${hh}${ampm}` : `${hh}:${String(m).padStart(2, "0")}${ampm}`;
-};
-
-// Total attendees on an event (resource shape). The Pass-B mirror stores
-// every attendee — internal + external — in a single jsonb array.
-function attendeeCount(r) {
-  return (r.attendees || []).filter(a => a?.email).length;
-}
+// `fmtTime` and `attendeeCount` come from team-calendar-shared.jsx; both
+// layouts label a block the same way.
 
 // Event skins live in the `.bxtc-evt*` rules in styles.css. Two reasons they
 // are not utility strings: an event sets an all-round border colour AND a
@@ -1205,6 +1147,7 @@ function EventPopover({ event, onClose }) {
 function CalToolbar({
   label, onNavigate, onView, view, viewsAvailable, eventCount, peopleOn,
   onRefresh, syncing, isAdmin, lastRefreshedAt, nowMs, refreshError,
+  layout, onLayout, layoutAvailable,
 }) {
   const freshness = lastRefreshedAt
     ? `Updated ${timeAgo(lastRefreshedAt, nowMs)}`
@@ -1279,6 +1222,26 @@ function CalToolbar({
             <TabsList variant="segmented" aria-label="Calendar view">
               {viewsAvailable.map(v => (
                 <TabsTrigger key={v} value={v}>{VIEW_LABEL[v]}</TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
+
+        {/* Layout switch. Sits after the view switch because it is the
+            coarser of the two and changes far less often, and it is hidden
+            on the mobile agenda, which has only one layout. The label drops
+            below `sm` so the pair of controls still fits a tablet. */}
+        {layoutAvailable && (
+          <Tabs value={layout} onValueChange={(v) => onLayout(v)}>
+            <TabsList variant="segmented" aria-label="Calendar layout">
+              {CAL_LAYOUTS.map(l => (
+                <TabsTrigger key={l.id} value={l.id} title={l.hint}>
+                  <Icon name={l.icon} size={14} />
+                  {/* One text node, not two: below `sm` it is read but not
+                      drawn, so the control narrows to its icons without the
+                      label disappearing from the accessibility tree. */}
+                  <span className="sr-only sm:not-sr-only">{l.label}</span>
+                </TabsTrigger>
               ))}
             </TabsList>
           </Tabs>
@@ -1391,10 +1354,22 @@ export function TeamCalendarTab() {
   });
   useEffect(() => { lsWrite(LS_VIEW, view); }, [view]);
 
+  // Which of the two layouts draws month/week/day. Persisted like the view,
+  // and deliberately independent of it: the choice of shape is not a choice
+  // of period. Defaults to the traditional grid.
+  const [layout, setLayout] = useState(() => {
+    const l = lsRead(LS_LAYOUT, "grid");
+    return LAYOUT_IDS.includes(l) ? l : "grid";
+  });
+  useEffect(() => { lsWrite(LS_LAYOUT, layout); }, [layout]);
+
   const [date, setDate] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [popoverEvent, setPopoverEvent] = useState(null);
+  // The list behind a week cell in the people layout. Grid has no equivalent
+  // (its blocks are directly clickable), so it stays null there.
+  const [dayList, setDayList] = useState(null);
 
   // Manual refresh wiring. `refreshKey` increments to force the loader effect
   // to re-run even when selected/view/date haven't changed. `syncing` is true
@@ -1489,6 +1464,41 @@ export function TeamCalendarTab() {
     }).filter(Boolean);
   }, [events, userById]);
 
+  // ---- lanes -------------------------------------------------------------
+  // One lane per selected person, in roster order, plus a lane for any owner
+  // who has events in range but is no longer on the roster (a disabled user
+  // whose id is still in the saved selection). Without that second pass an
+  // event could arrive with nowhere to go; with it every event is placed and
+  // every selected person is a lane exactly once. Built regardless of layout
+  // so switching does not have to wait on a recompute; it is a map over the
+  // roster, not a fetch.
+  const lanes = useMemo(() => {
+    const built = [];
+    const seen = new Set();
+    for (const u of roster) {
+      if (!selected.has(u.id)) continue;
+      seen.add(u.id);
+      built.push({
+        id: u.id,
+        name: u.name,
+        initials: u.initials || "?",
+        identity: identityVars(u.id),
+      });
+    }
+    for (const ev of rbcEvents) {
+      const id = ev.resource?.userId;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      built.push({
+        id,
+        name: UNKNOWN_OWNER,
+        initials: "?",
+        identity: NEUTRAL_IDENT,
+      });
+    }
+    return built;
+  }, [roster, selected, rbcEvents]);
+
   const toggle = (id) => setSelected(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -1516,15 +1526,64 @@ export function TeamCalendarTab() {
   const effectiveView = isMobile ? "agenda" : view;
   const viewsAvailable = isMobile ? ["agenda"] : DESKTOP_VIEWS;
 
+  // Mobile is agenda-only, and the agenda is the same in both layouts, so
+  // there is nothing for the switch to choose between there.
+  const layoutAvailable = !isMobile;
+  const effectiveLayout = isMobile ? "grid" : layout;
+  const isPeople = effectiveLayout === "people";
+
   // Column width drives only the even-columns / cascade decision in the day
   // layout below; nothing about the data or the view depends on it.
   const gridRef = useRef(null);
-  const colPx = useDayColumnWidth(gridRef, [effectiveView, date]);
+  const colPx = useDayColumnWidth(gridRef, [effectiveView, date, effectiveLayout]);
   const dayLayout = useMemo(() => makeDayLayout(colPx), [colPx]);
 
   const scrollToTime = useMemo(() => {
     const t = new Date(); t.setHours(7, 0, 0, 0); return t;
   }, []);
+
+  // react-big-calendar reads `components.toolbar` as a COMPONENT TYPE, so an
+  // inline arrow is a brand-new type on every render and React unmounts and
+  // remounts the whole toolbar each time. That reset Radix's roving tabindex
+  // on both segmented controls, leaving them at tabindex -1 and unreachable
+  // by Tab. Holding the varying props in a ref keeps the component identity
+  // fixed while the values it renders stay current: the toolbar still
+  // re-renders whenever this component does, and reads the ref during that
+  // render.
+  const toolbarExtras = useRef(null);
+  toolbarExtras.current = {
+    viewsAvailable,
+    eventCount: rbcEvents.length,
+    peopleOn: selected.size,
+    onRefresh: handleRefresh,
+    syncing: syncing || loading,
+    isAdmin: admin,
+    lastRefreshedAt,
+    nowMs,
+    refreshError,
+    layout: effectiveLayout,
+    onLayout: setLayout,
+    layoutAvailable,
+  };
+
+  const calComponents = useMemo(() => ({
+    event: MonthPill,
+    toolbar: function CalendarToolbar(props) {
+      return <CalToolbar {...props} {...toolbarExtras.current} />;
+    },
+    week:   { event: TimeBlock },
+    day:    { event: TimeBlock },
+    agenda: { event: AgendaRow },
+  }), []);
+
+  // Switching layout closes anything anchored to the layout being left. Both
+  // are read-only dialogs, so nothing can be lost by closing them.
+  useEffect(() => { setDayList(null); setPopoverEvent(null); }, [effectiveLayout]);
+
+  const openEvent = (e) => { setDayList(null); setPopoverEvent(e); };
+  // A week cell in the people layout hands over its person + day so the list
+  // can name itself.
+  const openDayList = (group) => { setPopoverEvent(null); setDayList(group); };
 
   const nothingSelected = selected.size === 0;
   const emptyRange = !nothingSelected && !loading && rbcEvents.length === 0;
@@ -1533,11 +1592,21 @@ export function TeamCalendarTab() {
   // The agenda view renders its own "nothing here" slot, so the floating
   // overlay is reserved for the month/week/day grids and the two never
   // double up.
-  const showGridOverlay = effectiveView !== "agenda" && (emptyRange || firstLoad);
+  //
+  // An empty range only needs a card in the GRID layout. An empty time grid
+  // says nothing, so it gets one; a lane view already reads as a row per
+  // person saying "Nothing booked", and covering that with a card would hide
+  // the answer to restate it.
+  const showGridOverlay =
+    effectiveView !== "agenda" && (firstLoad || (emptyRange && !isPeople));
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="bx-teamcal flex min-w-0 flex-col gap-4" data-view={effectiveView}>
+      <div
+        className="bx-teamcal flex min-w-0 flex-col gap-4"
+        data-view={effectiveView}
+        data-layout={effectiveLayout}
+      >
         <PeopleBar
           users={roster}
           selected={selected}
@@ -1569,17 +1638,34 @@ export function TeamCalendarTab() {
             className="relative min-w-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-xs)]"
             aria-busy={loading || undefined}
           >
-            <div className="bx-scroll-x min-w-0" ref={gridRef}>
+            {/* The grid scrolls sideways when its columns cannot fit; the
+                lane views size to the container and manage their own inner
+                scroll, so the wrapper must not add a second one. */}
+            <div className={isPeople ? "min-w-0" : "bx-scroll-x min-w-0"} ref={gridRef}>
               <Calendar
                 localizer={localizer}
                 events={rbcEvents}
+                // The lane views read `laneEvents` (one entry per calendar
+                // row) and `laneUsers` rather than rbc's placed events. Both
+                // are ignored by the built-in views, so they can be passed
+                // unconditionally.
+                laneEvents={rbcEvents}
+                laneUsers={lanes}
+                onOpenDayList={openDayList}
                 view={effectiveView}
                 onView={(v) => { if (!isMobile) setView(v); }}
                 date={date}
                 onNavigate={setDate}
                 startAccessor="start"
                 endAccessor="end"
-                views={{ month: true, week: true, day: true, agenda: true }}
+                // The only prop that differs between the two layouts.
+                // `Calendar` still owns navigation, the toolbar, the view
+                // switch and event activation either way, and each custom
+                // view carries the same navigate/range/title statics as the
+                // library view it stands in for.
+                views={isPeople
+                  ? { month: TeamMonth, week: WeekMatrix, day: DayLanes, agenda: true }
+                  : { month: true, week: true, day: true, agenda: true }}
                 eventPropGetter={eventPropGetter}
                 dayPropGetter={dayPropGetter}
                 popup
@@ -1589,27 +1675,8 @@ export function TeamCalendarTab() {
                 step={30}
                 timeslots={2}
                 scrollToTime={scrollToTime}
-                components={{
-                  event: MonthPill,
-                  toolbar: (props) => (
-                    <CalToolbar
-                      {...props}
-                      viewsAvailable={viewsAvailable}
-                      eventCount={rbcEvents.length}
-                      peopleOn={selected.size}
-                      onRefresh={handleRefresh}
-                      syncing={syncing || loading}
-                      isAdmin={admin}
-                      lastRefreshedAt={lastRefreshedAt}
-                      nowMs={nowMs}
-                      refreshError={refreshError}
-                    />
-                  ),
-                  week:   { event: TimeBlock },
-                  day:    { event: TimeBlock },
-                  agenda: { event: AgendaRow },
-                }}
-                onSelectEvent={(e) => setPopoverEvent(e)}
+                components={calComponents}
+                onSelectEvent={openEvent}
                 formats={{
                   monthHeaderFormat:    (d, _c, l) => l.format(d, "MMMM yyyy"),
                   dayHeaderFormat:      (d, _c, l) => l.format(d, "EEEE · MMM d"),
@@ -1663,6 +1730,14 @@ export function TeamCalendarTab() {
               </GridOverlay>
             )}
           </div>
+        )}
+
+        {dayList && (
+          <DayListDialog
+            group={dayList}
+            onOpenEvent={openEvent}
+            onClose={() => setDayList(null)}
+          />
         )}
 
         {popoverEvent && (

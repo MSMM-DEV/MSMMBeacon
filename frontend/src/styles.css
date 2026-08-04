@@ -23137,6 +23137,611 @@ button.tsx-tl-seg { cursor: pointer; }
 }
 
 /* ==========================================================================
+   THE THREE LANE VIEWS
+   --------------------------------------------------------------------------
+   Day, week and month are this page's own components (see team-calendar.jsx),
+   so unlike the agenda below they are ordinary markup and could in principle
+   be utility classes. They are here for three reasons that utilities cannot
+   cover: the container queries that thin a block out have to be able to
+   `display: none` a part; a block sets an all-round border AND a differently
+   coloured left rule, which two competing Tailwind border utilities resolve
+   by generated source order rather than by authoring order; and the geometry
+   is shared by three views, so it belongs in one place.
+
+   GEOMETRY CONTRACT. A day block's rectangle is written by JS as `left`,
+   `width` and `top` and is never adjusted here: the 2px it is inset by is
+   already inside the `width` calc, so the drawn box is exactly the interval
+   the packer reserved. Nothing in this file may add padding, margin, border
+   width or a min-width to `.bxtc-blockwrap`, or two blocks in one sub-row
+   could touch.
+   ========================================================================== */
+
+/* ---- the scrollers ------------------------------------------------------
+   Each view owns its own scrolling and its own sticky headers, so the page
+   never scrolls sideways and the calendar shell never nests two scrollers on
+   the same axis. */
+.bx-teamcal .bxtc-lanes,
+.bx-teamcal .bxtc-wkwrap,
+.bx-teamcal .bxtc-mowrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+}
+.bx-teamcal .bxtc-lanes:focus-visible,
+.bx-teamcal .bxtc-wkwrap:focus-visible,
+.bx-teamcal .bxtc-mowrap:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+/* Column caption shared by the day axis corner and the week corner. */
+.bxtc-colcap {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   DAY — one lane per person
+   ========================================================================== */
+.bx-teamcal .bxtc-lanes-inner {
+  /* 156px still fits "Tomas Lindqvist" at --fs-xs beside a 24px swatch, and
+     90px per hour is the width at which the commonest block on this page, a
+     subject-less half-hour marked busy, still spells out "Busy": 45px, less
+     2px of gutter and 11px of chrome, leaves 32px for a word that measures
+     27.9px at --fs-xs. Twelve hours plus the head is 1236px, so a full
+     working day fits a 1280 viewport without scrolling. */
+  --bxtc-head:  156px;
+  --bxtc-hourw: 90px;
+  min-width: calc(var(--bxtc-head) + var(--bxtc-hours) * var(--bxtc-hourw));
+  width: 100%;
+}
+
+/* ---- the hour axis ---- */
+.bx-teamcal .bxtc-axisrow {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.bx-teamcal .bxtc-axis-head {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: 0 0 var(--bxtc-head);
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.bx-teamcal .bxtc-axis {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(var(--bxtc-hours), minmax(0, 1fr));
+  min-width: 0;
+}
+.bx-teamcal .bxtc-axis-tick {
+  overflow: hidden;
+  padding: 7px 0 7px 5px;
+  border-left: 1px solid var(--border);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.bx-teamcal .bxtc-axis-tick:first-child { border-left: 0; }
+
+/* ---- a lane ---- */
+.bx-teamcal .bxtc-lane-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bx-teamcal .bxtc-lane {
+  display: flex;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+}
+.bx-teamcal .bxtc-lane:last-child { border-bottom: 0; }
+
+.bx-teamcal .bxtc-lane-head {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 var(--bxtc-head);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  /* Opaque: lanes scroll underneath it. */
+  background: var(--surface);
+}
+.bxtc-lane-id {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.bxtc-lane-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text);
+}
+.bxtc-lane-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-2xs);
+  line-height: 1.25;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Away is the answer this page exists to give, so it is not left as the same
+   grey as a load figure. It is never colour-only: the words "Out of office"
+   are the signal and the colour only reinforces them. Steel, per the product
+   -wide meaning of the token: paused, in between. "Free" deliberately stays
+   on --text-muted rather than dropping to --text-soft, which is under 4:1
+   against --surface in both themes. */
+.bxtc-lane-meta[data-tone="out"] { color: var(--blue-ink); font-weight: 600; }
+
+/* ---- the lane's track ---- */
+.bx-teamcal .bxtc-lane-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* One hairline per hour, drawn as a background so the gridlines cost no
+     DOM and land on exactly the same fractions as the axis ticks above. */
+  background-image: linear-gradient(
+    to right, var(--border) 0 1px, transparent 1px
+  );
+  background-size: calc(100% / var(--bxtc-hours)) 100%;
+}
+/* Now line. `--bxtc-now` is a bare number, set only when the lane is showing
+   today, so the marker costs no element and can never be stranded. */
+.bx-teamcal .bxtc-lane-track[data-now]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: calc(var(--bxtc-now) * 1%);
+  width: 2px;
+  translate: -1px 0;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.bxtc-blockwrap {
+  position: absolute;
+  height: 30px;   /* BLOCK_H in team-calendar.jsx */
+}
+
+/* ---- a block ------------------------------------------------------------
+   Identity is asserted by the lane head, which is sticky and therefore always
+   on screen, so the hue here is continuity rather than signal: a 3px rule and
+   a near-neutral wash of the same hue. */
+.bxtc-block {
+  /* Only so the focus ring can lift above its neighbours. No offsets, so the
+     measured box is still exactly the wrapper's. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 4px 0 3px;
+  border: 1px solid var(--u-line, var(--border));
+  border-left: 3px solid var(--u-key, var(--border-strong));
+  border-radius: var(--radius-xs);
+  background: var(--u-tint, var(--surface-2));
+  color: var(--u-ink, var(--text));
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+/* 10%, not more: the block's secondary line is --text-muted on --u-tint, and
+   past roughly 12% of the key colour that pair drops under 4.5:1. Hover is
+   also carried by the border going full --u-key, so it is not a colour-only
+   change of this size. */
+.bxtc-block:hover {
+  border-color: var(--u-key, var(--border-strong));
+  background: color-mix(in oklab, var(--u-key) 10%, var(--u-tint));
+}
+/* Pressed is a ring rather than a darker fill, for the same reason: pushing
+   the wash further would take the secondary line under 4.5:1. */
+.bxtc-block:active {
+  background: color-mix(in oklab, var(--u-key) 10%, var(--u-tint));
+  box-shadow: inset 0 0 0 1px var(--u-key);
+}
+.bxtc-block:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  z-index: 3;
+}
+/* An all-day or out-of-office band spans the whole window, so it carries the
+   hue all the way round rather than reading as a timed block that lost its
+   column. "Out" additionally gets a hatch, so away is legible without relying
+   on the fill alone. */
+.bxtc-block[data-kind] { border-color: var(--u-key, var(--border-strong)); }
+.bxtc-block[data-kind="out"] {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 5px,
+    color-mix(in oklab, var(--u-key) 16%, transparent) 5px 11px
+  );
+}
+.bxtc-block[data-cancelled="true"] { opacity: .62; }
+.bxtc-block[data-cancelled="true"] .bxtc-block-title { text-decoration: line-through; }
+
+.bxtc-block-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1.2;
+}
+/* The secondary line rides the SAME identity ramp as the title rather than
+   --text-muted. --u-ink is designed against --u-tint (7.1:1 at worst across
+   all thirty slots, both themes), so the pair holds up under the hover and
+   pressed washes too, where a neutral grey on a hued tint does not.
+   Hierarchy comes from size and weight instead of from colour. */
+.bxtc-block-time {
+  flex: 0 0 auto;
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--u-ink, var(--text-muted));
+  font-variant-numeric: tabular-nums;
+}
+
+/* The width budget, measured rather than guessed.
+   118px is title + gap + a "9:45am" stamp + chrome.
+   38px is chrome plus the width of the shortest real word this page prints.
+   Under that a 15-minute block has 9px of content box, which cannot hold a
+   character, so rather than leave a bordered box with nothing legible inside
+   it (the exact failure this redesign replaces) the block becomes a solid
+   tick in its owner's colour: an unmistakably deliberate mark, with the whole
+   event still on its tooltip and its accessible name. */
+.bx-teamcal .bxtc-blockwrap { container: bxtcblk / inline-size; }
+@container bxtcblk (max-width: 118px) {
+  .bxtc-block-time { display: none; }
+}
+@container bxtcblk (max-width: 38px) {
+  .bxtc-block-title { display: none; }
+  .bxtc-block {
+    padding: 0;
+    border-width: 1px;
+    border-left-width: 1px;
+    border-color: var(--u-key, var(--border-strong));
+    background: color-mix(in oklab, var(--u-key) 62%, var(--u-tint));
+  }
+}
+
+/* ==========================================================================
+   WEEK — person down, day across
+   ========================================================================== */
+.bx-teamcal .bxtc-wk {
+  --bxtc-head: 168px;
+  width: 100%;
+  min-width: calc(var(--bxtc-head) + 7 * 96px);
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+.bx-teamcal .bxtc-wk th,
+.bx-teamcal .bxtc-wk td {
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+.bx-teamcal .bxtc-wk tr > *:last-child { border-right: 0; }
+.bx-teamcal .bxtc-wk tbody tr:last-child > * { border-bottom: 0; }
+
+.bx-teamcal .bxtc-wk-corner,
+.bx-teamcal .bxtc-wk-day {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 6px 8px;
+  background: var(--surface-2);
+}
+.bx-teamcal .bxtc-wk-corner {
+  left: 0;
+  z-index: 5;
+  width: var(--bxtc-head);
+  padding-inline: 10px;
+}
+.bx-teamcal .bxtc-wk-day { white-space: nowrap; }
+.bx-teamcal .bxtc-wk-day[data-today="true"] { background: var(--accent-soft); }
+.bxtc-wk-dayline,
+.bxtc-wk-loadline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+.bxtc-wk-loadline { margin-top: 3px; }
+.bxtc-wk-dow {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bx-teamcal .bxtc-wk-day[data-today="true"] .bxtc-wk-dow,
+.bx-teamcal .bxtc-wk-day[data-today="true"] .bxtc-wk-dom { color: var(--accent-ink); }
+.bxtc-wk-dom {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.bxtc-wk-tally {
+  display: inline-flex;
+  gap: 3px;
+  overflow: hidden;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The team-load meter. Shared with the month grid. Never the only signal:
+   the figure it summarises is always printed beside it. */
+.bxtc-meter {
+  display: inline-block;
+  flex: 0 0 auto;
+  vertical-align: middle;
+  width: 30px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+.bxtc-meter-fill {
+  display: block;
+  width: calc(var(--bxtc-pct) * 1%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-solid);
+}
+
+.bx-teamcal .bxtc-wk-person {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: table-cell;
+  gap: 8px;
+  width: var(--bxtc-head);
+  height: 40px;
+  padding: 4px 10px;
+  background: var(--surface);
+  font-weight: 400;
+}
+/* `display: table-cell` cannot be flex, so the identity pair sits in an inner
+   line box instead. */
+.bx-teamcal .bxtc-wk-person > .bxtc-swatch { float: left; margin-right: 8px; }
+.bx-teamcal .bxtc-wk-person > .bxtc-lane-id { overflow: hidden; }
+
+.bx-teamcal .bxtc-wk-cell {
+  height: 40px;
+  padding: 0;
+}
+.bx-teamcal .bxtc-wk-cell[data-today="true"] { background: var(--accent-softer); }
+.bxtc-wk-none {
+  display: block;
+  padding: 0 10px;
+  color: var(--text-muted);
+}
+.bxtc-wk-btn {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.bxtc-wk-btn:hover  { background: var(--surface-2); }
+.bxtc-wk-btn:active { background: var(--surface-3); }
+.bxtc-wk-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.bxtc-strip {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 9px;
+  border-radius: var(--radius-full);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+.bxtc-seg {
+  position: absolute;
+  inset-block: 0;
+  min-width: 2px;
+  background: var(--u-key, var(--text-muted));
+}
+/* Away reads as a hatch across the whole strip, so "out" and "booked solid"
+   can never be confused for one another at a glance. */
+.bxtc-seg--out {
+  inset-inline: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in oklab, var(--u-key) 30%, transparent) 0 4px,
+    color-mix(in oklab, var(--u-key) 72%, transparent) 4px 8px
+  );
+}
+.bxtc-wk-fig {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.bxtc-wk-btn[data-out] .bxtc-wk-fig { color: var(--blue-ink); }
+
+/* ==========================================================================
+   MONTH — the shape of the team's month
+   ========================================================================== */
+.bx-teamcal .bxtc-mo {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+.bx-teamcal .bxtc-mo thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  text-align: left;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bx-teamcal .bxtc-mo-cell {
+  height: 92px;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  vertical-align: top;
+}
+.bx-teamcal .bxtc-mo tr > td:last-child { border-right: 0; }
+.bx-teamcal .bxtc-mo tbody tr:last-child > td { border-bottom: 0; }
+.bx-teamcal .bxtc-mo-cell[data-off="true"] { background: var(--surface-2); }
+.bx-teamcal .bxtc-mo-cell[data-today="true"] { background: var(--accent-softer); }
+
+.bxtc-mo-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.bxtc-mo-day:hover  { background: var(--surface-hover); }
+.bxtc-mo-day:active { background: var(--surface-3); }
+.bxtc-mo-day:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.bxtc-mo-date {
+  display: grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* An out-of-month day is signalled by the cell's --surface-2 wash, not by
+   dimming the date under 4.5:1. */
+.bx-teamcal .bxtc-mo-cell[data-today="true"] .bxtc-mo-date {
+  background: var(--accent-solid);
+  color: var(--accent-on);
+  font-weight: 700;
+}
+.bxtc-mo-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.bxtc-mo-body .bxtc-meter {
+  width: 100%;
+  min-width: 40px;
+}
+.bxtc-mo-figs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 6px;
+  min-width: 0;
+}
+.bxtc-mo-fig {
+  display: inline-flex;
+  gap: 3px;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.bxtc-mo-fig .num { font-weight: 700; color: var(--text); }
+.bxtc-mo-out {
+  display: inline-flex;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--blue-soft);
+  color: var(--blue-ink);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.bxtc-mo-quiet {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+/* ---- narrow viewports ---------------------------------------------------
+   Phones never reach any of this: the page falls back to the agenda below
+   640px. Between 640 and the point at which a view's `min-width` is met, the
+   view scrolls inside itself with its head column pinned, so the page body
+   still never scrolls sideways. */
+@media (max-width: 900px) {
+  .bx-teamcal .bxtc-lanes-inner { --bxtc-head: 132px; }
+  .bx-teamcal .bxtc-wk          { --bxtc-head: 140px; }
+  .bx-teamcal .bxtc-mo-cell     { height: 84px; }
+}
+
+/* ==========================================================================
    react-big-calendar chrome
    ========================================================================== */
 
