@@ -815,6 +815,11 @@ const TableView = ({
   yearOptions, yearValue, onYearChange,
   primarySort,
   postProcess,
+  // Visual treatment only. Stamps `data-skin` on the wrapper so a table can
+  // opt into a different skin without any other table changing; every rule
+  // for a skin is scoped under that attribute in styles.css. Omitted means
+  // the original chrome, which is what every table but Leads & Bids uses.
+  skin,
 }) => {
   const chrome = useTableChrome(columns, { primarySort });
   const {
@@ -968,7 +973,7 @@ const TableView = ({
   ]);
 
   return (
-    <div className="tablewrap">
+    <div className="tablewrap" data-skin={skin || undefined}>
       <ChromeToolbar
         filters={filters} right={right} onNew={onNew} newLabel={newLabel}
         columns={orderedColumns} sort={sort} onSortToggle={onSortToggle}
@@ -5246,6 +5251,7 @@ export const HotLeadsTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}

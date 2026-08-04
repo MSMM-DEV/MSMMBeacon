@@ -908,7 +908,18 @@ export const SearchableSelect = ({
       if (menuRef.current?.contains(e.target)) return;
       dismiss();
     };
-    const onScroll = () => dismiss();
+    // An ANCESTOR scrolling has to dismiss: the menu is position:fixed, so the
+    // anchor slides out from under it and the two visibly come apart. The
+    // menu's OWN scroll moves nothing and must not dismiss, or the list closes
+    // the instant the user reaches for an option below the fold — with 163
+    // clients in a 323px menu, that is most of them. Scroll events do not
+    // bubble, but they do reach a capture-phase listener on window, so the
+    // menu's own scroll lands here and has to be filtered out explicitly.
+    const onScroll = (e) => {
+      const menu = menuRef.current;
+      if (menu && e.target instanceof Node && menu.contains(e.target)) return;
+      dismiss();
+    };
     document.addEventListener("mousedown", onDoc);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", dismiss);

@@ -27143,3 +27143,128 @@ button.tsx-tl-seg { cursor: pointer; }
   .bxt-pt-toggle { width: 32px; height: 32px; }
   .bxt-dir-projects { min-height: 32px; }
 }
+
+/* ==========================================================================
+   TABLE SKIN: "clean"
+   --------------------------------------------------------------------------
+   Opted into by ONE table (Leads & Bids, via `skin="clean"` on TableView),
+   so every rule here is scoped under [data-skin="clean"] and no other table
+   is touched. This is a first pass at a calmer, airier treatment; the
+   information architecture is deliberately unchanged, so every column, sort,
+   resize, reorder and inline editor behaves exactly as before.
+
+   Four things carry the difference:
+
+   1. ROWS GO NEUTRAL. The old table washed the ENTIRE row in its star
+      rating's colour (--stars-N-bg). At this dataset's density that is most
+      of the grid tinted at once, which is what read as heavy: a table of 36
+      three-star leads was 36 olive rows. The rating still colours the row,
+      but now as a 3px rule on the leading edge, so the signal survives while
+      the surface stays white. The stars themselves are unchanged and remain
+      the primary encoding.
+   2. NO VERTICAL RULES. Column dividers on every cell draw a lattice; the
+      eye then has to cross a line per column while reading one record.
+      Horizontal hairlines alone are enough to separate rows.
+   3. HEADER STOPS SHOUTING. Uppercase + 0.08em tracking at 11px is harder
+      to read than sentence case at 12.5px, and it competes with the data.
+   4. AIR. Row height 44 to 56px and cell padding 12 to 16px.
+   ========================================================================== */
+
+.tablewrap[data-skin="clean"] {
+  --row-h: 56px;
+  --row-pad-y: 14px;
+  --bxt-cell-x: 16px;
+}
+
+/* ---- container ---------------------------------------------------------- */
+.tablewrap[data-skin="clean"] .table-scroll {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+/* ---- header ------------------------------------------------------------- */
+.tablewrap[data-skin="clean"] .thead {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.tablewrap[data-skin="clean"] .th:hover { color: var(--accent-ink); }
+
+/* ---- cells -------------------------------------------------------------- */
+.tablewrap[data-skin="clean"] .th,
+.tablewrap[data-skin="clean"] .td {
+  border-right: 0;
+  padding-inline: var(--bxt-cell-x);
+}
+.tablewrap[data-skin="clean"] .td { font-size: var(--fs-md); }
+
+/* Money reads as a figure, not as a terminal string. Tabular numerals still
+   hold the decimal columns in line without the typewriter face. */
+.tablewrap[data-skin="clean"] .td.num,
+.tablewrap[data-skin="clean"] .td.mono {
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- rows --------------------------------------------------------------- */
+.tablewrap[data-skin="clean"] .trow {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.tablewrap[data-skin="clean"] .trow:hover { background: var(--surface-hover); }
+.tablewrap[data-skin="clean"] .trow.selected { background: var(--accent-softer); }
+.tablewrap[data-skin="clean"] .trow.selected:hover { background: var(--accent-soft); }
+
+/* The rating, demoted from a full-row wash to a leading rule. Specificity
+   beats the unscoped `.trow[data-stars="N"]` rules above, which keep their
+   original behaviour everywhere else. */
+.tablewrap[data-skin="clean"] .trow[data-stars="5"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-5); }
+.tablewrap[data-skin="clean"] .trow[data-stars="4"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-4); }
+.tablewrap[data-skin="clean"] .trow[data-stars="3"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-3); }
+.tablewrap[data-skin="clean"] .trow[data-stars="2"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-2); }
+.tablewrap[data-skin="clean"] .trow[data-stars="1"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-1); }
+.tablewrap[data-skin="clean"] .trow[data-stars="5"]:hover,
+.tablewrap[data-skin="clean"] .trow[data-stars="4"]:hover,
+.tablewrap[data-skin="clean"] .trow[data-stars="3"]:hover,
+.tablewrap[data-skin="clean"] .trow[data-stars="2"]:hover,
+.tablewrap[data-skin="clean"] .trow[data-stars="1"]:hover { background-color: var(--surface-hover); }
+
+/* ---- group headers ------------------------------------------------------ */
+/* Still a band, but a quiet one: it is a label for the run beneath it, not a
+   row of data competing with them. */
+.tablewrap[data-skin="clean"] .trow.stars-header {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  min-height: 38px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* ---- chips -------------------------------------------------------------- */
+.tablewrap[data-skin="clean"] .chip {
+  border-radius: var(--radius-full);
+  padding: 3px 10px;
+  font-weight: 500;
+}
+
+/* ---- resize handles ----------------------------------------------------- */
+/* The handle's hairline is what was left of the column lattice in the header.
+   It only matters while the user is reaching for it, so it is transparent
+   until the header is hovered and solid on the handle itself. The hit area
+   is untouched: still the full 6px, still grabbable without the cue. */
+.tablewrap[data-skin="clean"] .col-resize-handle::after {
+  background: transparent;
+}
+.tablewrap[data-skin="clean"] .thead:hover .col-resize-handle::after {
+  background: var(--border);
+}
+.tablewrap[data-skin="clean"] .col-resize-handle:hover::after,
+.tablewrap[data-skin="clean"] .col-resize-handle:active::after {
+  background: var(--accent);
+  width: 2px;
+}
