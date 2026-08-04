@@ -247,67 +247,74 @@ export function LicensesTab() {
             <Alert tone="danger" title="Could not load licenses">{err}</Alert>
           )}
 
-          {busy && rows.length === 0 ? (
-            <SkeletonTable rows={6} cols={7} />
-          ) : filtered.length === 0 ? (
-            rows.length === 0 ? (
-              <EmptyState
-                icon={shieldIcon}
-                title="No licenses tracked yet"
-                description="Add a company or individual license with its expiration date and Beacon will count down to it, group it by urgency, and email the people you list at 60, 30, 14, 7 and 1 days out."
-                action={<Button variant="primary" onClick={() => setEditing("new")}><Icon name="plus" size={15} /> Add license</Button>}
-              />
+          {/* Loading, empty and populated states all render into the SAME
+              box. `.lcx-results` is the only part of the page whose height
+              tracks the query, and the CSS reserves a screenful for it so
+              the runway above can never be pushed, pulled or re-measured
+              by a keystroke. */}
+          <div className="lcx-results">
+            {busy && rows.length === 0 ? (
+              <SkeletonTable rows={6} cols={7} />
+            ) : filtered.length === 0 ? (
+              rows.length === 0 ? (
+                <EmptyState
+                  icon={shieldIcon}
+                  title="No licenses tracked yet"
+                  description="Add a company or individual license with its expiration date and Beacon will count down to it, group it by urgency, and email the people you list at 60, 30, 14, 7 and 1 days out."
+                  action={<Button variant="primary" onClick={() => setEditing("new")}><Icon name="plus" size={15} /> Add license</Button>}
+                />
+              ) : (
+                <EmptyState
+                  icon={filterIcon}
+                  title="No licenses match these filters"
+                  description="Nothing in the register matches the current status, type, state and search combination. Widen a filter or clear the search to see the rest."
+                  action={filtersOn ? (
+                    <Button variant="default" onClick={() => { setLane("all"); setTypeF("all"); setStateF("all"); setQ(""); }}>
+                      <Icon name="undo" size={14} /> Reset filters
+                    </Button>
+                  ) : null}
+                />
+              )
             ) : (
-              <EmptyState
-                icon={filterIcon}
-                title="No licenses match these filters"
-                description="Nothing in the register matches the current status, type, state and search combination. Widen a filter or clear the search to see the rest."
-                action={filtersOn ? (
-                  <Button variant="default" onClick={() => { setLane("all"); setTypeF("all"); setStateF("all"); setQ(""); }}>
-                    <Icon name="undo" size={14} /> Reset filters
-                  </Button>
-                ) : null}
-              />
-            )
-          ) : (
-            <div className="lcx-tablewrap bx-scroll-x">
-              <table className="lcx-table">
-                <caption className="sr-only">
-                  Licenses and certifications, sorted by days until expiry.
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Status</th>
-                    <th scope="col">Entity</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">State</th>
-                    <th scope="col">License no</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">Reminders</th>
-                    <th scope="col"><span className="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
-                {sections.map(g => (
-                  <tbody key={g.key}>
-                    {g.label && (
-                      <tr className="lcx-grouprow">
-                        <th scope="colgroup" colSpan={8}>
-                          <span className={`lcx-groupmark lcx-band-${g.key}`} aria-hidden="true">
-                            <Icon name={bandUi(g.key).icon} size={13} />
-                          </span>
-                          <span className="lcx-grouplabel">{g.label}</span>
-                          <span className="lcx-groupcount num">{g.rows.length}</span>
-                        </th>
-                      </tr>
-                    )}
-                    {g.rows.map(r => (
-                      <LicenseRow key={r.id} lic={r} onEdit={() => setEditing(r)} />
-                    ))}
-                  </tbody>
-                ))}
-              </table>
-            </div>
-          )}
+              <div className="lcx-tablewrap bx-scroll-x">
+                <table className="lcx-table">
+                  <caption className="sr-only">
+                    Licenses and certifications, sorted by days until expiry.
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Status</th>
+                      <th scope="col">Entity</th>
+                      <th scope="col">Type</th>
+                      <th scope="col">State</th>
+                      <th scope="col">License no</th>
+                      <th scope="col">Expires</th>
+                      <th scope="col">Reminders</th>
+                      <th scope="col"><span className="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  {sections.map(g => (
+                    <tbody key={g.key}>
+                      {g.label && (
+                        <tr className="lcx-grouprow">
+                          <th scope="colgroup" colSpan={8}>
+                            <span className={`lcx-groupmark lcx-band-${g.key}`} aria-hidden="true">
+                              <Icon name={bandUi(g.key).icon} size={13} />
+                            </span>
+                            <span className="lcx-grouplabel">{g.label}</span>
+                            <span className="lcx-groupcount num">{g.rows.length}</span>
+                          </th>
+                        </tr>
+                      )}
+                      {g.rows.map(r => (
+                        <LicenseRow key={r.id} lic={r} onEdit={() => setEditing(r)} />
+                      ))}
+                    </tbody>
+                  ))}
+                </table>
+              </div>
+            )}
+          </div>
         </section>
 
         {editing && (

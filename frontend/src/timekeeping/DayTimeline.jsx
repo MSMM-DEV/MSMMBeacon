@@ -160,13 +160,24 @@ export function DayTimeline({
           const left  = ((start - TRACK_START_HOUR) / span) * 100;
           const width = ((end   - start)            / span) * 100;
           const tone  = intervalTone(iv);   // green = at desk, red = out
+          // A segment is only a control where the host actually handles a
+          // click. Without `onIntervalClick` the button did nothing, yet it
+          // still took a tab stop per segment, and the presence rail mounts
+          // this timeline INSIDE its own row <button> — nested interactive
+          // content, which is invalid HTML. Hosts that pass a handler keep a
+          // real button; hosts that don't get a labelled graphic.
+          const Seg = onIntervalClick ? "button" : "span";
           return (
-            <button
+            <Seg
               key={iv.id}
-              type="button"
+              {...(onIntervalClick
+                ? {
+                    type: "button",
+                    onClick: (e) => { e.stopPropagation(); onIntervalClick(iv); },
+                  }
+                : { role: "img" })}
               className={`tsx-tl-seg tone-${tone}`}
               style={{ left: `${left}%`, width: `${width}%` }}
-              onClick={(e) => { e.stopPropagation(); onIntervalClick?.(iv); }}
               title={tooltipFor(iv)}
               aria-label={ariaLabelFor(iv)}
               data-category={iv.category}
@@ -185,7 +196,7 @@ export function DayTimeline({
                   <span className="tsx-tl-seg-note-dot"/>
                 )}
               </span>
-            </button>
+            </Seg>
           );
         })}
         {segments.length === 0 && !leave && (

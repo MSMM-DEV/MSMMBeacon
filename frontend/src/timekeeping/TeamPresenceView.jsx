@@ -7,6 +7,13 @@
 // is and go find them. Writes are impossible here — there are no edit
 // affordances, and the team-read RLS policies (migration 20260608140000) grant
 // SELECT only; the UI never offers a mutate path.
+//
+// Layout: each row is its own container query (`.tka-presence-row` in
+// styles.css), because this board is rendered full width AND inside the
+// 320–360px rail on the Timesheet page. Wide, everything sits on one line;
+// narrow, the day strip drops to a second row under the name. Every element
+// keeps its own grid cell either way, and long names truncate rather than
+// pushing the duration and chevron out of the card.
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Icon } from "@/icons";
@@ -201,11 +208,11 @@ export function TeamPresenceView({ date: controlledDate = null, onDate = null, e
                   <span className={`avatar sm ${user.color}`}>{user.initials}</span>
 
                   <span className="tka-presence-who">
-                    <span className="tka-presence-name">{user.name}</span>
+                    <span className="tka-presence-name" title={user.name}>{user.name}</span>
                     <span className="tka-presence-statusline">
                       <span className={`tka-statuspill tone-${status.tone}`}>
                         <Icon name={STATUS_ICON[status.key] || "dot"} size={11}/>
-                        {status.label}
+                        <span className="tka-statuspill-label">{status.label}</span>
                       </span>
                       {status.since && (
                         <span className="tka-presence-since num">since {fmtClock(status.since)}</span>
@@ -216,7 +223,8 @@ export function TeamPresenceView({ date: controlledDate = null, onDate = null, e
                     </span>
                     {status.note && (
                       <span className="tka-presence-note" title={status.note}>
-                        <Icon name="note" size={11}/> {status.note}
+                        <Icon name="note" size={11}/>
+                        <span className="tka-presence-note-copy">{status.note}</span>
                       </span>
                     )}
                   </span>
@@ -225,7 +233,7 @@ export function TeamPresenceView({ date: controlledDate = null, onDate = null, e
                     <DayTimeline date={date} intervals={intervals} height={22} showHourGrid={false}/>
                   </span>
                   <span className="tka-presence-total num">{day ? fmtHM(day.minutesWork || 0) : "–"}</span>
-                  <span className="tka-presence-caret">
+                  <span className="tka-presence-caret" aria-hidden="true">
                     <Icon name={expanded ? "chevronDown" : "chevronRight"} size={15}/>
                   </span>
                 </button>

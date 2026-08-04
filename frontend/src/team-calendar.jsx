@@ -19,11 +19,16 @@
 // ---------------------------------------------------------------------------
 // The chrome is built entirely from the Beacon kit in `@/ui`. react-big-
 // calendar's own grid internals cannot be reached with utility classes, so
-// they are themed in ONE clearly-bannered block at the end of src/styles.css,
-// scoped under `.bx-teamcal` (the root element rendered below).
+// they are themed in ONE clearly-bannered block in src/styles.css, scoped
+// under `.bx-teamcal` (the root element rendered below). That same block also
+// owns this page's `.bxtc-*` event and swatch skins, which cannot live under
+// `.bx-teamcal` because the event dialog is portalled to <body>.
 //
-// Per-person colour is the primary signal, but it is never the ONLY signal:
-// every chip, block, agenda row and legend entry also carries the owner's
+// Per-person colour is DELIBERATELY QUIET. A week with twenty colleagues on
+// it puts a hundred blocks on screen, so the hue is confined to a 3px left
+// rule, a small initials tile and an all-day outline; the block body is a
+// near-neutral wash and the type is Beacon's. Colour is also never the only
+// signal: every chip, block, agenda row and legend entry carries the owner's
 // initials, and the legend spells out the full name next to the swatch.
 // =============================================================================
 
@@ -207,40 +212,78 @@ function timeAgo(date, nowMs) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-person colour. The assignment itself lives in data.js and is untouched;
-// this only projects the returned tokens onto CSS custom properties so the
-// same five values drive chips, blocks, agenda rows and the legend.
+// Per-person identity colour.
 //
-// Every surface pairs `--u-wash` (light theme) with `--u-wash-dk` (dark) and
-// `--u-ink` with `--u-ink-dk`, so the palette is legible in both themes
-// without hard-coding a single hex value here.
+// WHICH palette slot a person gets is decided in data.js (`userColorTokens`,
+// rotated per department) and is not touched here. What that slot RENDERS AS
+// is decided here, and that is the whole point of this section: the raw slot
+// is a fully-saturated hue, and twenty fully-saturated hues sharing one week
+// grid is a barcode, not information.
+//
+// The projection below keeps the slot's hue exactly, and keeps its *rank* on
+// the two other axes (a slot more saturated than its neighbours stays more
+// saturated; a darker slot stays darker) but compresses both ranks into a
+// narrow, deliberately dull band. The hue then only ever appears as a 3px
+// rule, a small initials tile, or an all-day outline, while the event body
+// sits on a near-neutral wash of the same hue.
+//
+// Measured across all 30 slots in both themes: --u-ink on --u-tint is 7.1:1
+// at worst, --u-ink on --u-chip 5.4:1, --text-muted on --u-tint 5.1:1, and
+// the --u-key rule holds 3.3:1 against whatever it sits on.
+//
+// Four values are emitted per theme; `.bxtc-ident` in styles.css picks the
+// matching pair, so nothing downstream needs a `dark:` variant.
 // ---------------------------------------------------------------------------
-function userStyleFor(userId) {
+const IDENT = "bxtc-ident";
+
+// `userColorTokens().stripe` is the slot's raw `hsl(H S% L%)`. Hue also comes
+// back on its own; saturation and lightness are only available through this
+// string, so a parse failure falls back to mid chroma and mid tone, which
+// still leaves the hue doing the separating.
+const SLOT_HSL_RE = /hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*\)/;
+
+const clamp01 = (n) => Math.min(1, Math.max(0, n));
+const hslStr = (h, s, l) =>
+  `hsl(${h} ${Math.round(s * 10) / 10}% ${Math.round(l * 10) / 10}%)`;
+
+function identityVars(userId) {
   const c = userColorTokens(userId);
+  const m = SLOT_HSL_RE.exec(c.stripe || "");
+  const h = m ? Number(m[1]) : (c.hue ?? 0);
+  const s = m ? Number(m[2]) : 55;
+  const l = m ? Number(m[3]) : 48;
+  // Rank of this slot within the source palette's own range (S 22–88, L 30–72).
+  const cr = clamp01((s - 22) / 66);
+  const tr = clamp01((l - 30) / 42);
   return {
-    "--u-ink":     c.ink,
-    "--u-ink-dk":  c.inkDark,
-    "--u-stripe":  c.stripe,
-    "--u-wash":    c.wash,
-    "--u-wash-dk": c.washDark,
+    "--u-key-l":  hslStr(h, 20 + 34 * cr, 29 + 17 * tr),
+    "--u-key-d":  hslStr(h, 22 + 30 * cr, 54 + 15 * tr),
+    "--u-ink-l":  hslStr(h, 20 + 18 * cr, 23 + 6 * tr),
+    "--u-ink-d":  hslStr(h, 22 + 20 * cr, 76 + 6 * tr),
+    "--u-tint-l": hslStr(h, 30 + 22 * cr, 96),
+    "--u-tint-d": hslStr(h, 14 + 10 * cr, 17),
+    "--u-chip-l": hslStr(h, 28 + 22 * cr, 89),
+    "--u-chip-d": hslStr(h, 18 + 12 * cr, 26),
   };
 }
 
-const SWATCH_SKIN = [
-  "grid shrink-0 place-items-center rounded-[var(--radius-xs)]",
-  "font-semibold uppercase leading-none tracking-[var(--tracking-wide)]",
-  "bg-[var(--u-wash)] text-[var(--u-ink)]",
-  "dark:bg-[var(--u-wash-dk)] dark:text-[var(--u-ink-dk)]",
-  "ring-1 ring-inset ring-[var(--u-stripe)]",
-].join(" ");
+// Someone who is not on the roster (an external attendee) gets the neutral
+// surface ramp rather than a colour they do not own.
+const NEUTRAL_IDENT = {
+  "--u-key-l":  "var(--border-strong)", "--u-key-d":  "var(--border-strong)",
+  "--u-ink-l":  "var(--text-muted)",    "--u-ink-d":  "var(--text-muted)",
+  "--u-tint-l": "var(--surface-2)",     "--u-tint-d": "var(--surface-2)",
+  "--u-chip-l": "var(--surface-3)",     "--u-chip-d": "var(--surface-3)",
+};
 
 /**
  * Initials tile in the owner's colour. `aria-hidden` because the owner's
- * name is always rendered (or announced) alongside it.
+ * name is always rendered (or announced) alongside it: colour is never the
+ * only signal. Skin lives in `.bxtc-swatch`; only the size varies per site.
  */
 function Swatch({ initials, className = "" }) {
   return (
-    <span className={`${SWATCH_SKIN} ${className}`} aria-hidden="true">
+    <span className={`bxtc-swatch ${className}`} aria-hidden="true">
       {initials || "··"}
     </span>
   );
@@ -420,8 +463,9 @@ function PeopleBar({ users, selected, onToggle, onSelectAll, onClearAll, onSetMa
                         type="button"
                         onClick={() => onToggle(u.id)}
                         aria-pressed={isSel}
-                        style={userStyleFor(u.id)}
+                        style={identityVars(u.id)}
                         className={[
+                          IDENT,
                           "flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)]",
                           "px-2 py-1.5 text-left",
                           "transition-[background-color,color] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
@@ -460,8 +504,12 @@ function PeopleBar({ users, selected, onToggle, onSelectAll, onClearAll, onSetMa
           </PopoverContent>
         </Popover>
 
-        {/* Legend / colour key. Scrolls sideways inside itself so a full
-            roster can never widen the page. */}
+        {/* Legend / colour key. Every chip is the SAME control: neutral
+            surface, one hairline, one type size. Only the swatch carries the
+            person's hue, and it carries their initials with it, so the row
+            reads as one component rather than as nine coloured buttons.
+            Scrolls sideways inside itself so a full roster can never widen
+            the page. */}
         {selectedUsers.length === 0 ? (
           <p className="m-0 text-[length:var(--fs-sm)] text-[var(--text-muted)]">
             Nobody selected yet.
@@ -474,28 +522,34 @@ function PeopleBar({ users, selected, onToggle, onSelectAll, onClearAll, onSetMa
                   type="button"
                   onClick={() => onToggle(u.id)}
                   aria-pressed="true"
-                  style={userStyleFor(u.id)}
+                  style={identityVars(u.id)}
                   title={`${u.name} · ${u._department || EMPTY} · ${u._location || EMPTY}`}
                   className={[
-                    "group flex h-7 items-center gap-1.5 rounded-[var(--radius-full)] pl-1 pr-2",
-                    "border border-[var(--u-stripe)] bg-[var(--u-wash)] text-[var(--u-ink)]",
-                    "dark:bg-[var(--u-wash-dk)] dark:text-[var(--u-ink-dk)]",
-                    "transition-[filter,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-                    "hover:brightness-[.96] dark:hover:brightness-[1.2]",
-                    "active:translate-y-px",
+                    IDENT,
+                    "group flex h-9 items-center gap-1.5 rounded-[var(--radius-full)] pl-1 pr-1.5 sm:h-8",
+                    "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
+                    "shadow-[var(--shadow-xs)]",
+                    "transition-[background-color,border-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+                    "hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]",
+                    "active:bg-[var(--surface-3)]",
                     "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
                   ].join(" ")}
                 >
-                  <Swatch initials={u.initials} className="size-5 text-[9.5px]" />
-                  <span className="max-w-[13ch] truncate text-[length:var(--fs-2xs)] font-semibold sm:max-w-[20ch]">
+                  <Swatch initials={u.initials} className="size-6 text-[9.5px] sm:size-5" />
+                  <span className="max-w-[13ch] truncate text-[length:var(--fs-xs)] font-medium sm:max-w-[20ch]">
                     {u.name}
                   </span>
-                  <Icon
-                    name="close"
-                    size={12}
-                    stroke={2.2}
-                    className="opacity-45 transition-opacity duration-[var(--dur-fast)] group-hover:opacity-100"
-                  />
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "grid size-4 shrink-0 place-items-center rounded-[var(--radius-full)]",
+                      "text-[var(--text-soft)]",
+                      "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+                      "group-hover:bg-[var(--surface-3)] group-hover:text-[var(--text)]",
+                    ].join(" ")}
+                  >
+                    <Icon name="close" size={11} stroke={2.4} />
+                  </span>
                   <span className="sr-only">Remove {u.name} from the calendar</span>
                 </button>
               </li>
@@ -530,63 +584,31 @@ function attendeeCount(r) {
   return (r.attendees || []).filter(a => a?.email).length;
 }
 
-// Shared event skin. Deliberately carries NO alignment or border-side
-// utility: each renderer adds its own, so two conflicting utilities can never
-// land on the same element (class order in JSX does not decide the winner).
-const EVENT_SKIN = [
-  "flex min-w-0 overflow-hidden rounded-[var(--radius-xs)]",
-  "bg-[var(--u-wash)] text-[var(--u-ink)]",
-  "dark:bg-[var(--u-wash-dk)] dark:text-[var(--u-ink-dk)]",
-  "transition-[filter] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-].join(" ");
-
-// Timed events wear the owner's colour as a left bar; all-day blocks wear it
-// as a full outline, so the two read differently even in one colour.
-const stripeFor = (isAllDay) =>
-  isAllDay
-    ? "ring-1 ring-inset ring-[var(--u-stripe)]"
-    : "border-l-[3px] border-[var(--u-stripe)]";
-
-/** Small "+n" attendee counter shared by the pill and the block. */
-function AttendeeTick({ n, className = "" }) {
-  return (
-    <span
-      className={`num shrink-0 rounded-[var(--radius-xs)] bg-black/[.06] px-1 text-[9.5px] font-semibold leading-[14px] dark:bg-white/[.10] ${className}`}
-      title={`${n} attendees`}
-    >
-      +{n}
-    </span>
-  );
-}
+// Event skins live in the `.bxtc-evt*` rules in styles.css. Two reasons they
+// are not utility strings: an event sets an all-round border colour AND a
+// differently-coloured 3px left rule, and two competing Tailwind border
+// utilities on one element resolve by generated source order rather than by
+// the order they appear here; and the container queries that thin a block out
+// on a narrow column have to be able to `display: none` a part, which a
+// layered rule cannot do to an element carrying a display utility.
 
 function MonthPill({ event }) {
   const r = event.resource;
   const n = attendeeCount(r);
   return (
     <div
-      className={[
-        EVENT_SKIN,
-        stripeFor(r.isAllDay),
-        "h-[18px] items-center gap-1 px-1",
-        r.isCancelled ? "opacity-60" : "",
-      ].join(" ")}
-      style={userStyleFor(r.userId)}
+      className={`${IDENT} bxtc-evt bxtc-evt--pill`}
+      data-allday={r.isAllDay ? "true" : undefined}
+      data-cancelled={r.isCancelled ? "true" : undefined}
+      style={identityVars(r.userId)}
     >
-      <span
-        className="num shrink-0 text-[9.5px] font-bold uppercase leading-none tracking-[var(--tracking-wide)] opacity-80"
-        aria-hidden="true"
-      >
+      <span className="bxtc-evt-initials" aria-hidden="true">
         {r._user?.initials || "··"}
       </span>
-      <span
-        className={[
-          "min-w-0 flex-1 truncate text-[10.5px] font-medium leading-none",
-          r.isCancelled ? "line-through" : "",
-        ].join(" ")}
-      >
-        {event.title}
-      </span>
-      {n > 1 && <AttendeeTick n={n} />}
+      <span className="bxtc-evt-title">{event.title}</span>
+      {n > 1 && (
+        <span className="bxtc-tick" title={`${n} attendees`}>+{n}</span>
+      )}
     </div>
   );
 }
@@ -595,50 +617,40 @@ function TimeBlock({ event }) {
   const r = event.resource;
   const minutes = Math.max(0, differenceInMinutes(event.end, event.start));
   // Density tiers control how much chrome we render inside the block.
-  // <30 min: title + owner only. 30–59: + time. ≥60: + location + attendees.
+  // <30 min: title + owner only. 30-59: + time. >=60: + location + attendees.
+  // That is the HEIGHT budget. The WIDTH budget is handled by the container
+  // queries on `.rbc-event`, which drop the meta lines, then the title, then
+  // the initials as overlapping columns squeeze a block down to a rule.
   const density = minutes < 30 ? "xs" : minutes < 60 ? "sm" : "lg";
   const n = attendeeCount(r);
   return (
     <div
-      className={[
-        EVENT_SKIN,
-        stripeFor(false),
-        "h-full w-full flex-col justify-start",
-        "hover:brightness-[.97] dark:hover:brightness-[1.15]",
-        density === "xs" ? "gap-0 px-1 py-px" : "gap-[1px] px-1.5 py-1",
-        r.isCancelled ? "opacity-60" : "",
-      ].join(" ")}
-      style={userStyleFor(r.userId)}
+      className={`${IDENT} bxtc-evt bxtc-evt--block`}
+      data-density={density}
+      data-allday={r.isAllDay ? "true" : undefined}
+      data-cancelled={r.isCancelled ? "true" : undefined}
+      style={identityVars(r.userId)}
     >
-      <span className="flex min-w-0 items-center gap-1">
-        <span
-          className="num shrink-0 text-[9.5px] font-bold uppercase leading-none tracking-[var(--tracking-wide)] opacity-80"
-          aria-hidden="true"
-        >
+      <span className="bxtc-evt-head">
+        <span className="bxtc-evt-initials" aria-hidden="true">
           {r._user?.initials || "··"}
         </span>
-        <span
-          className={[
-            "min-w-0 flex-1 truncate font-semibold leading-[1.15]",
-            density === "xs" ? "text-[10px]" : "text-[11px]",
-            r.isCancelled ? "line-through" : "",
-          ].join(" ")}
-        >
-          {event.title}
-        </span>
-        {density !== "xs" && n > 1 && <AttendeeTick n={n} />}
+        <span className="bxtc-evt-title">{event.title}</span>
+        {density !== "xs" && n > 1 && (
+          <span className="bxtc-tick" title={`${n} attendees`}>+{n}</span>
+        )}
       </span>
 
       {density !== "xs" && (
-        <span className="num truncate text-[9.5px] leading-[1.2] opacity-75">
-          {fmtTime(event.start)} – {fmtTime(event.end)}
+        <span className="bxtc-evt-meta">
+          <span>{fmtTime(event.start)} – {fmtTime(event.end)}</span>
         </span>
       )}
 
       {density === "lg" && r.location && (
-        <span className="flex min-w-0 items-center gap-1 text-[9.5px] leading-[1.2] opacity-75">
-          <Icon name="pin" size={10} stroke={2} className="shrink-0" />
-          <span className="min-w-0 truncate" title={r.location}>{r.location}</span>
+        <span className="bxtc-evt-meta">
+          <Icon name="pin" size={10} stroke={2} />
+          <span title={r.location}>{r.location}</span>
         </span>
       )}
     </div>
@@ -651,19 +663,14 @@ function AgendaRow({ event }) {
   return (
     <div
       className={[
-        "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1",
+        IDENT,
+        "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1",
         r.isCancelled ? "opacity-60" : "",
       ].join(" ")}
-      style={userStyleFor(r.userId)}
+      style={identityVars(r.userId)}
     >
       <span className="flex min-w-0 shrink-0 items-center gap-1.5">
-        <span
-          className="size-2 shrink-0 rounded-full bg-[var(--u-stripe)]"
-          aria-hidden="true"
-        />
-        <span className="num text-[length:var(--fs-2xs)] font-bold uppercase tracking-[var(--tracking-wide)] text-[var(--u-ink)] dark:text-[var(--u-ink-dk)]">
-          {r._user?.initials}
-        </span>
+        <Swatch initials={r._user?.initials} className="size-5 text-[9.5px]" />
         <span className="max-w-[16ch] truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
           {r._user?.name}
         </span>
@@ -721,12 +728,11 @@ const ATT_ROW = "flex min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px
 function InternalAttendeeRow({ attendee, rosterUser }) {
   const chip = responseChip(attendee.response);
   const initials = rosterUser?.initials || initialsFrom(attendee.name || attendee.email);
-  const tokens = rosterUser ? userColorTokens(rosterUser.id) : null;
-  const style = tokens
-    ? { "--u-stripe": tokens.stripe, "--u-ink": tokens.ink, "--u-ink-dk": tokens.inkDark, "--u-wash": tokens.wash, "--u-wash-dk": tokens.washDark }
-    : { "--u-stripe": "var(--border-strong)", "--u-ink": "var(--text-muted)", "--u-ink-dk": "var(--text-muted)", "--u-wash": "var(--surface-2)", "--u-wash-dk": "var(--surface-2)" };
+  // Someone on the roster wears the same swatch they wear on the grid; anyone
+  // else falls back to the neutral ramp rather than borrowing a colour.
+  const style = rosterUser ? identityVars(rosterUser.id) : NEUTRAL_IDENT;
   return (
-    <div className={ATT_ROW} style={style}>
+    <div className={`${IDENT} ${ATT_ROW}`} style={style}>
       <Swatch initials={initials} className="size-6 text-[10px]" />
       <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-[var(--text)]">
         {rosterUser?.name || attendee.name || attendee.email.split("@")[0]}
@@ -785,7 +791,6 @@ function EventPopover({ event, onClose }) {
 
   if (!event) return null;
   const r = event.resource;
-  const c = userColorTokens(r.userId);
   const sameDay = event.start.toDateString() === event.end.toDateString();
   const dateLabel = format(event.start, "EEEE · MMMM d, yyyy");
   const timeLabel = r.isAllDay
@@ -824,23 +829,23 @@ function EventPopover({ event, onClose }) {
   : subjectMissing                    ? "No title set in Outlook."
   : null;
 
-  const ownerStyle = {
-    "--u-ink":     c.ink,
-    "--u-ink-dk":  c.inkDark,
-    "--u-stripe":  c.stripe,
-    "--u-wash":    c.wash,
-    "--u-wash-dk": c.washDark,
-  };
+  const ownerStyle = identityVars(r.userId);
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
       {/* No aria-describedby: the body is a structured metadata list, not a
           single sentence, so a description would just repeat the title. */}
-      <DialogContent size="md" style={ownerStyle} aria-describedby={undefined}>
+      <DialogContent
+        size="md"
+        className={IDENT}
+        style={ownerStyle}
+        aria-describedby={undefined}
+      >
         {/* Owner colour rides the top edge of the sheet, so the dialog is
-            visibly "the same person" as the chip that opened it. */}
+            visibly "the same person" as the block that opened it. Same 3px
+            rule as an event block, same token. */}
         <span
-          className="absolute inset-x-0 top-0 h-[3px] bg-[var(--u-stripe)]"
+          className="absolute inset-x-0 top-0 h-[3px] bg-[var(--u-key)]"
           aria-hidden="true"
         />
         <DialogHeader className="pt-5">

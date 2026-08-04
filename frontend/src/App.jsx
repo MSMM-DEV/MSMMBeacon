@@ -130,6 +130,10 @@ const TAB_META = [
 // One entry per navbar pill. `tabs` lists the member tab keys in sub-tab
 // order; a single-tab group renders with no sub-tab strip. Pipeline groups
 // keep the → arrows between them.
+//
+// `group` places the pill in a rail section (see RAIL_SECTIONS below) and is
+// presentation only — it has no bearing on routing, deep links or
+// permissions. Array order sets the order inside a section.
 const NAV_GROUPS = [
   // Potential was removed from the navbar (2026-06 follow-up) — the flow is
   // Leads & Bids → Proposals → Awarded → Invoice ⇄ In-Between → Closed Out.
@@ -143,10 +147,20 @@ const NAV_GROUPS = [
   { key: "directory", label: "Directory",           stage: "stage-clients",   group: "side", tabs: ["directory"] },
   { key: "licenses",  label: "Licenses",            stage: "stage-events",    group: "side", tabs: ["licenses"] },
   { key: "timesheet", label: "Time & Leave",        stage: "stage-events",    group: "side", tabs: ["timesheet"] },
-  { key: "time-admin",label: "Time Admin",          stage: "stage-events",    group: "side", tabs: ["time-admin"], adminOnly: true },
   { key: "team-cal",  label: "Team Calendar",       stage: "stage-events",    group: "side", tabs: ["team-cal"] },
+  { key: "time-admin",label: "Time Admin",          stage: "stage-events",    group: "admin", tabs: ["time-admin"], adminOnly: true },
 ];
 const navGroupOf = (tabKey) => NAV_GROUPS.find(g => g.tabs.includes(tabKey));
+
+// Rail sections, in render order. `group` matches NAV_GROUPS[].group and
+// `flow` opts the section into the pipeline connector hairlines. A section
+// whose visible-item list comes back empty (Admin, for a non-admin) is not
+// rendered at all, heading included.
+const RAIL_SECTIONS = [
+  { group: "pipeline", label: "Pipeline",  flow: "pipeline" },
+  { group: "side",     label: "Workspace" },
+  { group: "admin",    label: "Admin"     },
+];
 
 // Rail glyphs, keyed by NAV_GROUPS.key. Presentation only: the collapsed rail
 // is icon-first, so every navigable group needs one. Names resolve against the
@@ -5657,18 +5671,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         <span className="bx-mark" aria-hidden="true">B</span>
         <span className="bx-wordmark">
           <b>Beacon</b>
-          <span>MSMM Project Lifecycle</span>
+          <span>The MSMM Operating System</span>
         </span>
       </div>
       <div className="bx-rail-scroll" ref={scrollRef}>
-        <div className="bx-navgroup" data-flow="pipeline">
-          <p className="bx-navlabel"><span>Pipeline</span></p>
-          {NAV_GROUPS.filter(g => g.group === "pipeline").map(navItem)}
-        </div>
-        <div className="bx-navgroup">
-          <p className="bx-navlabel"><span>Workspace</span></p>
-          {NAV_GROUPS.filter(g => g.group === "side" && (!g.adminOnly || isAdmin)).map(navItem)}
-        </div>
+        {RAIL_SECTIONS.map(section => {
+          // Same visibility rule every section had before: adminOnly pills are
+          // filtered out for non-admins. A section left with nothing to show
+          // renders nothing, so no empty labelled block is left behind.
+          const items = NAV_GROUPS.filter(
+            g => g.group === section.group && (!g.adminOnly || isAdmin)
+          );
+          if (!items.length) return null;
+          return (
+            <div
+              key={section.group}
+              className="bx-navgroup"
+              data-flow={section.flow}
+              role="group"
+              aria-label={section.label}
+            >
+              <p className="bx-navlabel"><span>{section.label}</span></p>
+              {items.map(navItem)}
+            </div>
+          );
+        })}
       </div>
       <div className="bx-rail-foot hidden lg:flex">
         <button

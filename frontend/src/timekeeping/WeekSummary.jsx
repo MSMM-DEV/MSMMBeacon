@@ -6,16 +6,20 @@
 // Presentation (ui-v2.0): a real table rather than a row of stat cards, so the
 // seven days line up as one column of tabular figures and a screen reader gets
 // day/hours pairs instead of a pile of divs. The bar behind each row is the
-// same 8-hour reference the previous version used; a day that runs past it
-// keeps the full bar and is called out with a label as well as a tone, never
-// with colour on its own.
+// same 8-hour reference the previous version used. Days past eight hours are
+// NOT flagged: overtime is a payroll conversation, not something this read-only
+// card should editorialise, so the bar and the figure read the same either way.
 
 import React from "react";
 import { Icon } from "../icons";
 import { EmptyState } from "@/ui";
 import { fmtHM } from "../data";
 
-const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// Full day names. The row header reads "Monday 08/03" — spelled out, because
+// the column is wide enough for "Wednesday" and an abbreviation saves nothing.
+const DOW_LABELS = [
+  "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+];
 
 // The reference day length the bars are drawn against (8 h). Unchanged from
 // the original: fill = min(100%, minutes / FULL_DAY_MIN).
@@ -92,15 +96,14 @@ export function WeekSummary({
                 const minutes = s.day?.minutesWork || 0;
                 const f = s.day?.flags || {};
                 const attention = attentionFor(f);
-                const over = minutes > FULL_DAY_MIN;
                 return (
                   <tr
                     key={s.date}
-                    className={`tsx-week-row ${minutes === 0 ? "is-empty" : ""} ${over ? "is-over" : ""} ${attention ? "has-attention" : ""}`}
+                    className={`tsx-week-row ${minutes === 0 ? "is-empty" : ""} ${attention ? "has-attention" : ""}`}
                   >
                     <th scope="row" className="tsx-week-cell-day">
                       <span className="tsx-week-dow">{s.label}</span>
-                      <span className="tsx-week-dom num">{dayOfMonth(s.date)}</span>
+                      <span className="tsx-week-dom num">{monthDay(s.date)}</span>
                     </th>
                     <td className="tsx-week-cell-bar">
                       <span className="tsx-week-bar" aria-hidden="true">
@@ -112,11 +115,6 @@ export function WeekSummary({
                     </td>
                     <td className="tsx-week-cell-h">
                       <span className="tsx-week-hours num">{minutes === 0 ? "–" : fmtHM(minutes)}</span>
-                      {over && (
-                        <span className="tsx-week-over">
-                          <Icon name="trend" size={11}/> Over 8h
-                        </span>
-                      )}
                     </td>
                     <td className="tsx-week-cell-flag">
                       {attention ? (
@@ -182,8 +180,10 @@ function fullDayLabel(dateStr) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" });
 }
 
-function dayOfMonth(dateStr) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", { day: "numeric" });
+// Zero-padded MM/DD, e.g. "08/03". Tabular figures keep the seven rows aligned.
+function monthDay(dateStr) {
+  return new Date(`${dateStr}T00:00:00`)
+    .toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" });
 }
 
 function fmtWeekRange(weekStart) {
