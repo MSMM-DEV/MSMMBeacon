@@ -27220,19 +27220,33 @@ button.tsx-tl-seg { cursor: pointer; }
 .tablewrap[data-skin="clean"] .trow.selected { background: var(--accent-softer); }
 .tablewrap[data-skin="clean"] .trow.selected:hover { background: var(--accent-soft); }
 
-/* The rating, demoted from a full-row wash to a leading rule. Specificity
-   beats the unscoped `.trow[data-stars="N"]` rules above, which keep their
-   original behaviour everywhere else. */
-.tablewrap[data-skin="clean"] .trow[data-stars="5"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-5); }
-.tablewrap[data-skin="clean"] .trow[data-stars="4"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-4); }
-.tablewrap[data-skin="clean"] .trow[data-stars="3"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-3); }
-.tablewrap[data-skin="clean"] .trow[data-stars="2"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-2); }
-.tablewrap[data-skin="clean"] .trow[data-stars="1"] { background-color: var(--surface); box-shadow: inset 3px 0 0 var(--stars-1); }
-.tablewrap[data-skin="clean"] .trow[data-stars="5"]:hover,
-.tablewrap[data-skin="clean"] .trow[data-stars="4"]:hover,
-.tablewrap[data-skin="clean"] .trow[data-stars="3"]:hover,
-.tablewrap[data-skin="clean"] .trow[data-stars="2"]:hover,
-.tablewrap[data-skin="clean"] .trow[data-stars="1"]:hover { background-color: var(--surface-hover); }
+/* The rating tint. It encodes the star level and is not decoration, so it
+   stays: the Rating column is the ninth of nine and is off-screen at common
+   widths, which makes the row itself the only place the level is legible
+   without scrolling sideways.
+
+   What changed is the strength. The original washed the row at 18% of the
+   rating hue, which at this dataset's density (36 leads, nearly all three
+   star) tinted the whole grid one colour and read as the table's background
+   rather than as a signal. Mixing 14% into --surface keeps it plainly visible
+   against the white rows around it while leaving the surface reading as
+   white, and mixing against --surface rather than hardcoding an alpha means
+   the dark theme derives its own value instead of glazing a light film over
+   a dark row. The leading rule stays at full strength, so a run of rows at
+   the same level still reads as one band.
+
+   Specificity beats the unscoped `.trow[data-stars="N"]` rules, which keep
+   their original 18% behaviour on every other table. */
+.tablewrap[data-skin="clean"] .trow[data-stars="5"] { background-color: color-mix(in srgb, var(--stars-5) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-5); }
+.tablewrap[data-skin="clean"] .trow[data-stars="4"] { background-color: color-mix(in srgb, var(--stars-4) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-4); }
+.tablewrap[data-skin="clean"] .trow[data-stars="3"] { background-color: color-mix(in srgb, var(--stars-3) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-3); }
+.tablewrap[data-skin="clean"] .trow[data-stars="2"] { background-color: color-mix(in srgb, var(--stars-2) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-2); }
+.tablewrap[data-skin="clean"] .trow[data-stars="1"] { background-color: color-mix(in srgb, var(--stars-1) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-1); }
+.tablewrap[data-skin="clean"] .trow[data-stars="5"]:hover { background-color: color-mix(in srgb, var(--stars-5) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="4"]:hover { background-color: color-mix(in srgb, var(--stars-4) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="3"]:hover { background-color: color-mix(in srgb, var(--stars-3) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="2"]:hover { background-color: color-mix(in srgb, var(--stars-2) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="1"]:hover { background-color: color-mix(in srgb, var(--stars-1) 24%, var(--surface)); }
 
 /* ---- group headers ------------------------------------------------------ */
 /* Still a band, but a quiet one: it is a label for the run beneath it, not a
