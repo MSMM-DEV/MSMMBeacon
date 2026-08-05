@@ -930,7 +930,23 @@ const TableView = ({
   // let Escape close it. Purely presentational: no row, sort, filter or
   // column state is touched, so leaving full screen restores exactly the view
   // the user had.
-  const [maximized, setMaximized] = useState(false);
+  //
+  // Persisted per tab, so a refresh doesn't throw the user back out of a view
+  // they deliberately chose. Per tab and not globally: maximizing Leads &
+  // Bids should not silently maximize Projects the next time it opens. The
+  // native Fullscreen API cannot be restored this way at all — browsers
+  // require a user gesture to enter it — which is a second reason this is a
+  // CSS overlay.
+  const maximizedKey = `beacon.table.maximized.${tab || "default"}`;
+  const [maximized, setMaximized] = useState(() => {
+    try { return localStorage.getItem(maximizedKey) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try {
+      if (maximized) localStorage.setItem(maximizedKey, "1");
+      else localStorage.removeItem(maximizedKey);
+    } catch { /* storage off — the toggle still works for this session */ }
+  }, [maximized, maximizedKey]);
   useEffect(() => {
     if (!maximized) return;
     const onKey = (e) => { if (e.key === "Escape") setMaximized(false); };

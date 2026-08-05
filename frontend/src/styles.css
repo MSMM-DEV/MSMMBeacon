@@ -2237,8 +2237,16 @@ html, body { overflow-x: clip; }
   min-height: 0;
   max-height: none;
 }
-/* Full screen means edge to edge: the card's own rounding and border would
-   otherwise draw a floating panel inset inside a full-viewport overlay.
+/* Full screen keeps the page's own gutter rather than running the grid into
+   the bezel. Edge-to-edge sounded right and looked wrong: the first column's
+   text and the last column's buttons ended up flush against the screen edges
+   with no margin to sit in, which reads as broken rather than as immersive.
+   --page-gutter is the same clamp the app's pages use, so the maximized table
+   lines up with everything else instead of inventing its own inset.
+
+   The card keeps its border and rounding for the same reason. It is still a
+   surface on a background; the only thing full screen changes is how much
+   room it gets.
 
    The background and overflow are re-stated here because they have to be.
    `.tablewrap[data-skin="clean"]` sets `background: transparent` and
@@ -2247,17 +2255,12 @@ html, body { overflow-x: clip; }
    the file — so it won, and the "full screen" overlay was literally see
    through. The whole page showed underneath it. */
 .tablewrap.is-maximized[data-skin="clean"] {
-  padding: 0;
+  padding: var(--sp-4) var(--page-gutter);
   background: var(--bg);
   overflow: hidden;
 }
-.tablewrap.is-maximized[data-skin="clean"] .bxt-toolbar { padding-inline: var(--sp-3); }
+.tablewrap.is-maximized[data-skin="clean"] .bxt-toolbar { padding-inline: 0; }
 .tablewrap.is-maximized[data-skin="clean"] .table-scroll {
-  border-inline: 0;
-  border-bottom: 0;
-  border-radius: 0;
-  /* Nothing to lift off: full screen, the card IS the page. */
-  box-shadow: none;
 
   /* Release the pinned height so the card fills the overlay.
 
