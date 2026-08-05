@@ -668,9 +668,14 @@ const ChromeToolbar = ({
         // The design-system input paints from Tailwind utilities, which sit in
         // a later cascade layer than styles.css — so the "has a query" tint
         // has to be expressed as utilities too rather than in the CSS block.
-        inputClassName={hasSearch
-          ? "border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
-          : undefined}
+        // The transition is unconditional: applied only alongside the tint it
+        // would ease on the way in and snap on the way out.
+        inputClassName={
+          "transition-[background-color,border-color,color] duration-[var(--dur-fast)] ease-[var(--ease-out)]"
+          + (hasSearch
+              ? " border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
+              : "")
+        }
         type="text"
         placeholder="Search rows"
         aria-label="Search rows"
@@ -1094,14 +1099,34 @@ const TableView = ({
         search={search} setSearch={setSearch}
         yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       />
-      {search.trim() && (
-        <div className="bxt-searchsummary" role="status" aria-live="polite">
-          {filteredRows.length === 0
-            ? <>No rows match <span className="bxt-searchterm">"{search}"</span>.</>
-            : <><strong className="num">{filteredRows.length}</strong> of <strong className="num">{rows.length}</strong> match <span className="bxt-searchterm">"{search}"</span></>
-          }
+      {/* The match count stays MOUNTED and collapses to zero height instead of
+          being added and removed from the tree. Two reasons.
+
+          Visually, mounting it shoved the table down the instant a character
+          landed and yanked it back up on clear — the strip has no enter or
+          exit to animate if it does not exist a frame earlier. As a permanent
+          grid row animating 0fr → 1fr, it opens and closes.
+
+          For assistive tech, a live region has to be in the document BEFORE
+          its content changes; one that appears already-populated is not
+          reliably announced. Keeping the wrapper and swapping only its
+          contents is the shape aria-live actually expects. */}
+      <div
+        className="bxt-searchsummary"
+        data-open={search.trim() ? "true" : undefined}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="bxt-searchsummary-inner">
+          <div className="bxt-searchsummary-text">
+            {search.trim() && (
+              filteredRows.length === 0
+                ? <>No rows match <span className="bxt-searchterm">"{search}"</span>.</>
+                : <><strong className="num">{filteredRows.length}</strong> of <strong className="num">{rows.length}</strong> match <span className="bxt-searchterm">"{search}"</span></>
+            )}
+          </div>
         </div>
-      )}
+      </div>
       {/* Mirrored top scrollbar — always rendered so its ref is stable for
           the measurement effect; hidden via .is-hidden when the table doesn't
           actually overflow (narrow tables don't grow an empty 14px strip).

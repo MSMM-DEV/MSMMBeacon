@@ -24357,14 +24357,46 @@ button.tsx-tl-seg { cursor: pointer; }
 }
 
 /* "12 of 84 match …" line under the chrome. */
+/* Collapsible match count. The outer element is a one-row grid whose track
+   animates between 0fr and 1fr, which is what gives it a height to transition
+   — `height: auto` is not interpolable, and the row count is not known ahead
+   of time, so a fixed max-height would either clip a long message or ease
+   against dead space. The inner wrapper carries `overflow: hidden` and
+   `min-height: 0` so the closed state genuinely measures zero, and all the
+   padding lives one level further in so it collapses with the text instead of
+   holding the strip open at a few pixels.
+
+   Browsers that cannot interpolate 0fr → 1fr simply snap, which is the
+   behaviour this replaced — the fallback is the old bug, not a broken one. */
 .bxt-searchsummary {
-  padding: var(--sp-1) var(--sp-3) var(--sp-2);
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
   font-size: var(--fs-xs);
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
+  transition:
+    grid-template-rows var(--dur-normal) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.bxt-searchsummary[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  border-bottom: 1px solid var(--border);
+}
+.bxt-searchsummary-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.bxt-searchsummary-text {
+  padding: var(--sp-1) var(--sp-3) var(--sp-2);
 }
 .bxt-searchsummary strong { color: var(--text); font-weight: 600; }
+
+/* Motion is a nicety here; the information is the text. */
+@media (prefers-reduced-motion: reduce) {
+  .bxt-searchsummary { transition: none; }
+}
 .bxt-searchterm { font-family: var(--font-mono); color: var(--accent-ink); }
 
 /* ------------------------------------------------------------- menus */
@@ -27237,6 +27269,70 @@ button.tsx-tl-seg { cursor: pointer; }
   padding-inline: 0;
   padding-bottom: var(--sp-3);
 }
+
+/* ---- toolbar layout ----------------------------------------------------- */
+/* A grid, not a wrapping flex row.
+
+   Flex can only break between items in DOM order — search, filters, actions —
+   so the first thing that stops fitting pushes everything after it onto the
+   next line. Around half a monitor's width that produced the bad split: the
+   filter chips finished the first row and Sort / Columns / Full screen were
+   left stranded alone on a second, right-aligned against nothing.
+
+   Named areas let the three groups regroup instead of merely wrapping, and
+   they can do it independently of source order:
+     wide    search | filters | actions          one row
+     medium  search | actions                    controls together on top,
+             filters filters                     filters as a full-width lane
+     narrow  search / actions / filters          one per row
+
+   The medium arrangement is the point of this. Search and the buttons are
+   both things you operate; the filter strip is a lane you scan and scroll
+   sideways. Splitting them that way gives each the full width it wants. */
+.tablewrap[data-skin="clean"] .bxt-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr) auto;
+  grid-template-areas: "search filters actions";
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.tablewrap[data-skin="clean"] .bxt-search {
+  grid-area: search;
+  max-width: none;
+}
+.tablewrap[data-skin="clean"] .bxt-filterstrip { grid-area: filters; }
+.tablewrap[data-skin="clean"] .bxt-toolbar-actions {
+  grid-area: actions;
+  margin-left: 0;
+  justify-self: end;
+  flex-wrap: nowrap;
+}
+
+/* Container queries, not viewport ones. The rail is 248px wide at desktop and
+   drops out of flow further down, so the same viewport width leaves the table
+   two very different amounts of room — a viewport breakpoint would fire at
+   the wrong moment on one side of that change. The toolbar's own width is
+   what decides whether its contents fit, so that is what gets measured. */
+.tablewrap[data-skin="clean"] { container: bxtable / inline-size; }
+
+@container bxtable (max-width: 880px) {
+  .tablewrap[data-skin="clean"] .bxt-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "search  actions"
+      "filters filters";
+  }
+}
+@container bxtable (max-width: 520px) {
+  .tablewrap[data-skin="clean"] .bxt-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "search"
+      "actions"
+      "filters";
+  }
+  .tablewrap[data-skin="clean"] .bxt-toolbar-actions { justify-self: stretch; }
+}
 /* The mirrored top scrollbar sits between the controls and the card. Its own
    border-top/bottom would add back two of the very lines we just removed, so
    here it is a bare track that reads as part of the card's top edge. */
@@ -27244,6 +27340,15 @@ button.tsx-tl-seg { cursor: pointer; }
   border: 0;
   background: transparent;
 }
+/* Same reasoning for the match count: it now sits in open space between the
+   controls and the card, so the elevated bar it used to be — background plus
+   a full-width rule — would read as a third stacked band. Plain text. */
+.tablewrap[data-skin="clean"] .bxt-searchsummary,
+.tablewrap[data-skin="clean"] .bxt-searchsummary[data-open="true"] {
+  background: transparent;
+  border-bottom: 0;
+}
+.tablewrap[data-skin="clean"] .bxt-searchsummary-text { padding-inline: 0; }
 .tablewrap[data-skin="clean"] .table-scroll {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -27257,7 +27362,12 @@ button.tsx-tl-seg { cursor: pointer; }
   text-transform: none;
   letter-spacing: normal;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  /* Regular weight. The header is a label for the column, not a competitor
+     with the data in it — at semibold, nine headings across the top pulled
+     the eye before any row did. It still separates from the body: the rule
+     beneath it and the full --text colour (rows sit at --text-muted) carry
+     the distinction without adding weight. */
+  font-weight: 400;
   color: var(--text);
 }
 .tablewrap[data-skin="clean"] .th:hover { color: var(--accent-ink); }
