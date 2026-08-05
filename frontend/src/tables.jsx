@@ -5416,7 +5416,7 @@ export const HotLeadsTable = ({
               <EditableCell value={r.type} type="select" options={hotLeadTypeOptions}
                 onChange={v => updateRow(r.id, { type: v })}
                 render={v => v
-                  ? <span className={`chip ${hotLeadTypeColor(v)}`}><span className="chip-dot"/>{v}</span>
+                  ? <span className={`chip ${hotLeadTypeColor(v)}`}>{v}</span>
                   : <span className="empty-cell">–</span>}/>
             </div>
           ),

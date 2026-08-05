@@ -27333,19 +27333,6 @@ button.tsx-tl-seg { cursor: pointer; }
   font-weight: 500;
 }
 
-/* A chip with a leading dot is not the same shape as one without, and it
-   should not be padded like one. Equal 10px insets put the dot's own visual
-   weight on top of the left inset, so the mark sat in a pocket of space while
-   the text ran close to the right edge — the pill read lopsided. Pulling the
-   left inset back to 7px lets the dot occupy the space the padding was
-   holding, and widening the gap to 6px keeps the dot from crowding the first
-   letter now that it sits nearer the edge. The result is optically centred:
-   dot-to-edge and text-to-edge carry the same weight. */
-.tablewrap[data-skin="clean"] .chip:has(> .chip-dot:first-child) {
-  padding-left: 7px;
-  gap: 6px;
-}
-
 /* ---- row actions -------------------------------------------------------- */
 /* Always visible, not hover-only. A control the user cannot see is a control
    they do not know exists: the column is headed "Actions" and then reads as
