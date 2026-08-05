@@ -5497,6 +5497,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setProjectsByTypeRef({ potential, awaiting, awarded, closed });
   }, [potential, awaiting, awarded, closed]);
 
+  // Pressing the chip that is already on releases it.
+  //
+  // Every chip group in FILTER_CHIPS is a radio set whose first member is an
+  // explicit "all", and each chip renders as a button with aria-pressed — a
+  // control that says it is a toggle. It wasn't one: the handler set the key
+  // unconditionally, so clicking the lit "Upcoming" chip re-selected
+  // "Upcoming" and there was no way back to the unfiltered list except by
+  // finding "All" and pressing that instead.
+  //
+  // Releasing falls back to "all" rather than to no key, because "all" IS the
+  // unfiltered state here — the predicate map has an entry for it. Pressing
+  // "all" while it is already lit stays put; there is nothing more neutral to
+  // fall back to.
+  const toggleFilterKey = (tabKey, key) =>
+    setFilterKey(f => ({
+      ...f,
+      [tabKey]: (f[tabKey] === key && key !== "all") ? "all" : key,
+    }));
+
   // Build filter chips with counts and click handlers for the current tab
   const chipsFor = (tabKey) => (FILTER_CHIPS[tabKey] || []).map(chip => ({
     label: chip.label,
@@ -5512,7 +5531,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             })[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
       : null,
     active: filterKey[tabKey] === chip.key,
-    onClick: () => setFilterKey(f => ({ ...f, [tabKey]: chip.key })),
+    onClick: () => toggleFilterKey(tabKey, chip.key),
   }));
 
   const stats = useMemo(() => {
@@ -6362,7 +6381,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             companies={companies}
             users={getUsers()}
             activeFilter={filterKey.projects}
-            onFilterChange={(k) => setFilterKey(f => ({ ...f, projects: k }))}
+            onFilterChange={(k) => toggleFilterKey("projects", k)}
             filterChips={FILTER_CHIPS.projects}
             flashId={flashId}
             tab="projects"/>
