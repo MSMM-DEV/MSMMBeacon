@@ -27356,13 +27356,23 @@ button.tsx-tl-seg { cursor: pointer; }
   }
   .tablewrap[data-skin="clean"] .bxt-toolbar-actions { justify-self: stretch; }
 }
-/* The mirrored top scrollbar sits between the controls and the card. Its own
-   border-top/bottom would add back two of the very lines we just removed, so
-   here it is a bare track that reads as part of the card's top edge. */
-.tablewrap[data-skin="clean"] .table-top-scroll {
-  border: 0;
-  background: transparent;
-}
+/* No mirrored top scrollbar. The table already shows two: .table-scroll
+   scrolls both axes, so it draws its own along the bottom and down the right.
+   The mirror above the header made a third, and three bars around one grid
+   reads as chrome rather than as a control — the eye has to work out which of
+   the two horizontal ones it is meant to use.
+
+   Hidden rather than unmounted: TableView always renders the element so its
+   ref stays stable for the measurement effect, and the scroll-sync writes to
+   `.scrollLeft` on it. Writing to a display:none element is a no-op, and its
+   own scroll handler can never fire, so hiding is safe where removing the
+   node from the tree would mean touching that contract.
+
+   The cost is real and worth stating: on a long table the only way to scroll
+   sideways is now the bottom bar, which may be well below the fold. The
+   header row still sticks, so the columns stay identified while you get
+   there. */
+.tablewrap[data-skin="clean"] .table-top-scroll { display: none; }
 /* Same reasoning for the match count: it now sits in open space between the
    controls and the card, so the elevated bar it used to be — background plus
    a full-width rule — would read as a third stacked band. Plain text. */
@@ -27376,6 +27386,28 @@ button.tsx-tl-seg { cursor: pointer; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+
+  /* A FIXED height, not a max-height, and this is what stops the page from
+     jumping to the top when a filter chip is pressed.
+
+     Nothing was scrolling the user anywhere. `.table-scroll` sized itself to
+     its content up to a cap, so filtering 36 rows down to 2 shrank the card
+     by 460px, the page's scrollHeight fell from 1094 to 844 — below the
+     844px viewport — and the browser clamped scrollTop from 250 to 0 because
+     there was no longer anywhere to scroll. It read as a reload; it was the
+     page running out of length underneath the reader.
+
+     Pinning min and max to the same value keeps the card the same size
+     whatever it holds, so the page keeps its length and the scroll offset
+     survives the filter. `max()` preserves the original pair of intents: the
+     viewport-relative target, floored so short viewports stay usable.
+
+     The trade is honest — a two-row result now leaves empty space below the
+     last row instead of collapsing to fit. That space is what the scroll
+     position is standing on. */
+  --bxt-scroll-h: max(340px, calc(100vh - 300px));
+  min-height: var(--bxt-scroll-h);
+  max-height: var(--bxt-scroll-h);
 }
 
 /* ---- header ------------------------------------------------------------- */
