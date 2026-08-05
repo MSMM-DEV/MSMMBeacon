@@ -2258,6 +2258,29 @@ html, body { overflow-x: clip; }
   border-radius: 0;
   /* Nothing to lift off: full screen, the card IS the page. */
   box-shadow: none;
+
+  /* Release the pinned height so the card fills the overlay.
+
+     These two features genuinely pull against each other. The card is pinned
+     to max(340px, calc(100vh - 300px)) so that filtering cannot shrink the
+     page out from under the reader's scroll position — and that pin is what
+     stopped full screen from filling the viewport, leaving the table at 600px
+     inside a 900px overlay with 246px of dead space below it.
+
+     It has to be undone HERE rather than by reordering anything, because
+     `.tablewrap.is-maximized .table-scroll` and
+     `.tablewrap[data-skin="clean"] .table-scroll` carry identical
+     specificity — three components each — so the later of the two wins on
+     source order alone, and the skin block is later. Adding the skin
+     attribute to the maximized selector takes it to four components, which
+     settles it by weight instead of by position in the file.
+
+     Nothing is lost by releasing the pin here: the overlay is a fixed-height
+     flex column, so the card's height is the space left over rather than
+     something the content can shrink. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .invoice-top-scroll,
 .table-top-scroll {
