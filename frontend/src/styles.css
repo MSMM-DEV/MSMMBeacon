@@ -27314,9 +27314,28 @@ button.tsx-tl-seg { cursor: pointer; }
    The medium arrangement is the point of this. Search and the buttons are
    both things you operate; the filter strip is a lane you scan and scroll
    sideways. Splitting them that way gives each the full width it wants. */
+/* The filter track is sized to its CONTENT, and the search box absorbs the
+   slack. Making filters the flexible 1fr track was the mistake: between the
+   width where everything fits (1125px on this table) and the width where the
+   two-row layout took over, the track shrank below the chips inside it, so
+   "Past" was sliced off mid-word with the Sort button starting immediately
+   after — a scrollable strip clipped flush against the next control reads as
+   two things overlapping, not as one thing that scrolls.
+
+   Chips have a fixed intrinsic width and nothing sensible to do when
+   squeezed; a text input has an obvious one. So search flexes between 180 and
+   320px and the chips keep their size.
+
+   `max-content`, NOT `minmax(0, max-content)`. With a 0 minimum the filter
+   track's base size is 0, so when grid distributes free space it hands each
+   track an equal share until one hits its limit — search reached its 320px
+   cap first and every remaining pixel of the shortfall came out of the chips.
+   A bare `max-content` makes the chips' own width the track's base size, so
+   the deficit lands on search instead, which is the track that can absorb
+   it. */
 .tablewrap[data-skin="clean"] .bxt-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 320px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(180px, 320px) max-content auto;
   grid-template-areas: "search filters actions";
   align-items: center;
   gap: var(--sp-2) var(--sp-3);
@@ -27340,7 +27359,12 @@ button.tsx-tl-seg { cursor: pointer; }
    what decides whether its contents fit, so that is what gets measured. */
 .tablewrap[data-skin="clean"] { container: bxtable / inline-size; }
 
-@container bxtable (max-width: 880px) {
+/* 1000px, not 880. With search at its 180px floor this table needs
+   180 + 12 + 444 (chips) + 12 + 337 (buttons) = 985px for one row, so 880
+   left a 105px band in which the row was already over-committed. Breaking a
+   little early costs nothing — the filter strip simply gets its own lane
+   sooner — whereas breaking late is what produced the collision. */
+@container bxtable (max-width: 1000px) {
   .tablewrap[data-skin="clean"] .bxt-toolbar {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
@@ -27475,16 +27499,24 @@ button.tsx-tl-seg { cursor: pointer; }
    against the white rows around it while leaving the surface reading as
    white, and mixing against --surface rather than hardcoding an alpha means
    the dark theme derives its own value instead of glazing a light film over
-   a dark row. The leading rule stays at full strength, so a run of rows at
-   the same level still reads as one band.
+   a dark row.
+
+   No leading rule. The tint alone carries the level; a saturated 3px bar of
+   the same hue beside it was the same fact stated twice, once quietly and
+   once at full strength, and the hard edge cut across the row's left side
+   every 48px down the list. Removing it has to be explicit rather than just
+   omitted: the unscoped `.trow.stars-header[data-stars="N"]` rule further up
+   still paints a 4px inset, and dropping the declaration here would let that
+   one through on the group bands.
 
    Specificity beats the unscoped `.trow[data-stars="N"]` rules, which keep
-   their original 18% behaviour on every other table. */
-.tablewrap[data-skin="clean"] .trow[data-stars="5"] { background-color: color-mix(in srgb, var(--stars-5) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-5); }
-.tablewrap[data-skin="clean"] .trow[data-stars="4"] { background-color: color-mix(in srgb, var(--stars-4) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-4); }
-.tablewrap[data-skin="clean"] .trow[data-stars="3"] { background-color: color-mix(in srgb, var(--stars-3) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-3); }
-.tablewrap[data-skin="clean"] .trow[data-stars="2"] { background-color: color-mix(in srgb, var(--stars-2) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-2); }
-.tablewrap[data-skin="clean"] .trow[data-stars="1"] { background-color: color-mix(in srgb, var(--stars-1) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--stars-1); }
+   their original 18%-plus-rule behaviour on every other table. */
+.tablewrap[data-skin="clean"] .trow[data-stars] { box-shadow: none; }
+.tablewrap[data-skin="clean"] .trow[data-stars="5"] { background-color: color-mix(in srgb, var(--stars-5) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="4"] { background-color: color-mix(in srgb, var(--stars-4) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="3"] { background-color: color-mix(in srgb, var(--stars-3) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="2"] { background-color: color-mix(in srgb, var(--stars-2) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-stars="1"] { background-color: color-mix(in srgb, var(--stars-1) 14%, var(--surface)); }
 .tablewrap[data-skin="clean"] .trow[data-stars="5"]:hover { background-color: color-mix(in srgb, var(--stars-5) 24%, var(--surface)); }
 .tablewrap[data-skin="clean"] .trow[data-stars="4"]:hover { background-color: color-mix(in srgb, var(--stars-4) 24%, var(--surface)); }
 .tablewrap[data-skin="clean"] .trow[data-stars="3"]:hover { background-color: color-mix(in srgb, var(--stars-3) 24%, var(--surface)); }
