@@ -91,34 +91,27 @@ export const UserTag = ({ userId, size = "xs", nameOnly = false }) => {
   );
 };
 
-// Renders a row of users as `[avatar][initials]` chips. The initials text
-// next to each avatar makes the column directly scannable instead of
-// requiring a hover-tooltip read on the small in-circle text. Wraps to
-// extra lines when the cell is narrow; overflowing users collapse to "+N".
+// Renders a row of users as avatars. The avatar already carries the person's
+// initials inside the circle, so the chip does NOT repeat them as text beside
+// it — printing "RP" twice per person said nothing extra and cost roughly half
+// the column's width, which matters in a nine-column table. The full name is
+// on hover. Wraps to extra lines when the cell is narrow; overflowing users
+// collapse to "+N".
 export const UserStack = ({ ids, max = 3 }) => {
   const shown = (ids || []).slice(0, max);
   const extra = (ids || []).length - shown.length;
   return (
-    <span className="user-chip-stack inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 align-middle">
+    <span className="user-chip-stack inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1 gap-y-1 align-middle">
       {shown.map((id) => {
         const u = userById(id);
         if (!u) return null;
         return (
           <span
             key={id}
-            className={cn(
-              "user-chip inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap",
-              "rounded-[var(--radius-full)] border border-[var(--border)] bg-[var(--surface-2)]",
-              "py-[2px] pl-[2px] pr-2 leading-none",
-              "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-              "hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)]"
-            )}
+            className="user-chip inline-flex shrink-0 items-center leading-none"
             title={u.name}
           >
             <UserAvatar user={u} size="xs" />
-            <span className="user-chip-label num text-[length:var(--fs-xs)] font-semibold tracking-[var(--tracking-wide)] text-[var(--text)]">
-              {u.initials}
-            </span>
           </span>
         );
       })}

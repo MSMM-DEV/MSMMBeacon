@@ -228,36 +228,28 @@ html, body { overflow-x: clip; }
 .avatar.xs { width: 22px; height: 22px; font-size: 9.5px; }
 .avatar.sm { width: 26px; height: 26px; font-size: 10px; }
 
-/* ---- UserStack: avatar + initials text chips, side-by-side ----------- */
+/* ---- UserStack: a row of initial avatars ----------------------------- */
+/* The avatar circle already prints the person's initials, so the chip no
+   longer repeats them as a text label beside it. That drops the surrounding
+   pill too: with nothing but the avatar inside, the border and padding were
+   drawing a second ring around a shape that is already a circle. */
 .user-chip-stack {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 4px;
   max-width: 100%;
 }
 .user-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 8px 2px 2px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  flex: none;
   line-height: 1;
-  white-space: nowrap;
 }
-.user-chip:hover {
-  background: var(--surface-hover);
-  border-color: var(--border-strong);
+.user-chip .avatar {
+  transition: transform var(--dur-fast) var(--ease-out);
 }
-.user-chip-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
+.user-chip:hover .avatar { transform: translateY(-1px); }
 .user-chip-more {
   display: inline-flex;
   align-items: center;
@@ -1102,37 +1094,50 @@ html, body { overflow-x: clip; }
    Used by Events & Other and Hot Leads tables — row stripes mirror the
    Potential `data-prob` pattern. 5★/4★ slot into the green family, 3★ yellow,
    2★ orange, 1★ red; Unrated leans muted so it doesn't compete for attention. */
+/* Every star rating in the app is on a THREE-step scale (HOT_LEAD_STAR_MAX),
+   so 1 / 2 / 3 are the levels that actually render and they are the ones tuned
+   here. Levels 4 and 5 are kept for the 5-step ramp the tokens were originally
+   written for; nothing renders them today.
+
+   3★ used to be dark dijon (#A89200). Two problems with it as the TOP of a
+   three-step scale. It sits one hue step from the 2★ orange, so as a row tint
+   the best and middle levels were nearly the same colour — which is why the
+   rating banding was hard to read. And a muddy yellow reads as caution, not as
+   the strongest lead in the list; the scale said "warning, more warning, bad".
+   Green / amber / red separates the three levels by the widest hue gaps
+   available and matches the reading every user already brings to a priority
+   scale. */
 :root {
-  --stars-5:    #1F6B3E;   /* deep forest — strongest signal */
-  --stars-4:    #7AAE53;   /* olive-leaf green */
-  --stars-3:    #A89200;   /* dark dijon — shared hue family as --prob-medium */
+  --stars-5:    #1F6B3E;   /* deep forest — 5-step ramp only, unused today */
+  --stars-4:    #7AAE53;   /* olive-leaf green — 5-step ramp only, unused today */
+  --stars-3:    #2F6A44;   /* forest green — top of the live 3-step scale */
   --stars-2:    #D97418;   /* cadmium orange — shared with --prob-orange */
   --stars-1:    #A3302E;   /* crimson — shared with --prob-low */
   --stars-5-bg:   rgba(31, 107, 62, 0.14);
   --stars-4-bg:   rgba(122, 174, 83, 0.16);
-  --stars-3-bg:   rgba(168, 146, 0, 0.18);
+  --stars-3-bg:   rgba(47, 106, 68, 0.14);
   --stars-2-bg:   rgba(217, 116, 24, 0.14);
   --stars-1-bg:   rgba(163, 48, 46, 0.13);
   --stars-5-bg-hover: rgba(31, 107, 62, 0.24);
   --stars-4-bg-hover: rgba(122, 174, 83, 0.26);
-  --stars-3-bg-hover: rgba(168, 146, 0, 0.28);
+  --stars-3-bg-hover: rgba(47, 106, 68, 0.24);
   --stars-2-bg-hover: rgba(217, 116, 24, 0.24);
   --stars-1-bg-hover: rgba(163, 48, 46, 0.22);
 }
 [data-theme="dark"] {
   --stars-5:    #6FB58A;
   --stars-4:    #B2D188;
-  --stars-3:    #F0D03D;
+  --stars-3:    #77C096;   /* forest green, lifted for dark surfaces */
   --stars-2:    #F3A064;
   --stars-1:    #E07A78;
   --stars-5-bg:   rgba(111, 181, 138, 0.16);
   --stars-4-bg:   rgba(178, 209, 136, 0.18);
-  --stars-3-bg:   rgba(240, 208, 61, 0.18);
+  --stars-3-bg:   rgba(119, 192, 150, 0.16);
   --stars-2-bg:   rgba(243, 160, 100, 0.16);
   --stars-1-bg:   rgba(224, 122, 120, 0.16);
   --stars-5-bg-hover: rgba(111, 181, 138, 0.26);
   --stars-4-bg-hover: rgba(178, 209, 136, 0.28);
-  --stars-3-bg-hover: rgba(240, 208, 61, 0.28);
+  --stars-3-bg-hover: rgba(119, 192, 150, 0.26);
   --stars-2-bg-hover: rgba(243, 160, 100, 0.26);
   --stars-1-bg-hover: rgba(224, 122, 120, 0.26);
 }
@@ -1474,8 +1479,16 @@ html, body { overflow-x: clip; }
 [data-theme="dark"] .chip.prob-low    { color: var(--prob-low); }
 [data-theme="dark"] .chip.prob-orange { color: var(--prob-orange); }
 
+/* `flex: none` is load-bearing, not tidiness. The chip is an inline-flex box
+   capped at max-width:100%, so in a narrow column a long label ("Engineering"
+   in a 130px Type column) squeezes every flexible child. The dot has no
+   intrinsic content, so it was the first thing to collapse: it shrank to a
+   sliver while its 5px gap stayed, and the chip rendered as an unexplained
+   indent. A short label ("AI") left room and kept its circle, so the same
+   column showed two different chip shapes depending on the word inside it. */
 .chip-dot {
   width: 6px; height: 6px; border-radius: 50%;
+  flex: none;
   background: currentColor;
 }
 .chip-stack { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
@@ -2206,6 +2219,28 @@ html, body { overflow-x: clip; }
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+}
+
+/* The same overlay, for the CSS-grid tables (TableView) rather than the
+   Invoice <table>. Chrome stays fixed at the top; the scroll container takes
+   the rest of the height instead of its normal viewport-relative max-height,
+   which is the entire point of going full screen. */
+.tablewrap.is-maximized .bxt-toolbar,
+.tablewrap.is-maximized .bxt-searchsummary,
+.tablewrap.is-maximized .table-top-scroll { flex: 0 0 auto; }
+.tablewrap.is-maximized .table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+/* Full screen means edge to edge: the card's own rounding and border would
+   otherwise draw a floating panel inset inside a full-viewport overlay. */
+.tablewrap.is-maximized[data-skin="clean"] { padding: 0; }
+.tablewrap.is-maximized[data-skin="clean"] .bxt-toolbar { padding-inline: var(--sp-3); }
+.tablewrap.is-maximized[data-skin="clean"] .table-scroll {
+  border-inline: 0;
+  border-bottom: 0;
+  border-radius: 0;
 }
 .invoice-top-scroll,
 .table-top-scroll {
@@ -27177,6 +27212,38 @@ button.tsx-tl-seg { cursor: pointer; }
 }
 
 /* ---- container ---------------------------------------------------------- */
+/* ONE card, not two. The wrapper draws the app's default panel — border,
+   radius, shadow — and this skin draws its own around the scroll container,
+   so the table was sitting in a bordered box inside a bordered box. Worse,
+   `.bxt-toolbar` carries a full-width `border-bottom`, which ran straight
+   across the top of the inner card and cut its rounded corners: the corner
+   curved away while the toolbar's rule kept going, so the two corners read as
+   broken rather than round.
+
+   The fix is to decide which element is the card. It is the table. The
+   wrapper drops its chrome and becomes plain layout, the toolbar drops its
+   rule and floats above as free-standing controls, and the table below is a
+   single rounded, bordered surface with nothing overlapping its corners. */
+.tablewrap[data-skin="clean"] {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.tablewrap[data-skin="clean"] .bxt-toolbar {
+  border-bottom: 0;
+  background: transparent;
+  padding-inline: 0;
+  padding-bottom: var(--sp-3);
+}
+/* The mirrored top scrollbar sits between the controls and the card. Its own
+   border-top/bottom would add back two of the very lines we just removed, so
+   here it is a bare track that reads as part of the card's top edge. */
+.tablewrap[data-skin="clean"] .table-top-scroll {
+  border: 0;
+  background: transparent;
+}
 .tablewrap[data-skin="clean"] .table-scroll {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -27266,6 +27333,19 @@ button.tsx-tl-seg { cursor: pointer; }
   font-weight: 500;
 }
 
+/* A chip with a leading dot is not the same shape as one without, and it
+   should not be padded like one. Equal 10px insets put the dot's own visual
+   weight on top of the left inset, so the mark sat in a pocket of space while
+   the text ran close to the right edge — the pill read lopsided. Pulling the
+   left inset back to 7px lets the dot occupy the space the padding was
+   holding, and widening the gap to 6px keeps the dot from crowding the first
+   letter now that it sits nearer the edge. The result is optically centred:
+   dot-to-edge and text-to-edge carry the same weight. */
+.tablewrap[data-skin="clean"] .chip:has(> .chip-dot:first-child) {
+  padding-left: 7px;
+  gap: 6px;
+}
+
 /* ---- resize handles ----------------------------------------------------- */
 /* The handle's hairline is what was left of the column lattice in the header.
    It only matters while the user is reaching for it, so it is transparent
@@ -27315,7 +27395,7 @@ button.tsx-tl-seg { cursor: pointer; }
 .tablewrap[data-skin="clean"] .trow::after {
   content: "";
   position: absolute;
-  left: var(--bxt-cell-x);
+  left: var(--bxt-rule-inset, var(--bxt-cell-x));
   right: 0;
   bottom: 0;
   height: 1px;
@@ -27323,3 +27403,24 @@ button.tsx-tl-seg { cursor: pointer; }
   pointer-events: none;
 }
 .tablewrap[data-skin="clean"] .trow:last-child::after { content: none; }
+
+/* ---- column rules ------------------------------------------------------- */
+/* Vertical separators between columns. Once the grid has both axes ruled it
+   is a lattice, so the horizontal rule has to run the full width too —
+   inset from the left it would leave the first column's vertical line hanging
+   past the end of every row rule.
+
+   Drawn as an inset box-shadow rather than border-right so the line lands
+   inside the cell's own box and cannot add width to a grid track — the tracks
+   are sized from JS-computed values, and a border would shift every column by
+   a pixel. */
+.tablewrap[data-skin="clean"] { --bxt-rule-inset: 0px; }
+.tablewrap[data-skin="clean"] .th + .th,
+.tablewrap[data-skin="clean"] .td + .td {
+  box-shadow: inset 1px 0 0 var(--border);
+}
+/* The rating tint paints its level as an inset box-shadow on the row. A cell's
+   own inset shadow is a separate box and does not collide with it, but the
+   FIRST cell must stay clear so the leading rule reads as one continuous band
+   down the column. `.td + .td` already skips it. */
+.tablewrap[data-skin="clean"] .trow.stars-header .td + .td { box-shadow: none; }

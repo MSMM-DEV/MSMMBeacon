@@ -53,6 +53,7 @@ import {
   DropdownMenuRadioGroup, DropdownMenuRadioItem,
   EmptyState as UIEmptyState,
   Popover as UIPopover, PopoverAnchor as UIPopoverAnchor, PopoverContent as UIPopoverContent,
+  Tooltip, TooltipProvider,
 } from "@/ui";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
@@ -242,6 +243,56 @@ const eventTypeRank = (t) => EVENT_TYPE_RANK[t] ?? 99;
 // Sort / Columns popovers and render no visible text in the header.
 const isInternalLabel = (label) => typeof label === "string" && label.startsWith("__");
 
+// A column header label that reveals its full text on hover when the column is
+// too narrow to show it ("Anticipated A…" → "Anticipated Amount").
+//
+// Truncation is measured (scrollWidth vs clientWidth) rather than guessed from
+// a character count, because these columns are user-resizable and
+// user-reorderable: the same label is clipped at one width and complete at the
+// next. A ResizeObserver keeps the answer current while the user drags a
+// resize handle, so the tooltip appears and disappears at the width where the
+// text actually starts and stops fitting.
+//
+// Headers that fit render no tooltip at all — a hover card that repeats text
+// already on screen is noise.
+const ThLabel = ({ text }) => {
+  const ref = useRef(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let alive = true;
+    const measure = () => {
+      if (!alive || !ref.current) return;
+      const node = ref.current;
+      const clipped = node.scrollWidth > node.clientWidth + 1;
+      setTruncated(prev => (prev === clipped ? prev : clipped));
+    };
+    measure();
+
+    // The webfont is the reason this needs more than one measurement. On a
+    // cold load the header paints in the fallback face, which is narrower —
+    // "Anticipated Amount" fits, so the first measure says "not clipped". When
+    // the real face swaps in, the text grows past the cell but the SPAN'S BOX
+    // DOES NOT CHANGE SIZE (the grid track still fixes it at 100px), so a
+    // ResizeObserver never fires and the tooltip would never appear.
+    document.fonts?.ready?.then(measure).catch(() => {});
+
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => { alive = false; ro?.disconnect(); };
+  }, [text]);
+
+  const label = (
+    <span ref={ref} className="bxt-th-label" data-clipped={truncated ? "true" : undefined}>
+      {text}
+    </span>
+  );
+  if (!truncated || !text) return label;
+  return <Tooltip label={text} side="top">{label}</Tooltip>;
+};
+
 // Readable name for an internal (__*) column, used only as the accessible
 // name of its header cell — the visible label stays blank.
 const INTERNAL_COLUMN_NAMES = {
@@ -377,6 +428,9 @@ const HeaderRow = ({
   };
 
   return (
+    // TooltipProvider renders no DOM of its own, so it can sit outside the
+    // grid row without disturbing the column tracks.
+    <TooltipProvider delayDuration={250} skipDelayDuration={300}>
     <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: grid }}>
       {visible.map((c, i) => {
         const sortable = !!c.sortKey;
@@ -385,8 +439,15 @@ const HeaderRow = ({
         const isDragging = dragLabel === c.label;
         const isOver = overLabel === c.label && dragLabel && dragLabel !== c.label && canDrag;
         const internal = isInternalLabel(c.label);
-        const displayLabel = internal ? "" : c.label;
         const accessibleLabel = internal ? internalColumnName(c.label) : c.label;
+        // Internal columns render no visible text, with one exception: the
+        // trailing actions column is a column like any other to the eye, and a
+        // blank cell at the end of an otherwise-labelled header row reads as
+        // something missing. The leading checkbox stays blank — a "Select"
+        // label over a 42px checkbox column is noise, not information.
+        const displayLabel = !internal
+          ? c.label
+          : (c.label === "__actions" ? internalColumnName(c.label) : "");
 
         const dragProps = canDrag ? {
           draggable: true,
@@ -444,14 +505,18 @@ const HeaderRow = ({
               // the keyboard. It carries `draggable` too: dragstart bubbles up
               // to the header cell's handler, which is what browsers need in
               // order to start a column drag from inside a form control.
+              // No `title` here: the label carries its own hover tooltip when
+              // it is clipped, and a native title on the parent would stack a
+              // second card on top of it. `aria-label` keeps the sort
+              // affordance announced, and contains the visible text.
               <button
                 type="button"
                 className="bxt-th-btn"
                 draggable={canDrag || undefined}
                 onClick={() => onSortToggle(c.sortKey)}
-                title={`Sort by ${accessibleLabel}`}
+                aria-label={`Sort by ${accessibleLabel}`}
               >
-                <span className="bxt-th-label">{displayLabel}</span>
+                <ThLabel text={displayLabel}/>
                 <span className="bxt-th-sort" aria-hidden="true">
                   <Icon
                     name={active ? (sort.dir === "asc" ? "chevronUp" : "chevronDown") : "chevronsUpDown"}
@@ -459,9 +524,11 @@ const HeaderRow = ({
                   />
                 </span>
               </button>
+            ) : displayLabel ? (
+              <ThLabel text={displayLabel}/>
             ) : (
               <span className="bxt-th-label">
-                {displayLabel || <span className="sr-only">{accessibleLabel}</span>}
+                <span className="sr-only">{accessibleLabel}</span>
               </span>
             )}
             {!c.locked && setColumnWidths && (
@@ -478,6 +545,7 @@ const HeaderRow = ({
         );
       })}
     </div>
+    </TooltipProvider>
   );
 };
 
@@ -573,11 +641,12 @@ const useTableChrome = (columns, { primarySort = [] } = {}) => {
 // ---------- Chrome Toolbar with live Columns + Sort + Filter + Year popovers ----------
 const ChromeToolbar = ({
   filters, right, onNew, newLabel = "New",
-  columns, sort, onSortToggle, hiddenCols, toggleHidden,
+  columns, sort, onSortToggle, onSortClear, hiddenCols, toggleHidden,
   openMenu, setOpenMenu,
   sortBtnRef, colsBtnRef, filterBtnRef, yearBtnRef, searchInputRef,
   search, setSearch,
   yearOptions, yearValue, onYearChange,
+  maximized, onToggleMaximize,
 }) => {
   // Only surface sortable, user-facing columns in the Sort popover; hide internal (__*) columns.
   const sortableCols = columns.filter(c => c.sortKey && !isInternalLabel(c.label));
@@ -734,7 +803,7 @@ const ChromeToolbar = ({
             {sort.key && (
               <>
                 <DropdownMenuSeparator/>
-                <DropdownMenuItem onSelect={() => { /* clear */ }}>
+                <DropdownMenuItem onSelect={() => onSortClear?.()}>
                   <Icon name="x" size={13}/>
                   <span className="bxt-menu-text">Clear sort</span>
                 </DropdownMenuItem>
@@ -785,6 +854,24 @@ const ChromeToolbar = ({
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Full screen. Presentation only: it repositions the same table into a
+            fixed overlay and changes nothing about the rows, sort or filters.
+            Same mechanism the Invoice table already uses (a CSS overlay rather
+            than the native Fullscreen API, which iOS Safari refuses on
+            non-video elements). */}
+        {onToggleMaximize && (
+          <button
+            type="button"
+            className={"bxt-tool" + (maximized ? " is-on" : "")}
+            onClick={onToggleMaximize}
+            aria-pressed={!!maximized}
+            title={maximized ? "Exit full screen (Esc)" : "Expand this table to full screen"}
+          >
+            <Icon name={maximized ? "minimize" : "maximize"} size={13}/>
+            <span className="bxt-tool-label">{maximized ? "Exit" : "Full screen"}</span>
+          </button>
+        )}
+
         {right}
 
         {onNew && (
@@ -823,7 +910,7 @@ const TableView = ({
 }) => {
   const chrome = useTableChrome(columns, { primarySort });
   const {
-    sort, hiddenCols, orderedColumns, visibleColumns,
+    sort, setSort, hiddenCols, orderedColumns, visibleColumns,
     onSortToggle, toggleHidden,
     openMenu, setOpenMenu,
     sortBtnRef, colsBtnRef, filterBtnRef, yearBtnRef, searchInputRef,
@@ -831,6 +918,25 @@ const TableView = ({
     columnOrder, onReorder,
     columnWidths, setColumnWidths,
   } = chrome;
+
+  // Full-screen view. A CSS fixed-overlay rather than the native Fullscreen
+  // API, which doesn't work on non-video elements in iOS Safari — the same
+  // approach the Invoice table has used. While open we lock body scroll and
+  // let Escape close it. Purely presentational: no row, sort, filter or
+  // column state is touched, so leaving full screen restores exactly the view
+  // the user had.
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e) => { if (e.key === "Escape") setMaximized(false); };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [maximized]);
 
   // Column-walking search predicate. For each non-locked column we extract a
   // searchable string via the column's `sortValue` (which usually resolves
@@ -973,10 +1079,13 @@ const TableView = ({
   ]);
 
   return (
-    <div className="tablewrap" data-skin={skin || undefined}>
+    <div className={"tablewrap" + (maximized ? " is-maximized" : "")}
+         data-skin={skin || undefined}>
       <ChromeToolbar
         filters={filters} right={right} onNew={onNew} newLabel={newLabel}
         columns={orderedColumns} sort={sort} onSortToggle={onSortToggle}
+        onSortClear={() => setSort({ key: null, dir: null })}
+        maximized={maximized} onToggleMaximize={() => setMaximized(m => !m)}
         hiddenCols={hiddenCols} toggleHidden={toggleHidden}
         openMenu={openMenu} setOpenMenu={setOpenMenu}
         sortBtnRef={sortBtnRef} colsBtnRef={colsBtnRef}
@@ -5083,7 +5192,13 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
   const eng     = upcoming.filter(r => r.type === "Engineering");
   const untyped = upcoming.filter(r => !r.type).length;
 
-  const renderColumn = (label, tone, items) => (
+  // Leads of a type that carry no date at all. An empty column means "nothing
+  // on the calendar ahead" — NOT "no leads of this type" — so the empty state
+  // reports these to keep the two readings apart. Counted off `rows` (every
+  // hot lead), not `upcoming` (which is date-filtered by definition).
+  const undatedOf = (type) => (rows || []).filter(r => r.type === type && !r.dateTime).length;
+
+  const renderColumn = (label, tone, items, undated) => (
     <section className="hlq-col" data-tone={tone} aria-label={`${label} upcoming hot leads`}>
       <header className="hlq-col-head">
         <h3 className="hlq-col-title">
@@ -5099,7 +5214,12 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
       {items.length === 0 ? (
         <p className="hlq-empty">
           <Icon name="calendar" size={14}/>
-          <span>No {label.toLowerCase()} leads scheduled.</span>
+          <span>
+            No {label} leads on the calendar
+            {undated > 0
+              ? <> — <span className="num">{undated}</span> {undated === 1 ? "lead" : "leads"} worth following up.</>
+              : "."}
+          </span>
         </p>
       ) : (
         <ol className="hlq-list">
@@ -5152,8 +5272,8 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
         </span>
       </header>
       <div className="hlq-cols">
-        {renderColumn("AI",          "sage", ai)}
-        {renderColumn("Engineering", "blue", eng)}
+        {renderColumn("AI",          "sage", ai,  undatedOf("AI"))}
+        {renderColumn("Engineering", "blue", eng, undatedOf("Engineering"))}
       </div>
       {untyped > 0 && (
         <p className="hlq-hint">
@@ -5205,7 +5325,9 @@ export const HotLeadsTable = ({
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating",      w: "150px", sortKey: "stars",
       sortValue: r => starsRank(r.stars, HOT_LEAD_STAR_MAX) },
-    { label: "__actions",   w: "80px", locked: true },
+    // 100px, not 80: this skin pads cells to 16px a side, which left the
+    // now-visible "Actions" header 48px to render 51px of text.
+    { label: "__actions",   w: "100px", locked: true },
   ];
 
   // Chip tone per Type. Engineering uses --blue (matches the Project total

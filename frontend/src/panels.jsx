@@ -75,7 +75,14 @@ const SHEET_SIDE_TO_BOTTOM = [
   "max-sm:[--tw-enter-translate-y:100%] max-sm:[--tw-exit-translate-y:100%]",
 ].join(" ");
 
-/** Uppercase section rule used to break a long panel body into real groups. */
+/** Uppercase section heading used to break a long panel body into real groups.
+ *
+ *  No trailing rule. The heading used to run a hairline from the title out to
+ *  the panel's right edge, which stacked against the borders the panel already
+ *  draws — the sheet header's own bottom border directly above the first
+ *  section, and the dashed field separators below it — and read as a doubled
+ *  line rather than as one divider. The uppercase, muted, tracked heading is
+ *  enough of a break on its own, and the gap between sections does the rest. */
 function PanelSection({ icon, title, count, action, children, className = "" }) {
   return (
     <section className={"min-w-0" + (className ? " " + className : "")}>
@@ -89,8 +96,7 @@ function PanelSection({ icon, title, count, action, children, className = "" }) 
             </span>
           )}
         </h3>
-        <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-[var(--border)]"/>
-        {action}
+        {action ? <span className="ml-auto">{action}</span> : null}
       </div>
       {children}
     </section>
@@ -876,6 +882,11 @@ export const DetailDrawer = ({
     return <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
   };
 
+  // Every table the drawer can open needs an entry. `hotleads` was missing, so
+  // on Leads & Bids the badge rendered with no text at all — which is why it
+  // read as a bare, unexplained icon rather than as a label for the kind of
+  // record on screen. (The Deleted tabs pass a no-op onOpenDrawer and never
+  // reach here, so they need no entry.)
   const titleMap = {
     potential: "Potential Project",
     awaiting:  "Proposal",
@@ -885,6 +896,7 @@ export const DetailDrawer = ({
     events:    "Event",
     clients:   "Client",
     companies: "Company",
+    hotleads:  "Hot Lead",
     openbids:  "Open Bid",
     projects:  "Project",
   };
@@ -923,10 +935,11 @@ export const DetailDrawer = ({
       >
         <SheetHeader className="gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Badge tone="outline">
-              <Icon name="briefcase" size={11}/>
-              {titleLabel}
-            </Badge>
+            {/* No icon. The badge already says what the record is, in words,
+                and a briefcase glyph in front of "Hot Lead" or "Company" adds
+                no information the label doesn't carry — it was the same
+                picture on every record type. */}
+            <Badge tone="outline">{titleLabel}</Badge>
             {row.projectNumber && (
               <span className="num text-[length:var(--fs-xs)] text-[var(--text-soft)]">
                 #{row.projectNumber}
