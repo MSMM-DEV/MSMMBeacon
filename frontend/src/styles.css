@@ -2256,6 +2256,8 @@ html, body { overflow-x: clip; }
   border-inline: 0;
   border-bottom: 0;
   border-radius: 0;
+  /* Nothing to lift off: full screen, the card IS the page. */
+  box-shadow: none;
 }
 .invoice-top-scroll,
 .table-top-scroll {
@@ -27386,6 +27388,15 @@ button.tsx-tl-seg { cursor: pointer; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+
+  /* A soft lift off the page. --shadow-md rather than --shadow-sm: sm is
+     mostly a half-pixel ring, which would sit directly on top of the 1px
+     border this card already draws and read as a slightly muddier line
+     instead of as depth. md is a real 14px blur with a 4px drop, which is
+     what separates a surface from the page behind it. Both themes are
+     covered by the token — dark theme carries its own, heavier values, since
+     a shadow tuned for paper disappears on a dark ground. */
+  box-shadow: var(--shadow-md);
 
   /* A FIXED height, not a max-height, and this is what stops the page from
      jumping to the top when a filter chip is pressed.
