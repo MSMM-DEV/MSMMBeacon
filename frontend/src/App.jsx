@@ -28,7 +28,7 @@ import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { ProjectDetailPage } from "./project-detail.jsx";
-import { exportPDF } from "./utils/pdf.js";
+import { exportPDF, drawStar } from "./utils/pdf.js";
 import { isChunkLoadError } from "./utils/lazy-chunk.js";
 import {
   buildManishExportData,
@@ -95,6 +95,22 @@ const countRefs = (id) => {
   const list = [...(all.potential || []), ...(all.awaiting || []), ...(all.awarded || []), ...(all.closed || [])];
   return list.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
 };
+
+// Star ratings in the PDF are DRAWN, not typed. See drawStar() in utils/pdf.js
+// for why: "★" prints as ampersands under jsPDF's WinAnsi Helvetica, and the
+// ASCII "*" fallback encodes fine but renders as apostrophe-sized ticks at
+// 7pt. The Rating cell therefore carries no text at all and the stars are
+// painted over it in the didDrawCell pass.
+//
+// Rating hues, matching the on-screen scale (--stars-N in the light theme).
+const PDF_STAR_RGB = {
+  3: [47, 106, 68],    // forest green
+  2: [217, 116, 24],   // cadmium orange
+  1: [163, 48, 46],    // crimson
+};
+// Word form, for places where a rating appears inside a sentence rather than
+// in its own cell — there is nowhere to paint a shape there.
+const pdfStarWords = (n) => (n ? `${n} star${n === 1 ? "" : "s"}` : "");
 
 // linkedProjectsFor moved to data.js so both the Directory drawer (panels.jsx)
 // and the inline expand row (DirectoryTable in tables.jsx) can use it.
@@ -542,13 +558,18 @@ const EXPORT_COLUMNS = {
     { label: "Type",              wMm: 22,  get: r => r._starsHeader ? "" : (r.type || "") },
     { label: "Title",                       get: r => r._starsHeader
         ? (r._starsHeader === "Unrated" ? `Unrated · ${r._count} ${r._count === 1 ? "lead" : "leads"}`
-                                        : `${"★".repeat(r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`)
+                                        : `${pdfStarWords(r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`)
         : (r.title || ""), wrap: true },
     { label: "Client / Firm",               get: r => r._starsHeader ? "" : (companyById(r.clientId)?.name || "") },
     { label: "Date & Time",       wMm: 36,  get: r => r._starsHeader ? "" : fmtDateTime(r.dateTime) },
-    { label: "Attendees",                   get: r => r._starsHeader ? "" : ((r.attendees || []).map(uid => userById(uid)?.name).filter(Boolean).join(", ")) },
+    // fullName, not name: `name` is the user's display_name, which for much of
+    // the roster is a first name or a nickname ("Mark", "Stuart"). A printed
+    // report that circulates outside the team needs the person identified.
+    { label: "Attendees",                   get: r => r._starsHeader ? "" : ((r.attendees || []).map(uid => { const u = userById(uid); return u && (u.fullName || u.name); }).filter(Boolean).join(", ")) },
     { label: "Notes",                       get: r => r._starsHeader ? "" : (r.notes || "") },
-    { label: "Rating",            wMm: 22,  get: r => r._starsHeader ? "" : (r.stars ? "★".repeat(r.stars) : "") },
+    // Empty on purpose — the stars are painted into this cell by the
+    // onDidDrawCell hook in handleExport. Text here would sit under them.
+    { label: "Rating",            wMm: 22,  get: () => "" },
   ],
   directory: [
     { label: "Name",                        get: r => r.type === "Client" ? (r.baseName || r.name) : r.name },
@@ -4661,6 +4682,28 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           if (r.probability === "Low")    return [236, 205, 203];
           return null;
         }
+      : (tab === "hotleads" || tab === "leads-deleted")
+      ? (r) => {
+          // The rating tint, carried into the print. On screen the level is
+          // encoded in the row's background, so a PDF without it loses the
+          // grouping entirely — every lead arrives looking equally important.
+          //
+          // Literal RGB rather than a token: the export runs through jsPDF,
+          // which has no CSS engine to resolve var() or color-mix(). These are
+          // the exact values the browser computes for
+          // color-mix(in srgb, var(--stars-N) 14%, var(--surface)) in the
+          // light theme, sampled from the live table — so the print matches
+          // what the user was looking at. Deliberately light-theme only: paper
+          // is white, and the dark-theme mixes would print as mud.
+          const band = { 3: [226, 234, 229], 2: [250, 236, 223], 1: [242, 226, 226] };
+          if (r._starsHeader != null) {
+            // The group divider row sits a step darker than the run it labels,
+            // the same relationship Potential uses for its total rows.
+            const head = { 3: [205, 222, 211], 2: [245, 222, 199], 1: [233, 205, 205] };
+            return head[r._starsHeader] || [237, 234, 228];
+          }
+          return band[r.stars] || null;
+        }
       : undefined;
 
     // Invoice export needs per-cell colors that track the Invoice UI's
@@ -4699,6 +4742,30 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         }
       : undefined;
 
+    // Paint the rating as actual stars, over the (empty) Rating cell.
+    // Vector geometry rather than a glyph — see drawStar() for why a "★" and
+    // an ASCII "*" both fail here.
+    const starPainter = (tab === "hotleads" || tab === "leads-deleted")
+      ? (data, row, col) => {
+          if (!col || col.label !== "Rating") return;
+          const n = Number(row?.stars) || 0;
+          if (n <= 0) return;
+          const { doc, cell } = data;
+          const R = 1.5;                       // mm — outer radius
+          const gap = 0.9;                     // mm between stars
+          const span = n * (R * 2) + (n - 1) * gap;
+          // Centre the run in the cell so a 1-star row and a 3-star row share
+          // an axis and the column reads as a column.
+          let cx = cell.x + (cell.width - span) / 2 + R;
+          const cy = cell.y + cell.height / 2;
+          const rgb = PDF_STAR_RGB[n] || [110, 102, 89];
+          for (let i = 0; i < n; i++) {
+            drawStar(doc, cx, cy, R, rgb);
+            cx += R * 2 + gap;
+          }
+        }
+      : undefined;
+
     // Build subtitle describing active filter/year/search so the PDF footer
     // communicates what the user was looking at.
     const annotations = [];
@@ -4721,6 +4788,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         subtitle,
         rowColor,
         cellStyle: invoiceCellStyle,
+        onDidDrawCell: starPainter,
         // A3 landscape gives Invoice's 17 columns (12 months + totals)
         // enough width to render full dollar amounts without ellipsizing.
         // Other tabs stay on A4 — fewer columns, more text-oriented.

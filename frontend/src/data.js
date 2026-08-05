@@ -637,9 +637,18 @@ function adaptUser(u, i) {
   const initials = (fl || ll)
     ? (fl + ll).toUpperCase()
     : initialsFromName(display);
+  // The legal-ish name, kept separate from `name`.
+  //
+  // `name` prefers display_name, which much of the roster has set to a first
+  // name or a nickname ("Mark", "Stuart", "Autumn") — right for a chip or a
+  // hover, wrong for a document that leaves the building. fullName rebuilds
+  // it from first_name + last_name and falls back to `display` when the row
+  // has no split name, so it is always safe to read.
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || display;
   return {
     id: u.id,
     name: display,
+    fullName: full,
     shortName: short,
     initials,
     color: PM_COLORS[i % PM_COLORS.length],

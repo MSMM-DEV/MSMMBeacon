@@ -82,6 +82,45 @@ function planColumnWidths(columns, usableWidth) {
   return fixed.map(x => x == null ? flexW : x * scale);
 }
 
+/**
+ * Draw a filled five-point star as vector geometry.
+ *
+ * The reason this exists rather than a "★" in a cell: jsPDF's stock Helvetica
+ * is WinAnsi/Latin-1 and has no U+2605, and jsPDF writes the code point's high
+ * byte when it meets one — so "★★★" printed as "&&&". Falling back to ASCII
+ * "***" encodes correctly but Helvetica's asterisk is a small superscript
+ * glyph; at 7pt a row of them reads as apostrophes, not as a rating.
+ *
+ * A path has no encoding, no font, and no size floor. It is the same shape at
+ * any scale and needs nothing embedded in the file.
+ *
+ * @param doc    jsPDF instance
+ * @param cx,cy  centre, in the document's units (mm here)
+ * @param outerR outer radius; the star spans 2*outerR
+ * @param color  [r,g,b], 0-255
+ */
+export function drawStar(doc, cx, cy, outerR, color) {
+  // 0.382 is the classic five-point ratio (1/phi^2) — the inner vertices sit
+  // where the arms' edges would intersect if extended, which is what makes the
+  // points read as sharp rather than as a blunt decagon.
+  const innerR = outerR * 0.382;
+  const pts = [];
+  for (let k = 0; k < 10; k++) {
+    const angle = ((-90 + k * 36) * Math.PI) / 180;
+    const r = k % 2 === 0 ? outerR : innerR;
+    pts.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
+  }
+  // doc.lines() takes RELATIVE segments from a starting point, so walk the
+  // absolute vertices into deltas. `closed` joins the last point back to the
+  // first; "F" fills without stroking, which keeps the edges crisp at 2mm.
+  const deltas = [];
+  for (let i = 1; i < pts.length; i++) {
+    deltas.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+  }
+  doc.setFillColor(color[0], color[1], color[2]);
+  doc.lines(deltas, pts[0][0], pts[0][1], [1, 1], "F", true);
+}
+
 export async function exportPDF(columns, rows, filename, options = {}) {
   const {
     title,
