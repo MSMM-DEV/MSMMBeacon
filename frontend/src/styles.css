@@ -27252,9 +27252,17 @@ button.tsx-tl-seg { cursor: pointer; }
    4. AIR. Row height 44 to 56px and cell padding 12 to 16px.
    ========================================================================== */
 
+/* 48px, down from 56. The tallest thing any row actually contains is 30px —
+   an editable cell wrapping a 22px chip — with the row-action buttons next at
+   28px, so 56px was holding 13px of air on each side of a 30px object. 48
+   leaves 9px, which still reads as an airy table rather than a spreadsheet,
+   and buys about two more rows per screen (10.7 to 12.5 in a 600px scroll
+   area). Below this it gets tight: at the base 44px the 28px action buttons
+   would sit in 8px of total padding, and with the group-header bands and the
+   rating tint the grid starts to feel packed. */
 .tablewrap[data-skin="clean"] {
-  --row-h: 56px;
-  --row-pad-y: 14px;
+  --row-h: 48px;
+  --row-pad-y: 10px;
   --bxt-cell-x: 16px;
 }
 
