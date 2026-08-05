@@ -2189,19 +2189,23 @@ html, body { overflow-x: clip; }
   overscroll-behavior: contain;
 }
 
-/* Full-screen invoice table — a themed fixed overlay covering the viewport.
-   z-index 40 sits ABOVE all app chrome (sticky topbar 20; the tab rail is
-   non-positioned normal flow) but BELOW every overlay layer — modal scrim
-   (50), modal/drawer (60–80), the toolbar's portaled filter popovers
+/* Full-screen table — a themed fixed overlay covering the viewport.
+   z-index 45 sits ABOVE all app chrome and BELOW every overlay layer — modal
+   scrim (50), modal/drawer (60–80), the toolbar's portaled filter popovers
    (.menu, 70), and toasts (90–100). That ordering is deliberate: clicking
    "New invoice row" / a filter chip while maximized must surface its modal /
-   popover ON TOP of the maximized table, not behind it. No ancestor sets
-   transform/filter/contain, so `fixed` anchors to the viewport. The inner
-   .invoice-wrap flexes to fill the remaining height. */
+   popover ON TOP of the maximized table, not behind it.
+
+   45, not 40. The sticky topbar (.bx-topbar in design/beacon.css) is itself
+   z-index 40 — it was 20 when this rule was written, and the comment here
+   went stale when it moved. At equal z-index the later-painted element wins,
+   so the account menu and the notification bell drew straight through the
+   "full screen" table. No ancestor sets transform/filter/contain, so `fixed`
+   anchors to the viewport. */
 .tablewrap.is-maximized {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 45;
   margin: 0;
   border: none;
   border-radius: 0;
@@ -2234,8 +2238,19 @@ html, body { overflow-x: clip; }
   max-height: none;
 }
 /* Full screen means edge to edge: the card's own rounding and border would
-   otherwise draw a floating panel inset inside a full-viewport overlay. */
-.tablewrap.is-maximized[data-skin="clean"] { padding: 0; }
+   otherwise draw a floating panel inset inside a full-viewport overlay.
+
+   The background and overflow are re-stated here because they have to be.
+   `.tablewrap[data-skin="clean"]` sets `background: transparent` and
+   `overflow: visible` to hand the card role to .table-scroll, and it carries
+   the same specificity as `.tablewrap.is-maximized` while sitting later in
+   the file — so it won, and the "full screen" overlay was literally see
+   through. The whole page showed underneath it. */
+.tablewrap.is-maximized[data-skin="clean"] {
+  padding: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
 .tablewrap.is-maximized[data-skin="clean"] .bxt-toolbar { padding-inline: var(--sp-3); }
 .tablewrap.is-maximized[data-skin="clean"] .table-scroll {
   border-inline: 0;
