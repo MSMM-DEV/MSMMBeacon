@@ -27346,6 +27346,32 @@ button.tsx-tl-seg { cursor: pointer; }
   gap: 6px;
 }
 
+/* ---- row actions -------------------------------------------------------- */
+/* Always visible, not hover-only. A control the user cannot see is a control
+   they do not know exists: the column is headed "Actions" and then reads as
+   empty until the pointer happens to cross a row, which is a poor trade for
+   a little tidiness. Touch devices have always shown these (see the
+   `hover: none` block), so this makes the desktop behave like the phone.
+
+   Visible does not mean loud. At rest the icons carry no background or
+   border, so 36 rows do not turn into a wall of buttons; hovering the row
+   lifts them to full text colour, and hovering a button keeps the accent
+   treatment it already had. The hierarchy the fade used to provide is still
+   there, just done with weight instead of absence.
+
+   --text-muted, not --text-soft. A permanently visible icon is a UI component
+   under WCAG 1.4.11 and owes 3:1 against its background; soft measured
+   2.99:1 on the 1-star row in light theme, and the rating tints mean the
+   background is not one colour to check but five. Muted clears it on all of
+   them. The fade hid this before: the icons only ever appeared over the
+   hover tint, never over the resting row. */
+.tablewrap[data-skin="clean"] .row-actions { opacity: 1; }
+.tablewrap[data-skin="clean"] .row-btn { color: var(--text-muted); }
+.tablewrap[data-skin="clean"] .trow:hover .row-btn { color: var(--text); }
+.tablewrap[data-skin="clean"] .row-btn:hover,
+.tablewrap[data-skin="clean"] .row-btn:focus-visible { color: var(--text); }
+.tablewrap[data-skin="clean"] .row-btn.forward:hover { color: #fff; }
+
 /* ---- resize handles ----------------------------------------------------- */
 /* The handle's hairline is what was left of the column lattice in the header.
    It only matters while the user is reaching for it, so it is transparent
