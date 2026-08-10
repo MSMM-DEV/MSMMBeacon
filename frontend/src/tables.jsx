@@ -243,8 +243,14 @@ const eventTypeRank = (t) => EVENT_TYPE_RANK[t] ?? 99;
 // Sort / Columns popovers and render no visible text in the header.
 const isInternalLabel = (label) => typeof label === "string" && label.startsWith("__");
 
-// A column header label that reveals its full text on hover when the column is
-// too narrow to show it ("Anticipated A…" → "Anticipated Amount").
+// A column header label with a hover tooltip. Two independent reasons to show
+// one, and a header can have either or both:
+//
+//   1. `hint` — the column's meaning is not obvious from its name. This is the
+//      case a truncation check cannot catch: "Role" and "Pool" fit their
+//      columns perfectly and are still opaque, so no amount of width would
+//      have produced an explanation.
+//   2. The label is clipped ("Anticipated A…" → "Anticipated Amount").
 //
 // Truncation is measured (scrollWidth vs clientWidth) rather than guessed from
 // a character count, because these columns are user-resizable and
@@ -253,9 +259,9 @@ const isInternalLabel = (label) => typeof label === "string" && label.startsWith
 // resize handle, so the tooltip appears and disappears at the width where the
 // text actually starts and stops fitting.
 //
-// Headers that fit render no tooltip at all — a hover card that repeats text
-// already on screen is noise.
-const ThLabel = ({ text }) => {
+// A header that fits and has no hint renders no tooltip at all — a hover card
+// that repeats text already on screen is noise.
+const ThLabel = ({ text, hint }) => {
   const ref = useRef(null);
   const [truncated, setTruncated] = useState(false);
 
@@ -289,8 +295,16 @@ const ThLabel = ({ text }) => {
       {text}
     </span>
   );
-  if (!truncated || !text) return label;
-  return <Tooltip label={text} side="top">{label}</Tooltip>;
+  if (!text) return label;
+  // When a clipped header also has a hint, lead with the full name so the
+  // tooltip answers "what does that cut-off word say" before it explains what
+  // the column means. Separator is a middot, not an em dash: the app does not
+  // use em dashes in user-facing copy.
+  const tip = hint
+    ? (truncated ? `${text} · ${hint}` : hint)
+    : (truncated ? text : null);
+  if (!tip) return label;
+  return <Tooltip label={tip} side="top">{label}</Tooltip>;
 };
 
 // Readable name for an internal (__*) column, used only as the accessible
@@ -516,7 +530,7 @@ const HeaderRow = ({
                 onClick={() => onSortToggle(c.sortKey)}
                 aria-label={`Sort by ${accessibleLabel}`}
               >
-                <ThLabel text={displayLabel}/>
+                <ThLabel text={displayLabel} hint={c.hint}/>
                 <span className="bxt-th-sort" aria-hidden="true">
                   <Icon
                     name={active ? (sort.dir === "asc" ? "chevronUp" : "chevronDown") : "chevronsUpDown"}
@@ -525,7 +539,7 @@ const HeaderRow = ({
                 </span>
               </button>
             ) : displayLabel ? (
-              <ThLabel text={displayLabel}/>
+              <ThLabel text={displayLabel} hint={c.hint}/>
             ) : (
               <span className="bxt-th-label">
                 <span className="sr-only">{accessibleLabel}</span>
@@ -1336,8 +1350,16 @@ const submissionAge = (iso) => {
   return {
     days,
     tone: over ? "over" : "fresh",
-    icon: over ? "hourglass" : "clock",
-    flag: `${days}d`,
+    // No icon, and the flag is words rather than "45d".
+    //
+    // An hourglass beside a date says "time" to someone who already knows the
+    // column is about elapsed time, and says nothing at all to anyone else. It
+    // could not distinguish the two states either: the same glyph would have
+    // to mean both "submitted last week" and "waiting over a month", so the
+    // whole signal rested on a tone shift most people would not catch. The
+    // words carry it instead, and the tone reinforces rather than performs.
+    icon: null,
+    flag: `${days} ${unit}`,
     text: over
       ? `${days} ${unit} since submission, over 30 days`
       : `${days} ${unit} since submission`,
@@ -1357,8 +1379,11 @@ const expiryRunway = (iso) => {
     };
   }
   if (days < 180) {
+    // Same reasoning as submissionAge: words, no hourglass. The "Expired"
+    // state above keeps its warning icon, because that one IS an alert rather
+    // than a measurement.
     return {
-      days, tone: "expiring", icon: "hourglass", flag: `${days}d`,
+      days, tone: "expiring", icon: null, flag: `${days} ${unit} left`,
       text: `Contract expires in ${days} ${unit}`,
     };
   }
@@ -1647,14 +1672,14 @@ export const PotentialTable = ({
             </div>
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
                 : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
+          "Project Number": (
             <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
@@ -1814,19 +1839,29 @@ export const AwaitingTable = ({
     { label: "Client", w: "minmax(160px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Org Type", w: "110px", sortKey: "orgType", defaultHidden: true,
+      hint: "The client's organisation type, which also groups the rows",
       sortValue: r => orgRank(r.clientId) },
-    { label: "Role", w: "100px", sortKey: "role" },
-    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
-    { label: "Anticipated Result", w: "140px", sortKey: "anticipatedResultDate" },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
-    { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining" },
-    { label: "PM", w: "140px", sortKey: "pm",
+    { label: "Role", w: "100px", sortKey: "role",
+      hint: "Whether MSMM is the Prime or a Sub on this proposal" },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted",
+      hint: "Date the proposal went to the client, and how long it has waited since" },
+    { label: "Anticipated Result", w: "140px", sortKey: "anticipatedResultDate",
+      hint: "Date a verdict is expected" },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract",
+      hint: "The client's own contract number" },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract",
+      hint: "MSMM's internal contract number" },
+    { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining",
+      hint: "MSMM contract value not yet used" },
+    { label: "Project Manager", w: "170px", sortKey: "pm",
+      hint: "The MSMM people managing this proposal",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "110px", sortKey: "projectNumber" },
-    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
+    { label: "Project Number", w: "150px", sortKey: "projectNumber" },
+    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true,
+      hint: "Subconsultants on this proposal" },
     { label: "Status", w: "150px", sortKey: "status", defaultHidden: true },
-    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed", defaultHidden: true },
+    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed", defaultHidden: true,
+      hint: "MSMM contract value used to date" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "__actions", w: "140px", locked: true },
   ];
@@ -1839,6 +1874,7 @@ export const AwaitingTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
@@ -1935,14 +1971,14 @@ export const AwaitingTable = ({
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
                 : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
+          "Project Number": (
             <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
@@ -2058,27 +2094,43 @@ export const AwardedTable = ({
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Prime", w: "minmax(150px, 1.2fr)", sortKey: "primeName",
       sortValue: r => companyById(r.primeId)?.name || "" },
-    { label: "Subs", w: "minmax(180px, 1.5fr)" },
-    { label: "Role", w: "100px", sortKey: "role" },
+    { label: "Subs", w: "minmax(180px, 1.5fr)",
+      hint: "Subconsultants on this project" },
+    { label: "Role", w: "100px", sortKey: "role",
+      hint: "Whether MSMM is the Prime or a Sub on this project" },
     { label: "Status", w: "120px", sortKey: "status" },
-    { label: "Stage", w: "150px", sortKey: "stage" },
+    { label: "Stage", w: "150px", sortKey: "stage",
+      hint: "Where the work has reached, from contract type through design to closeout" },
     { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details" },
-    { label: "Pool", w: "130px", sortKey: "pools" },
-    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
-    { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
+    { label: "Pool", w: "130px", sortKey: "pools",
+      hint: "Contract pools this project draws from" },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted",
+      hint: "Date the proposal went to the client" },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract",
+      hint: "The client's own contract number" },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract",
+      hint: "MSMM's internal contract number" },
+    { label: "Expiry", w: "110px", sortKey: "contractExpiry",
+      hint: "Contract expiry date, and the runway left before it" },
     { label: "Contract", w: "120px", sortKey: "contract",
+      hint: "Total MSMM contract value: used plus remaining",
       sortValue: r => (r.msmmUsed || 0) + (r.msmmRemaining || 0) },
-    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed" },
-    { label: "Remaining", w: "120px", sortKey: "msmmRemaining" },
+    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed",
+      hint: "MSMM contract value used to date" },
+    { label: "Remaining", w: "120px", sortKey: "msmmRemaining",
+      hint: "MSMM contract value not yet used" },
     { label: "Org Type", w: "110px", sortKey: "orgType",
+      hint: "The client's organisation type, which also groups the rows",
       sortValue: r => orgRank(r.clientId) },
-    { label: "PM", w: "130px", sortKey: "pm",
+    { label: "Project Manager", w: "170px", sortKey: "pm",
+      hint: "The MSMM people managing this project",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "minmax(170px, 1.2fr)", sortKey: "projectNumber",
+    { label: "Project Number", w: "minmax(170px, 1.2fr)", sortKey: "projectNumber",
+      hint: "MSMM project number, and any invoice projects linked to it",
       sortValue: r => (r.invoiceLinks || [])[0] || r.projectNumber || "" },
-    { label: "__actions", w: "90px", locked: true },
+    // 100px to match Leads & Bids: this skin pads cells to 16px a side, and
+    // the now-visible "Actions" header needs about 51px of that.
+    { label: "__actions", w: "100px", locked: true },
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
   // Bridge from the historic chip palette names above onto the kit's Badge
@@ -2093,6 +2145,7 @@ export const AwardedTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
@@ -2222,14 +2275,14 @@ export const AwardedTable = ({
                   : <span className="empty-cell">–</span>}/>
             </div>
           ),
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
                 : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
+          "Project Number": (
             // Linked invoice projects, keyed on project number. Chips open
             // the live project card; "+" links more. The awarded row's own
             // project_number text stays editable from the drawer.
@@ -2250,8 +2303,14 @@ export const AwardedTable = ({
             </div>
           ),
           "Subs": (
+            // No `wrap`, and capped at two. This was the only table in the app
+            // that let sub chips flow onto extra lines, and because .td sizes
+            // on min-height the row grew to match — so one project with six
+            // subs stood several rows tall next to its single-line neighbours.
+            // Every other table already shows subs on one line; this brings
+            // Awarded in line and adds a "+N" so the count is not lost.
             <div className="td bxt-td-subs">
-              <SubsCell subs={r.subs} wrap/>
+              <SubsCell subs={r.subs} max={2}/>
             </div>
           ),
           "Submitted": (
@@ -2458,14 +2517,14 @@ export const ClosedTable = ({
                   : <span className="empty-cell">–</span>}/>
             </div>
           ),
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
                 : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
+          "Project Number": (
             <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
@@ -5056,6 +5115,7 @@ export const EventsTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
@@ -5247,9 +5307,7 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
           {label}
         </h3>
         <span className="hlq-col-count">
-          {items.length === 0
-            ? "Nothing upcoming"
-            : <><span className="num">{items.length}</span> upcoming</>}
+          <span className="num">{items.length}</span> upcoming
         </span>
       </header>
       {items.length === 0 ? (
@@ -5306,11 +5364,6 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
     <section className="hlq" aria-label="Upcoming hot leads quick view">
       <header className="hlq-head">
         <h2 className="hlq-title">Upcoming hot leads</h2>
-        <span className="hlq-sub">
-          {upcoming.length === 0
-            ? "Nothing scheduled"
-            : <><span className="num">{upcoming.length}</span> scheduled, split by type</>}
-        </span>
       </header>
       <div className="hlq-cols">
         {renderColumn("AI",          "sage", ai,  undatedOf("AI"))}
@@ -6397,7 +6450,11 @@ export const DirectoryTable = ({
   const shownRows = groupedRows.clients.length + groupedRows.companies.length;
 
   return (
-    <div className="tablewrap bxt-dir">
+    // data-skin rather than a `skin` prop: Directory builds its own chrome
+    // (toolbar, thead, rows) instead of going through TableView, but it uses
+    // the same .tablewrap / .bxt-toolbar / .thead / .trow / .td primitives, so
+    // stamping the attribute on the wrapper is all the skin needs to reach it.
+    <div className="tablewrap bxt-dir" data-skin="clean">
       {/* Same chrome vocabulary as every other Beacon table. */}
       <div className="bxt-toolbar">
         <InputGroup
@@ -6485,14 +6542,27 @@ export const DirectoryTable = ({
         </div>
       )}
 
-      {hasSearch && (
-        <div className="bxt-searchsummary" role="status" aria-live="polite">
-          {showNoMatches
-            ? <>No entries match <span className="bxt-searchterm">"{search}"</span>.</>
-            : <><strong className="num">{searchableRows.length}</strong> of <strong className="num">{totalRows}</strong> match <span className="bxt-searchterm">"{search}"</span></>
-          }
+      {/* Same collapsible shape TableView uses. The skin styles
+          .bxt-searchsummary as a grid row that animates 0fr to 1fr and is
+          driven by data-open, so the older markup (rendered conditionally,
+          no data-open, no inner wrappers) would have sat at zero height and
+          zero opacity forever the moment this table opted into the skin. */}
+      <div
+        className="bxt-searchsummary"
+        data-open={hasSearch ? "true" : undefined}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="bxt-searchsummary-inner">
+          <div className="bxt-searchsummary-text">
+            {hasSearch && (
+              showNoMatches
+                ? <>No entries match <span className="bxt-searchterm">"{search}"</span>.</>
+                : <><strong className="num">{searchableRows.length}</strong> of <strong className="num">{totalRows}</strong> match <span className="bxt-searchterm">"{search}"</span></>
+            )}
+          </div>
         </div>
-      )}
+      </div>
 
       <div className="table-scroll">
         {/* The roster is a CSS grid rather than a <table>: rows expand in
@@ -6777,7 +6847,7 @@ export const ProjectsTable = ({
 
   if (items.length === 0) {
     return (
-      <div className="tablewrap bxt-ptree">
+      <div className="tablewrap bxt-ptree" data-skin="clean">
         <EmptyState
           title="No projects yet"
           hint='Use "New project" to create a top-level project, then add phases and subphases under it.'
@@ -6819,7 +6889,9 @@ export const ProjectsTable = ({
   const hasQuery = !!query.trim();
 
   return (
-    <div className="tablewrap bxt-ptree">
+    // Same reasoning as Directory: the projects tree hand-rolls its chrome
+    // but on the shared primitives, so the attribute is enough.
+    <div className="tablewrap bxt-ptree" data-skin="clean">
       {/* Same toolbar vocabulary as every other Beacon table: search first,
           then a scrolling filter strip, then the tools pushed right. */}
       <div className="bxt-toolbar">
@@ -6881,21 +6953,32 @@ export const ProjectsTable = ({
         </div>
       </div>
 
-      {isFiltering && (
-        <div className="bxt-searchsummary" role="status" aria-live="polite">
-          {flat.length === 0
-            ? (hasQuery
-              ? <>No projects match <span className="bxt-searchterm">"{query}"</span>.</>
-              : <>No projects in this filter.</>)
-            : (
-              <>
-                <strong className="num">{flat.length}</strong> of{" "}
-                <strong className="num">{items.length}</strong> shown
-                {hasQuery && <> for <span className="bxt-searchterm">"{query}"</span></>}
-              </>
+      {/* Collapsible, driven by data-open — see the note on Directory's copy
+          for why the conditional version breaks under the skin. */}
+      <div
+        className="bxt-searchsummary"
+        data-open={isFiltering ? "true" : undefined}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="bxt-searchsummary-inner">
+          <div className="bxt-searchsummary-text">
+            {isFiltering && (
+              flat.length === 0
+                ? (hasQuery
+                  ? <>No projects match <span className="bxt-searchterm">"{query}"</span>.</>
+                  : <>No projects in this filter.</>)
+                : (
+                  <>
+                    <strong className="num">{flat.length}</strong> of{" "}
+                    <strong className="num">{items.length}</strong> shown
+                    {hasQuery && <> for <span className="bxt-searchterm">"{query}"</span></>}
+                  </>
+                )
             )}
+          </div>
         </div>
-      )}
+      </div>
 
       <div className="table-scroll">
         {/* The outline is a CSS grid, not a <table>: rows carry their own

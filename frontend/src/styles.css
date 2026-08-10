@@ -18531,8 +18531,21 @@ html, body { overflow-x: clip; }
   height: 14px;
   border-radius: var(--radius-full);
 }
-.lcx-tl-zone-near { left: 6%; right: 50%; background: color-mix(in srgb, var(--rose) 16%, transparent); }
-.lcx-tl-zone-far  { left: 50%; right: 6%; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+/* The runway is NEUTRAL. It used to be tinted with the same two hues the
+   markers use — rose for the first thirty days, accent ochre for the second
+   thirty — which meant every dot sat on a band of its own colour. A critical
+   licence is a rose ring centred on a rose stripe and a "soon" licence is an
+   ochre ring on an ochre stripe, so the one element carrying the urgency was
+   camouflaged against the one element that duplicated it. The far zone was
+   also painted in --accent, the interactive colour used for primary buttons
+   and active states, which reads as "selected" rather than "approaching".
+
+   Urgency is already stated three ways per licence: the dot and flag colour,
+   an icon, and the words ("12 days left"). The band underneath only has to
+   say where in the runway you are, so it steps two neutral surfaces, denser
+   nearer today. That leaves the hue to mean exactly one thing. */
+.lcx-tl-zone-near { left: 6%; right: 50%; background: var(--surface-3); }
+.lcx-tl-zone-far  { left: 50%; right: 6%; background: var(--surface-2); }
 
 .lcx-tl-axis {
   position: absolute;
@@ -18594,7 +18607,9 @@ html, body { overflow-x: clip; }
   border-radius: var(--radius-full);
   background: var(--surface);
   border: 3px solid var(--lcx-c);
-  box-shadow: var(--shadow-xs);
+  /* A surface ring so the dot separates from whatever it lands on: the axis
+     line, either zone, or another dot when two dates fall a day apart. */
+  box-shadow: 0 0 0 2px var(--surface), var(--shadow-xs);
   transition: scale var(--dur-fast) var(--ease-spring);
 }
 
@@ -23100,6 +23115,71 @@ button.tsx-tl-seg { cursor: pointer; }
 }
 .bxtc-evt--block[data-allday="true"] .bxtc-evt-meta { display: none; }
 
+/* ---- the overflow band ---------------------------------------------------
+   What a slot too crowded to draw collapses to. Everything about it says
+   "this is not one person's meeting": the neutral ramp instead of an owner
+   hue, a DASHED hairline, no left identity rule, and a hatched wash so it
+   reads as a surface with things behind it rather than a block. It is a door,
+   and it should not be mistaken for a wall. */
+.bxtc-evt--more {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  padding: 2px 4px;
+  border: 1px dashed var(--border-strong);
+  border-left-width: 1px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--surface-2) 0 5px,
+      var(--surface-3) 5px 10px
+    );
+}
+.bxtc-evt--more:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--accent-softer) 0 5px,
+      var(--accent-soft) 5px 10px
+    );
+}
+.bxtc-more-head {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  line-height: 1.1;
+}
+.bxtc-more-count {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  color: var(--text);
+}
+.bxtc-more-word,
+.bxtc-more-who {
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bxtc-more-who { opacity: .75; }
+/* Same container-query discipline as an event block: shed the parts that no
+   longer fit rather than clipping them. The count is the last thing to go
+   because it is the only part that cannot be inferred. */
+@container bxtcevt (max-width: 96px) {
+  .bxtc-more-who { display: none; }
+}
+@container bxtcevt (max-width: 58px) {
+  .bxtc-more-word { display: none; }
+}
+
 /* The first line of a block is exactly 13px tall whatever it happens to
    contain. Left to size itself, the head grew with the tallest thing in it —
    a title line box, an attendee counter — so a block that had shed its title
@@ -23847,10 +23927,12 @@ button.tsx-tl-seg { cursor: pointer; }
 .bx-teamcal[data-view="week"]  .rbc-time-view {
   min-width: 560px;
 }
-@media (max-width: 767px) {
-  /* Keep the toolbar anchored to the viewport edge while the grid scrolls. */
-  .bx-teamcal .bx-teamcal-toolbar { position: sticky; left: 0; }
-}
+/* The toolbar is no longer inside the scroller — it is rendered above the
+   `.bx-scroll-x` wrapper by team-calendar.jsx, so the header, the chevrons
+   and the Today button stay put however far a wide grid is scrolled. It used
+   to need `position: sticky; left: 0` under 767px to fake that, and the fake
+   only held below that breakpoint. */
+.bx-teamcal .bx-teamcal-toolbar { position: static; }
 
 /* ---- column + day headers ---------------------------------------------- */
 .bx-teamcal .rbc-header {
@@ -27537,7 +27619,8 @@ button.tsx-tl-seg { cursor: pointer; }
 
    Specificity beats the unscoped `.trow[data-stars="N"]` rules, which keep
    their original 18%-plus-rule behaviour on every other table. */
-.tablewrap[data-skin="clean"] .trow[data-stars] { box-shadow: none; }
+.tablewrap[data-skin="clean"] .trow[data-stars],
+.tablewrap[data-skin="clean"] .trow[data-org] { box-shadow: none; }
 .tablewrap[data-skin="clean"] .trow[data-stars="5"] { background-color: color-mix(in srgb, var(--stars-5) 14%, var(--surface)); }
 .tablewrap[data-skin="clean"] .trow[data-stars="4"] { background-color: color-mix(in srgb, var(--stars-4) 14%, var(--surface)); }
 .tablewrap[data-skin="clean"] .trow[data-stars="3"] { background-color: color-mix(in srgb, var(--stars-3) 14%, var(--surface)); }
@@ -27549,10 +27632,37 @@ button.tsx-tl-seg { cursor: pointer; }
 .tablewrap[data-skin="clean"] .trow[data-stars="2"]:hover { background-color: color-mix(in srgb, var(--stars-2) 24%, var(--surface)); }
 .tablewrap[data-skin="clean"] .trow[data-stars="1"]:hover { background-color: color-mix(in srgb, var(--stars-1) 24%, var(--surface)); }
 
+/* ---- org-type tint (Proposals, Awarded) --------------------------------- */
+/* Same treatment as the rating tint above, for the other thing these tables
+   group by. Proposals and Awarded stripe each row by the client's org type,
+   which the unscoped rules paint at 8-22% of a hardcoded rgba plus a 4px
+   leading bar. Mixed into --surface instead, at the same 14% the rating uses,
+   so the two tables read as one system and the dark theme derives its own
+   value rather than laying a light film over a dark row. The leading bar goes
+   for the same reason it went on Leads & Bids: the tint already says it. */
+.tablewrap[data-skin="clean"] .trow[data-org="federal"]  { background-color: color-mix(in srgb, var(--org-federal) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="state"]    { background-color: color-mix(in srgb, var(--org-state) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="local"]    { background-color: color-mix(in srgb, var(--org-local) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="city"]     { background-color: color-mix(in srgb, var(--org-city) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="parish"]   { background-color: color-mix(in srgb, var(--org-parish) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="regional"] { background-color: color-mix(in srgb, var(--org-regional) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="other"]    { background-color: color-mix(in srgb, var(--org-other) 14%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="unknown"]  { background-color: var(--surface); }
+.tablewrap[data-skin="clean"] .trow[data-org="federal"]:hover  { background-color: color-mix(in srgb, var(--org-federal) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="state"]:hover    { background-color: color-mix(in srgb, var(--org-state) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="local"]:hover    { background-color: color-mix(in srgb, var(--org-local) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="city"]:hover     { background-color: color-mix(in srgb, var(--org-city) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="parish"]:hover   { background-color: color-mix(in srgb, var(--org-parish) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="regional"]:hover { background-color: color-mix(in srgb, var(--org-regional) 24%, var(--surface)); }
+.tablewrap[data-skin="clean"] .trow[data-org="other"]:hover    { background-color: color-mix(in srgb, var(--org-other) 24%, var(--surface)); }
+
 /* ---- group headers ------------------------------------------------------ */
 /* Still a band, but a quiet one: it is a label for the run beneath it, not a
-   row of data competing with them. */
-.tablewrap[data-skin="clean"] .trow.stars-header {
+   row of data competing with them.
+   `.bxt-grouphead` rather than `.stars-header`, so the org-type bands in
+   Proposals and Awarded get the identical treatment — that class is on both
+   kinds of divider row. */
+.tablewrap[data-skin="clean"] .trow.bxt-grouphead {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   min-height: 38px;
@@ -27565,6 +27675,42 @@ button.tsx-tl-seg { cursor: pointer; }
   border-radius: var(--radius-full);
   padding: 3px 10px;
   font-weight: 500;
+}
+
+/* ---- date age labels ---------------------------------------------------- */
+/* The elapsed count under a date is a caption, not a badge.
+   The shared style gives it an outlined pill: 1px border in the current
+   colour, weight 700, wide letter-spacing, full radius. At "6 days" that is a
+   small tidy chip. At "181 days" it becomes a wide bordered box of bold
+   tracked text sitting under every row, and the border is the loudest thing
+   in a column whose actual content is a date.
+   Here it is set as text. No border, no pill, normal weight, no tracking, and
+   tabular figures so the numbers line up down the column. The state still
+   reads, because the colour is doing that job on its own: muted while a
+   proposal is fresh, the attention tone once it is over thirty days. Losing
+   the border is what lets the colour be legible as a signal instead of
+   competing with an outline for the same job. */
+.tablewrap[data-skin="clean"] .bxt-due-flag {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-weight: 400;
+  letter-spacing: normal;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+/* The date is the fact; the age is the annotation. A slight step down in
+   size and weight between the two lines is what makes the pair read in that
+   order rather than as two competing values. */
+.tablewrap[data-skin="clean"] .bxt-due-date {
+  font-variant-numeric: tabular-nums;
+}
+.tablewrap[data-skin="clean"] .bxt-due-stack { gap: 1px; }
+/* Fresh proposals: the age is background information, so it recedes. */
+.tablewrap[data-skin="clean"] .bxt-td-age[data-age="fresh"] .bxt-due-flag {
+  color: var(--text-soft);
+  border-color: transparent;
 }
 
 /* ---- row actions -------------------------------------------------------- */
@@ -27670,4 +27816,4 @@ button.tsx-tl-seg { cursor: pointer; }
    own inset shadow is a separate box and does not collide with it, but the
    FIRST cell must stay clear so the leading rule reads as one continuous band
    down the column. `.td + .td` already skips it. */
-.tablewrap[data-skin="clean"] .trow.stars-header .td + .td { box-shadow: none; }
+.tablewrap[data-skin="clean"] .trow.bxt-grouphead .td + .td { box-shadow: none; }

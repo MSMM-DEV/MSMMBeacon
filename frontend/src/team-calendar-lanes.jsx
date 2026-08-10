@@ -199,7 +199,7 @@ function fullEventLabel(event) {
   );
   if (r.location) bits.push(r.location);
   const n = attendeeCount(r);
-  if (n > 1) bits.push(`${n} attendees`);
+  if (n > 1) bits.push(`${n} people invited`);
   if (r.isCancelled) bits.push("cancelled");
   return bits.join(", ");
 }
@@ -837,7 +837,10 @@ function DayListRow({ event, onOpen }) {
         </span>
       </span>
       {n > 1 && (
-        <span className="flex shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
+        <span
+          className="flex shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]"
+          title={`${n} people invited`}
+        >
           <Icon name="users" size={11} stroke={1.8} />
           <span className="num">{n}</span>
         </span>

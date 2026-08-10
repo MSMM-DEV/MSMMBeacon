@@ -220,7 +220,9 @@ const SUB_TABS = {
 const PAGE_META = {
   openbids:  { title: "Open Bids", desc: "RFQ/RFPs under evaluation. Admins approve a bid before it can be moved forward to Proposals." },
   potential: { title: "Potential Projects", desc: "Opportunities and billing candidates. Add directly or copy from Awarded. Move forward to Invoice when ready to bill." },
-  awaiting:  { title: "Proposals", desc: "Submitted proposals awaiting a verdict. Add here, then mark as Awarded or Closed Out when the verdict lands." },
+  // No desc. The tab is called Proposals and the table shows proposals; a
+  // sentence restating that sat between the title and the data on every visit.
+  awaiting:  { title: "Proposals", desc: "" },
   awarded:   { title: "Awarded Projects", desc: "Won contracts. Attach invoice projects by number, track capacity, or move forward when billing starts." },
   closed:    { title: "Closed Out Projects", desc: "Archived work: every sub, month, attachment, and note is preserved, just like In-Between. Reopen a project to move it back to Invoices; proposals closed without billing are listed below." },
   invoice:   { title: "Anticipated Invoice", desc: "Monthly billing, with Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
@@ -231,14 +233,20 @@ const PAGE_META = {
   "leads-deleted": { title: "Deleted: Leads & Bids", desc: "Deleted Hot Leads and Open Bids. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
   "proposals-deleted": { title: "Deleted: Proposals & Awarded", desc: "Deleted Proposals and Awarded projects. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
   directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
-  licenses:  { title: "Licenses & Certifications", desc: "Every company and individual license with its expiration. Color-coded by days until due; reminder emails go out at 60 / 30 / 14 / 7 / 1 days before expiry." },
+  // No desc. The page's own colour key and the "Expiring soon" panel state
+  // the same things, in place and against real data.
+  licenses:  { title: "Licenses & Certifications", desc: "" },
   timesheet: {
     title: "Time & Leave",
     desc: "Punch in/out, review time, request leave, and tap your fob at the front-door reader.",
     mobileDesc: "Punch time or request leave.",
   },
   "time-admin": { title: "Time Admin", desc: "Team-wide view, leave requests + balances, NFC enrollment, and timekeeping settings." },
-  "team-cal":  { title: "Team Calendar", desc: "Everyone's Outlook calendars in one view, color-coded per person. Read-only: pick the colleagues you want to see and overlay their schedules." },
+  // No desc. The page states all of it in place and against real data: the
+  // "Who is on the calendar" panel IS the colour key and the picker, and the
+  // event dialog says "Read only" on its face. The blurb was onboarding copy
+  // sitting above the thing it described.
+  "team-cal":  { title: "Team Calendar", desc: "" },
 };
 
 const DEFAULT_TWEAKS = {
@@ -451,42 +459,60 @@ const EXPORT_COLUMNS = {
     { label: "Notes",                       get: r => r._total ? "" : (r.notes || "") },
     { label: "Dates & Comments",            get: r => r._total ? "" : [r.nextActionDate ? fmtDate(r.nextActionDate) : "", r.dates || ""].filter(Boolean).join(" · ") },
   ],
+  // Labels here MUST match the table's column labels exactly: handleExport
+  // resolves each visible column through `defsByLabel.get(uc.label)` and
+  // silently drops anything that misses. Renaming a column in tables.jsx
+  // without renaming it here removes it from the PDF with no error.
+  //
+  // Every getter guards `_orgHeader`, the divider rows injectOrgHeaders()
+  // splices into the row list. They reach the export along with the data, and
+  // without a guard each one printed a full row of blanks and "undefined"
+  // where a section label belonged.
   awaiting: [
-    { label: "Year",              wMm: 14,  get: r => r.year },
-    { label: "Project",                     get: r => r.name },
-    { label: "Client",                      get: r => companyById(r.clientId)?.name || "" },
-    { label: "Role",              wMm: 18,  get: r => r.role || "" },
-    { label: "Submitted",         wMm: 22,  get: r => fmtDate(r.dateSubmitted) },
-    { label: "Anticipated Result", wMm: 26, get: r => fmtDate(r.anticipatedResultDate) },
-    { label: "Client Contract",   wMm: 28,  get: r => r.clientContract || "" },
-    { label: "MSMM Contract",     wMm: 28,  get: r => r.msmmContract || "" },
-    { label: "MSMM Remaining",    wMm: 26,  get: r => fmtMoney(r.msmmRemaining) },
-    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
-    { label: "Proj #",            wMm: 20,  get: r => r.projectNumber || "" },
-    { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
-    { label: "Status",            wMm: 28,  get: r => r.status || "Proposal" },
-    { label: "MSMM Used",         wMm: 24,  get: r => fmtMoney(r.msmmUsed) },
-    { label: "Notes",                       get: r => r.notes || "" },
+    { label: "Year",              wMm: 14,  get: r => r._orgHeader ? "" : r.year },
+    { label: "Project",                     get: r => r._orgHeader
+        ? `${r._orgHeader === "–" || r._orgHeader === "—" ? "Unassigned" : r._orgHeader} · ${r._count} ${r._unit}`
+        : r.name, wrap: true },
+    { label: "Client",                      get: r => r._orgHeader ? "" : (companyById(r.clientId)?.name || "") },
+    { label: "Org Type",          wMm: 22,  get: r => r._orgHeader ? "" : (companyById(r.clientId)?.orgType || "") },
+    { label: "Role",              wMm: 18,  get: r => r._orgHeader ? "" : (r.role || "") },
+    { label: "Submitted",         wMm: 22,  get: r => r._orgHeader ? "" : fmtDate(r.dateSubmitted) },
+    { label: "Anticipated Result", wMm: 26, get: r => r._orgHeader ? "" : fmtDate(r.anticipatedResultDate) },
+    { label: "Client Contract",   wMm: 28,  get: r => r._orgHeader ? "" : (r.clientContract || "") },
+    { label: "MSMM Contract",     wMm: 28,  get: r => r._orgHeader ? "" : (r.msmmContract || "") },
+    { label: "MSMM Remaining",    wMm: 26,  get: r => r._orgHeader ? "" : fmtMoney(r.msmmRemaining) },
+    { label: "Project Manager",   wMm: 30,  get: r => r._orgHeader ? "" : ((r.pmIds || []).map(id => { const u = userById(id); return u && (u.fullName || u.name); }).filter(Boolean).join(", ")), wrap: true },
+    { label: "Project Number",    wMm: 24,  get: r => r._orgHeader ? "" : (r.projectNumber || "") },
+    { label: "Subs",                        get: r => r._orgHeader ? "" : ((r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ")) },
+    { label: "Status",            wMm: 28,  get: r => r._orgHeader ? "" : (r.status || "Proposal") },
+    { label: "MSMM Used",         wMm: 24,  get: r => r._orgHeader ? "" : fmtMoney(r.msmmUsed) },
+    { label: "Notes",                       get: r => r._orgHeader ? "" : (r.notes || "") },
   ],
   awarded: [
-    { label: "Year",              wMm: 14,  get: r => r.year },
-    { label: "Project",                     get: r => r.name },
-    { label: "Client",                      get: r => companyById(r.clientId)?.name || "" },
-    { label: "Stage",                       get: r => r.stage || "" },
-    { label: "Pool",                        get: r => r.pools || "" },
-    { label: "Contract",          wMm: 26,  get: r => fmtMoney((r.msmmUsed || 0) + (r.msmmRemaining || 0)) },
-    { label: "MSMM Used",         wMm: 24,  get: r => fmtMoney(r.msmmUsed) },
-    { label: "Remaining",         wMm: 24,  get: r => fmtMoney(r.msmmRemaining) },
-    { label: "Expiry",            wMm: 22,  get: r => fmtDate(r.contractExpiry) },
-    { label: "PM",                wMm: 22,  get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
-    { label: "Proj #",            wMm: 26,  get: r => (r.invoiceLinks && r.invoiceLinks.length) ? r.invoiceLinks.join(", ") : (r.projectNumber || "") },
-    { label: "Role",              wMm: 18,  get: r => r.role || "" },
-    { label: "Subs",                        get: r => (r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ") },
-    { label: "Submitted",         wMm: 22,  get: r => fmtDate(r.dateSubmitted) },
-    { label: "Client Contract",             get: r => r.clientContract || "" },
-    { label: "MSMM Contract",               get: r => r.msmmContract || "" },
-    { label: "Status",            wMm: 26,  get: r => r.status || "Awarded" },
-    { label: "Details",                     get: r => r.details || "" },
+    { label: "Year",              wMm: 14,  get: r => r._orgHeader ? "" : r.year },
+    { label: "Project",                     get: r => r._orgHeader
+        ? `${r._orgHeader === "–" || r._orgHeader === "—" ? "Unassigned" : r._orgHeader} · ${r._count} ${r._unit}`
+        : r.name, wrap: true },
+    { label: "Client",                      get: r => r._orgHeader ? "" : (companyById(r.clientId)?.name || "") },
+    // Prime and Org Type are on screen but had no def here, so they were
+    // dropped from the PDF without a word.
+    { label: "Prime",                       get: r => r._orgHeader ? "" : (companyById(r.primeId)?.name || "") },
+    { label: "Org Type",          wMm: 22,  get: r => r._orgHeader ? "" : (companyById(r.clientId)?.orgType || "") },
+    { label: "Stage",                       get: r => r._orgHeader ? "" : (r.stage || "") },
+    { label: "Pool",                        get: r => r._orgHeader ? "" : (r.pools || "") },
+    { label: "Contract",          wMm: 26,  get: r => r._orgHeader ? "" : fmtMoney((r.msmmUsed || 0) + (r.msmmRemaining || 0)) },
+    { label: "MSMM Used",         wMm: 24,  get: r => r._orgHeader ? "" : fmtMoney(r.msmmUsed) },
+    { label: "Remaining",         wMm: 24,  get: r => r._orgHeader ? "" : fmtMoney(r.msmmRemaining) },
+    { label: "Expiry",            wMm: 22,  get: r => r._orgHeader ? "" : fmtDate(r.contractExpiry) },
+    { label: "Project Manager",   wMm: 30,  get: r => r._orgHeader ? "" : ((r.pmIds || []).map(id => { const u = userById(id); return u && (u.fullName || u.name); }).filter(Boolean).join(", ")), wrap: true },
+    { label: "Project Number",    wMm: 30,  get: r => r._orgHeader ? "" : ((r.invoiceLinks && r.invoiceLinks.length) ? r.invoiceLinks.join(", ") : (r.projectNumber || "")) },
+    { label: "Role",              wMm: 18,  get: r => r._orgHeader ? "" : (r.role || "") },
+    { label: "Subs",                        get: r => r._orgHeader ? "" : ((r.subs || []).map(s => companyById(s.cId)?.name || "").filter(Boolean).join("; ")) },
+    { label: "Submitted",         wMm: 22,  get: r => r._orgHeader ? "" : fmtDate(r.dateSubmitted) },
+    { label: "Client Contract",             get: r => r._orgHeader ? "" : (r.clientContract || "") },
+    { label: "MSMM Contract",               get: r => r._orgHeader ? "" : (r.msmmContract || "") },
+    { label: "Status",            wMm: 26,  get: r => r._orgHeader ? "" : (r.status || "Awarded") },
+    { label: "Details",                     get: r => r._orgHeader ? "" : (r.details || "") },
   ],
   closed: [
     { label: "Year",              wMm: 14,  get: r => r.year },
@@ -562,6 +588,11 @@ const EXPORT_COLUMNS = {
         : (r.title || ""), wrap: true },
     { label: "Client / Firm",               get: r => r._starsHeader ? "" : (companyById(r.clientId)?.name || "") },
     { label: "Date & Time",       wMm: 36,  get: r => r._starsHeader ? "" : fmtDateTime(r.dateTime) },
+    // Was missing entirely, so the column showed on screen and vanished from
+    // the PDF. `defsByLabel.get()` misses silently, which is exactly how a gap
+    // like this survives unnoticed.
+    { label: "Anticipated Amount", wMm: 30, halign: "right",
+      get: r => r._starsHeader ? "" : (r.anticipatedAmount != null && r.anticipatedAmount !== "" ? fmtMoney(r.anticipatedAmount) : "") },
     // fullName, not name: `name` is the user's display_name, which for much of
     // the roster is a first name or a nickname ("Mark", "Stuart"). A printed
     // report that circulates outside the team needs the person identified.
@@ -796,7 +827,7 @@ function LoadingScreen({ error }) {
         <span className="bx-mark bx-boot-mark" data-idle={error ? "true" : "false"} aria-hidden="true">B</span>
         <h1 className="bx-boot-title">Beacon</h1>
         <p className="bx-boot-sub">
-          {error ? "Couldn't load project data" : "Loading from beacon_v2.*…"}
+          {error ? "Couldn't load project data" : "Loading workspace…"}
         </p>
         {error && (
           <pre className="bx-boot-error">{String(error.message || error)}</pre>
@@ -1176,6 +1207,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     (currentUser?.first_name?.[0] || "") +
     (currentUser?.last_name?.[0]  || "")
     || userDisplayName.slice(0, 2);
+  // Attribution for exported documents. Ordered first_name + last_name FIRST,
+  // the reverse of userDisplayName, because display_name is often a nickname
+  // ("Mark", "Stuart") — fine on the account chip, not on a report that
+  // leaves the building. Same reasoning as `fullName` on the roster.
+  const exporterName =
+    [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ").trim()
+    || currentUser?.display_name
+    || currentUser?.email
+    || "Unknown user";
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   // ---- App-shell chrome state (presentation only) --------------------
@@ -4682,6 +4722,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           if (r.probability === "Low")    return [236, 205, 203];
           return null;
         }
+      : (tab === "awaiting" || tab === "awarded" || tab === "proposals-deleted")
+      ? (r) => {
+          // The org-type divider rows carry a label in the Project column and
+          // nothing else. Without a fill they read as a row that failed to
+          // render rather than as a section break.
+          if (r._orgHeader) return [237, 234, 228];
+          return null;
+        }
       : (tab === "hotleads" || tab === "leads-deleted")
       ? (r) => {
           // The rating tint, carried into the print. On screen the level is
@@ -4776,8 +4824,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     if (yearFilter[tab] != null) annotations.push(`Year: ${yearFilter[tab]}`);
     if (filterKey[tab] && filterKey[tab] !== "all") annotations.push(`Filter: ${filterKey[tab]}`);
     if (snap?.search) annotations.push(`Search: "${snap.search}"`);
-    annotations.push(`Exported ${exportedAt}`);
-    const subtitle = [meta.desc, annotations.join(" · ")].filter(Boolean).join("  ·  ");
+
+    // Leads & Bids gets a document-style header: attributed, and without the
+    // page's own explanatory blurb. Scoped to this tab rather than applied
+    // everywhere, so no other export changes shape.
+    //
+    // meta.desc is dropped here because "Early-stage opportunities and
+    // conversations before they become Potential Projects" explains the tab to
+    // someone standing in the app; on a printed report it is onboarding copy
+    // above the data, and it pushed the annotations that do matter (filter,
+    // year, search, who exported it) further along a line that already runs
+    // the width of the page.
+    const isLeadsExport = tab === "hotleads" || tab === "leads-deleted";
+    annotations.push(isLeadsExport
+      ? `Exported by ${exporterName} on ${exportedAt}`
+      : `Exported ${exportedAt}`);
+    const subtitle = isLeadsExport
+      ? annotations.join(" · ")
+      : [meta.desc, annotations.join(" · ")].filter(Boolean).join("  ·  ");
 
     try {
       showToast("Preparing PDF…", "export");
@@ -4789,10 +4853,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         rowColor,
         cellStyle: invoiceCellStyle,
         onDidDrawCell: starPainter,
+        // Leads & Bids only, per the same scoping as the subtitle above.
+        // stampTime off because the subtitle already carries the stamp with
+        // the exporter's name on it.
+        stampTime: !isLeadsExport,
+        footerLogo: isLeadsExport,
         // A3 landscape gives Invoice's 17 columns (12 months + totals)
         // enough width to render full dollar amounts without ellipsizing.
+        //
+        // Proposals and Awarded join it for the same reason: Awarded exports
+        // 19 columns and Proposals 11 to 16 depending on what is unhidden,
+        // and A4 landscape is 277mm of usable width. Nineteen columns across
+        // that is about 14mm each, which is narrower than the dates and
+        // contract numbers going into them, so nearly every cell ellipsized.
         // Other tabs stay on A4 — fewer columns, more text-oriented.
-        format: (tab === "invoice" || tab === "between") ? "a3" : "a4",
+        format: (tab === "invoice" || tab === "between"
+                 || tab === "awaiting" || tab === "awarded" || tab === "proposals-deleted")
+          ? "a3" : "a4",
         // Zebra striping fights the Invoice's per-cell fill palette
         // (actual amber, projection cream, orange tint) — turn it off
         // on Invoice so the colors read cleanly.
@@ -5973,10 +6050,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         <div className={`bx-pagehead ${tab === "timesheet" ? "bx-pagehead-compact" : ""}`}>
           <div className="bx-pagehead-text">
             <h1 className="bx-pagetitle">{pageTitle}</h1>
-            <p className={`bx-pagedesc ${currentMeta.mobileDesc ? "bx-pagedesc-dual" : ""}`}>
-              <span className="bx-pagedesc-full">{currentMeta.desc}</span>
-              {currentMeta.mobileDesc && <span className="bx-pagedesc-short">{currentMeta.mobileDesc}</span>}
-            </p>
+            {/* Skipped entirely when a tab has no blurb. `.bx-pagedesc` carries
+                a 6px top margin, so an empty <p> still pushed the page down by
+                a hairline on the three tabs that deliberately have no desc
+                (Proposals, Licenses, Team Calendar). */}
+            {(currentMeta.desc || currentMeta.mobileDesc) && (
+              <p className={`bx-pagedesc ${currentMeta.mobileDesc ? "bx-pagedesc-dual" : ""}`}>
+                <span className="bx-pagedesc-full">{currentMeta.desc}</span>
+                {currentMeta.mobileDesc && <span className="bx-pagedesc-short">{currentMeta.mobileDesc}</span>}
+              </p>
+            )}
           </div>
           <div className="bx-pageactions">
             {tab === "invoice" ? (

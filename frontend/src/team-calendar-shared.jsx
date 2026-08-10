@@ -123,8 +123,14 @@ export const fmtTime = (d) => {
   return m === 0 ? `${hh}${ampm}` : `${hh}:${String(m).padStart(2, "0")}${ampm}`;
 };
 
-// Total attendees on an event (resource shape). The Pass-B mirror stores
-// every attendee, internal and external, in a single jsonb array.
+// How many people were INVITED to an event (resource shape). The Pass-B mirror
+// stores every attendee, internal and external, in a single jsonb array.
+//
+// It is a headcount, not an RSVP tally, and the `+N` ticks it feeds are
+// labelled "invited" for that reason: an unanswered invitation counts here
+// exactly like an accepted one. Whether a given person accepted is a separate
+// question with a separate answer — see attendee-status.js — and reading it
+// off this number is how the two ended up disagreeing.
 export function attendeeCount(r) {
   return (r?.attendees || []).filter(a => a?.email).length;
 }

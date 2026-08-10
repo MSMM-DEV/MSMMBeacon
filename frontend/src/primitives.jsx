@@ -270,16 +270,37 @@ export const StarRating = ({ value, onChange, size = "md", title, max = DEFAULT_
   );
 };
 
-export const SubsCell = ({ subs, wrap = false }) => {
+// `max` caps how many sub chips render, collapsing the rest into a "+N" the
+// way UserStack does. Without it a row with six subs is six chips tall, and in
+// a grid where every other row is one line that single row sets the height for
+// its whole band. The count still tells you there is more, and the hidden
+// names are on the overflow chip's tooltip.
+export const SubsCell = ({ subs, wrap = false, max }) => {
   if (!subs || subs.length === 0) return <EmptyCell />;
+  const capped = max != null && subs.length > max;
+  const shown = capped ? subs.slice(0, max) : subs;
+  const hidden = capped ? subs.slice(max) : [];
+  const hiddenTip = hidden
+    .map(s => companyById(s.cId)?.name || s.desc || "Sub")
+    .join(", ");
   return (
+    // The chip shows only the first word of the firm's name ("Waggoner" for
+    // "Waggoner Engineering") and truncates from there when the column is
+    // narrow, so the full name has to be reachable on hover. It was, via the
+    // native `title` attribute, but that waits about a second, renders in the
+    // OS tooltip style, and never appears at all on touch. The kit's Tooltip
+    // shows on hover and on keyboard focus, in the app's own styling.
+    //
+    // TooltipProvider renders no DOM of its own, so it can wrap the chip row
+    // without affecting the flex layout.
+    <TooltipProvider delayDuration={250} skipDelayDuration={300}>
     <span
       className={cn(
         "chip-stack flex min-w-0 max-w-full items-center gap-1",
         wrap ? "flex-wrap" : "trunc flex-nowrap overflow-hidden"
       )}
     >
-      {subs.map((s, i) => {
+      {shown.map((s, i) => {
         const co = companyById(s.cId);
         const label = co?.name?.split(" ")[0] || s.desc || "Sub";
         const amount = s.amt ? fmtMoney(s.amt, false) : "";
@@ -289,21 +310,46 @@ export const SubsCell = ({ subs, wrap = false }) => {
           .filter(Boolean)
           .join(" · ");
         return (
-          <Badge
-            key={i}
-            tone="neutral"
-            dot
-            className="min-w-0 shrink basis-auto"
-            title={tip}
-          >
-            <span className="min-w-0 truncate">{label}</span>
-            {amount && (
-              <span className="num shrink-0 font-normal opacity-70">{amount}</span>
-            )}
-          </Badge>
+          // Deliberately NOT focusable. Making each chip a tab stop would add
+          // two or three per row, which is a hundred-odd extra stops on a
+          // 36-row table, and tabbing through firm names to reach the next
+          // control is worse than the problem it solves. Screen readers get
+          // the full detail from the sr-only span instead, which sits in
+          // reading order where the truncated label is.
+          <Tooltip key={i} label={tip} side="top">
+            <Badge
+              tone="neutral"
+              dot
+              className="min-w-0 shrink basis-auto"
+            >
+              <span className="min-w-0 truncate" aria-hidden="true">{label}</span>
+              {amount && (
+                <span className="num shrink-0 font-normal opacity-70" aria-hidden="true">{amount}</span>
+              )}
+              <span className="sr-only">{tip}</span>
+            </Badge>
+          </Tooltip>
         );
       })}
+      {capped && (
+        // This one IS focusable: it is the only "there is more here" control
+        // in the cell, one per row rather than one per sub, and it is the
+        // affordance a keyboard user needs to discover the hidden names.
+        <Tooltip label={`Also: ${hiddenTip}`} side="top">
+          <span
+            tabIndex={0}
+            className={cn(
+              "num inline-flex h-5 shrink-0 items-center whitespace-nowrap px-2",
+              "rounded-[var(--radius-full)] border border-dashed border-[var(--border-strong)]",
+              "bg-[var(--surface-2)] text-[length:var(--fs-2xs)] font-semibold text-[var(--text-muted)]"
+            )}
+          >
+            +{hidden.length}
+          </span>
+        </Tooltip>
+      )}
     </span>
+    </TooltipProvider>
   );
 };
 

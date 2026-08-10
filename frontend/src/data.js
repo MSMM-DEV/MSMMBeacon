@@ -3380,6 +3380,11 @@ export function adaptUserCalEvent(r) {
   return {
     userId:           r.user_id,
     outlookEventId:   r.outlook_event_id,
+    // The SAME meeting mirrored into two mailboxes is two rows with two
+    // outlook_event_ids but ONE ical_uid. It is how the Team Calendar finds
+    // every copy of a meeting when reconciling attendee RSVPs — see
+    // attendee-status.js.
+    icalUid:          r.ical_uid || null,
     subject:          r.subject,
     startAt:          r.start_at,
     endAt:            r.end_at,
@@ -3742,6 +3747,42 @@ export async function loadTeamCalendarEvents(userIds, startIso, endIso) {
     .order("start_at", { ascending: true });
   if (error) throw error;
   return (data || []).map(adaptUserCalEvent);
+}
+
+// Every mirrored copy of ONE meeting, across every mailbox we can see.
+//
+// Exchange only records an attendee's RSVP in the copies entitled to know it
+// (their own mailbox, and the organizer's), so the copy behind the block a
+// user clicked is usually NOT the copy that knows whether the other attendees
+// accepted. Reconciling that needs the siblings, which is what this fetches;
+// `resolveAttendeeResponses` in attendee-status.js does the reconciling.
+//
+// Deliberately NOT restricted to the selected people: an RSVP must not change
+// because of who happens to be ticked in the People picker. The rows come back
+// under the same tk_calevents_team_select RLS policy as the calendar itself.
+//
+// `ical_uid` is shared by every occurrence of a recurring series as well as by
+// every mailbox copy, so the start time narrows it to the one occurrence. A
+// ±2 minute window absorbs the per-mailbox rounding Graph occasionally emits.
+export async function loadMeetingAttendeeCopies(icalUid, startIso) {
+  if (!icalUid || !startIso) return [];
+  const anchor = new Date(startIso);
+  if (Number.isNaN(anchor.getTime())) return [];
+  const pad = 2 * 60 * 1000;
+  const { data, error } = await supabase
+    .from("user_calendar_events")
+    .select("user_id, outlook_event_id, ical_uid, start_at, organizer, attendees")
+    .eq("ical_uid", icalUid)
+    .gte("start_at", new Date(+anchor - pad).toISOString())
+    .lte("start_at", new Date(+anchor + pad).toISOString());
+  if (error) throw error;
+  return (data || []).map(r => ({
+    userId:     r.user_id,
+    icalUid:    r.ical_uid,
+    startAt:    r.start_at,
+    organizer:  r.organizer || null,
+    attendees:  r.attendees || [],
+  }));
 }
 
 // =============================================================================
