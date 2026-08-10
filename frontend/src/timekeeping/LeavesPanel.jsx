@@ -2,8 +2,16 @@
 //   1. Pending requests   — approve / reject (with optional note). Surfaces a
 //                           warning when the request exceeds the person's
 //                           accrued balance (admin can still approve).
-//   2. Approved leave     — revert (adds the hours back, returns to pending).
+//   2. Decided leave      — every request an admin has already ruled on, in a
+//                           table, each row revertible back to pending.
 //   3. Team balances      — the editable balance table (LeaveAdminTable).
+//
+// Section 2 carries BOTH outcomes. It used to list approved requests only,
+// which meant a rejection vanished from the admin's screen the instant it was
+// made: no record of the decision and no way to walk it back short of asking
+// the person to re-submit. A Status column is what makes one table able to hold
+// both, and "Revert" then means the same thing in both rows — send it back to
+// pending — even though the two paths differ underneath (see `revert`).
 //
 // Approve / reject / revert call the SECURITY DEFINER RPCs (admin-gated in the
 // DB); the balance math is atomic there. Refreshing after each action keeps the
@@ -11,10 +19,10 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Icon } from "../icons";
-import { Badge, Button, EmptyState, Input } from "@/ui";
+import { Badge, Button, EmptyState, Input, Tooltip } from "@/ui";
 import {
   loadAllLeaveRequests, loadLeaveBalances, computeLeaveAvailable,
-  approveLeaveRequest, rejectLeaveRequest, revertLeaveRequest,
+  approveLeaveRequest, rejectLeaveRequest, revertLeaveRequest, reopenLeaveRequest,
   userById, getAppSettings, fmtDate,
 } from "../data";
 import { LeaveAdminTable, LeaveStatusChip } from "../leave.jsx";
@@ -52,8 +60,16 @@ export function LeavesPanel() {
     return leaveType === "sick" ? c.sickAvailable : c.vacationAvailable;
   }, [balByUser, settings]);
 
-  const pending  = useMemo(() => requests.filter(r => r.status === "pending"), [requests]);
-  const approved = useMemo(() => requests.filter(r => r.status === "approved"), [requests]);
+  const pending = useMemo(() => requests.filter(r => r.status === "pending"), [requests]);
+
+  // Everything already ruled on, newest decision first. `reviewedAt` is stamped
+  // by both RPCs; requestedAt is the fallback for rows decided before that
+  // column existed, so a null review timestamp can't sink a row to the bottom.
+  const decided = useMemo(() => requests
+    .filter(r => r.status === "approved" || r.status === "rejected")
+    .sort((a, b) =>
+      String(b.reviewedAt || b.requestedAt || "").localeCompare(String(a.reviewedAt || a.requestedAt || ""))),
+  [requests]);
 
   const act = async (id, fn) => {
     setActing(id); setErr(null);
@@ -173,52 +189,85 @@ export function LeavesPanel() {
         )}
       </section>
 
-      {/* 2. Approved */}
-      <section className="tsx-leave-sec" aria-labelledby="tsx-leaveadmin-approved">
+      {/* 2. Decided — approved AND rejected, both revertible back to pending. */}
+      <section className="tsx-leave-sec" aria-labelledby="tsx-leaveadmin-decided">
         <header className="tsx-leave-sechead">
-          <h4 id="tsx-leaveadmin-approved">
-            Approved leave
-            <span className="tsx-count num">{approved.length}</span>
+          <h4 id="tsx-leaveadmin-decided">
+            Decided leave
+            <span className="tsx-count num">{decided.length}</span>
           </h4>
-          <p>Reverting adds the hours back and returns the request to pending.</p>
+          <p>Every request you have ruled on. Reverting sends it back to pending — an approval also returns the hours.</p>
         </header>
 
-        {approved.length === 0 && !busy ? (
+        {decided.length === 0 && !busy ? (
           <EmptyState
             compact
-            title="Nothing approved yet"
-            description="Approved requests stay listed here so you can revert one if plans change."
+            title="No decisions yet"
+            description="Once you approve or reject a request it stays listed here, so you can see what was decided and undo it if plans change."
           />
         ) : (
-          <ul className="tsx-leaveapproved">
-            {approved.map(r => {
-              const u = userById(r.userId);
-              const inFlight = acting === r.id;
-              return (
-                <li key={r.id} className="tsx-leaveapproved-row">
-                  <span className="tsx-leaveapproved-who">
-                    {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
-                    <span className="tsx-leaveapproved-name">{u?.name || "Unknown"}</span>
-                  </span>
-                  <Badge tone={r.leaveType === "sick" ? "info" : "success"}>
-                    {r.leaveType === "sick" ? "Sick" : "Vacation"}
-                  </Badge>
-                  <span className="tsx-leaveapproved-dates num">
-                    {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
-                  </span>
-                  <span className="tsx-leaveapproved-hours num">{hrs(r.totalHours)}</span>
-                  <LeaveStatusChip status="approved"/>
-                  <Button
-                    variant="ghost" size="sm" disabled={inFlight} loading={inFlight}
-                    title="Add these hours back and return the request to pending"
-                    aria-label={`Revert approved leave for ${u?.name || "this request"}`}
-                    onClick={() => act(r.id, () => revertLeaveRequest(r.id))}>
-                    <Icon name="undo" size={12}/> Revert
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="bx-scroll-x tsx-leaveadmin-wrap">
+            <table className="tsx-leaveadmin-table tsx-leavedecided-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="tsx-leaveadmin-th-name">Employee</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Dates</th>
+                  <th scope="col">Hours</th>
+                  <th scope="col">Status</th>
+                  <th scope="col"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {decided.map(r => {
+                  const u = userById(r.userId);
+                  const inFlight = acting === r.id;
+                  const name     = u?.name || "Unknown";
+                  const approved = r.status === "approved";
+                  // Two different undos behind one word. An approval moved a
+                  // balance, so it goes back through the RPC that reverses the
+                  // math atomically; a rejection never moved one, so it is a
+                  // status flip. Both land at pending — which is why the button
+                  // says the same thing on both rows.
+                  const hint = approved
+                    ? `Add ${hrs(r.totalHours)} back to ${name}'s balance and return the request to pending`
+                    : `Return ${name}'s request to pending so you can decide again — no balance changes`;
+                  return (
+                    <tr key={r.id} className={`is-${r.status}`}>
+                      <th scope="row" className="tsx-leaveadmin-td-name">
+                        <span className="tsx-leaveadmin-who">
+                          {u && <span className={`avatar xs ${u.color}`}>{u.initials}</span>}
+                          <span className="tsx-leaveadmin-name">{name}</span>
+                        </span>
+                      </th>
+                      <td>
+                        <Badge tone={r.leaveType === "sick" ? "info" : "success"}>
+                          {r.leaveType === "sick" ? "Sick" : "Vacation"}
+                        </Badge>
+                      </td>
+                      <td className="num tsx-leavedecided-dates">
+                        {fmtDate(r.dateStart)}{r.dateEnd !== r.dateStart ? ` – ${fmtDate(r.dateEnd)}` : ""}
+                      </td>
+                      <td className="num tsx-leavedecided-hours">{hrs(r.totalHours)}</td>
+                      <td><LeaveStatusChip status={r.status}/></td>
+                      <td className="tsx-leavedecided-td-act">
+                        <Tooltip label={hint}>
+                          <Button
+                            variant="ghost" size="sm" disabled={inFlight} loading={inFlight}
+                            aria-label={`Revert ${approved ? "approved" : "rejected"} leave for ${name}`}
+                            onClick={() => act(r.id, () => (
+                              approved ? revertLeaveRequest(r.id) : reopenLeaveRequest(r.id)
+                            ))}>
+                            <Icon name="undo" size={12}/> Revert
+                          </Button>
+                        </Tooltip>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 

@@ -22531,24 +22531,6 @@ button.tsx-tl-seg { cursor: pointer; }
   .tsx-leavereq-actions > * { flex: 0 0 auto; }
 }
 
-.tsx-leaveapproved { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
-.tsx-leaveapproved-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  font-size: var(--fs-sm);
-  min-width: 0;
-}
-.tsx-leaveapproved-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex: 1 1 160px; }
-.tsx-leaveapproved-name { font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tsx-leaveapproved-dates { color: var(--text-muted); }
-.tsx-leaveapproved-hours { font-weight: 650; color: var(--text); }
-
 .tsx-leaveadmin-wrap { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .tsx-leaveadmin-table {
   width: 100%;
@@ -22584,16 +22566,38 @@ button.tsx-tl-seg { cursor: pointer; }
 .tsx-leaveadmin-table tbody tr:hover td,
 .tsx-leaveadmin-table tbody tr:hover th { background: var(--surface-2); }
 .tsx-leaveadmin-table tr.is-noaccrue { opacity: .62; }
+
+/* Column rules. Every cell but the first in a row takes a left hairline, so the
+   grid closes without doubling up on the wrapper's own border. `tbody td` is
+   safe as a blanket rule because the leading cell of each body row is a
+   <th scope="row"> — the row header never picks one up. */
+.tsx-leaveadmin-table thead th + th,
+.tsx-leaveadmin-table tbody td { border-left: 1px solid var(--border); }
+
 .tsx-leaveadmin-td-name { white-space: nowrap; }
-.tsx-leaveadmin-td-name .avatar { display: inline-flex; vertical-align: middle; }
+/* Flex, not vertical-align — see the comment on the markup in leave.jsx. */
+.tsx-leaveadmin-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .tsx-leaveadmin-name {
-  margin-left: var(--sp-2);
   font-weight: 600;
   color: var(--text);
-  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tsx-leaveadmin-th-accr,
 .tsx-leaveadmin-td-accr { text-align: right; }
+
+/* ---- decided leave (approved + rejected) ---- */
+.tsx-leavedecided-table { min-width: 660px; }
+.tsx-leavedecided-table tbody td { vertical-align: middle; }
+.tsx-leavedecided-dates { color: var(--text-muted); white-space: nowrap; }
+.tsx-leavedecided-hours { font-weight: 650; color: var(--text); white-space: nowrap; }
+/* Everything stays left-aligned, matching the balances table directly below —
+   two adjacent tables with different alignment rules read as a mistake. */
+.tsx-leavedecided-td-act { white-space: nowrap; width: 1%; }
+/* Rejected rows stay legible but read as settled — they are history, not work
+   queued up. Not `opacity`, which would wash out the Revert button too. */
+.tsx-leavedecided-table tbody tr.is-rejected .tsx-leaveadmin-name,
+.tsx-leavedecided-table tbody tr.is-rejected .tsx-leavedecided-hours { color: var(--text-muted); }
 .tsx-leaveadmin-empty {
   padding: var(--sp-5) var(--sp-3);
   color: var(--text-muted);
@@ -22674,7 +22678,6 @@ button.tsx-tl-seg { cursor: pointer; }
      the space back from the fixed hours / flag columns instead (done in the
      max-width: 560px block above, which now owns this). */
   .tsx-week-cell-bar { width: 32%; }
-  .tsx-leaveapproved-row { align-items: flex-start; }
 }
 
 @media (max-width: 400px) {
@@ -23030,13 +23033,15 @@ button.tsx-tl-seg { cursor: pointer; }
   --u-ink:  var(--u-ink-l);
   --u-tint: var(--u-tint-l);
   --u-chip: var(--u-chip-l);
-  --u-line: color-mix(in oklab, var(--u-key) 34%, var(--border));
+  --u-bold: var(--u-bold-l);
+  --u-line: color-mix(in oklab, var(--u-bold) 42%, var(--border));
 }
 [data-theme="dark"] .bxtc-ident {
   --u-key:  var(--u-key-d);
   --u-ink:  var(--u-ink-d);
   --u-tint: var(--u-tint-d);
   --u-chip: var(--u-chip-d);
+  --u-bold: var(--u-bold-d);
 }
 
 /* ---- initials tile ------------------------------------------------------
@@ -23057,14 +23062,66 @@ button.tsx-tl-seg { cursor: pointer; }
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
 }
+/* Round variant, for the roster surfaces where the tile is an AVATAR rather
+   than a colour key: the chips and the picker rows. Same tokens, heavier
+   ring, because at that size the ring is most of what carries the hue. */
+.bxtc-swatch--avatar {
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1.5px var(--u-bold, var(--border-strong));
+}
+
+/* ---- roster identity ----------------------------------------------------
+   The people chips and the picker rows are the ONE place the palette runs at
+   close to full strength. Everywhere else it stays compressed on purpose —
+   a week grid holds a hundred blocks and twenty saturated hues in it is a
+   paint chart, not information. A roster holds each person exactly once, and
+   there the hue IS the content: it is the key you read the grid by, so it
+   has to be unmistakable here or it is not a key at all.
+
+   Three carriers per person, so the identity survives losing any one of
+   them: the ring, the avatar, and the name. Colour is never alone — the
+   initials and the full name sit right next to it. */
+.bxtc-person {
+  border-color: var(--u-bold, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--u-bold) 22%, transparent),
+              var(--shadow-xs);
+}
+.bxtc-person:hover {
+  border-color: var(--u-bold, var(--border-strong));
+  background: color-mix(in oklab, var(--u-bold) 7%, var(--surface));
+}
+.bxtc-person:active {
+  background: color-mix(in oklab, var(--u-bold) 13%, var(--surface));
+}
+.bxtc-person-name { color: var(--u-ink, var(--text)); }
+/* The remove affordance stays neutral until hovered — it is an action, not
+   part of the person's identity, and colouring it would make every chip look
+   like it was mid-delete. */
+.bxtc-person-x { color: var(--text-soft); }
+.bxtc-person:hover .bxtc-person-x {
+  background: color-mix(in oklab, var(--u-bold) 16%, transparent);
+  color: var(--u-ink, var(--text));
+}
+/* The picker's selected tick. `--surface` as the glyph colour is not a
+   shortcut: it is light where --u-bold is dark (light theme) and dark where
+   --u-bold is light (dark theme), so one declaration stays legible in both
+   without a per-theme override. */
+.bxtc-person-tick {
+  background: var(--u-bold, var(--accent-solid));
+  color: var(--surface);
+}
 
 /* ---- event skins -------------------------------------------------------- */
+/* The identity rule is --u-bold, not --u-key. At 3px it is the single
+   strongest per-person signal on the grid and the one part of a block that
+   survives every container query, so it gets the vivid tier — and being a
+   rule rather than a fill, saturation there costs nothing in legibility. */
 .bxtc-evt {
   display: flex;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--u-line);
-  border-left: 3px solid var(--u-key);
+  border-left: 3px solid var(--u-bold, var(--u-key));
   border-radius: var(--radius-xs);
   background: var(--u-tint);
   color: var(--u-ink);
@@ -23073,10 +23130,10 @@ button.tsx-tl-seg { cursor: pointer; }
     background-color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
-.bxtc-evt:hover { background: color-mix(in oklab, var(--u-key) 12%, var(--u-tint)); }
+.bxtc-evt:hover { background: color-mix(in oklab, var(--u-bold) 14%, var(--u-tint)); }
 /* All-day blocks carry the hue all the way round, so a band across the top of
    the week never reads as "a timed event that lost its column". */
-.bxtc-evt[data-allday="true"] { border-color: var(--u-key); }
+.bxtc-evt[data-allday="true"] { border-color: var(--u-bold, var(--u-key)); }
 .bxtc-evt[data-cancelled="true"] { opacity: .62; }
 
 .bxtc-evt--pill {
@@ -25356,11 +25413,15 @@ button.tsx-tl-seg { cursor: pointer; }
   gap: var(--sp-3);
   min-width: 0;
 }
+/* No coloured left rule. A stat tile's tone still reads off its icon and, on
+   "Currently in", its live dot — the stripe was a third copy of the same
+   signal and four of them in a row turned the header into a set of tabs
+   nobody can click. The tile is a plain bordered card; the number is the
+   content. */
 .tka-stat {
   min-width: 0;
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--tka-tone);
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-xs);

@@ -23,6 +23,7 @@ import {
   loadTeamDay, loadTeamRange, getUsers,
   TK_CATEGORY_LABEL, intervalTone,
 } from "../data";
+import { inSince, openIntervalOf } from "../timekeeping-presence.js";
 import { DayTimeline } from "./DayTimeline";
 import { useIsMobile } from "../use-mobile";
 
@@ -118,13 +119,15 @@ function workMinutesFromIntervals(intervals, date) {
   return mins;
 }
 
-// Most recent open interval's start (Day-mode rows carry intervals[], Range-
-// mode rows carry an `openSince` string).
+// When a Day-mode row has been at their desk since (Range-mode rows carry an
+// `openSince` string instead).
+//
+// Delegates to `inSince` so the chip this feeds and the In/Out filter are the
+// same decision. It used to search for ANY open IN interval, which on a day
+// with a stale unclosed punch disagreed with the filter about the same person
+// — see the banner in timekeeping-presence.js.
 function openSinceFromDayRow(row) {
-  // Only an open IN interval means "currently working since"; an open OUT
-  // interval is "currently out" and must not read as in-since / add to time.
-  const open = (row.intervals || []).find(i => !i.endAt && !i.isOut);
-  return open ? open.startAt : null;
+  return inSince(row.intervals);
 }
 
 // First-in / last-out for a day, derived from intervals (preferred) or the
@@ -141,7 +144,7 @@ function dayPunchBounds(row) {
 }
 
 // ---------------------------------------------------------------------------
-export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion = 0 }) {
+export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion = 0, signals }) {
   const today      = todayInCT();
   const anchorDate = prefs.anchorDate || today;
   const range      = prefs.range || "day";
@@ -230,16 +233,52 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
     return user.name.toLowerCase().includes(q) || (user.initials || "").toLowerCase().includes(q);
   }, [prefs.search]);
 
+  // ---------- Presence filter (in / out / all)
+  //
+  // Both states are about RIGHT NOW, not about the range on screen — on a past
+  // week "who is in" would mean nothing, and the two other places that say
+  // "in" on this page (the In chip, the "Currently in" tile) already mean this
+  // moment.
+  //
+  // Punches toggle, so a person is in exactly one of three states and OUT IS
+  // NOT THE COMPLEMENT OF IN:
+  //
+  //   in     an open interval whose direction is IN — at their desk
+  //   out    an open interval whose direction is OUT — at lunch, on site, or
+  //          gone for the day
+  //   —      no open interval at all: they have not punched today
+  //
+  // Filtering "out" as `!in` swept that third group in, so an admin asking
+  // "who is out" was handed everyone who never showed up. They are different
+  // questions with different answers, and only All covers the third group.
+  //
+  // Both sets come from the live today-snapshot the parent already fetches —
+  // see the comment on `signals` in TimeAdminTab for why they cannot be
+  // derived from the range rows.
+  const presence = prefs.presence || "all";
+  const matchesPresence = useCallback((row) => {
+    if (presence === "all") return true;
+    const set = presence === "in" ? signals?.currentlyIn : signals?.currentlyOut;
+    return !!set?.has(row.user.id);
+  }, [presence, signals]);
+
+  // ONE predicate for every consumer. It used to be spelled out at each of the
+  // five call sites (the stats and the four matrices), which is exactly the
+  // shape where a new filter gets added to four of them and the tiles quietly
+  // keep counting rows the table is no longer showing.
+  const visibleRows = useCallback((arr) => (
+    arr.filter(r =>
+      visibleSet.has(r.user.id) && matchesSearch(r.user) && matchesPresence(r))
+  ), [visibleSet, matchesSearch, matchesPresence]);
+
   // ---------- Sorting
   // Anyone currently in → top, then anyone with hours, then alpha.
   const sortRows = useCallback((arr, kind) => {
     return arr.slice().sort((a, b) => {
-      const aIn = kind === "day"
-        ? a.intervals.some(i => !i.endAt && !i.isOut)
-        : !!a.openSince;
-      const bIn = kind === "day"
-        ? b.intervals.some(i => !i.endAt && !i.isOut)
-        : !!b.openSince;
+      // Same rule as the chip and the filter, so the person sorted to the top
+      // as "in" is the person the row says is in.
+      const aIn = kind === "day" ? !!inSince(a.intervals) : !!a.openSince;
+      const bIn = kind === "day" ? !!inSince(b.intervals) : !!b.openSince;
       if (aIn !== bIn) return aIn ? -1 : 1;
       const aTot = kind === "day"
         ? (a.day ? totalMinForDay(a.day) : 0)
@@ -255,9 +294,8 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
   // ---------- Stat tiles (compute once per data load)
   const stats = useMemo(() => {
     let totalMin = 0, activeUsers = 0, inNow = 0, daysWithFlags = 0;
-    const eligible = (kind, arr) => arr.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user));
     if (range === "day") {
-      const list = eligible("day", dayRows);
+      const list = visibleRows(dayRows);
       for (const r of list) {
         if (r.intervals.length > 0) activeUsers++;
         const openSince = openSinceFromDayRow(r);
@@ -267,7 +305,7 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
       }
       return { totalMin, activeUsers, inNow, daysWithFlags, peopleShown: list.length };
     }
-    const list = eligible("range", rows);
+    const list = visibleRows(rows);
     for (const r of list) {
       if (r.days.length > 0) activeUsers++;
       if (r.openSince) inNow++;
@@ -284,11 +322,14 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
       }
     }
     return { totalMin, activeUsers, inNow, daysWithFlags, peopleShown: list.length };
-  }, [range, dayRows, rows, anchorDate, visibleSet, matchesSearch]);
+  }, [range, dayRows, rows, anchorDate, visibleRows]);
 
   // ---------- Render
   const isCompact = prefs.density === "compact";
   const noPeople  = stats.peopleShown === 0;
+  // Whether an empty table can be read as a statement about the whole team.
+  const presenceIsOnlyFilter =
+    presence !== "all" && !prefs.search?.trim() && prefs.visibleUsers === "all";
 
   return (
     <section className={`tka-range ${isCompact ? "is-compact" : ""}`} aria-busy={busy || undefined}>
@@ -322,16 +363,30 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
         {busy && noPeople ? (
           <SkeletonTable rows={6} cols={6} />
         ) : noPeople ? (
+          // Three filters can empty this table and the fix differs for each.
+          //
+          // "Nobody is punched in right now" is an ANSWER, not an error — an
+          // admin who filtered to In and sees an empty table should be told
+          // the office is empty, not told to widen a selection that is already
+          // correct. But it is only a true answer when presence is the ONLY
+          // filter narrowing; with a name search or a People allowlist also
+          // on, the empty table says nothing about the whole team, so it falls
+          // back to the neutral title rather than asserting something false.
           <EmptyState
             icon={UsersGlyph}
-            title="No people match this view"
-            description="Widen the People selection or clear the name search to bring rows back."
+            title={!presenceIsOnlyFilter ? "No people match this view"
+                 : presence === "in"     ? "Nobody is punched in right now"
+                 : presence === "out"    ? "Everybody is punched in right now"
+                 : "No people match this view"}
+            description={presence !== "all"
+              ? "Switch the In/Out filter back to All, or widen the People selection and clear the name search."
+              : "Widen the People selection or clear the name search to bring rows back."}
           />
         ) : (
           <>
             {range === "day" && (
               <DayMatrix
-                rows={sortRows(dayRows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "day")}
+                rows={sortRows(visibleRows(dayRows), "day")}
                 date={anchorDate}
                 onOpenUserDay={onOpenUserDay}
                 isCompact={isCompact}
@@ -339,7 +394,7 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
             )}
             {range === "week" && (
               <WeekMatrix
-                rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
+                rows={sortRows(visibleRows(rows), "range")}
                 columns={window.columns}
                 today={today}
                 onOpenUserDay={onOpenUserDay}
@@ -348,7 +403,7 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
             )}
             {range === "month" && (
               <MonthMatrix
-                rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
+                rows={sortRows(visibleRows(rows), "range")}
                 weeks={window.columns}
                 anchorDate={anchorDate}
                 today={today}
@@ -358,7 +413,7 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
             )}
             {range === "custom" && (
               <CustomMatrix
-                rows={sortRows(rows.filter(r => visibleSet.has(r.user.id) && matchesSearch(r.user)), "range")}
+                rows={sortRows(visibleRows(rows), "range")}
                 start={window.start}
                 endExclusive={window.endExclusive}
                 onOpenUserDay={onOpenUserDay}
@@ -670,7 +725,7 @@ function DayMatrixMobileRow({ row, date, onOpenUserDay }) {
 
   // Surface the open interval's note if there is one (short notes only;
   // longer fall through to UserDayModal where they wrap properly).
-  const openIv = (row.intervals || []).find(i => !i.endAt);
+  const openIv = openIntervalOf(row.intervals);
   const noteToShow = openIv?.notes ||
     (statusKind === "last" && (row.intervals || []).find(i => i.endAt && i.notes)?.notes);
 

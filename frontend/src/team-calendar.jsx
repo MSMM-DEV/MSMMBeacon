@@ -755,20 +755,37 @@ function PeopleBar({
                       "aria-pressed:bg-[var(--surface-2)]",
                     ].join(" ")}
                   >
-                    <Swatch initials={u.initials} className="size-6 text-[10px]" />
+                    <Swatch
+                      initials={u.initials}
+                      className="bxtc-swatch--avatar size-7 text-[10px]"
+                    />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+                      {/* The name carries the hue here too, so the row you
+                          tick and the chip it produces are recognisably the
+                          same person before you have read either. Selected
+                          rows only: an unselected person is not on the
+                          calendar, so their colour means nothing yet. */}
+                      <span
+                        className={[
+                          "block truncate text-[length:var(--fs-sm)] font-semibold",
+                          isSel ? "bxtc-person-name" : "text-[var(--text)]",
+                        ].join(" ")}
+                      >
                         {u.name}
                       </span>
                       <span className="block truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
                         {meta || EMPTY}
                       </span>
                     </span>
+                    {/* The tick takes the person's colour rather than the
+                        app accent — twenty accent-coloured checks down the
+                        list said "selected" twenty times and never said who,
+                        which is the one thing this list is for. */}
                     <span
                       className={[
-                        "grid size-4 shrink-0 place-items-center rounded-[var(--radius-xs)] border",
+                        "grid size-[18px] shrink-0 place-items-center rounded-[var(--radius-full)] border",
                         isSel
-                          ? "border-[var(--accent-solid)] bg-[var(--accent-solid)] text-[var(--accent-on)]"
+                          ? "bxtc-person-tick border-transparent"
                           : "border-[var(--border-strong)] text-transparent",
                       ].join(" ")}
                       aria-hidden="true"
@@ -894,33 +911,36 @@ function PeopleBar({
                 title={`${u.name} · ${u._department || EMPTY} · ${u._location || EMPTY}`}
                 className={[
                   IDENT,
+                  // `bxtc-person` carries the hue — ring, hover wash and the
+                  // name's ink. It is a class rather than utilities because
+                  // every one of those is a colour-mix on --u-bold, which a
+                  // utility cannot express.
+                  "bxtc-person",
                   // Same height expression as the kit's `size="sm"` Button, so
                   // a chip and the People button beside it line up at BOTH
                   // densities — a flat `h-8` matched only the comfortable one
                   // and sat 4px proud of the button in compact.
                   "group flex h-[calc(var(--control-h)-2px)] max-w-full items-center gap-1.5 rounded-[var(--radius-full)] pl-1 pr-1.5",
-                  "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
-                  "shadow-[var(--shadow-xs)]",
-                  "transition-[background-color,border-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-                  "hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]",
-                  "active:bg-[var(--surface-3)]",
+                  "border bg-[var(--surface)]",
+                  "transition-[background-color,border-color,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
                   "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
                 ].join(" ")}
               >
-                <Swatch initials={u.initials} className="size-5 shrink-0 text-[9.5px]" />
+                <Swatch
+                  initials={u.initials}
+                  className="bxtc-swatch--avatar size-5 shrink-0 text-[9.5px]"
+                />
                 {/* Tighter cap on a phone so two chips still fit a 375px row —
                     a truncated "Christopher M…" beside its swatch is more
                     legible than one chip per line. */}
-                <span className="min-w-0 max-w-[12ch] truncate text-[length:var(--fs-xs)] font-medium sm:max-w-[16ch]">
+                <span className="bxtc-person-name min-w-0 max-w-[12ch] truncate text-[length:var(--fs-xs)] font-semibold sm:max-w-[16ch]">
                   {u.name}
                 </span>
                 <span
                   aria-hidden="true"
                   className={[
-                    "grid size-4 shrink-0 place-items-center rounded-[var(--radius-full)]",
-                    "text-[var(--text-soft)]",
+                    "bxtc-person-x grid size-4 shrink-0 place-items-center rounded-[var(--radius-full)]",
                     "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)]",
-                    "group-hover:bg-[var(--surface-3)] group-hover:text-[var(--text)]",
                   ].join(" ")}
                 >
                   <Icon name="close" size={11} stroke={2.4} />

@@ -1787,6 +1787,30 @@ export function revertLeaveRequest(id) {
   return _decideLeaveRequest("revert_leave_request", { p_id: id }, null);
 }
 
+// Reopen a REJECTED request — the mirror of revert for the other outcome.
+//
+// There is deliberately no RPC for this. `revert_leave_request` exists because
+// approving MOVED a balance and undoing it needs the same atomic, admin-gated
+// math in reverse; rejecting never touched a balance, so undoing it is nothing
+// but a status flip and a plain admin write covers it (`leave_req_admin_write`
+// + the `update` grant in 20260608180000_leave_requests.sql).
+//
+// The `.eq("status", "rejected")` is the guard the RPC would have given us: it
+// makes the write a no-op on an approved row, so a stale screen can never send
+// an approved request back to pending while its deducted hours stay deducted.
+export async function reopenLeaveRequest(id) {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .update({ status: "pending", reviewed_by: null, reviewed_at: null })
+    .eq("id", id)
+    .eq("status", "rejected")
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Could not reopen — this request is no longer rejected. Refresh and try again.");
+  return adaptLeaveRequest(data);
+}
+
 // One-shot alert (alerts + recipients + a pending fire) reusing the existing
 // alerts→send-alert→Resend pipeline. subject_table='timesheet' renders the
 // message verbatim, so no Edge Function change is needed. Best-effort: callers
@@ -3497,6 +3521,11 @@ export const DEFAULT_ADMIN_TIME_PREFS = {
   customEnd:    null,        // 'YYYY-MM-DD' (inclusive)
   visibleUsers: "all",       // 'all' | string[]  (array = explicit allowlist)
   search:       "",          // free-text name filter
+  // Presence filter. 'in' / 'out' are about RIGHT NOW — whether the person
+  // has an open non-OUT punch at this moment — not about the range being
+  // viewed, which matches what the "Currently in" tile and the In chip
+  // already mean. Defaults to showing everyone.
+  presence:     "all",       // 'all' | 'in' | 'out'
   density:      "comfortable",  // 'comfortable' | 'compact'
 };
 export function loadAdminTimePrefs(adminUserId) {

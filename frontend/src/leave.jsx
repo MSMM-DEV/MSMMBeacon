@@ -419,8 +419,15 @@ export function LeaveAdminTable({ reloadKey = 0 }) {
               return (
                 <tr key={r.userId} className={r.accrues ? "" : "is-noaccrue"}>
                   <th scope="row" className="tsx-leaveadmin-td-name">
-                    <span className={`avatar xs ${u.color}`}>{u.initials}</span>
-                    <span className="tsx-leaveadmin-name">{u.name}</span>
+                    {/* The flex wrapper is load-bearing: `vertical-align:
+                        middle` on the avatar and the name aligns each to the
+                        parent's baseline + half x-height, not to each other,
+                        which left the initials sitting a hair off the name.
+                        Flex centres them against one another instead. */}
+                    <span className="tsx-leaveadmin-who">
+                      <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+                      <span className="tsx-leaveadmin-name">{u.name}</span>
+                    </span>
                   </th>
                   <td title={r.accrues ? tip : "Not accruing"}>
                     <LeaveNum value={c.vacationAvailable} label={`Vacation available for ${u.name}`}
