@@ -181,6 +181,28 @@ const RAIL_SECTIONS = [
 // Rail glyphs, keyed by NAV_GROUPS.key. Presentation only: the collapsed rail
 // is icon-first, so every navigable group needs one. Names resolve against the
 // Lucide-backed registry in icons.jsx.
+//
+// These have to survive being the ONLY thing on screen: the rail rests
+// collapsed to a 60px icon strip, so a glyph that needs its label to be
+// legible is a glyph nobody can navigate by. Two pairs were previously
+// indistinguishable at 16px, which is exactly how they were read — as
+// "one of the two calendars" and "one of the two time pages":
+//
+//   • `calendar` vs `calendarDays` — lucide draws these identically apart
+//     from six r=0.01 dots inside the box. At 16px that is not a
+//     difference. Events keeps `calendarDays` (it genuinely is a calendar
+//     of events); Team Calendar moved to `userCheck`, because the question
+//     that page answers is "who is in today" — presence, not scheduling —
+//     and a person-with-a-tick reads as that. It stays distinct from
+//     Directory's `users` (two figures, no tick).
+//   • `timer` vs `gauge` — both a circle with a needle. Time & Leave keeps
+//     `timer` (your own punch clock); Time Admin moved to `sliders`, which
+//     shares no silhouette with anything else here and reads as the
+//     console it is.
+//
+// Before adding a nav entry, check its glyph against this list at 16px
+// rather than by name — `clipboard`/`blocks`/`wallet` are fine because
+// their outlines differ, not because their names do.
 const NAV_ICONS = {
   leads:       "trend",
   proposals:   "clipboard",
@@ -190,8 +212,8 @@ const NAV_ICONS = {
   directory:   "users",
   licenses:    "shieldCheck",
   timesheet:   "timer",
-  "time-admin":"gauge",
-  "team-cal":  "calendar",
+  "time-admin":"sliders",
+  "team-cal":  "userCheck",
 };
 
 // localStorage key for the desktop rail's collapsed state. This is a per-device
