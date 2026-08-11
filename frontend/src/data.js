@@ -489,7 +489,7 @@ export const noteCategoryLabel = (v) =>
 export const mkId = () => "r_" + Math.random().toString(36).slice(2, 10);
 
 export const fmtMoney = (n, showCents = true) => {
-  if (n == null || n === "") return "—";
+  if (n == null || n === "") return "–";
   return "$" + Number(n).toLocaleString("en-US", {
     minimumFractionDigits: showCents ? 2 : 0,
     maximumFractionDigits: showCents ? 2 : 0,
@@ -497,18 +497,18 @@ export const fmtMoney = (n, showCents = true) => {
 };
 
 export const fmtDate = (iso) => {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const s = String(iso).substr(0, 10);
   const [y, m, d] = s.split("-").map(Number);
-  if (!y) return "—";
+  if (!y) return "–";
   const dt = new Date(y, (m || 1) - 1, d || 1);
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
 export const fmtDateTime = (iso) => {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const dt = new Date(iso);
-  if (isNaN(dt)) return "—";
+  if (isNaN(dt)) return "–";
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " · " +
     dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 };
@@ -637,9 +637,18 @@ function adaptUser(u, i) {
   const initials = (fl || ll)
     ? (fl + ll).toUpperCase()
     : initialsFromName(display);
+  // The legal-ish name, kept separate from `name`.
+  //
+  // `name` prefers display_name, which much of the roster has set to a first
+  // name or a nickname ("Mark", "Stuart", "Autumn") — right for a chip or a
+  // hover, wrong for a document that leaves the building. fullName rebuilds
+  // it from first_name + last_name and falls back to `display` when the row
+  // has no split name, so it is always safe to read.
+  const full = [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || display;
   return {
     id: u.id,
     name: display,
+    fullName: full,
     shortName: short,
     initials,
     color: PM_COLORS[i % PM_COLORS.length],
@@ -658,7 +667,7 @@ function adaptClient(c) {
     id: c.id,
     // `name` keeps the merged form so existing consumers (project rows' Client column,
     // dropdowns, sub references) continue to show the full USACE — District label.
-    name: c.district ? `${c.name} — ${c.district}` : c.name,
+    name: c.district ? `${c.name} – ${c.district}` : c.name,
     baseName: c.name,
     district: c.district || "",
     type: "Client",
@@ -1776,6 +1785,30 @@ export function rejectLeaveRequest(id, note = null) {
 // Revert restores the balance; no requester email (admin housekeeping action).
 export function revertLeaveRequest(id) {
   return _decideLeaveRequest("revert_leave_request", { p_id: id }, null);
+}
+
+// Reopen a REJECTED request — the mirror of revert for the other outcome.
+//
+// There is deliberately no RPC for this. `revert_leave_request` exists because
+// approving MOVED a balance and undoing it needs the same atomic, admin-gated
+// math in reverse; rejecting never touched a balance, so undoing it is nothing
+// but a status flip and a plain admin write covers it (`leave_req_admin_write`
+// + the `update` grant in 20260608180000_leave_requests.sql).
+//
+// The `.eq("status", "rejected")` is the guard the RPC would have given us: it
+// makes the write a no-op on an approved row, so a stale screen can never send
+// an approved request back to pending while its deducted hours stay deducted.
+export async function reopenLeaveRequest(id) {
+  const { data, error } = await supabase
+    .from("leave_requests")
+    .update({ status: "pending", reviewed_by: null, reviewed_at: null })
+    .eq("id", id)
+    .eq("status", "rejected")
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Could not reopen — this request is no longer rejected. Refresh and try again.");
+  return adaptLeaveRequest(data);
 }
 
 // One-shot alert (alerts + recipients + a pending fire) reusing the existing
@@ -3261,7 +3294,7 @@ export function fmtHM(min, opts) {
 }
 
 export function fmtClock(iso) {
-  if (!iso) return "—";
+  if (!iso) return "–";
   return new Date(iso).toLocaleTimeString("en-US", {
     timeZone: CT_TZ, hour: "numeric", minute: "2-digit",
   });
@@ -3371,6 +3404,11 @@ export function adaptUserCalEvent(r) {
   return {
     userId:           r.user_id,
     outlookEventId:   r.outlook_event_id,
+    // The SAME meeting mirrored into two mailboxes is two rows with two
+    // outlook_event_ids but ONE ical_uid. It is how the Team Calendar finds
+    // every copy of a meeting when reconciling attendee RSVPs — see
+    // attendee-status.js.
+    icalUid:          r.ical_uid || null,
     subject:          r.subject,
     startAt:          r.start_at,
     endAt:            r.end_at,
@@ -3483,6 +3521,11 @@ export const DEFAULT_ADMIN_TIME_PREFS = {
   customEnd:    null,        // 'YYYY-MM-DD' (inclusive)
   visibleUsers: "all",       // 'all' | string[]  (array = explicit allowlist)
   search:       "",          // free-text name filter
+  // Presence filter. 'in' / 'out' are about RIGHT NOW — whether the person
+  // has an open non-OUT punch at this moment — not about the range being
+  // viewed, which matches what the "Currently in" tile and the In chip
+  // already mean. Defaults to showing everyone.
+  presence:     "all",       // 'all' | 'in' | 'out'
   density:      "comfortable",  // 'comfortable' | 'compact'
 };
 export function loadAdminTimePrefs(adminUserId) {
@@ -3733,6 +3776,42 @@ export async function loadTeamCalendarEvents(userIds, startIso, endIso) {
     .order("start_at", { ascending: true });
   if (error) throw error;
   return (data || []).map(adaptUserCalEvent);
+}
+
+// Every mirrored copy of ONE meeting, across every mailbox we can see.
+//
+// Exchange only records an attendee's RSVP in the copies entitled to know it
+// (their own mailbox, and the organizer's), so the copy behind the block a
+// user clicked is usually NOT the copy that knows whether the other attendees
+// accepted. Reconciling that needs the siblings, which is what this fetches;
+// `resolveAttendeeResponses` in attendee-status.js does the reconciling.
+//
+// Deliberately NOT restricted to the selected people: an RSVP must not change
+// because of who happens to be ticked in the People picker. The rows come back
+// under the same tk_calevents_team_select RLS policy as the calendar itself.
+//
+// `ical_uid` is shared by every occurrence of a recurring series as well as by
+// every mailbox copy, so the start time narrows it to the one occurrence. A
+// ±2 minute window absorbs the per-mailbox rounding Graph occasionally emits.
+export async function loadMeetingAttendeeCopies(icalUid, startIso) {
+  if (!icalUid || !startIso) return [];
+  const anchor = new Date(startIso);
+  if (Number.isNaN(anchor.getTime())) return [];
+  const pad = 2 * 60 * 1000;
+  const { data, error } = await supabase
+    .from("user_calendar_events")
+    .select("user_id, outlook_event_id, ical_uid, start_at, organizer, attendees")
+    .eq("ical_uid", icalUid)
+    .gte("start_at", new Date(+anchor - pad).toISOString())
+    .lte("start_at", new Date(+anchor + pad).toISOString());
+  if (error) throw error;
+  return (data || []).map(r => ({
+    userId:     r.user_id,
+    icalUid:    r.ical_uid,
+    startAt:    r.start_at,
+    organizer:  r.organizer || null,
+    attendees:  r.attendees || [],
+  }));
 }
 
 // =============================================================================

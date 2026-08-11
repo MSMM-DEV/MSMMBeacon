@@ -3,7 +3,12 @@
 // pending `edit_punch` correction row for the admin to review.
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import {
+  Alert, Badge, Button, Dialog, DialogBody, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle, EmptyState, Field, Select,
+  SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea,
+} from "@/ui";
 import {
   submitCorrection, loadDayDetail, getCurrentBeaconUser,
   fmtClock, todayInCT, TK_CATEGORY_LABEL,
@@ -13,6 +18,8 @@ import {
 // (work / meeting_untagged / eod / vacation / holiday) — those are assigned by
 // the classifier or the approval flow, not picked when carving a manual gap.
 const AWAY_CATEGORIES = ["lunch", "break", "meeting", "travel", "off"];
+
+const ClockGlyph = (props) => <Icon name="clock" {...props} />;
 
 export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
   const me = getCurrentBeaconUser();
@@ -127,7 +134,7 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
         const e = edits[iv.id];
         if (!e) continue;
         const desc = (e.description || "").trim();
-        const prefix = desc ? `${desc} — ` : "";
+        const prefix = desc ? `${desc}: ` : "";
         if (e.startLocal && iv.startPunchId) {
           tasks.push(submitCorrection({
             date,
@@ -148,7 +155,7 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
       for (const nb of newBlocks) {
         if (!nb.start || !nb.end) continue;
         const desc = (nb.description || "").trim();
-        const prefix = desc ? `${desc} — ` : "";
+        const prefix = desc ? `${desc}: ` : "";
         const category = nb.isOut ? nb.category : "work";
         const kindLabel = nb.isOut ? "away" : "worked";
         const catLabel = nb.isOut ? ` (${TK_CATEGORY_LABEL[nb.category] || nb.category})` : "";
@@ -176,192 +183,214 @@ export function CorrectionModal({ date: initialDate, onClose, onSubmitted }) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="modal-eyebrow">Timesheet</div>
-            <h3 className="modal-title">Request a Correction</h3>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={16}/>
-          </button>
-        </div>
+    <Dialog open onOpenChange={(o) => { if (!o) onClose?.(); }}>
+      <DialogContent size="lg" className="tka-corr">
+        <DialogHeader>
+          <p className="tka-eyebrow">Timesheet</p>
+          <DialogTitle>Request a correction</DialogTitle>
+          <DialogDescription>
+            Your admin reviews the request before it lands on your timesheet.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="modal-body">
-          <div className="form-row">
-            <label className="form-label">Day</label>
+        <DialogBody className="tka-corr-body">
+          <Field label="Day" htmlFor="tka-corr-day">
             <input
+              id="tka-corr-day"
               type="date"
-              className="form-input tk-correction-date"
+              className="tka-dateinput num"
               value={date}
               max={todayInCT()}
               onChange={e => setDate(e.target.value || todayInCT())}
             />
-            <p className="form-help">
-              Your admin will review the request before it lands on your timesheet.
-            </p>
-          </div>
+          </Field>
 
-          <div className="form-row">
-            <label className="form-label">Your time blocks</label>
-            {loading && <p className="form-help">Loading…</p>}
-            {loadErr && <div className="form-error">{loadErr}</div>}
-            {!loading && !loadErr && intervals.length === 0 && newBlocks.length === 0 && (
-              <p className="form-help">No time blocks on this day. Pick a different day, or click <strong>Add New Time</strong>.</p>
+          <section className="tka-corr-section">
+            <h4 className="tka-corr-legend">
+              Your time blocks
+              {changeCount > 0 && (
+                <Badge tone="brand" size="sm" className="num">{changeCount} change{changeCount === 1 ? "" : "s"}</Badge>
+              )}
+            </h4>
+
+            {loading && (
+              <div className="tka-corr-loading" aria-busy="true">
+                <Skeleton className="h-12 w-full"/>
+                <Skeleton className="h-12 w-full"/>
+                <span className="sr-only">Loading the day</span>
+              </div>
             )}
+
+            {loadErr && <Alert tone="danger" title="Could not load that day">{loadErr}</Alert>}
+
+            {!loading && !loadErr && intervals.length === 0 && newBlocks.length === 0 && (
+              <EmptyState
+                compact
+                icon={ClockGlyph}
+                title="No time blocks on this day"
+                description="Pick a different day, or use Add new time to describe a block that was never punched."
+              />
+            )}
+
             {!loading && (intervals.length > 0 || newBlocks.length > 0) && (
-              <ul className="tk-correction-blocks">
+              <ul className="tka-corr-blocks">
                 {intervals.map(iv => {
                   const e = edits[iv.id];
                   const isExpanded = expandedId === iv.id;
                   return (
-                    <li key={iv.id} className={`tk-correction-block${e ? " is-edited" : ""}`}>
-                      <div className="tk-correction-block-row">
-                        <span className="tk-correction-block-time">
+                    <li key={iv.id} className={`tka-corr-block${e ? " is-edited" : ""}`}>
+                      <div className="tka-corr-block-row">
+                        <span className="tka-corr-block-time num">
                           {renderTime(iv.startAt, e?.startLocal)}
-                          <span className="tk-correction-block-sep">—</span>
+                          <span className="tka-corr-block-sep" aria-hidden="true">–</span>
                           {iv.endAt
                             ? renderTime(iv.endAt, e?.endLocal)
-                            : <em className="tk-correction-block-open">Open</em>}
+                            : <em className="tka-corr-open">Open</em>}
                         </span>
+                        {e && <Badge tone="brand" size="sm"><Icon name="edit" size={11}/> Edited</Badge>}
                         {!isExpanded && (
-                          <div className="tk-correction-block-actions">
+                          <div className="tka-corr-block-actions">
                             {e && (
-                              <button className="btn btn-ghost btn-sm" onClick={() => clearEdit(iv.id)}
-                                title="Undo this block's edit">
+                              <Button variant="ghost" size="sm" onClick={() => clearEdit(iv.id)}
+                                aria-label={`Undo the edit on the block starting ${fmtClock(iv.startAt)}`}>
                                 Undo
-                              </button>
+                              </Button>
                             )}
-                            <button className="btn btn-ghost btn-sm" onClick={() => startEdit(iv)}>
+                            <Button variant="default" size="sm" onClick={() => startEdit(iv)}>
                               Modify
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </div>
+
                       {isExpanded && (
-                        <div className="tk-correction-block-edit">
-                          <label className="tk-correction-block-field">
-                            <span className="form-label">Start</span>
-                            <input type="time" className="form-input"
+                        <div className="tka-corr-block-edit">
+                          <Field label="Start" htmlFor={`start-${iv.id}`}>
+                            <input id={`start-${iv.id}`} type="time" className="tka-dateinput num"
                               value={draft.start}
                               disabled={!iv.startPunchId}
                               onChange={evt => setDraft(d => ({ ...d, start: evt.target.value }))}/>
-                          </label>
-                          <label className="tk-correction-block-field">
-                            <span className="form-label">End</span>
-                            <input type="time" className="form-input"
+                          </Field>
+                          <Field label="End" htmlFor={`end-${iv.id}`}>
+                            <input id={`end-${iv.id}`} type="time" className="tka-dateinput num"
                               value={draft.end}
                               disabled={!iv.endPunchId}
                               onChange={evt => setDraft(d => ({ ...d, end: evt.target.value }))}/>
-                          </label>
-                          <label className="tk-correction-block-field tk-correction-block-field-wide">
-                            <span className="form-label">Description</span>
-                            <textarea className="form-input" rows={2}
+                          </Field>
+                          <Field label="Description" htmlFor={`desc-${iv.id}`} className="tka-corr-wide">
+                            <Textarea id={`desc-${iv.id}`} rows={2}
                               placeholder="What were you doing during this block?"
                               value={draft.description}
                               maxLength={400}
                               onChange={evt => setDraft(d => ({ ...d, description: evt.target.value }))}/>
-                          </label>
-                          <div className="tk-correction-block-edit-actions">
-                            <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>Cancel</button>
-                            <button className="btn btn-primary btn-sm" onClick={() => saveEdit(iv)}>Save</button>
+                          </Field>
+                          <div className="tka-corr-block-editactions">
+                            <Button variant="ghost" size="sm" onClick={cancelEdit}>Cancel</Button>
+                            <Button variant="primary" size="sm" onClick={() => saveEdit(iv)}>Save</Button>
                           </div>
                         </div>
                       )}
                     </li>
                   );
                 })}
+
                 {newBlocks.map(nb => (
-                  <li key={nb.id} className="tk-correction-block is-new">
-                    <div className="tk-correction-block-row">
-                      <span className="tk-correction-block-time">
-                        <em className="tk-correction-block-open">
+                  <li key={nb.id} className="tka-corr-block is-new">
+                    <div className="tka-corr-block-row">
+                      <span className="tka-corr-block-time">
+                        <Badge tone={nb.isOut ? "danger" : "success"} size="sm" dot>
                           {nb.isOut ? "Away" : "Worked"} block
-                          {nb.start && nb.end
-                            ? <> · {fmtLocalHHMM(nb.start)} – {fmtLocalHHMM(nb.end)}</>
-                            : null}
-                        </em>
+                        </Badge>
+                        {nb.start && nb.end && (
+                          <span className="num">{fmtLocalHHMM(nb.start)} – {fmtLocalHHMM(nb.end)}</span>
+                        )}
                       </span>
-                      <div className="tk-correction-block-actions">
-                        <button className="btn btn-ghost btn-sm" onClick={() => removeNewBlock(nb.id)}>
+                      <div className="tka-corr-block-actions">
+                        <Button variant="ghost" size="sm" onClick={() => removeNewBlock(nb.id)}>
                           Remove
-                        </button>
+                        </Button>
                       </div>
                     </div>
-                    <div className="tk-correction-block-edit">
-                      <div className="tk-correction-block-field tk-correction-block-field-wide">
-                        <span className="form-label">This block was</span>
-                        <div className="tk-presence-toggle" role="group" aria-label="Block type">
+
+                    <div className="tka-corr-block-edit">
+                      <div className="tka-corr-wide">
+                        <span className="tka-insp-label" id={`kind-${nb.id}`}>This block was</span>
+                        <div className="tka-seg" role="group" aria-labelledby={`kind-${nb.id}`}>
                           <button type="button"
-                            className={`btn btn-sm ${nb.isOut ? "btn-primary" : "btn-ghost"}`}
+                            className={`tka-seg-btn ${nb.isOut ? "is-on tone-rose" : ""}`}
+                            aria-pressed={nb.isOut}
                             onClick={() => updateNewBlock(nb.id, { isOut: true })}>
                             Away
                           </button>
                           <button type="button"
-                            className={`btn btn-sm ${!nb.isOut ? "btn-primary" : "btn-ghost"}`}
+                            className={`tka-seg-btn ${!nb.isOut ? "is-on tone-sage" : ""}`}
+                            aria-pressed={!nb.isOut}
                             onClick={() => updateNewBlock(nb.id, { isOut: false })}>
                             Worked
                           </button>
                         </div>
                       </div>
+
                       {nb.isOut && (
-                        <label className="tk-correction-block-field">
-                          <span className="form-label">Reason</span>
-                          <select className="form-input"
+                        <Field label="Reason" htmlFor={`reason-${nb.id}`}>
+                          <Select
                             value={nb.category}
-                            onChange={evt => updateNewBlock(nb.id, { category: evt.target.value })}>
-                            {AWAY_CATEGORIES.map(c => (
-                              <option key={c} value={c}>{TK_CATEGORY_LABEL[c] || c}</option>
-                            ))}
-                          </select>
-                        </label>
+                            onValueChange={v => updateNewBlock(nb.id, { category: v })}
+                          >
+                            <SelectTrigger id={`reason-${nb.id}`} aria-label="Away reason">
+                              <SelectValue/>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {AWAY_CATEGORIES.map(c => (
+                                <SelectItem key={c} value={c}>{TK_CATEGORY_LABEL[c] || c}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
                       )}
-                      <label className="tk-correction-block-field">
-                        <span className="form-label">Start</span>
-                        <input type="time" className="form-input"
+
+                      <Field label="Start" htmlFor={`nstart-${nb.id}`}>
+                        <input id={`nstart-${nb.id}`} type="time" className="tka-dateinput num"
                           value={nb.start}
                           onChange={evt => updateNewBlock(nb.id, { start: evt.target.value })}/>
-                      </label>
-                      <label className="tk-correction-block-field">
-                        <span className="form-label">End</span>
-                        <input type="time" className="form-input"
+                      </Field>
+                      <Field label="End" htmlFor={`nend-${nb.id}`}>
+                        <input id={`nend-${nb.id}`} type="time" className="tka-dateinput num"
                           value={nb.end}
                           onChange={evt => updateNewBlock(nb.id, { end: evt.target.value })}/>
-                      </label>
-                      <label className="tk-correction-block-field tk-correction-block-field-wide">
-                        <span className="form-label">Description</span>
-                        <textarea className="form-input" rows={2}
+                      </Field>
+                      <Field label="Description" htmlFor={`ndesc-${nb.id}`} className="tka-corr-wide">
+                        <Textarea id={`ndesc-${nb.id}`} rows={2}
                           placeholder={nb.isOut
                             ? "Why were you away during this block?"
                             : "What were you working on during this block?"}
                           value={nb.description}
                           maxLength={400}
                           onChange={evt => updateNewBlock(nb.id, { description: evt.target.value })}/>
-                      </label>
+                      </Field>
                     </div>
                   </li>
                 ))}
               </ul>
             )}
-          </div>
+          </section>
 
-          {submitErr && <div className="form-error">{submitErr}</div>}
-        </div>
+          {submitErr && <Alert tone="danger" title="Could not submit">{submitErr}</Alert>}
+        </DialogBody>
 
-        <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
-          <div className="tk-correction-foot-right">
-            <button className="btn btn-ghost" onClick={addNewBlock} disabled={busy || loading}>
-              Add New Time
-            </button>
-            <button className="btn btn-primary" onClick={submit} disabled={busy || changeCount === 0}>
-              {busy ? "Submitting…" : "Request change"}
-            </button>
+        <DialogFooter className="tka-corr-foot sm:justify-between">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <div className="tka-corr-footright">
+            <Button variant="default" onClick={addNewBlock} disabled={busy || loading}>
+              <Icon name="plus" size={15}/> Add new time
+            </Button>
+            <Button variant="primary" onClick={submit} disabled={busy || changeCount === 0} loading={busy}>
+              {busy ? "Submitting" : "Request change"}
+            </Button>
           </div>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -369,7 +398,7 @@ function renderTime(originalIso, newLocal) {
   if (!newLocal) return <span>{fmtClock(originalIso)}</span>;
   return (
     <span>
-      <s className="tk-correction-orig">{fmtClock(originalIso)}</s>
+      <s className="tka-corr-orig">{fmtClock(originalIso)}</s>
       &nbsp;<strong>{fmtLocalHHMM(newLocal)}</strong>
     </span>
   );

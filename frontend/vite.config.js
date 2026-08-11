@@ -1,5 +1,7 @@
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 // A fresh build stamp baked into the client bundle (via `define` below) and
@@ -31,8 +33,14 @@ export default defineConfig({
   define: {
     __BUILD_ID__: JSON.stringify(BUILD_ID),
   },
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   plugins: [
     react(),
+    tailwindcss(),
     // Emit a tiny /version.json carrying the same BUILD_ID baked into the
     // client. NOT precached (globPatterns below excludes json), so a
     // cache-busted fetch of it always reaches the network and reflects the

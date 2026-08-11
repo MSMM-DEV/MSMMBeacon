@@ -10,15 +10,25 @@
 // timeclock-admin Edge Function (`resolve-correction`) which inserts the
 // missing punch / applies the change via service-role and re-derives the
 // affected day. Approving a week opens the existing WeekApprovalModal.
+//
+// Visual grammar: queue-level actions (refresh) sit in the section header;
+// per-row decisions sit at the right edge of the row they act on, so a bulk
+// control can never be mistaken for a single-record one.
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import {
+  Alert, Badge, Button, EmptyState, Input, Separator, TooltipProvider,
+} from "@/ui";
 import { UserTag } from "../primitives";
 import {
   loadPendingApprovals, loadPendingCorrections,
   tkResolveCorrection, fmtClock,
 } from "../data";
 import { WeekApprovalModal } from "./WeekApprovalModal";
+
+const InboxGlyph    = (props) => <Icon name="inbox" {...props} />;
+const CalendarGlyph = (props) => <Icon name="calendar" {...props} />;
 
 export function ApprovalsQueue({ onResolved }) {
   const [pending,    setPending]    = useState([]);
@@ -54,84 +64,128 @@ export function ApprovalsQueue({ onResolved }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  const total = corrections.length + pending.length;
+
   return (
-    <div className="tk-approvals">
-      <header className="tk-section-head">
-        <h3>Awaiting review</h3>
-        <button className="btn btn-ghost btn-sm" onClick={refresh} disabled={busy}>
-          <Icon name="undo" size={13}/> {busy ? "Refreshing…" : "Refresh"}
-        </button>
-      </header>
-
-      {err && <div className="form-error">{err}</div>}
-
-      {/* === 1. Pending CORRECTIONS ============================== */}
-      <section className="tk-approvals-section">
-        <header className="tk-approvals-section-head">
-          <h4>
-            Correction requests
-            {corrections.length > 0 && (
-              <span className="tk-approvals-section-count">{corrections.length}</span>
-            )}
-          </h4>
-          <span className="tk-approvals-section-sub">
-            Add-punch / note requests submitted from a user's timesheet.
-          </span>
+    <TooltipProvider delayDuration={280}>
+      <div className="tka-approvals">
+        <header className="tka-sectionhead">
+          <div className="tka-sectionhead-titles">
+            <h3 className="tka-sectionhead-title">Awaiting review</h3>
+            <p className="tka-sectionhead-sub">
+              {total > 0
+                ? `${total} item${total === 1 ? "" : "s"} need a decision before payroll closes.`
+                : "Nothing is waiting on you right now."}
+            </p>
+          </div>
+          <div className="tka-sectionhead-tools">
+            <Button variant="default" size="sm" onClick={refresh} disabled={busy} loading={busy}>
+              {!busy && <Icon name="refresh" size={14}/>}
+              {busy ? "Refreshing" : "Refresh"}
+            </Button>
+          </div>
         </header>
-        <ul className="tk-approvals-list">
-          {corrections.map(c => (
-            <CorrectionRow
-              key={c.id}
-              correction={c}
-              onResolved={refreshAndNotify}
+
+        {err && <Alert tone="danger" title="Could not load the review queues">{err}</Alert>}
+
+        {/* === 1. Pending CORRECTIONS ============================== */}
+        <section className="tka-queue">
+          <header className="tka-queuehead">
+            <h4 className="tka-queuetitle">
+              <Icon name="edit" size={14}/>
+              Correction requests
+              {corrections.length > 0 && (
+                <Badge tone="brand" size="sm" className="num">{corrections.length}</Badge>
+              )}
+            </h4>
+            <p className="tka-queuesub">
+              Add-punch and note requests submitted from a user's timesheet.
+            </p>
+          </header>
+
+          {corrections.length === 0 && !busy ? (
+            <EmptyState
+              compact
+              icon={InboxGlyph}
+              title="No pending corrections"
+              description="When someone submits a fix from their timesheet, it lands here for approval."
             />
-          ))}
-          {corrections.length === 0 && !busy && (
-            <li className="tk-approvals-empty">No pending corrections.</li>
+          ) : (
+            <ul className="tka-rows">
+              {corrections.map(c => (
+                <CorrectionRow
+                  key={c.id}
+                  correction={c}
+                  onResolved={refreshAndNotify}
+                />
+              ))}
+            </ul>
           )}
-        </ul>
-      </section>
+        </section>
 
-      {/* === 2. Pending WEEK approvals ============================ */}
-      <section className="tk-approvals-section">
-        <header className="tk-approvals-section-head">
-          <h4>
-            Week submissions
-            {pending.length > 0 && (
-              <span className="tk-approvals-section-count">{pending.length}</span>
-            )}
-          </h4>
-          <span className="tk-approvals-section-sub">
-            Users who submitted their week for approval. Click Open to review and lock.
-          </span>
-        </header>
-        <ul className="tk-approvals-list">
-          {pending.map(w => (
-            <li key={`${w.userId}:${w.weekStart}`} className="tk-approvals-row">
-              <UserTag userId={w.userId} size="sm" nameOnly/>
-              <span className="tk-approvals-week">Week of {w.weekStart}</span>
-              <span className="tk-approvals-sub">submitted {timeAgo(w.submittedAt)}</span>
-              <button className="btn btn-primary btn-sm"
-                onClick={() => setOpen({ userId: w.userId, weekStart: w.weekStart })}>
-                Open
-              </button>
-            </li>
-          ))}
-          {pending.length === 0 && !busy && (
-            <li className="tk-approvals-empty">No pending week submissions.</li>
+        <Separator/>
+
+        {/* === 2. Pending WEEK approvals ============================ */}
+        <section className="tka-queue">
+          <header className="tka-queuehead">
+            <h4 className="tka-queuetitle">
+              <Icon name="calendar" size={14}/>
+              Week submissions
+              {pending.length > 0 && (
+                <Badge tone="brand" size="sm" className="num">{pending.length}</Badge>
+              )}
+            </h4>
+            <p className="tka-queuesub">
+              Users who submitted their week for approval. Open one to review and lock it.
+            </p>
+          </header>
+
+          {pending.length === 0 && !busy ? (
+            <EmptyState
+              compact
+              icon={CalendarGlyph}
+              title="No pending week submissions"
+              description="Weeks appear here once a user submits their timesheet for approval."
+            />
+          ) : (
+            <ul className="tka-rows">
+              {pending.map(w => (
+                <li key={`${w.userId}:${w.weekStart}`} className="tka-row">
+                  <div className="tka-row-main">
+                    <div className="tka-row-who">
+                      <UserTag userId={w.userId} size="sm" nameOnly/>
+                      <Badge tone="brand" size="sm">
+                        <Icon name="hourglass" size={11}/> Pending
+                      </Badge>
+                    </div>
+                    <div className="tka-row-what num">Week of {w.weekStart}</div>
+                    <div className="tka-row-sub">submitted {timeAgo(w.submittedAt)}</div>
+                  </div>
+                  <div className="tka-row-actions">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setOpen({ userId: w.userId, weekStart: w.weekStart })}
+                    >
+                      Open week
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
-        </ul>
-      </section>
+        </section>
 
-      {open && (
-        <WeekApprovalModal
-          userId={open.userId}
-          weekStart={open.weekStart}
-          onClose={() => setOpen(null)}
-          onResolved={() => refreshAndNotify({ kind: "week", weekStart: open.weekStart })}
-        />
-      )}
-    </div>
+        {open && (
+          <WeekApprovalModal
+            userId={open.userId}
+            weekStart={open.weekStart}
+            onClose={() => setOpen(null)}
+            onResolved={() => refreshAndNotify({ kind: "week", weekStart: open.weekStart })}
+          />
+        )}
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -164,80 +218,90 @@ function CorrectionRow({ correction, onResolved }) {
   };
 
   return (
-    <li className="tk-approvals-row tk-corr-row">
-      <div className="tk-corr-row-meta">
-        <UserTag userId={correction.userId} size="sm" nameOnly/>
-        <span className="tk-corr-row-kind">
+    <li className="tka-row is-correction">
+      <div className="tka-row-main">
+        <div className="tka-row-who">
+          <UserTag userId={correction.userId} size="sm" nameOnly/>
           <KindBadge kind={correction.kind}/>
-          {kindLabel(correction)}
-        </span>
-        <span className="tk-corr-row-date">on {fmtFriendlyDate(correction.date)}</span>
-      </div>
-
-      {correction.reason && (
-        <div className="tk-corr-row-reason">
-          <Icon name="edit" size={11}/>
-          <span>{correction.reason}</span>
+          <Badge tone="brand" size="sm">
+            <Icon name="hourglass" size={11}/> Pending
+          </Badge>
         </div>
-      )}
 
-      {correction.payload?.note && (
-        <div className="tk-corr-row-note">
-          Note: {correction.payload.note}
+        <div className="tka-row-what">{kindLabel(correction)}</div>
+        <div className="tka-row-sub">
+          <span className="num">on {fmtFriendlyDate(correction.date)}</span>
+          <span className="tka-dot" aria-hidden="true">·</span>
+          <span>submitted {timeAgo(correction.submittedAt)}</span>
         </div>
-      )}
 
-      <div className="tk-corr-row-foot">
-        <span className="tk-corr-row-sub">submitted {timeAgo(correction.submittedAt)}</span>
-        {!rejecting ? (
-          <div className="tk-corr-row-actions">
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setRejecting(true)}
-              disabled={busy}
-            >
-              Reject…
-            </button>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={approve}
-              disabled={busy}
-            >
-              {busy ? "Applying…" : "Approve"}
-            </button>
-          </div>
-        ) : (
-          <div className="tk-corr-row-reject">
-            <input
-              type="text"
-              className="form-input"
-              placeholder="Reason (optional, shared with the user)"
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              maxLength={300}
-              autoFocus
-            />
-            <div className="tk-corr-row-actions">
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => { setRejecting(false); setReason(""); setErr(null); }}
-                disabled={busy}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-warn btn-sm"
-                onClick={reject}
-                disabled={busy}
-              >
-                {busy ? "Rejecting…" : "Send back"}
-              </button>
-            </div>
-          </div>
+        {correction.reason && (
+          <p className="tka-row-quote">
+            <Icon name="note" size={12}/>
+            <span>{correction.reason}</span>
+          </p>
         )}
+
+        {correction.payload?.note && (
+          <p className="tka-row-note">Note: {correction.payload.note}</p>
+        )}
+
+        {err && <Alert tone="danger" className="mt-2">{err}</Alert>}
       </div>
 
-      {err && <div className="form-error">{err}</div>}
+      {!rejecting ? (
+        <div className="tka-row-actions">
+          <Button
+            variant="destructive-soft"
+            size="sm"
+            onClick={() => setRejecting(true)}
+            disabled={busy}
+          >
+            <Icon name="x" size={14}/> Reject
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={approve}
+            disabled={busy}
+            loading={busy}
+          >
+            {!busy && <Icon name="check" size={14}/>}
+            {busy ? "Applying" : "Approve"}
+          </Button>
+        </div>
+      ) : (
+        <div className="tka-row-reject">
+          <Input
+            type="text"
+            placeholder="Reason (optional, shared with the user)"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            maxLength={300}
+            aria-label="Rejection reason"
+            autoFocus
+          />
+          <div className="tka-row-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setRejecting(false); setReason(""); setErr(null); }}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={reject}
+              disabled={busy}
+              loading={busy}
+            >
+              {busy ? "Rejecting" : "Send back"}
+            </Button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }
@@ -248,15 +312,19 @@ function CorrectionRow({ correction, onResolved }) {
 
 function KindBadge({ kind }) {
   const map = {
-    add_punch:           { tone: "accent", label: "Punch" },
-    add_interval:        { tone: "accent", label: "Block" },
-    edit_punch:          { tone: "blue",   label: "Edit" },
-    delete_punch:        { tone: "rose",   label: "Delete" },
-    reclassify_interval: { tone: "sage",   label: "Reclassify" },
-    note:                { tone: "muted",  label: "Note" },
+    add_punch:           { tone: "brand",   icon: "plus",    label: "Punch" },
+    add_interval:        { tone: "brand",   icon: "plus",    label: "Block" },
+    edit_punch:          { tone: "info",    icon: "edit",    label: "Edit" },
+    delete_punch:        { tone: "danger",  icon: "trash",   label: "Delete" },
+    reclassify_interval: { tone: "success", icon: "tag",     label: "Reclassify" },
+    note:                { tone: "neutral", icon: "note",    label: "Note" },
   };
   const m = map[kind] || map.note;
-  return <span className={`tk-corr-kind-chip tone-${m.tone}`}>{m.label}</span>;
+  return (
+    <Badge tone={m.tone} size="sm">
+      <Icon name={m.icon} size={11}/> {m.label}
+    </Badge>
+  );
 }
 
 function kindLabel(c) {
@@ -279,7 +347,7 @@ function kindLabel(c) {
 }
 
 function fmtFriendlyDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "–";
   return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
     weekday: "short", month: "short", day: "numeric",
   });

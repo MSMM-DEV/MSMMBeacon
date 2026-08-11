@@ -10,11 +10,17 @@
 // Popover affordances:
 //   • Search field
 //   • Quick chips: All · None · Active today · Currently in
-//   • Per-user checkboxes (sticky avatar + name)
+//   • Per-user checkboxes (avatar + name + presence flag)
 //   • Footer: "X of Y selected" + Done
+//
+// The overlay is Radix (via the kit's Popover) so focus trapping, Escape and
+// outside-click dismissal are handled for us rather than hand-rolled.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Icon } from "../icons";
+import React, { useId, useMemo, useState } from "react";
+import { Icon } from "@/icons";
+import {
+  Badge, Button, Checkbox, InputGroup, Popover, PopoverContent, PopoverTrigger, Separator,
+} from "@/ui";
 import { getUsers } from "../data";
 
 export function PeopleFilter({
@@ -24,8 +30,7 @@ export function PeopleFilter({
 }) {
   const [open, setOpen]     = useState(false);
   const [search, setSearch] = useState("");
-  const btnRef  = useRef(null);
-  const popRef  = useRef(null);
+  const baseId = useId();
 
   // Resolve the full roster once per open. Filter to enabled users + apply
   // the search term. Always alpha-sorted.
@@ -46,23 +51,6 @@ export function PeopleFilter({
   const totalCount   = allIds.length;
   const isAll        = visibleUsers === "all" || visibleCount === totalCount;
 
-  // Close on outside click + Escape.
-  useEffect(() => {
-    if (!open) return undefined;
-    const onClick = (e) => {
-      if (popRef.current?.contains(e.target)) return;
-      if (btnRef.current?.contains(e.target)) return;
-      setOpen(false);
-    };
-    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const togglePerson = (id) => {
     const cur = visibleUsers === "all" ? new Set(allIds) : new Set(visibleUsers || []);
     if (cur.has(id)) cur.delete(id); else cur.add(id);
@@ -77,104 +65,113 @@ export function PeopleFilter({
   const pickPreset   = (set) => onChange(Array.from(set));
 
   return (
-    <div className="tk-people-wrap">
-      <button
-        ref={btnRef}
-        type="button"
-        className={`tk-people-chip ${!isAll ? "is-filtered" : ""} ${open ? "is-open" : ""}`}
-        onClick={() => setOpen(o => !o)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-      >
-        <Icon name="users" size={13}/>
-        <span className="tk-people-chip-label">
-          {isAll ? "All people" : `${visibleCount} of ${totalCount}`}
-        </span>
-        <Icon name="chevronDown" size={11}/>
-      </button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="default"
+          size="md"
+          className={`tka-people-trigger ${!isAll ? "border-[var(--accent-line)] bg-[var(--accent-softer)] text-[var(--accent-ink)]" : ""}`}
+          aria-label={isAll ? "Filter people, all people visible" : `Filter people, ${visibleCount} of ${totalCount} visible`}
+        >
+          <Icon name="users" size={14}/>
+          <span className="tka-people-triggerlabel">
+            {isAll ? "All people" : <span className="num">{visibleCount} of {totalCount}</span>}
+          </span>
+          <Icon name="chevronDown" size={12}/>
+        </Button>
+      </PopoverTrigger>
 
-      {open && (
-        <div ref={popRef} className="tk-people-pop" role="dialog" aria-label="Visible people">
-          <div className="tk-people-pop-head">
-            <Icon name="search" size={13}/>
-            <input
-              autoFocus
-              type="text"
-              className="tk-people-search"
-              placeholder="Search people…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            {search && (
-              <button type="button" className="tk-people-clear" onClick={() => setSearch("")} aria-label="Clear search">
-                <Icon name="x" size={11}/>
+      <PopoverContent align="end" className="tka-people-pop w-[min(320px,calc(100vw-24px))] p-0">
+        <div className="tka-people-search">
+          <InputGroup
+            type="text"
+            autoFocus
+            placeholder="Search people"
+            aria-label="Search people"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            leading={<Icon name="search" size={14}/>}
+            trailing={search ? (
+              <button
+                type="button"
+                className="tka-search-clear"
+                onClick={() => setSearch("")}
+                aria-label="Clear people search"
+              >
+                <Icon name="x" size={12}/>
               </button>
-            )}
-          </div>
-
-          <div className="tk-people-quick">
-            <button type="button" className={`tk-people-quick-btn ${isAll ? "is-active" : ""}`} onClick={pickAll}>
-              All
-            </button>
-            <button type="button" className="tk-people-quick-btn" onClick={pickNone}>
-              None
-            </button>
-            {signals.activeToday && (
-              <button type="button" className="tk-people-quick-btn"
-                onClick={() => pickPreset(signals.activeToday)}>
-                Active today
-                <span className="tk-people-quick-count">{signals.activeToday.size}</span>
-              </button>
-            )}
-            {signals.currentlyIn && signals.currentlyIn.size > 0 && (
-              <button type="button" className="tk-people-quick-btn"
-                onClick={() => pickPreset(signals.currentlyIn)}>
-                <span className="tk-pulse-dot"/>
-                Currently in
-                <span className="tk-people-quick-count">{signals.currentlyIn.size}</span>
-              </button>
-            )}
-          </div>
-
-          <ul className="tk-people-list" role="listbox">
-            {roster.map(u => {
-              const checked = visibleSet.has(u.id);
-              const isIn    = signals.currentlyIn?.has(u.id);
-              const isActive = signals.activeToday?.has(u.id);
-              return (
-                <li key={u.id}>
-                  <label className={`tk-people-row ${checked ? "is-on" : ""}`}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => togglePerson(u.id)}
-                      className="tk-people-check"
-                    />
-                    <span className={`avatar xs ${u.color}`}>{u.initials}</span>
-                    <span className="tk-people-name">{u.name}</span>
-                    {isIn && <span className="tk-people-flag tk-people-flag-in"><span className="tk-pulse-dot"/>in</span>}
-                    {!isIn && isActive && <span className="tk-people-flag tk-people-flag-active">active</span>}
-                  </label>
-                </li>
-              );
-            })}
-            {roster.length === 0 && (
-              <li className="tk-people-empty">No matches</li>
-            )}
-          </ul>
-
-          <footer className="tk-people-foot">
-            <span className="tk-people-foot-meta">
-              {isAll
-                ? `All ${totalCount} people visible`
-                : `${visibleCount} of ${totalCount} visible`}
-            </span>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => setOpen(false)}>
-              Done
-            </button>
-          </footer>
+            ) : null}
+          />
         </div>
-      )}
-    </div>
+
+        <div className="tka-people-quick" role="group" aria-label="Quick selections">
+          <Button variant={isAll ? "subtle" : "ghost"} size="xs" onClick={pickAll}>All</Button>
+          <Button variant="ghost" size="xs" onClick={pickNone}>None</Button>
+          {signals.activeToday && (
+            <Button variant="ghost" size="xs" onClick={() => pickPreset(signals.activeToday)}>
+              Active today
+              <Badge tone="neutral" size="sm" className="num">{signals.activeToday.size}</Badge>
+            </Button>
+          )}
+          {signals.currentlyIn && signals.currentlyIn.size > 0 && (
+            <Button variant="ghost" size="xs" onClick={() => pickPreset(signals.currentlyIn)}>
+              <span className="tka-livedot" aria-hidden="true"/>
+              Currently in
+              <Badge tone="neutral" size="sm" className="num">{signals.currentlyIn.size}</Badge>
+            </Button>
+          )}
+        </div>
+
+        <Separator/>
+
+        <ul className="tka-people-list">
+          {roster.map(u => {
+            const checked  = visibleSet.has(u.id);
+            const isIn     = signals.currentlyIn?.has(u.id);
+            const isActive = signals.activeToday?.has(u.id);
+            return (
+              <li key={u.id} className={`tka-people-row ${checked ? "is-on" : ""}`}>
+                <Checkbox
+                  id={`${baseId}-${u.id}`}
+                  checked={checked}
+                  onCheckedChange={() => togglePerson(u.id)}
+                  aria-label={u.name}
+                />
+                {/* Mouse convenience: the whole row toggles. The checkbox above
+                    stays the single keyboard stop and carries the name. */}
+                <span
+                  className="tka-people-rowbody"
+                  role="presentation"
+                  onClick={() => togglePerson(u.id)}
+                >
+                  <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+                  <span className="tka-people-name">{u.name}</span>
+                  {isIn && (
+                    <Badge tone="brand" size="sm">
+                      <span className="tka-livedot" aria-hidden="true"/> in
+                    </Badge>
+                  )}
+                  {!isIn && isActive && <Badge tone="neutral" size="sm">active</Badge>}
+                </span>
+              </li>
+            );
+          })}
+          {roster.length === 0 && (
+            <li className="tka-people-empty">
+              No one matches that search. Clear it to see the full roster.
+            </li>
+          )}
+        </ul>
+
+        <footer className="tka-people-foot">
+          <span className="tka-people-count">
+            {isAll
+              ? `All ${totalCount} people visible`
+              : `${visibleCount} of ${totalCount} visible`}
+          </span>
+          <Button variant="primary" size="sm" onClick={() => setOpen(false)}>Done</Button>
+        </footer>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -3,9 +3,13 @@
 // approve, the week locks (no further user edits).
 
 import React, { useEffect, useState } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
+import {
+  Alert, Badge, Button, Dialog, DialogBody, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle, Skeleton, Textarea,
+} from "@/ui";
 import { UserTag } from "../primitives";
-import { loadMyWeek, fmtHM, tkApproveWeek, tkRejectWeek } from "../data";
+import { loadMyWeek, loadDayDetail, fmtHM, tkApproveWeek, tkRejectWeek } from "../data";
 import { DayTimeline } from "./DayTimeline";
 
 const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -40,9 +44,18 @@ export function WeekApprovalModal({ userId, weekStart, onClose, onResolved }) {
 
   if (!data) {
     return (
-      <div className="modal-backdrop"><div className="modal modal-wide">
-        <div className="modal-body">Loading…</div>
-      </div></div>
+      <Dialog open onOpenChange={(o) => { if (!o) onClose?.(); }}>
+        <DialogContent size="xl" className="tka-week">
+          <DialogHeader>
+            <p className="tka-eyebrow">Week review</p>
+            <DialogTitle>Loading the week</DialogTitle>
+            <DialogDescription>Fetching the seven days in this submission.</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="flex flex-col gap-2" aria-busy="true">
+            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full"/>)}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
     );
   }
 
@@ -58,36 +71,50 @@ export function WeekApprovalModal({ userId, weekStart, onClose, onResolved }) {
   const total = slots.reduce((acc, s) => acc + (s.day?.minutesWork || 0), 0);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
-        <div className="modal-head">
-          <div className="modal-eyebrow">Week review</div>
-          <h3 className="modal-title">
-            Week of {weekStart} · <UserTag userId={userId} nameOnly/>
-          </h3>
-          <div className="modal-head-meta">{fmtHM(total)}</div>
-          <button className="modal-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
-        <div className="modal-body">
+    <Dialog open onOpenChange={(o) => { if (!o) onClose?.(); }}>
+      <DialogContent size="xl" className="tka-week">
+        <DialogHeader className="tka-week-head gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="tka-eyebrow">Week review</p>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              <span className="num">Week of {weekStart}</span>
+              <UserTag userId={userId} nameOnly/>
+            </DialogTitle>
+            <DialogDescription>
+              Approving locks the week so the user can no longer edit it.
+            </DialogDescription>
+          </div>
+          <span className="tka-week-total num">{fmtHM(total)}</span>
+        </DialogHeader>
+
+        <DialogBody className="tka-week-body">
           {data.week?.rejectReason && (
-            <div className="tk-banner tk-banner-warn">
-              Previously returned: {data.week.rejectReason}
-            </div>
+            <Alert tone="warning" title="Previously returned">
+              {data.week.rejectReason}
+            </Alert>
           )}
 
-          <ul className="tk-week-review-days">
+          <ul className="tka-week-days">
             {slots.map(s => {
               const minutes = s.day?.minutesWork || 0;
               const f = s.day?.flags || {};
               return (
-                <li key={s.date} className="tk-week-review-day">
-                  <div className="tk-week-review-day-head">
-                    <span className="tk-week-review-day-label">{s.label}</span>
-                    <span className="tk-week-review-day-date">{s.date.slice(5)}</span>
-                    <span className="tk-week-review-day-total">{fmtHM(minutes)}</span>
-                    {f.missing_out      && <span className="tk-week-flag-chip tone-rose"  >missing OUT</span>}
-                    {f.overtime_min     && <span className="tk-week-flag-chip tone-blue"  >OT {fmtHM(f.overtime_min)}</span>}
-                    {f.untagged_meeting && <span className="tk-week-flag-chip tone-rose"  >untagged gap</span>}
+                <li key={s.date} className="tka-week-day">
+                  <div className="tka-week-dayhead">
+                    <span className="tka-week-dow">{s.label}</span>
+                    <span className="tka-week-date num">{s.date.slice(5)}</span>
+                    <span className="tka-week-hours num">{fmtHM(minutes)}</span>
+                    <span className="tka-week-flags">
+                      {f.missing_out && (
+                        <Badge tone="danger" size="sm"><Icon name="warn" size={11}/> missing OUT</Badge>
+                      )}
+                      {f.overtime_min && (
+                        <Badge tone="info" size="sm"><Icon name="clock" size={11}/> OT {fmtHM(f.overtime_min)}</Badge>
+                      )}
+                      {f.untagged_meeting && (
+                        <Badge tone="danger" size="sm"><Icon name="warn" size={11}/> untagged gap</Badge>
+                      )}
+                    </span>
                   </div>
                   <DayTimelineForReview date={s.date} dayData={s.day} userId={userId}/>
                 </li>
@@ -96,48 +123,52 @@ export function WeekApprovalModal({ userId, weekStart, onClose, onResolved }) {
           </ul>
 
           {rejectOpen && (
-            <div className="tk-reject-pane">
-              <label className="form-label">Reason for return</label>
-              <textarea className="form-input" rows={2} value={reason}
+            <div className="tka-week-reject">
+              <label className="tka-insp-label" htmlFor="tka-week-reason">Reason for return</label>
+              <Textarea id="tka-week-reason" rows={2} value={reason}
                 onChange={e => setReason(e.target.value)}
                 placeholder="e.g. Wed has an open IN with no OUT; please add a correction."/>
-              <p className="form-help">The user gets an email with this reason and the week reopens for re-submission.</p>
+              <p className="tka-insp-hint">
+                The user gets an email with this reason and the week reopens for re-submission.
+              </p>
             </div>
           )}
 
-          {err && <div className="form-error">{err}</div>}
-        </div>
-        <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          {err && <Alert tone="danger">{err}</Alert>}
+        </DialogBody>
+
+        <DialogFooter>
           {!rejectOpen ? (
             <>
-              <button className="btn btn-warn" onClick={() => setRejectOpen(true)} disabled={busy}>
-                Return for review…
-              </button>
-              <button className="btn btn-primary" onClick={approve} disabled={busy}>
-                {busy ? "Approving…" : "Approve & lock"}
-              </button>
+              <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+              <Button variant="destructive-soft" onClick={() => setRejectOpen(true)} disabled={busy}>
+                Return for review
+              </Button>
+              <Button variant="primary" onClick={approve} disabled={busy} loading={busy}>
+                {!busy && <Icon name="lock" size={15}/>}
+                {busy ? "Approving" : "Approve and lock"}
+              </Button>
             </>
           ) : (
             <>
-              <button className="btn btn-ghost" onClick={() => { setRejectOpen(false); setReason(""); }} disabled={busy}>
+              <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+              <Button variant="default" onClick={() => { setRejectOpen(false); setReason(""); }} disabled={busy}>
                 Back
-              </button>
-              <button className="btn btn-warn" onClick={reject} disabled={busy || !reason.trim()}>
-                {busy ? "Sending…" : "Send back"}
-              </button>
+              </Button>
+              <Button variant="destructive" onClick={reject} disabled={busy || !reason.trim()} loading={busy}>
+                {busy ? "Sending" : "Send back"}
+              </Button>
             </>
           )}
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 // Small lazy wrapper so the modal renders fast on open and the per-day intervals
 // load when their slot mounts. For the v1 we just lean on the existing day data
 // from loadMyWeek (which only carries day rollups) and fetch intervals on demand.
-import { loadDayDetail } from "../data";
 function DayTimelineForReview({ date, userId }) {
   const [intervals, setIntervals] = useState(null);
   useEffect(() => {
@@ -145,6 +176,6 @@ function DayTimelineForReview({ date, userId }) {
     loadDayDetail(userId, date).then(d => { if (live) setIntervals(d.intervals || []); });
     return () => { live = false; };
   }, [userId, date]);
-  if (intervals === null) return <div className="tk-day-empty">Loading…</div>;
+  if (intervals === null) return <Skeleton className="h-5 w-full"/>;
   return <DayTimeline date={date} intervals={intervals} height={20} showHourGrid={false}/>;
 }

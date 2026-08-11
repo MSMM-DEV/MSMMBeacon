@@ -46,6 +46,15 @@ import {
   openLocalFolderWithHelper,
 } from "./egnyte-links.js";
 import { HOT_LEAD_STAR_MAX, starLabel, starsRank } from "./star-rating.js";
+import {
+  Button, InputGroup, Badge, Progress,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  EmptyState as UIEmptyState,
+  Popover as UIPopover, PopoverAnchor as UIPopoverAnchor, PopoverContent as UIPopoverContent,
+  Tooltip, TooltipProvider,
+} from "@/ui";
 
 // 1 → "1st", 2 → "2nd", 5 → "5th", 22 → "22nd". Used by the Invoice tab's
 // Actual/Projection legend to phrase the configurable cutover day.
@@ -73,33 +82,38 @@ function EgnyteLogoMark({ size = 14, linked = false }) {
 }
 
 // ---------- Shared empty state ----------
+//
+// Thin adapter over the design-system EmptyState: the historic
+// `{ title, hint, iconName }` signature is preserved for every existing call
+// site, while the rendering (dashed frame, icon plate, type scale, both
+// themes) comes from `@/ui`. The registry name is bridged to the component
+// shape `EmptyState` expects via a memoised wrapper so the icon identity is
+// stable across re-renders.
+const _iconComponentCache = new Map();
+const iconComponentFor = (name) => {
+  if (!name) return undefined;
+  let C = _iconComponentCache.get(name);
+  if (!C) {
+    C = (props) => <Icon name={name} {...props} />;
+    C.displayName = `TableIcon(${name})`;
+    _iconComponentCache.set(name, C);
+  }
+  return C;
+};
+
+// The dashed frame the kit's empty state normally draws is dropped here:
+// inside a table shell the `.tablewrap` card already provides the boundary,
+// and a second frame reads as a box inside a box. `sticky left-0` keeps the
+// message centred in the viewport when a wide table is scrolled sideways.
+// These have to be utilities, not CSS in styles.css, because `.bx-empty`
+// lives in a later cascade layer than the legacy stylesheet.
 export const EmptyState = ({ title, hint, iconName }) => (
-  <div style={{
-    minHeight: 280,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: "32px 24px",
-    textAlign: "center",
-  }}>
-    {iconName && (
-      <div style={{
-        width: 48, height: 48,
-        borderRadius: "50%",
-        background: "var(--surface-2)",
-        display: "grid",
-        placeItems: "center",
-        color: "var(--text-muted)",
-        marginBottom: 4,
-      }}>
-        <Icon name={iconName} size={22}/>
-      </div>
-    )}
-    <div style={{ fontWeight: 500, fontSize: 14, color: "var(--text)" }}>{title}</div>
-    {hint && <div style={{ fontSize: 12.5, color: "var(--text-soft)", maxWidth: 420 }}>{hint}</div>}
-  </div>
+  <UIEmptyState
+    className="bxt-empty sticky left-0 border-0 bg-none bg-transparent rounded-none"
+    icon={iconComponentFor(iconName)}
+    title={title}
+    description={hint}
+  />
 );
 
 // ---------- Sort helpers ----------
@@ -187,7 +201,7 @@ const nextSortDir = (cur, key, newKey) => {
 
 // Short helper for truncated text cells
 const truncCell = (text, max = 80) => {
-  if (!text) return <span className="empty-cell">—</span>;
+  if (!text) return <span className="empty-cell">–</span>;
   const s = String(text);
   return (
     <span
@@ -229,6 +243,119 @@ const eventTypeRank = (t) => EVENT_TYPE_RANK[t] ?? 99;
 // Sort / Columns popovers and render no visible text in the header.
 const isInternalLabel = (label) => typeof label === "string" && label.startsWith("__");
 
+// A column header label with a hover tooltip. Two independent reasons to show
+// one, and a header can have either or both:
+//
+//   1. `hint` — the column's meaning is not obvious from its name. This is the
+//      case a truncation check cannot catch: "Role" and "Pool" fit their
+//      columns perfectly and are still opaque, so no amount of width would
+//      have produced an explanation.
+//   2. The label is clipped ("Anticipated A…" → "Anticipated Amount").
+//
+// Truncation is measured (scrollWidth vs clientWidth) rather than guessed from
+// a character count, because these columns are user-resizable and
+// user-reorderable: the same label is clipped at one width and complete at the
+// next. A ResizeObserver keeps the answer current while the user drags a
+// resize handle, so the tooltip appears and disappears at the width where the
+// text actually starts and stops fitting.
+//
+// A header that fits and has no hint renders no tooltip at all — a hover card
+// that repeats text already on screen is noise.
+const ThLabel = ({ text, hint }) => {
+  const ref = useRef(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let alive = true;
+    const measure = () => {
+      if (!alive || !ref.current) return;
+      const node = ref.current;
+      const clipped = node.scrollWidth > node.clientWidth + 1;
+      setTruncated(prev => (prev === clipped ? prev : clipped));
+    };
+    measure();
+
+    // The webfont is the reason this needs more than one measurement. On a
+    // cold load the header paints in the fallback face, which is narrower —
+    // "Anticipated Amount" fits, so the first measure says "not clipped". When
+    // the real face swaps in, the text grows past the cell but the SPAN'S BOX
+    // DOES NOT CHANGE SIZE (the grid track still fixes it at 100px), so a
+    // ResizeObserver never fires and the tooltip would never appear.
+    document.fonts?.ready?.then(measure).catch(() => {});
+
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => { alive = false; ro?.disconnect(); };
+  }, [text]);
+
+  const label = (
+    <span ref={ref} className="bxt-th-label" data-clipped={truncated ? "true" : undefined}>
+      {text}
+    </span>
+  );
+  if (!text) return label;
+  // When a clipped header also has a hint, lead with the full name so the
+  // tooltip answers "what does that cut-off word say" before it explains what
+  // the column means. Separator is a middot, not an em dash: the app does not
+  // use em dashes in user-facing copy.
+  const tip = hint
+    ? (truncated ? `${text} · ${hint}` : hint)
+    : (truncated ? text : null);
+  if (!tip) return label;
+  return <Tooltip label={tip} side="top">{label}</Tooltip>;
+};
+
+// Readable name for an internal (__*) column, used only as the accessible
+// name of its header cell — the visible label stays blank.
+const INTERNAL_COLUMN_NAMES = {
+  __select:  "Select",
+  __actions: "Actions",
+  __expand:  "Expand",
+};
+const internalColumnName = (label) => {
+  if (INTERNAL_COLUMN_NAMES[label]) return INTERNAL_COLUMN_NAMES[label];
+  const bare = String(label || "").replace(/^_+/, "").replace(/[-_]+/g, " ").trim();
+  return bare ? bare.charAt(0).toUpperCase() + bare.slice(1) : "Column";
+};
+
+// Accessible name for the grid as a whole. Purely a label lookup: it never
+// affects which rows or columns a table renders.
+const TAB_TABLE_NAMES = {
+  potential:       "Potential projects",
+  awaiting:        "Proposals",
+  awarded:         "Awarded projects",
+  closed:          "Closed out projects",
+  events:          "Events and other",
+  hotleads:        "Hot leads",
+  openbids:        "Open bids",
+  directory:       "Directory",
+  projects:        "Projects",
+  "leads-deleted": "Deleted leads and bids",
+};
+// The tables are CSS-grid rows rather than <tr> elements (column widths are
+// user-resizable and user-reorderable, which a real <table> can't express),
+// so the grid carries explicit ARIA roles instead. `asGridRow` stamps
+// role="row" onto whatever a table's renderRow returned, and
+// renderOrderedCells stamps role="cell" onto each cell. Both are strictly
+// additive: an element that already declares a role, or that isn't a plain
+// DOM element (fragments, arrays, null), is returned untouched.
+const withRole = (node, role) => {
+  if (!React.isValidElement(node)) return node;
+  if (typeof node.type !== "string") return node;
+  if (node.props.role != null) return node;
+  return React.cloneElement(node, { role });
+};
+const asGridRow = (node) => withRole(node, "row");
+
+const tableAccessibleName = (tab) => {
+  if (!tab) return "Data table";
+  if (TAB_TABLE_NAMES[tab]) return TAB_TABLE_NAMES[tab];
+  const s = String(tab).replace(/[-_]+/g, " ").trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : "Data table";
+};
+
 // ---------- Shared no-op for optional `updateRow` props ----------
 //
 // Parent callers (App.jsx) don't currently pass an `updateRow` into a few of
@@ -237,55 +364,36 @@ const isInternalLabel = (label) => typeof label === "string" && label.startsWith
 const _noopUpdate = () => {};
 
 // ---------- Popover (menu) ----------
-const Popover = ({ anchorRef, onClose, children, align = "left" }) => {
-  const ref = useRef(null);
-  useEffect(() => {
-    const onDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target) &&
-          anchorRef?.current && !anchorRef.current.contains(e.target)) {
-        onClose();
-      }
-    };
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [anchorRef, onClose]);
-
-  // Position relative to anchor. useLayoutEffect runs before paint so the
-  // menu never flashes at (0,0). `ready` guards the first frame so we don't
-  // render the menu at a stale position before the rect is measured.
-  const [pos, setPos] = useState({ top: 0, left: 0, ready: false });
-  useLayoutEffect(() => {
-    if (!anchorRef?.current) return;
-    const r = anchorRef.current.getBoundingClientRect();
-    setPos({
-      top: r.bottom + 4 + window.scrollY,
-      left: align === "right" ? r.right + window.scrollX : r.left + window.scrollX,
-      ready: true,
-    });
-  }, [anchorRef, align]);
-
-  // Portal to <body> so the menu is not affected by any ancestor's
-  // overflow/clip/transform/contain — the toolbar lives inside .tablewrap
-  // which sets `overflow: clip`, and earlier non-portaled placement would
-  // get visually clipped on some viewport widths even though the menu is
-  // position:absolute.
-  return createPortal(
-    <div ref={ref} className="menu" style={{
-      top: pos.top,
-      left: align === "right" ? undefined : pos.left,
-      right: align === "right" ? (window.innerWidth - pos.left) : undefined,
-      visibility: pos.ready ? "visible" : "hidden",
-    }}>
+//
+// Same call signature as the hand-rolled version it replaces
+// (`anchorRef`, `onClose`, `align`, children) but the overlay itself is now
+// the Radix-backed `Popover` from `@/ui`: portalling, collision flipping,
+// Escape, outside-dismiss and the `aria-*` wiring are handled by the
+// primitive instead of by three hand-written document listeners.
+//
+// Two deliberate carry-overs from the old behaviour:
+//   • the anchor is a *virtual* anchor, so callers keep passing a ref to a
+//     button they render themselves rather than wrapping it in a trigger;
+//   • an interaction on that anchor does NOT dismiss here — the anchor's own
+//     onClick already toggles the menu, and letting both fire would reopen
+//     the menu on every close click.
+const Popover = ({ anchorRef, onClose, children, align = "left" }) => (
+  <UIPopover open onOpenChange={(next) => { if (!next) onClose(); }}>
+    <UIPopoverAnchor virtualRef={anchorRef} />
+    <UIPopoverContent
+      align={align === "right" ? "end" : "start"}
+      sideOffset={6}
+      className="bxt-menu w-auto min-w-[220px] max-w-[min(340px,calc(100vw-24px))] p-1"
+      onOpenAutoFocus={(e) => e.preventDefault()}
+      onCloseAutoFocus={(e) => e.preventDefault()}
+      onInteractOutside={(e) => {
+        if (anchorRef?.current && anchorRef.current.contains(e.target)) e.preventDefault();
+      }}
+    >
       {children}
-    </div>,
-    document.body
-  );
-};
+    </UIPopoverContent>
+  </UIPopover>
+);
 
 // Resolve each column's effective grid-column width: user-resized px wins over default.
 const resolveGridCols = (cols, columnWidths) =>
@@ -334,14 +442,26 @@ const HeaderRow = ({
   };
 
   return (
-    <div className="thead" style={{ gridTemplateColumns: grid }}>
+    // TooltipProvider renders no DOM of its own, so it can sit outside the
+    // grid row without disturbing the column tracks.
+    <TooltipProvider delayDuration={250} skipDelayDuration={300}>
+    <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: grid }}>
       {visible.map((c, i) => {
         const sortable = !!c.sortKey;
         const active = sortable && sort.key === c.sortKey;
         const canDrag = !c.locked && !!onReorder;
         const isDragging = dragLabel === c.label;
         const isOver = overLabel === c.label && dragLabel && dragLabel !== c.label && canDrag;
-        const displayLabel = isInternalLabel(c.label) ? "" : c.label;
+        const internal = isInternalLabel(c.label);
+        const accessibleLabel = internal ? internalColumnName(c.label) : c.label;
+        // Internal columns render no visible text, with one exception: the
+        // trailing actions column is a column like any other to the eye, and a
+        // blank cell at the end of an otherwise-labelled header row reads as
+        // something missing. The leading checkbox stays blank — a "Select"
+        // label over a 42px checkbox column is noise, not information.
+        const displayLabel = !internal
+          ? c.label
+          : (c.label === "__actions" ? internalColumnName(c.label) : "");
 
         const dragProps = canDrag ? {
           draggable: true,
@@ -380,6 +500,7 @@ const HeaderRow = ({
 
         const classes = [
           "th",
+          "bxt-th",
           active ? "sorted" : "",
           c.className || "",
           isDragging ? "col-dragging" : "",
@@ -389,29 +510,47 @@ const HeaderRow = ({
         return (
           <div key={c.label + ":" + i}
                className={classes}
-               onClick={sortable ? () => onSortToggle(c.sortKey) : undefined}
-               style={{
-                 cursor: sortable ? "pointer" : "default",
-                 position: "relative",
-               }}
+               role="columnheader"
+               aria-sort={sortable ? (active ? (sort.dir === "asc" ? "ascending" : "descending") : "none") : undefined}
+               data-sorted={active ? (sort.dir === "asc" ? "asc" : "desc") : undefined}
                {...dragProps}>
-            {displayLabel}
-            {sortable && (
-              <span className="sort-arrow"
-                    style={{
-                      opacity: active ? 1 : 0,
-                      color: "var(--accent)",
-                      fontSize: 10,
-                      display: "inline-block",
-                      transform: active && sort.dir === "asc" ? "rotate(180deg)" : "none",
-                      transition: "transform .15s",
-                    }}>
-                ▼
+            {sortable ? (
+              // A real button, so the column is reachable and operable from
+              // the keyboard. It carries `draggable` too: dragstart bubbles up
+              // to the header cell's handler, which is what browsers need in
+              // order to start a column drag from inside a form control.
+              // No `title` here: the label carries its own hover tooltip when
+              // it is clipped, and a native title on the parent would stack a
+              // second card on top of it. `aria-label` keeps the sort
+              // affordance announced, and contains the visible text.
+              <button
+                type="button"
+                className="bxt-th-btn"
+                draggable={canDrag || undefined}
+                onClick={() => onSortToggle(c.sortKey)}
+                aria-label={`Sort by ${accessibleLabel}`}
+              >
+                <ThLabel text={displayLabel} hint={c.hint}/>
+                <span className="bxt-th-sort" aria-hidden="true">
+                  <Icon
+                    name={active ? (sort.dir === "asc" ? "chevronUp" : "chevronDown") : "chevronsUpDown"}
+                    size={12}
+                  />
+                </span>
+              </button>
+            ) : displayLabel ? (
+              <ThLabel text={displayLabel} hint={c.hint}/>
+            ) : (
+              <span className="bxt-th-label">
+                <span className="sr-only">{accessibleLabel}</span>
               </span>
             )}
             {!c.locked && setColumnWidths && (
               <div
                 className="col-resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={`Resize ${accessibleLabel} column`}
                 onMouseDown={(e) => startResize(e, c.label, e.currentTarget.parentElement)}
                 onClick={(e) => e.stopPropagation()}
               />
@@ -420,6 +559,7 @@ const HeaderRow = ({
         );
       })}
     </div>
+    </TooltipProvider>
   );
 };
 
@@ -515,197 +655,250 @@ const useTableChrome = (columns, { primarySort = [] } = {}) => {
 // ---------- Chrome Toolbar with live Columns + Sort + Filter + Year popovers ----------
 const ChromeToolbar = ({
   filters, right, onNew, newLabel = "New",
-  columns, sort, onSortToggle, hiddenCols, toggleHidden,
+  columns, sort, onSortToggle, onSortClear, hiddenCols, toggleHidden,
   openMenu, setOpenMenu,
   sortBtnRef, colsBtnRef, filterBtnRef, yearBtnRef, searchInputRef,
   search, setSearch,
   yearOptions, yearValue, onYearChange,
+  maximized, onToggleMaximize,
 }) => {
   // Only surface sortable, user-facing columns in the Sort popover; hide internal (__*) columns.
   const sortableCols = columns.filter(c => c.sortKey && !isInternalLabel(c.label));
   const hasSearch = !!search.trim();
 
   const hasYear = Array.isArray(yearOptions) && yearOptions.length > 0;
+  const sortedColLabel = sort.key
+    ? (columns.find(c => c.sortKey === sort.key)?.label || sort.key)
+    : null;
+  const hiddenCount = hiddenCols.size;
 
   return (
-    <div className="toolbar">
-      {/* Search input — primary affordance, leftmost in the chrome */}
-      <div className={"chrome-search" + (hasSearch ? " active" : "")}>
-        <Icon name="search" size={13}/>
-        <input
-          ref={searchInputRef}
-          className="chrome-search-input"
-          placeholder="Search rows…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          spellCheck={false}
-          autoComplete="off"
-        />
-        {hasSearch && (
+    <div className="bxt-toolbar">
+      {/* Search — first control in the chrome and the one users reach for
+          most, so it keeps the leading slot at every width. */}
+      <InputGroup
+        ref={searchInputRef}
+        className="bxt-search"
+        // The design-system input paints from Tailwind utilities, which sit in
+        // a later cascade layer than styles.css — so the "has a query" tint
+        // has to be expressed as utilities too rather than in the CSS block.
+        // The transition is unconditional: applied only alongside the tint it
+        // would ease on the way in and snap on the way out.
+        inputClassName={
+          "transition-[background-color,border-color,color] duration-[var(--dur-fast)] ease-[var(--ease-out)]"
+          + (hasSearch
+              ? " border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
+              : "")
+        }
+        type="text"
+        placeholder="Search rows"
+        aria-label="Search rows"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        spellCheck={false}
+        autoComplete="off"
+        leading={<Icon name="search" size={14}/>}
+        trailing={hasSearch ? (
           <button
             type="button"
-            className="chrome-search-clear"
+            className="bxt-search-clear"
             title="Clear search"
+            aria-label="Clear search"
             onClick={() => setSearch("")}
-            aria-label="Clear search">
-            <Icon name="x" size={11}/>
-          </button>
-        )}
-      </div>
-
-      {filters?.map((f, i) => (
-        <button key={i} className={"tool-chip" + (f.active ? " on" : "")} onClick={f.onClick}>
-          {f.icon && <Icon name={f.icon} size={13}/>}
-          {f.label}
-          {f.count != null && <span style={{ opacity: .6, marginLeft: 2 }}>· {f.count}</span>}
-        </button>
-      ))}
-
-      {hasYear && (
-        <button
-          ref={yearBtnRef}
-          className={"tool-chip" + (yearValue != null ? " on" : "")}
-          onClick={() => setOpenMenu(openMenu === "year" ? null : "year")}
-        >
-          <Icon name="calendar" size={13}/>
-          Year: {yearValue ?? "All"}
-        </button>
-      )}
-
-      <div className="tool-sep"/>
-
-      <button
-        ref={sortBtnRef}
-        className={"tool-chip" + (sort.key ? " on" : "")}
-        onClick={() => setOpenMenu(openMenu === "sort" ? null : "sort")}
-      >
-        <Icon name="sort" size={13}/>
-        Sort{sort.key ? ` · ${(columns.find(c => c.sortKey === sort.key)?.label || sort.key)} ${sort.dir === "asc" ? "↑" : "↓"}` : ""}
-      </button>
-
-      <button
-        ref={colsBtnRef}
-        className={"tool-chip" + (hiddenCols.size > 0 ? " on" : "")}
-        onClick={() => setOpenMenu(openMenu === "columns" ? null : "columns")}
-      >
-        <Icon name="columns" size={13}/>
-        Columns{hiddenCols.size > 0 ? ` · ${hiddenCols.size} hidden` : ""}
-      </button>
-
-      <div className="ml-auto" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {right}
-        {onNew && (
-          <button className="btn primary sm" onClick={onNew}>
-            <Icon name="plus" size={13}/>{newLabel}
-          </button>
-        )}
-      </div>
-
-      {openMenu === "year" && hasYear && (
-        <Popover anchorRef={yearBtnRef} onClose={() => setOpenMenu(null)} align="left">
-          <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-            Select year
-          </div>
-          <button
-            className="menu-item"
-            onClick={() => { onYearChange?.(null); setOpenMenu(null); }}
-            style={yearValue == null ? { color: "var(--accent-ink)" } : undefined}
           >
-            <Icon name="calendar" size={13}/>
-            <span style={{ flex: 1 }}>All years</span>
-            {yearValue == null && (
-              <span style={{ fontSize: 11, color: "var(--accent)" }}>✓</span>
-            )}
+            <Icon name="x" size={12}/>
           </button>
-          <div className="menu-sep"/>
-          {yearOptions.map((y) => {
-            const active = yearValue === y;
-            return (
-              <button
-                key={y}
-                className="menu-item"
-                onClick={() => { onYearChange?.(y); setOpenMenu(null); }}
-                style={active ? { color: "var(--accent-ink)" } : undefined}
-              >
-                <Icon name="calendar" size={13}/>
-                <span style={{ flex: 1 }}>{y}</span>
-                {active && (
-                  <span style={{ fontSize: 11, color: "var(--accent)" }}>✓</span>
-                )}
-              </button>
-            );
-          })}
-        </Popover>
+        ) : null}
+      />
+
+      {/* Filter strip — scrolls sideways on phones rather than wrapping into
+          a tall stack or pushing the page wide. */}
+      {(filters?.length > 0 || hasYear) && (
+        <div className="bxt-filterstrip" role="group" aria-label="Filters">
+          {filters?.map((f, i) => (
+            <button
+              key={i}
+              type="button"
+              className={"bxt-chip" + (f.active ? " is-on" : "")}
+              aria-pressed={!!f.active}
+              onClick={f.onClick}
+            >
+              {f.icon && <Icon name={f.icon} size={13}/>}
+              <span className="bxt-chip-label">{f.label}</span>
+              {f.count != null && <span className="bxt-chip-count num">{f.count}</span>}
+            </button>
+          ))}
+
+          {hasYear && (
+            <DropdownMenu
+              modal={false}
+              open={openMenu === "year"}
+              onOpenChange={(o) => setOpenMenu(o ? "year" : null)}
+            >
+              <DropdownMenuTrigger asChild>
+                <button
+                  ref={yearBtnRef}
+                  type="button"
+                  className={"bxt-chip" + (yearValue != null ? " is-on" : "")}
+                >
+                  <Icon name="calendar" size={13}/>
+                  <span className="bxt-chip-label">Year</span>
+                  <span className="bxt-chip-count num">{yearValue ?? "All"}</span>
+                  <Icon name="chevronDown" size={12} className="bxt-chip-caret"/>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="bxt-menu">
+                <DropdownMenuLabel>Select year</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={yearValue == null ? "__all" : String(yearValue)}
+                  onValueChange={(v) => {
+                    onYearChange?.(v === "__all"
+                      ? null
+                      : yearOptions.find(y => String(y) === v));
+                  }}
+                >
+                  <DropdownMenuRadioItem value="__all">All years</DropdownMenuRadioItem>
+                  <DropdownMenuSeparator/>
+                  {yearOptions.map((y) => (
+                    <DropdownMenuRadioItem key={y} value={String(y)} className="num">
+                      {y}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       )}
 
-      {openMenu === "sort" && (
-        <Popover anchorRef={sortBtnRef} onClose={() => setOpenMenu(null)}>
-          <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-            Sort by
-          </div>
-          {sortableCols.length === 0 && (
-            <div className="menu-item" style={{ color: "var(--text-soft)", cursor: "default" }}>
-              No sortable columns
-            </div>
-          )}
-          {sortableCols.map((c, i) => {
-            const active = sort.key === c.sortKey;
-            return (
-              <button
-                key={i}
-                className="menu-item"
-                onClick={() => {
-                  onSortToggle(c.sortKey);
-                  // If toggling turns it off, keep menu open so user can pick another
-                }}
-                style={active ? { color: "var(--accent-ink)" } : undefined}
-              >
-                <Icon name="sort" size={13}/>
-                <span style={{ flex: 1 }}>{c.label}</span>
-                {active && (
-                  <span style={{ fontSize: 11, color: "var(--accent)" }}>
-                    {sort.dir === "asc" ? "↑ asc" : sort.dir === "desc" ? "↓ desc" : ""}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-          {sort.key && (
-            <>
-              <div className="menu-sep"/>
-              <button className="menu-item" onClick={() => { /* clear */ setOpenMenu(null); }}
-                      style={{ color: "var(--text-muted)" }}>
-                <Icon name="x" size={13}/>
-                <span style={{ flex: 1 }} onClick={(e) => { e.stopPropagation(); }}>Clear sort</span>
-              </button>
-            </>
-          )}
-        </Popover>
-      )}
+      <div className="bxt-toolbar-actions">
+        <DropdownMenu
+          modal={false}
+          open={openMenu === "sort"}
+          onOpenChange={(o) => setOpenMenu(o ? "sort" : null)}
+        >
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={sortBtnRef}
+              type="button"
+              className={"bxt-tool" + (sort.key ? " is-on" : "")}
+            >
+              <Icon name="sort" size={13}/>
+              <span className="bxt-tool-label">Sort</span>
+              {sort.key && (
+                <span className="bxt-tool-value">
+                  <span className="bxt-truncate">{sortedColLabel}</span>
+                  <Icon name={sort.dir === "asc" ? "chevronUp" : "chevronDown"} size={11}/>
+                </span>
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="bxt-menu">
+            <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            {sortableCols.length === 0 && (
+              <p className="bxt-menu-empty">No sortable columns</p>
+            )}
+            {sortableCols.map((c, i) => {
+              const active = sort.key === c.sortKey;
+              return (
+                <DropdownMenuItem
+                  key={i}
+                  // Keep the menu open after a toggle so the user can cycle
+                  // asc → desc → off, or pick a different column, in place.
+                  onSelect={(e) => { e.preventDefault(); onSortToggle(c.sortKey); }}
+                  data-active={active ? "true" : undefined}
+                >
+                  <Icon name="sort" size={13}/>
+                  <span className="bxt-menu-text">{c.label}</span>
+                  {active && (
+                    <span className="bxt-menu-hint">
+                      <Icon name={sort.dir === "asc" ? "chevronUp" : "chevronDown"} size={11}/>
+                      {sort.dir === "asc" ? "Asc" : "Desc"}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              );
+            })}
+            {sort.key && (
+              <>
+                <DropdownMenuSeparator/>
+                <DropdownMenuItem onSelect={() => onSortClear?.()}>
+                  <Icon name="x" size={13}/>
+                  <span className="bxt-menu-text">Clear sort</span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-      {openMenu === "columns" && (
-        <Popover anchorRef={colsBtnRef} onClose={() => setOpenMenu(null)} align="right">
-          <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-            Show columns
-          </div>
-          {columns.map((c, i) => {
-            if (c.locked) return null; // can't hide checkbox or actions
-            if (isInternalLabel(c.label)) return null; // defensive: never expose __* columns
-            const visible = !hiddenCols.has(c.label);
-            return (
-              <label key={i} className="menu-item" style={{ cursor: "pointer" }}>
-                <input
-                  type="checkbox"
+        <DropdownMenu
+          modal={false}
+          open={openMenu === "columns"}
+          onOpenChange={(o) => setOpenMenu(o ? "columns" : null)}
+        >
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={colsBtnRef}
+              type="button"
+              className={"bxt-tool" + (hiddenCount > 0 ? " is-on" : "")}
+            >
+              <Icon name="columns" size={13}/>
+              <span className="bxt-tool-label">Columns</span>
+              {hiddenCount > 0 && (
+                <span className="bxt-tool-value">
+                  <span className="num">{hiddenCount}</span> hidden
+                </span>
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="bxt-menu">
+            <DropdownMenuLabel>Show columns</DropdownMenuLabel>
+            {columns.map((c, i) => {
+              if (c.locked) return null; // can't hide checkbox or actions
+              if (isInternalLabel(c.label)) return null; // defensive: never expose __* columns
+              const visible = !hiddenCols.has(c.label);
+              return (
+                <DropdownMenuCheckboxItem
+                  key={i}
                   checked={visible}
-                  onChange={() => toggleHidden(c.label)}
-                  style={{ accentColor: "var(--accent)", marginRight: 2 }}
-                />
-                <span style={{ flex: 1 }}>{c.label || <span style={{ color: "var(--text-soft)" }}>(unnamed)</span>}</span>
-              </label>
-            );
-          })}
-        </Popover>
-      )}
+                  onCheckedChange={() => toggleHidden(c.label)}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  <span className="bxt-menu-text">
+                    {c.label || <span className="bxt-menu-unnamed">(unnamed)</span>}
+                  </span>
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Full screen. Presentation only: it repositions the same table into a
+            fixed overlay and changes nothing about the rows, sort or filters.
+            Same mechanism the Invoice table already uses (a CSS overlay rather
+            than the native Fullscreen API, which iOS Safari refuses on
+            non-video elements). */}
+        {onToggleMaximize && (
+          <button
+            type="button"
+            className={"bxt-tool" + (maximized ? " is-on" : "")}
+            onClick={onToggleMaximize}
+            aria-pressed={!!maximized}
+            title={maximized ? "Exit full screen (Esc)" : "Expand this table to full screen"}
+          >
+            <Icon name={maximized ? "minimize" : "maximize"} size={13}/>
+            <span className="bxt-tool-label">{maximized ? "Exit" : "Full screen"}</span>
+          </button>
+        )}
+
+        {right}
+
+        {onNew && (
+          <Button variant="primary" size="sm" onClick={onNew}>
+            <Icon name="plus" size={14}/>{newLabel}
+          </Button>
+        )}
+      </div>
     </div>
   );
 };
@@ -728,10 +921,15 @@ const TableView = ({
   yearOptions, yearValue, onYearChange,
   primarySort,
   postProcess,
+  // Visual treatment only. Stamps `data-skin` on the wrapper so a table can
+  // opt into a different skin without any other table changing; every rule
+  // for a skin is scoped under that attribute in styles.css. Omitted means
+  // the original chrome, which is what every table but Leads & Bids uses.
+  skin,
 }) => {
   const chrome = useTableChrome(columns, { primarySort });
   const {
-    sort, hiddenCols, orderedColumns, visibleColumns,
+    sort, setSort, hiddenCols, orderedColumns, visibleColumns,
     onSortToggle, toggleHidden,
     openMenu, setOpenMenu,
     sortBtnRef, colsBtnRef, filterBtnRef, yearBtnRef, searchInputRef,
@@ -739,6 +937,41 @@ const TableView = ({
     columnOrder, onReorder,
     columnWidths, setColumnWidths,
   } = chrome;
+
+  // Full-screen view. A CSS fixed-overlay rather than the native Fullscreen
+  // API, which doesn't work on non-video elements in iOS Safari — the same
+  // approach the Invoice table has used. While open we lock body scroll and
+  // let Escape close it. Purely presentational: no row, sort, filter or
+  // column state is touched, so leaving full screen restores exactly the view
+  // the user had.
+  //
+  // Persisted per tab, so a refresh doesn't throw the user back out of a view
+  // they deliberately chose. Per tab and not globally: maximizing Leads &
+  // Bids should not silently maximize Projects the next time it opens. The
+  // native Fullscreen API cannot be restored this way at all — browsers
+  // require a user gesture to enter it — which is a second reason this is a
+  // CSS overlay.
+  const maximizedKey = `beacon.table.maximized.${tab || "default"}`;
+  const [maximized, setMaximized] = useState(() => {
+    try { return localStorage.getItem(maximizedKey) === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try {
+      if (maximized) localStorage.setItem(maximizedKey, "1");
+      else localStorage.removeItem(maximizedKey);
+    } catch { /* storage off — the toggle still works for this session */ }
+  }, [maximized, maximizedKey]);
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e) => { if (e.key === "Escape") setMaximized(false); };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [maximized]);
 
   // Column-walking search predicate. For each non-locked column we extract a
   // searchable string via the column's `sortValue` (which usually resolves
@@ -881,10 +1114,13 @@ const TableView = ({
   ]);
 
   return (
-    <div className="tablewrap">
+    <div className={"tablewrap" + (maximized ? " is-maximized" : "")}
+         data-skin={skin || undefined}>
       <ChromeToolbar
         filters={filters} right={right} onNew={onNew} newLabel={newLabel}
         columns={orderedColumns} sort={sort} onSortToggle={onSortToggle}
+        onSortClear={() => setSort({ key: null, dir: null })}
+        maximized={maximized} onToggleMaximize={() => setMaximized(m => !m)}
         hiddenCols={hiddenCols} toggleHidden={toggleHidden}
         openMenu={openMenu} setOpenMenu={setOpenMenu}
         sortBtnRef={sortBtnRef} colsBtnRef={colsBtnRef}
@@ -893,14 +1129,34 @@ const TableView = ({
         search={search} setSearch={setSearch}
         yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       />
-      {search.trim() && (
-        <div className="chrome-search-summary">
-          {filteredRows.length === 0
-            ? <>No rows match <span className="mono">"{search}"</span>.</>
-            : <><strong>{filteredRows.length}</strong> of <strong>{rows.length}</strong> match <span className="mono">"{search}"</span></>
-          }
+      {/* The match count stays MOUNTED and collapses to zero height instead of
+          being added and removed from the tree. Two reasons.
+
+          Visually, mounting it shoved the table down the instant a character
+          landed and yanked it back up on clear — the strip has no enter or
+          exit to animate if it does not exist a frame earlier. As a permanent
+          grid row animating 0fr → 1fr, it opens and closes.
+
+          For assistive tech, a live region has to be in the document BEFORE
+          its content changes; one that appears already-populated is not
+          reliably announced. Keeping the wrapper and swapping only its
+          contents is the shape aria-live actually expects. */}
+      <div
+        className="bxt-searchsummary"
+        data-open={search.trim() ? "true" : undefined}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="bxt-searchsummary-inner">
+          <div className="bxt-searchsummary-text">
+            {search.trim() && (
+              filteredRows.length === 0
+                ? <>No rows match <span className="bxt-searchterm">"{search}"</span>.</>
+                : <><strong className="num">{filteredRows.length}</strong> of <strong className="num">{rows.length}</strong> match <span className="bxt-searchterm">"{search}"</span></>
+            )}
+          </div>
         </div>
-      )}
+      </div>
       {/* Mirrored top scrollbar — always rendered so its ref is stable for
           the measurement effect; hidden via .is-hidden when the table doesn't
           actually overflow (narrow tables don't grow an empty 14px strip).
@@ -923,27 +1179,38 @@ const TableView = ({
           .trow would size to its own content and rows would drift out of
           alignment at narrow viewports. */}
       <div className="table-scroll" ref={tableScrollRef} onScroll={onTableBodyScroll}>
-        <div className="table-scroll-body" ref={tableScrollBodyRef}>
+        <div
+          className="table-scroll-body"
+          ref={tableScrollBodyRef}
+          role="table"
+          aria-label={`${tableAccessibleName(tab)} table`}
+        >
           <HeaderRow
             columns={orderedColumns} gridCols={gridCols} sort={sort}
             onSortToggle={onSortToggle} hiddenCols={hiddenCols}
             onReorder={onReorder}
             columnWidths={columnWidths} setColumnWidths={setColumnWidths}
           />
-          {sortedRows.length === 0 ? (
-            showNoMatches ? (
-              <EmptyState
-                title="No matches"
-                hint={`Nothing matches "${search}".`}
-                iconName="search"
-              />
-            ) : (
-              <EmptyState title={emptyTitle} hint={emptyHint} iconName={emptyIcon}/>
-            )
-          ) : (
-            processedRows.map((r, i) => renderRow(r, i, gridCols, visibleColumns, hiddenCols))
-          )}
+          {sortedRows.length === 0
+            ? null
+            : processedRows.map((r, i) => asGridRow(renderRow(r, i, gridCols, visibleColumns, hiddenCols)))}
         </div>
+        {/* The empty state sits beside the grid rather than inside it: it is
+            not a row, and keeping it out of the `role="table"` subtree means
+            assistive tech never announces a stray cell-less row. It also lets
+            the message centre on the viewport instead of on the (possibly
+            much wider) column track sum. */}
+        {sortedRows.length === 0 && (
+          showNoMatches ? (
+            <EmptyState
+              title="No matches"
+              hint={`Nothing matches "${search}".`}
+              iconName="search"
+            />
+          ) : (
+            <EmptyState title={emptyTitle} hint={emptyHint} iconName={emptyIcon}/>
+          )
+        )}
       </div>
     </div>
   );
@@ -951,24 +1218,39 @@ const TableView = ({
 
 // ---------- Standalone Toolbar (kept for any external caller) ----------
 export const Toolbar = ({ filters, right, onNew, newLabel = "New" }) => (
-  <div className="toolbar">
-    {filters?.map((f, i) => (
-      <button key={i} className={"tool-chip" + (f.active ? " on" : "")} onClick={f.onClick}>
-        {f.icon && <Icon name={f.icon} size={13}/>}
-        {f.label}
-        {f.count != null && <span style={{ opacity: .6, marginLeft: 2 }}>· {f.count}</span>}
+  <div className="bxt-toolbar">
+    {filters?.length > 0 && (
+      <div className="bxt-filterstrip" role="group" aria-label="Filters">
+        {filters.map((f, i) => (
+          <button
+            key={i}
+            type="button"
+            className={"bxt-chip" + (f.active ? " is-on" : "")}
+            aria-pressed={!!f.active}
+            onClick={f.onClick}
+          >
+            {f.icon && <Icon name={f.icon} size={13}/>}
+            <span className="bxt-chip-label">{f.label}</span>
+            {f.count != null && <span className="bxt-chip-count num">{f.count}</span>}
+          </button>
+        ))}
+      </div>
+    )}
+    <div className="bxt-toolbar-actions">
+      <button type="button" className="bxt-tool">
+        <Icon name="filter" size={13}/><span className="bxt-tool-label">Add filter</span>
       </button>
-    ))}
-    <div className="tool-sep"/>
-    <button className="tool-chip"><Icon name="filter" size={13}/>Add filter</button>
-    <button className="tool-chip"><Icon name="sort" size={13}/>Sort</button>
-    <button className="tool-chip"><Icon name="columns" size={13}/>Columns</button>
-    <div className="ml-auto" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <button type="button" className="bxt-tool">
+        <Icon name="sort" size={13}/><span className="bxt-tool-label">Sort</span>
+      </button>
+      <button type="button" className="bxt-tool">
+        <Icon name="columns" size={13}/><span className="bxt-tool-label">Columns</span>
+      </button>
       {right}
       {onNew && (
-        <button className="btn primary sm" onClick={onNew}>
-          <Icon name="plus" size={13}/>{newLabel}
-        </button>
+        <Button variant="primary" size="sm" onClick={onNew}>
+          <Icon name="plus" size={14}/>{newLabel}
+        </Button>
       )}
     </div>
   </div>
@@ -982,7 +1264,7 @@ export const Toolbar = ({ filters, right, onNew, newLabel = "New" }) => (
 const renderOrderedCells = (visibleColumns, cells) =>
   visibleColumns.map((col) => (
     <React.Fragment key={col.label}>
-      {cells[col.label] ?? null}
+      {withRole(cells[col.label] ?? null, "cell")}
     </React.Fragment>
   ));
 
@@ -1021,6 +1303,176 @@ const buildOptions = () => {
     companyTypeOptions:  ["Prime", "Sub", "Multiple"],
     stageOptions:        ["Multi-Use Contract", "Single Use Contract (Project)", "AE Selected List"],
   };
+};
+
+/* ======================================================================
+   PROPOSALS & AWARDED PIPELINE — shared presentation helpers
+   ----------------------------------------------------------------------
+   Used only by PotentialTable / AwaitingTable / AwardedTable /
+   ClosedTable. Everything below is presentation: each helper takes a value
+   the row already carries and returns a tone name, a short flag and a
+   spelled-out description. Nothing here reads, writes, filters or reorders
+   a row.
+
+   The thresholds deliberately mirror the filter chips App.jsx already
+   ships ("Over 30 days", "Expiring soon", "Low remaining", "Losses only"),
+   so a row that lights up in the table is exactly a row the matching chip
+   would keep. Every tone is paired with a glyph and a worded flag, so a
+   state is never carried by colour alone.
+   ====================================================================== */
+
+const PIPE_DAY_MS = 86400000;
+
+// Whole days elapsed since an ISO date. Null when absent or unparseable.
+const daysSinceISO = (iso) => {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / PIPE_DAY_MS);
+};
+
+// Whole days left until an ISO date. Negative once the date is past.
+const daysUntilISO = (iso) => {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((t - Date.now()) / PIPE_DAY_MS);
+};
+
+// Proposals: how long a submittal has waited for a verdict. `over` mirrors
+// the "Over 30 days" chip and maps onto the brand/ochre "needs attention"
+// token; everything younger stays neutral.
+const submissionAge = (iso) => {
+  const days = daysSinceISO(iso);
+  if (days == null || days < 0) return null;
+  const over = days > 30;
+  const unit = days === 1 ? "day" : "days";
+  return {
+    days,
+    tone: over ? "over" : "fresh",
+    // No icon, and the flag is words rather than "45d".
+    //
+    // An hourglass beside a date says "time" to someone who already knows the
+    // column is about elapsed time, and says nothing at all to anyone else. It
+    // could not distinguish the two states either: the same glyph would have
+    // to mean both "submitted last week" and "waiting over a month", so the
+    // whole signal rested on a tone shift most people would not catch. The
+    // words carry it instead, and the tone reinforces rather than performs.
+    icon: null,
+    flag: `${days} ${unit}`,
+    text: over
+      ? `${days} ${unit} since submission, over 30 days`
+      : `${days} ${unit} since submission`,
+  };
+};
+
+// Awarded: contract expiry runway. `expiring` mirrors the "Expiring soon"
+// chip (inside 180 days); a date already past reads as expired (clay).
+const expiryRunway = (iso) => {
+  const days = daysUntilISO(iso);
+  if (days == null) return null;
+  const unit = Math.abs(days) === 1 ? "day" : "days";
+  if (days < 0) {
+    return {
+      days, tone: "expired", icon: "warn", flag: "Expired",
+      text: `Contract expired ${Math.abs(days)} ${unit} ago`,
+    };
+  }
+  if (days < 180) {
+    // Same reasoning as submissionAge: words, no hourglass. The "Expired"
+    // state above keeps its warning icon, because that one IS an alert rather
+    // than a measurement.
+    return {
+      days, tone: "expiring", icon: null, flag: `${days} ${unit} left`,
+      text: `Contract expires in ${days} ${unit}`,
+    };
+  }
+  return { days, tone: "ok", icon: null, flag: null, text: `Contract expires in ${days} ${unit}` };
+};
+
+// Awarded: remaining contract capacity as a share of the awarded total.
+// `low` mirrors the "Low remaining" chip (under 20% left). The percentage
+// is always printed next to the bar, so the bar is a second reading of a
+// figure the user can already see rather than the only reading.
+const capacityState = (used, remaining) => {
+  const total = (used || 0) + (remaining || 0);
+  if (total <= 0) return null;
+  const share = (remaining || 0) / total;
+  const pct = Math.round(share * 100);
+  const low = share < 0.2;
+  return {
+    pct,
+    low,
+    text: low
+      ? `${pct}% of contract capacity left, below 20%`
+      : `${pct}% of contract capacity left`,
+  };
+};
+
+// Closed Out: mirrors the "Losses only" chip so a lost or descoped closure
+// carries a word rather than being left to be read out of free text.
+const LOSS_REASON_RE = /lost|cancel|descope|withdraw/i;
+
+// A date plus its urgency flag, stacked so both stay legible in a column
+// narrow enough that they cannot sit side by side. Built from the same
+// `.bxt-due-*` atoms the Open Bids due-date cell uses. The glyph rides in
+// the flag rather than ahead of the date, so the date always gets the full
+// column width before anything else is allowed to take room.
+const renderDateFlag = (formatted, state) => (
+  <span
+    className="bxt-due bxt-due-stack"
+    title={state ? `${formatted} · ${state.text}` : formatted}
+  >
+    <span className="bxt-due-date num">{formatted}</span>
+    {state?.flag && (
+      <span className="bxt-due-flag">
+        {state.icon && <Icon name={state.icon} size={10} aria-hidden="true"/>}
+        {state.flag}
+        <span className="sr-only"> {state.text}</span>
+      </span>
+    )}
+  </span>
+);
+
+// Section-header row for the org-type groups injectOrgHeaders() injects
+// into Proposals and Awarded. It is a single cell spanning the whole grid,
+// so — unlike a data row, which goes through renderOrderedCells — it has to
+// declare its own row/cell roles and its column span.
+const renderOrgHeaderRow = (r, gridCols, colCount) => {
+  const raw = r._orgHeader;
+  // injectOrgHeaders falls back to an en dash for an unassigned org type;
+  // rows shaped before that used an em dash. Both mean "not set".
+  const unassigned = !raw || raw === "–" || raw === "—";
+  const orgKey = unassigned ? "unknown" : String(raw).toLowerCase();
+  return (
+    <div
+      key={r.id}
+      className="trow org-header bxt-grouphead bxt-orghead"
+      role="row"
+      data-org={orgKey}
+      style={{ gridTemplateColumns: gridCols }}
+    >
+      <div
+        className="td bxt-grouphead-cell bxt-orghead-cell"
+        role="cell"
+        aria-colspan={colCount}
+      >
+        {/* The bar spans the whole grid, which on these tables is far wider
+            than the viewport, so its content is pinned to the left edge and
+            stays readable while the table is scrolled sideways. */}
+        <span className="bxt-orghead-inner">
+          <span className="bxt-orghead-dot" aria-hidden="true"/>
+          <span className="bxt-orghead-kicker">Org type</span>
+          <span className="bxt-grouphead-label bxt-truncate">
+            {unassigned ? "Unassigned" : raw}
+          </span>
+          <span className="bxt-grouphead-count">
+            <span className="num">{r._count}</span> {r._unit}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
 };
 
 // ---------- Potential Projects ----------
@@ -1088,7 +1540,7 @@ export const PotentialTable = ({
     };
 
     for (const r of rows) {
-      const p = r.probability || "—";
+      const p = r.probability || "–";
       if (lastProb !== undefined && p !== lastProb) flush(lastProb);
       out.push(r);
       groupRows.push(r);
@@ -1127,31 +1579,32 @@ export const PotentialTable = ({
         if (r._total) {
           const isGrand = r._total === "All";
           const countNoun = r._count === 1 ? "project" : "projects";
-          const label = isGrand
-            ? `Grand total · ${r._count} ${countNoun}`
-            : `${r._total} · ${r._count} ${countNoun}`;
+          const label = isGrand ? "Grand total" : r._total;
           const cells = {
             "__select": <div className="td"/>,
             "Year": <div className="td"/>,
             "Project": (
-              <div className="td" style={{ fontWeight: 600 }}>
-                {label}
+              <div className="td bxt-totalrow-label">
+                <span className="bxt-totalrow-name bxt-truncate">{label}</span>
+                <span className="bxt-totalrow-count">
+                  <span className="num">{r._count}</span> {countNoun}
+                </span>
               </div>
             ),
             "Role": <div className="td"/>,
             "Client": <div className="td"/>,
             "Contract": (
-              <div className="td mono" style={{ fontWeight: 600 }}>
+              <div className="td mono num bxt-totalrow-money">
                 {fmtMoney(r.amount, false)}
               </div>
             ),
             "MSMM": (
-              <div className="td mono" style={{ fontWeight: 600, color: "var(--accent-ink)" }}>
+              <div className="td mono num bxt-totalrow-money is-accent">
                 {fmtMoney(r.msmm, false)}
               </div>
             ),
             "Subs": (
-              <div className="td mono" style={{ fontWeight: 600 }}>
+              <div className="td mono num bxt-totalrow-money">
                 {fmtMoney(r.subsTotal, false)}
               </div>
             ),
@@ -1164,7 +1617,7 @@ export const PotentialTable = ({
           };
           return (
             <div key={r.id}
-                 className={"trow total-row" + (isGrand ? " grand-total" : "")}
+                 className={"trow total-row bxt-totalrow" + (isGrand ? " grand-total" : "")}
                  data-prob={isGrand ? "all" : String(r._total).toLowerCase()}
                  style={{ gridTemplateColumns: gridCols }}>
               {renderOrderedCells(visibleColumns, cells)}
@@ -1172,20 +1625,21 @@ export const PotentialTable = ({
           );
         }
 
+        const projName = r.name || "this project";
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${projName}`}/>
             </div>
           ),
           "Year": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.year} type="number"
                 onChange={v => updateRow(r.id, { year: v })}/>
             </div>
           ),
           "Project": (
-            <div className="td" style={{ fontWeight: 500 }}>
+            <div className="td bxt-td-identity">
               <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
             </div>
           ),
@@ -1200,74 +1654,96 @@ export const PotentialTable = ({
             <div className="td subtle" style={{ overflow: "hidden" }}>
               <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Contract": (
-            <div className="td mono">
+            <div className="td mono num">
               <EditableCell value={r.amount} type="number"
                 onChange={v => updateRow(r.id, { amount: v })}
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "MSMM": (
-            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+            <div className="td mono num bxt-td-accent">
               <EditableCell value={r.msmm} type="number"
                 onChange={v => updateRow(r.id, { msmm: v })}
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
-                : <span className="empty-cell">—</span>}
+                : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
-            <div className="td mono subtle">
+          "Project Number": (
+            <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
             </div>
           ),
           "Probability": (
             <div className="td">
+              {/* The probability palette (prob-high … prob-orange) is shared
+                  with this table's row stripes, so the chip deliberately
+                  keeps that palette rather than a kit Badge tone — the chip
+                  and the stripe have to read as the same colour. The written
+                  label carries the state on its own. */}
               <EditableCell value={r.probability} type="select" options={probOptions}
                 onChange={v => updateRow(r.id, { probability: v })}
                 render={v => v
-                  ? <span className={`chip ${probChipClass(v)}`}>{v}</span>
-                  : <span className="empty-cell">—</span>}/>
+                  ? (
+                    <span className={`chip ${probChipClass(v)} bxt-chip-trunc`} title={`${v} probability`}>
+                      <span className="chip-dot" aria-hidden="true"/>{v}
+                    </span>
+                  )
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
                 format={v => truncCell(v)}/>
             </div>
           ),
           "Dates & Comments": (
-            <div className="td subtle" style={{ fontSize: 12.5, flexDirection: "column", alignItems: "flex-start", gap: 2, whiteSpace: "normal" }}>
+            <div className="td subtle bxt-td-note bxt-td-stack">
               {r.nextActionDate && (
-                <span className="mono" style={{ fontSize: 11, color: "var(--accent-ink)" }}>
+                <span className="mono num bxt-td-nextaction">
+                  <Icon name="calendarClock" size={11} aria-hidden="true"/>
                   {fmtDate(r.nextActionDate)}
+                  <span className="sr-only"> next action date</span>
                 </span>
               )}
               <EditableCell value={r.dates}
                 onChange={v => updateRow(r.id, { dates: v })}
                 format={v => v
                   ? truncCell(v)
-                  : (!r.nextActionDate ? <span className="empty-cell">—</span> : null)}/>
+                  : (!r.nextActionDate ? <span className="empty-cell">–</span> : null)}/>
             </div>
           ),
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end" }}>
-              <RowActions
-                onForward={() => onForward(r)}
-                onAlert={() => onAlert(r)}
-                forwardTitle="Move → Invoice"
-              />
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
+                <button type="button"
+                        className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                        title="Move to Invoice"
+                        aria-label={`Move ${projName} to Invoice`}
+                        onClick={() => onForward(r)}>
+                  <Icon name="forward" size={14}/>
+                </button>
+                <button type="button"
+                        className="row-btn bxt-rowbtn bxt-rowbtn-alert"
+                        title="Set alert"
+                        aria-label={`Set an alert on ${projName}`}
+                        onClick={() => onAlert(r)}>
+                  <Icon name="bell" size={14}/>
+                </button>
+              </div>
             </div>
           ),
         };
@@ -1300,14 +1776,14 @@ const injectOrgHeaders = (unitLabel = "row") => (sortedRows) => {
   if (!sortedRows || sortedRows.length === 0) return sortedRows;
   const counts = {};
   for (const r of sortedRows) {
-    const o = companyById(r.clientId)?.orgType || "—";
+    const o = companyById(r.clientId)?.orgType || "–";
     counts[o] = (counts[o] || 0) + 1;
   }
   const plural = (n) => n === 1 ? unitLabel : (unitLabel + "s");
   const out = [];
   let lastOrg;
   for (const r of sortedRows) {
-    const o = companyById(r.clientId)?.orgType || "—";
+    const o = companyById(r.clientId)?.orgType || "–";
     if (o !== lastOrg) {
       out.push({
         id: `_orgheader_${o}`,
@@ -1363,19 +1839,29 @@ export const AwaitingTable = ({
     { label: "Client", w: "minmax(160px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Org Type", w: "110px", sortKey: "orgType", defaultHidden: true,
+      hint: "The client's organisation type, which also groups the rows",
       sortValue: r => orgRank(r.clientId) },
-    { label: "Role", w: "100px", sortKey: "role" },
-    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
-    { label: "Anticipated Result", w: "140px", sortKey: "anticipatedResultDate" },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
-    { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining" },
-    { label: "PM", w: "140px", sortKey: "pm",
+    { label: "Role", w: "100px", sortKey: "role",
+      hint: "Whether MSMM is the Prime or a Sub on this proposal" },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted",
+      hint: "Date the proposal went to the client, and how long it has waited since" },
+    { label: "Anticipated Result", w: "140px", sortKey: "anticipatedResultDate",
+      hint: "Date a verdict is expected" },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract",
+      hint: "The client's own contract number" },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract",
+      hint: "MSMM's internal contract number" },
+    { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining",
+      hint: "MSMM contract value not yet used" },
+    { label: "Project Manager", w: "170px", sortKey: "pm",
+      hint: "The MSMM people managing this proposal",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "110px", sortKey: "projectNumber" },
-    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
+    { label: "Project Number", w: "150px", sortKey: "projectNumber" },
+    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true,
+      hint: "Subconsultants on this proposal" },
     { label: "Status", w: "150px", sortKey: "status", defaultHidden: true },
-    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed", defaultHidden: true },
+    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed", defaultHidden: true,
+      hint: "MSMM contract value used to date" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "__actions", w: "140px", locked: true },
   ];
@@ -1388,6 +1874,7 @@ export const AwaitingTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
@@ -1397,49 +1884,48 @@ export const AwaitingTable = ({
       emptyHint="Submitted proposals live here until awarded or closed out."
       emptyIcon="clock"
       renderRow={(r, _i, gridCols, visibleColumns) => {
-        if (r._orgHeader) {
-          const raw = r._orgHeader;
-          const orgKey = raw === "—" ? "unknown" : raw.toLowerCase();
-          return (
-            <div key={r.id} className="trow org-header"
-                 data-org={orgKey}
-                 style={{ gridTemplateColumns: gridCols }}>
-              <div className="td" style={{ color: "var(--text)" }}>
-                Org Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._unit}
-              </div>
-            </div>
-          );
-        }
+        if (r._orgHeader) return renderOrgHeaderRow(r, gridCols, visibleColumns.length);
+
+        const proposalName = r.name || "this proposal";
+        // Age since submission. Presentation only: it never reorders or
+        // filters, it just gives the "Over 30 days" chip a row-level read.
+        const age = submissionAge(r.dateSubmitted);
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${proposalName}`}/>
             </div>
           ),
           "Year": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.year} type="number"
                 onChange={v => updateRow(r.id, { year: v })}/>
             </div>
           ),
           "Project": (
-            <div className="td" style={{ fontWeight: 500 }}>
+            <div className="td bxt-td-identity bxt-td-titleline">
               <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
-              {r.projectNumber && <span className="chip muted" style={{ marginLeft: 8, fontSize: 11 }}>{r.projectNumber}</span>}
+              {r.projectNumber && (
+                <Badge tone="outline" size="sm" className="num bxt-projno" title={`Project number ${r.projectNumber}`}>
+                  {r.projectNumber}
+                </Badge>
+              )}
             </div>
           ),
           "Client": (
             <div className="td subtle">
               <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Org Type": (
             <div className="td subtle">
               {(() => {
                 const o = companyById(r.clientId)?.orgType;
-                return o ? <span className="chip muted">{o}</span> : <span className="empty-cell">—</span>;
+                return o
+                  ? <Badge tone="neutral" className="max-w-full"><span className="min-w-0 truncate">{o}</span></Badge>
+                  : <span className="empty-cell">–</span>;
               })()}
             </div>
           ),
@@ -1451,88 +1937,116 @@ export const AwaitingTable = ({
             </div>
           ),
           "Submitted": (
-            <div className="td mono subtle">
+            <div className="td mono bxt-td-age" data-age={age?.tone}>
               <EditableCell value={r.dateSubmitted} type="date"
                 onChange={v => updateRow(r.id, { dateSubmitted: v })}
-                format={v => fmtDate(v)}/>
+                format={v => v
+                  ? renderDateFlag(fmtDate(v), age)
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Anticipated Result": (
-            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+            <div className="td mono num bxt-td-accent">
               <EditableCell value={r.anticipatedResultDate} type="date"
                 onChange={v => updateRow(r.id, { anticipatedResultDate: v })}
                 format={v => fmtDate(v)}/>
             </div>
           ),
           "Client Contract": (
-            <div className="td mono" style={{ fontSize: 12 }}>
+            <div className="td mono num bxt-td-ref">
               <EditableCell value={r.clientContract}
                 onChange={v => updateRow(r.id, { clientContract: v })}/>
             </div>
           ),
           "MSMM Contract": (
-            <div className="td mono" style={{ fontSize: 12 }}>
+            <div className="td mono num bxt-td-ref">
               <EditableCell value={r.msmmContract}
                 onChange={v => updateRow(r.id, { msmmContract: v })}/>
             </div>
           ),
           "MSMM Remaining": (
-            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+            <div className="td mono num bxt-td-accent">
               <EditableCell value={r.msmmRemaining} type="number"
                 onChange={v => updateRow(r.id, { msmmRemaining: v })}
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
-                : <span className="empty-cell">—</span>}
+                : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
-            <div className="td mono subtle">
+          "Project Number": (
+            <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
             </div>
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
-          "Status": <div className="td"><span className="chip accent">Proposal</span></div>,
+          "Status": <div className="td"><StatusChip status="Proposal"/></div>,
           "MSMM Used": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.msmmUsed} type="number"
                 onChange={v => updateRow(r.id, { msmmUsed: v })}
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
                 format={v => truncCell(v)}/>
             </div>
           ),
+          // The two verdict actions (award, close out) are the whole point
+          // of this table, so they stay exposed and tone-coded; alerting and
+          // deleting are housekeeping and move into the row menu.
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end", gap: 4 }}>
-              <div className="row-actions" onClick={e => e.stopPropagation()}>
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
                 {deletedMode ? (
-                  <button className="row-btn forward" title="Restore this proposal" onClick={() => onRestore?.(r)}>
+                  <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                          title="Restore this proposal"
+                          aria-label={`Restore ${proposalName}`}
+                          onClick={() => onRestore?.(r)}>
                     <Icon name="undo" size={14}/>
                   </button>
                 ) : (
                   <>
-                    <button className="row-btn forward" title="Award → move to Awarded" onClick={() => onForward(r, "Awarded")}>
+                    <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                            title="Award, moves to Awarded"
+                            aria-label={`Award ${proposalName}, moves it to Awarded`}
+                            onClick={() => onForward(r, "Awarded")}>
                       <Icon name="check" size={14}/>
                     </button>
-                    <button className="row-btn" title="Close Out" onClick={() => onCloseOut(r)} style={{ color: "var(--rose)" }}>
-                      <Icon name="x" size={14}/>
+                    <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-verdict"
+                            title="Close out"
+                            aria-label={`Close out ${proposalName}`}
+                            onClick={() => onCloseOut(r)}>
+                      <Icon name="ban" size={14}/>
                     </button>
-                    <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
-                      <Icon name="bell" size={14}/>
-                    </button>
-                    <button className="row-btn" title="Delete" onClick={() => onSoftDelete?.(r)} style={{ color: "var(--rose)" }}>
-                      <Icon name="trash" size={14}/>
-                    </button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" className="row-btn bxt-rowbtn"
+                                title="More actions"
+                                aria-label={`More actions for ${proposalName}`}>
+                          <Icon name="more" size={14}/>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bxt-menu">
+                        <DropdownMenuItem onSelect={() => onAlert(r)}>
+                          <Icon name="bell" size={13}/>
+                          <span className="bxt-menu-text">Set alert</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator/>
+                        <DropdownMenuItem destructive onSelect={() => onSoftDelete?.(r)}>
+                          <Icon name="trash" size={13}/>
+                          <span className="bxt-menu-text">Delete proposal</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </>
                 )}
               </div>
@@ -1580,29 +2094,48 @@ export const AwardedTable = ({
       sortValue: r => companyById(r.clientId)?.name || "" },
     { label: "Prime", w: "minmax(150px, 1.2fr)", sortKey: "primeName",
       sortValue: r => companyById(r.primeId)?.name || "" },
-    { label: "Subs", w: "minmax(180px, 1.5fr)" },
-    { label: "Role", w: "100px", sortKey: "role" },
+    { label: "Subs", w: "minmax(180px, 1.5fr)",
+      hint: "Subconsultants on this project" },
+    { label: "Role", w: "100px", sortKey: "role",
+      hint: "Whether MSMM is the Prime or a Sub on this project" },
     { label: "Status", w: "120px", sortKey: "status" },
-    { label: "Stage", w: "150px", sortKey: "stage" },
+    { label: "Stage", w: "150px", sortKey: "stage",
+      hint: "Where the work has reached, from contract type through design to closeout" },
     { label: "Details", w: "minmax(200px, 1.5fr)", sortKey: "details" },
-    { label: "Pool", w: "130px", sortKey: "pools" },
-    { label: "Submitted", w: "120px", sortKey: "dateSubmitted" },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract" },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract" },
-    { label: "Expiry", w: "110px", sortKey: "contractExpiry" },
+    { label: "Pool", w: "130px", sortKey: "pools",
+      hint: "Contract pools this project draws from" },
+    { label: "Submitted", w: "120px", sortKey: "dateSubmitted",
+      hint: "Date the proposal went to the client" },
+    { label: "Client Contract", w: "150px", sortKey: "clientContract",
+      hint: "The client's own contract number" },
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract",
+      hint: "MSMM's internal contract number" },
+    { label: "Expiry", w: "110px", sortKey: "contractExpiry",
+      hint: "Contract expiry date, and the runway left before it" },
     { label: "Contract", w: "120px", sortKey: "contract",
+      hint: "Total MSMM contract value: used plus remaining",
       sortValue: r => (r.msmmUsed || 0) + (r.msmmRemaining || 0) },
-    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed" },
-    { label: "Remaining", w: "120px", sortKey: "msmmRemaining" },
+    { label: "MSMM Used", w: "120px", sortKey: "msmmUsed",
+      hint: "MSMM contract value used to date" },
+    { label: "Remaining", w: "120px", sortKey: "msmmRemaining",
+      hint: "MSMM contract value not yet used" },
     { label: "Org Type", w: "110px", sortKey: "orgType",
+      hint: "The client's organisation type, which also groups the rows",
       sortValue: r => orgRank(r.clientId) },
-    { label: "PM", w: "130px", sortKey: "pm",
+    { label: "Project Manager", w: "170px", sortKey: "pm",
+      hint: "The MSMM people managing this project",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "minmax(170px, 1.2fr)", sortKey: "projectNumber",
+    { label: "Project Number", w: "minmax(170px, 1.2fr)", sortKey: "projectNumber",
+      hint: "MSMM project number, and any invoice projects linked to it",
       sortValue: r => (r.invoiceLinks || [])[0] || r.projectNumber || "" },
-    { label: "__actions", w: "90px", locked: true },
+    // 100px to match Leads & Bids: this skin pads cells to 16px a side, and
+    // the now-visible "Actions" header needs about 51px of that.
+    { label: "__actions", w: "100px", locked: true },
   ];
   const stageColor = s => s?.includes("Construction") ? "sage" : s?.includes("60") ? "accent" : s?.includes("Draft") ? "blue" : "muted";
+  // Bridge from the historic chip palette names above onto the kit's Badge
+  // tones. The mapping is a rename only; stageColor() is untouched.
+  const stageTone = { sage: "success", accent: "brand", blue: "info", muted: "neutral" };
 
   const { clientOptions, clientOrFirmOpts, userOptions, roleOptions, stageOptions } = buildOptions();
 
@@ -1612,6 +2145,7 @@ export const AwardedTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
@@ -1621,60 +2155,58 @@ export const AwardedTable = ({
       emptyHint="When an awaiting project is awarded, it moves here for tracking."
       emptyIcon="check"
       renderRow={(r, _i, gridCols, visibleColumns) => {
-        if (r._orgHeader) {
-          const raw = r._orgHeader;
-          const orgKey = raw === "—" ? "unknown" : raw.toLowerCase();
-          return (
-            <div key={r.id} className="trow org-header"
-                 data-org={orgKey}
-                 style={{ gridTemplateColumns: gridCols }}>
-              <div className="td" style={{ color: "var(--text)" }}>
-                Org Type : {raw === "—" ? "(unassigned)" : raw} · {r._count} {r._unit}
-              </div>
-            </div>
-          );
-        }
+        if (r._orgHeader) return renderOrgHeaderRow(r, gridCols, visibleColumns.length);
+
         const total = (r.msmmUsed || 0) + (r.msmmRemaining || 0);
-        const pct = total ? Math.round(((r.msmmUsed || 0) / total) * 100) : 0;
+        // Presentation of the same two numbers the Contract column already
+        // sums: what share of the awarded capacity is still unspent, and
+        // whether that share is under the 20% the "Low remaining" chip uses.
+        const cap = capacityState(r.msmmUsed, r.msmmRemaining);
+        const expiry = expiryRunway(r.contractExpiry);
+        const projName = r.name || "this project";
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${projName}`}/>
             </div>
           ),
           "Year": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.year} type="number"
                 onChange={v => updateRow(r.id, { year: v })}/>
             </div>
           ),
           "Project": (
-            <div className="td" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2, whiteSpace: "normal" }}>
-              <span style={{ fontWeight: 500, width: "100%" }}>
+            <div className="td bxt-td-stack bxt-td-identity">
+              <span className="bxt-td-fullwidth">
                 <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
               </span>
-              <span className="mono" style={{ fontSize: 11, color: "var(--text-soft)" }}>{r.projectNumber}</span>
+              {r.projectNumber
+                ? <span className="mono num bxt-td-sub">{r.projectNumber}</span>
+                : null}
             </div>
           ),
           "Client": (
             <div className="td subtle">
               <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Prime": (
             <div className="td subtle">
               <EditableCell value={r.primeId} type="combobox" options={clientOrFirmOpts}
                 onChange={v => updateRow(r.id, { primeId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Org Type": (
             <div className="td subtle">
               {(() => {
                 const o = companyById(r.clientId)?.orgType;
-                return o ? <span className="chip muted">{o}</span> : <span className="empty-cell">—</span>;
+                return o
+                  ? <Badge tone="neutral" className="max-w-full"><span className="min-w-0 truncate">{o}</span></Badge>
+                  : <span className="empty-cell">–</span>;
               })()}
             </div>
           ),
@@ -1683,51 +2215,74 @@ export const AwardedTable = ({
               <EditableCell value={r.stage} type="select" options={stageOptions}
                 onChange={v => updateRow(r.id, { stage: v })}
                 render={v => v
-                  ? <span className={`chip ${stageColor(v)}`}>{v}</span>
-                  : <span className="empty-cell">—</span>}/>
+                  ? (
+                    <Badge tone={stageTone[stageColor(v)] || "neutral"} dot className="max-w-full" title={v}>
+                      <span className="min-w-0 truncate">{v}</span>
+                    </Badge>
+                  )
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Pool": (
-            <div className="td subtle" style={{ fontSize: 12 }}>
+            <div className="td subtle bxt-td-ref">
               <EditableCell value={r.pools}
                 onChange={v => updateRow(r.id, { pools: v })}/>
             </div>
           ),
-          "Contract": <div className="td mono">{fmtMoney(total || null, false)}</div>,
+          "Contract": <div className="td mono num">{fmtMoney(total || null, false)}</div>,
           "MSMM Used": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.msmmUsed} type="number"
                 onChange={v => updateRow(r.id, { msmmUsed: v })}
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
+          // Remaining capacity: the money, then the same figure as a share
+          // of the contract in words AND as a bar. The bar is never the only
+          // reading, and "Low" is spelled out when the share drops under 20%.
           "Remaining": (
-            <div className="td mono" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
-              <span style={{ color: "var(--accent-ink)", width: "100%" }}>
+            <div className="td mono bxt-cap" data-capacity={cap ? (cap.low ? "low" : "ok") : undefined}>
+              <span className="bxt-cap-money num bxt-td-fullwidth">
                 <EditableCell value={r.msmmRemaining} type="number"
                   onChange={v => updateRow(r.id, { msmmRemaining: v })}
                   format={v => fmtMoney(v, false)}/>
               </span>
-              <div style={{ width: "100%", height: 3, background: "var(--surface-2)", borderRadius: 2 }}>
-                <div style={{ width: pct + "%", height: "100%", background: "var(--accent)", borderRadius: 2 }}/>
-              </div>
+              {cap ? (
+                <div className="bxt-cap-meter" title={cap.text}>
+                  <Progress
+                    className="bxt-cap-bar"
+                    value={cap.pct}
+                    tone={cap.low ? "danger" : "brand"}
+                    aria-label={`Contract capacity remaining for ${projName}`}
+                  />
+                  <span className="bxt-cap-fig">
+                    <span className="num">{cap.pct}%</span>
+                    <span className="sr-only"> {cap.text}</span>
+                  </span>
+                  {cap.low && <span className="bxt-cap-flag">Low</span>}
+                </div>
+              ) : (
+                <span className="bxt-cap-none">No capacity recorded</span>
+              )}
             </div>
           ),
           "Expiry": (
-            <div className="td mono subtle">
+            <div className="td mono bxt-td-expiry" data-expiry={expiry?.tone}>
               <EditableCell value={r.contractExpiry} type="date"
                 onChange={v => updateRow(r.id, { contractExpiry: v })}
-                format={v => fmtDate(v)}/>
+                format={v => v
+                  ? renderDateFlag(fmtDate(v), expiry)
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
-                : <span className="empty-cell">—</span>}
+                : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
+          "Project Number": (
             // Linked invoice projects, keyed on project number. Chips open
             // the live project card; "+" links more. The awarded row's own
             // project_number text stays editable from the drawer.
@@ -1748,58 +2303,83 @@ export const AwardedTable = ({
             </div>
           ),
           "Subs": (
-            <div className="td" style={{ overflow: "visible", whiteSpace: "normal", flexWrap: "wrap", padding: "6px 12px" }}>
-              <SubsCell subs={r.subs} wrap/>
+            // No `wrap`, and capped at two. This was the only table in the app
+            // that let sub chips flow onto extra lines, and because .td sizes
+            // on min-height the row grew to match — so one project with six
+            // subs stood several rows tall next to its single-line neighbours.
+            // Every other table already shows subs on one line; this brings
+            // Awarded in line and adds a "+N" so the count is not lost.
+            <div className="td bxt-td-subs">
+              <SubsCell subs={r.subs} max={2}/>
             </div>
           ),
           "Submitted": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.dateSubmitted} type="date"
                 onChange={v => updateRow(r.id, { dateSubmitted: v })}
                 format={v => fmtDate(v)}/>
             </div>
           ),
           "Client Contract": (
-            <div className="td mono" style={{ fontSize: 12 }}>
+            <div className="td mono num bxt-td-ref">
               <EditableCell value={r.clientContract}
                 onChange={v => updateRow(r.id, { clientContract: v })}/>
             </div>
           ),
           "MSMM Contract": (
-            <div className="td mono" style={{ fontSize: 12 }}>
+            <div className="td mono num bxt-td-ref">
               <EditableCell value={r.msmmContract}
                 onChange={v => updateRow(r.id, { msmmContract: v })}/>
             </div>
           ),
-          "Status": <div className="td"><span className="chip sage">Awarded</span></div>,
+          "Status": <div className="td"><StatusChip status="Awarded"/></div>,
           "Details": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.details} type="textarea"
                 onChange={v => updateRow(r.id, { details: v })}
                 format={v => truncCell(v, 100)}/>
             </div>
           ),
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end" }}>
-              <div className="row-actions" onClick={e => e.stopPropagation()}>
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
                 {deletedMode ? (
-                  <button className="row-btn forward" title="Restore this project" onClick={() => onRestore?.(r)}>
+                  <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                          title="Restore this project"
+                          aria-label={`Restore ${projName}`}
+                          onClick={() => onRestore?.(r)}>
                     <Icon name="undo" size={14}/>
                   </button>
                 ) : (
                   <>
                     {onForward && (
-                      <button className="row-btn forward" title="Move → Invoice"
+                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                              title="Move to Invoice"
+                              aria-label={`Move ${projName} to Invoice`}
                               onClick={() => onForward(r)}>
                         <Icon name="forward" size={14}/>
                       </button>
                     )}
-                    <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
-                      <Icon name="bell" size={14}/>
-                    </button>
-                    <button className="row-btn" title="Delete" onClick={() => onSoftDelete?.(r)} style={{ color: "var(--rose)" }}>
-                      <Icon name="trash" size={14}/>
-                    </button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" className="row-btn bxt-rowbtn"
+                                title="More actions"
+                                aria-label={`More actions for ${projName}`}>
+                          <Icon name="more" size={14}/>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bxt-menu">
+                        <DropdownMenuItem onSelect={() => onAlert(r)}>
+                          <Icon name="bell" size={13}/>
+                          <span className="bxt-menu-text">Set alert</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator/>
+                        <DropdownMenuItem destructive onSelect={() => onSoftDelete?.(r)}>
+                          <Icon name="trash" size={13}/>
+                          <span className="bxt-menu-text">Delete project</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </>
                 )}
               </div>
@@ -1860,67 +2440,92 @@ export const ClosedTable = ({
       emptyHint="Rows appear here when a Proposal or Invoice project is closed out."
       emptyIcon="x"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        const projName = r.name || "this project";
+        // Mirrors the "Losses only" chip so a lost or descoped closure is
+        // labelled in words instead of having to be read out of free text.
+        const isLoss = LOSS_REASON_RE.test(r.reason || "");
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${projName}`}/>
             </div>
           ),
           "Year": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.year} type="number"
                 onChange={v => updateRow(r.id, { year: v })}/>
             </div>
           ),
           "Project": (
-            <div className="td" style={{ fontWeight: 500 }}>
+            <div className="td bxt-td-identity bxt-td-titleline">
               <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
-              {r.projectNumber && <span className="chip muted" style={{ marginLeft: 8, fontSize: 11 }}>{r.projectNumber}</span>}
+              {r.projectNumber && (
+                <Badge tone="outline" size="sm" className="num bxt-projno" title={`Project number ${r.projectNumber}`}>
+                  {r.projectNumber}
+                </Badge>
+              )}
             </div>
           ),
           "Client": (
             <div className="td subtle">
               <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Submitted": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.dateSubmitted} type="date"
                 onChange={v => updateRow(r.id, { dateSubmitted: v })}
                 format={v => fmtDate(v)}/>
             </div>
           ),
+          // The closing date is the fact that puts the row in this archive,
+          // so unlike every other date here it keeps full-strength text
+          // while the rest of the row sits back.
           "Closed": (
-            <div className="td mono">
+            <div className="td mono num bxt-td-closed">
               <EditableCell value={r.dateClosed} type="date"
                 onChange={v => updateRow(r.id, { dateClosed: v })}
-                format={v => fmtDate(v)}/>
+                format={v => v
+                  ? (
+                    <span className="bxt-closedon num" title={`Closed out ${fmtDate(v)}`}>
+                      {fmtDate(v)}
+                    </span>
+                  )
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Contract": (
-            <div className="td mono subtle">
+            <div className="td mono num subtle">
               <EditableCell value={r.amount} type="number"
                 onChange={v => updateRow(r.id, { amount: v })}
                 format={v => fmtMoney(v, false)}/>
             </div>
           ),
           "Reason": (
-            <div className="td subtle" style={{ whiteSpace: "normal", fontSize: 12.5 }}>
+            <div className="td bxt-td-reason">
               <EditableCell value={r.reason} type="textarea"
-                onChange={v => updateRow(r.id, { reason: v })}/>
+                onChange={v => updateRow(r.id, { reason: v })}
+                format={v => v
+                  ? (
+                    <span className="bxt-reason" title={String(v)}>
+                      {isLoss && <Badge tone="danger" size="sm" className="bxt-reason-tag">Loss</Badge>}
+                      <span className="bxt-reason-text">{v}</span>
+                    </span>
+                  )
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
-          "PM": (
+          "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
-                : <span className="empty-cell">—</span>}
+                : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Proj #": (
-            <div className="td mono subtle">
+          "Project Number": (
+            <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
             </div>
@@ -1934,29 +2539,32 @@ export const ClosedTable = ({
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
           "Client Contract": (
-            <div className="td mono" style={{ fontSize: 12 }}>
+            <div className="td mono num bxt-td-ref">
               <EditableCell value={r.clientContract}
                 onChange={v => updateRow(r.id, { clientContract: v })}/>
             </div>
           ),
           "MSMM Contract": (
-            <div className="td mono" style={{ fontSize: 12 }}>
+            <div className="td mono num bxt-td-ref">
               <EditableCell value={r.msmmContract}
                 onChange={v => updateRow(r.id, { msmmContract: v })}/>
             </div>
           ),
           "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
                 format={v => truncCell(v)}/>
             </div>
           ),
-          "Status": <div className="td"><span className="chip rose">Closed Out</span></div>,
+          "Status": <div className="td"><StatusChip status="Closed Out"/></div>,
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end" }}>
-              <div className="row-actions" onClick={e => e.stopPropagation()}>
-                <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
+                <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-alert"
+                        title="Set alert"
+                        aria-label={`Set an alert on ${projName}`}
+                        onClick={() => onAlert(r)}>
                   <Icon name="bell" size={14}/>
                 </button>
               </div>
@@ -1964,7 +2572,12 @@ export const ClosedTable = ({
           ),
         };
         return (
-          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+          // `data-archived` is what makes this table read as an archive
+          // rather than a grey copy of the live ones: a clay edge rule and a
+          // recessed wash, both drawn from the closed-out semantic tokens.
+          <div key={r.id} className={"trow bxt-closedrow" + (flashId === r.id ? " flash" : "")}
+               data-archived="true"
+               data-loss={isLoss ? "true" : undefined}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
             {renderOrderedCells(visibleColumns, cells)}
@@ -4460,12 +5073,33 @@ export const EventsTable = ({
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating", w: "150px", sortKey: "stars",
       sortValue: r => starsRank(r.stars) },
-    { label: "__actions", w: "80px", locked: true },
+    { label: "__actions", w: "96px", locked: true },
   ];
+
+  // Status vocabulary, shared verbatim with the Calendar view
+  // (STATUS_META in events-calendar.jsx): same word, same glyph, same
+  // semantic tone, so the two views of the same page never disagree about
+  // what state a row is in. Tones follow design/README §2 — steel for a
+  // booked/in-between date, brand for something still scheduled, neutral
+  // once it has happened, clay for an Outlook cancellation.
+  const STATUS_META = {
+    "Booked":    { icon: "calendarClock", tone: "info" },
+    "Scheduled": { icon: "clock",         tone: "brand" },
+    "Happened":  { icon: "checkCircle",   tone: "neutral" },
+  };
+  const CANCELLED_META = { icon: "ban", tone: "danger" };
+
+  // Event type is a category, not a state, so it carries the same tone the
+  // Calendar paints its tiles with (TYPE_TONE in events-calendar.jsx),
+  // translated into the kit's Badge tone names. The word is always printed
+  // next to the swatch, so the category never rests on colour.
   const typeColor = t => ({
     "Partner": "accent", "AI": "sage", "Project": "blue", "Meetings": "muted",
     "Board Meetings": "blue", "Event": "rose"
   }[t] || "muted");
+  const TYPE_BADGE_TONE = {
+    accent: "brand", sage: "success", blue: "info", rose: "danger", muted: "neutral",
+  };
 
   const { eventTypeOptions } = buildOptions();
 
@@ -4481,17 +5115,19 @@ export const EventsTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No events logged yet"
-      emptyHint="Track partner touchpoints, conferences, and meetings here."
+      emptyHint="Add an event, or run an Outlook sync, and partner touchpoints, conferences and meetings show up here."
       emptyIcon="calendar"
       renderRow={(r, _i, gridCols, visibleColumns) => {
+        const eventName = r.title || "this event";
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${eventName}`}/>
             </div>
           ),
           "Status": (() => {
@@ -4500,17 +5136,25 @@ export const EventsTable = ({
             // useNowTick re-render. Tooltip explains the source of truth
             // so an admin scanning the list isn't surprised that the chip
             // doesn't match what they may have stored in the DB.
-            const derived = derivedEventStatus(r, now);
+            const derived   = derivedEventStatus(r, now);
+            const cancelled = !!r.outlookIsCancelled;
+            const meta  = cancelled ? CANCELLED_META : (STATUS_META[derived] || STATUS_META["Booked"]);
+            const label = cancelled ? "Cancelled" : derived;
             const stale   = r.status && r.status !== derived;
             const refISO  = r.outlookEndDateTime || r.dateTime || r.date;
-            const tip = refISO
-              ? `Auto: ${derived} — ${derived === "Happened" ? "event already passed" : "event still upcoming"}` +
-                (r.outlookEndDateTime ? ` (ends ${fmtDateTime(r.outlookEndDateTime)})` : "") +
-                (stale ? ` · stored as "${r.status}"` : "")
-              : `${derived} · no datetime recorded`;
+            const tip = cancelled
+              ? "Cancelled in Outlook"
+              : refISO
+                ? `Auto: ${derived}, ${derived === "Happened" ? "event already passed" : "event still upcoming"}` +
+                  (r.outlookEndDateTime ? ` (ends ${fmtDateTime(r.outlookEndDateTime)})` : "") +
+                  (stale ? ` · stored as "${r.status}"` : "")
+                : `${derived} · no datetime recorded`;
             return (
-              <div className="td" title={tip}>
-                <StatusChip status={derived}/>
+              <div className="td bxt-td-status" title={tip}>
+                <Badge tone={meta.tone} className="max-w-full">
+                  <Icon name={meta.icon} size={12} aria-hidden="true"/>
+                  <span className="min-w-0 truncate">{label}</span>
+                </Badge>
               </div>
             );
           })(),
@@ -4519,12 +5163,16 @@ export const EventsTable = ({
               <EditableCell value={r.type} type="select" options={eventTypeOptions}
                 onChange={v => updateRow(r.id, { type: v })}
                 render={v => v
-                  ? <span className={`chip ${typeColor(v)}`}>{v}</span>
-                  : <span className="empty-cell">—</span>}/>
+                  ? (
+                    <Badge tone={TYPE_BADGE_TONE[typeColor(v)] || "neutral"} dot className="max-w-full" title={v}>
+                      <span className="min-w-0 truncate">{v}</span>
+                    </Badge>
+                  )
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Title": (
-            <div className="td" style={{ fontWeight: 500 }}>
+            <div className="td bxt-td-identity">
               {r.source === "outlook" ? (
                 <span className="td-readonly" title={r.outlookWebLink ? "Synced from Outlook · Edit in Outlook" : "Synced from Outlook"}>
                   <span className="src-mark"><Icon name="link" size={9} stroke={2}/></span>
@@ -4550,19 +5198,24 @@ export const EventsTable = ({
             // 3 days" instead of just "Jun 4". Inline edit still applies
             // to start datetime only; end is Outlook-managed.
             const range = fmtEventRange(r);
-            const display = (
-              <span className="event-range">
-                <span className="event-range-primary">{range.primary}</span>
+            // fmtEventRange returns an em dash when nothing is recorded;
+            // the table's placeholder for an empty cell is an en dash.
+            const hasWhen = range.primary && range.primary !== "—";
+            const display = hasWhen ? (
+              <span className="bxt-when">
+                <span className="bxt-when-primary num">{range.primary}</span>
                 {range.secondary && (
-                  <span className="event-range-secondary">{range.secondary}</span>
+                  <span className="bxt-when-secondary num">{range.secondary}</span>
                 )}
                 {range.isMultiDay && (
-                  <span className="event-range-badge" title="Spans multiple days">multi-day</span>
+                  <Badge tone="outline" size="sm" className="mt-px w-fit">Multi-day</Badge>
                 )}
               </span>
+            ) : (
+              <span className="empty-cell">–</span>
             );
             return (
-              <div className="td mono subtle">
+              <div className="td bxt-td-when">
                 {r.source === "outlook" ? (
                   <span className="td-readonly-text">{display}</span>
                 ) : (
@@ -4575,17 +5228,25 @@ export const EventsTable = ({
           })(),
           "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,
           "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
                 format={v => truncCell(v)}/>
             </div>
           ),
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end" }}>
-              <div className="row-actions" onClick={e => e.stopPropagation()}>
-                <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions bxt-actions-persist"
+                   onClick={e => e.stopPropagation()}>
+                <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-alert"
+                        title="Set alert" aria-label={`Set an alert for ${eventName}`}
+                        onClick={() => onAlert(r)}>
                   <Icon name="bell" size={14}/>
+                </button>
+                <button type="button" className="row-btn bxt-rowbtn"
+                        title="Open details" aria-label={`Open details for ${eventName}`}
+                        onClick={() => onOpenDrawer(r)}>
+                  <Icon name="maximize" size={14}/>
                 </button>
               </div>
             </div>
@@ -4632,54 +5293,66 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
   const eng     = upcoming.filter(r => r.type === "Engineering");
   const untyped = upcoming.filter(r => !r.type).length;
 
-  const renderColumn = (label, tone, items) => (
-    <section className="hl-quick-col" aria-label={`${label} upcoming hot leads`}>
-      <header className="hl-quick-col-head">
-        <div className="hl-quick-col-label">
-          <span className={`hl-quick-col-dot tone-${tone}`} aria-hidden/>
+  // Leads of a type that carry no date at all. An empty column means "nothing
+  // on the calendar ahead" — NOT "no leads of this type" — so the empty state
+  // reports these to keep the two readings apart. Counted off `rows` (every
+  // hot lead), not `upcoming` (which is date-filtered by definition).
+  const undatedOf = (type) => (rows || []).filter(r => r.type === type && !r.dateTime).length;
+
+  const renderColumn = (label, tone, items, undated) => (
+    <section className="hlq-col" data-tone={tone} aria-label={`${label} upcoming hot leads`}>
+      <header className="hlq-col-head">
+        <h3 className="hlq-col-title">
+          <span className="hlq-col-dot" aria-hidden="true"/>
           {label}
-        </div>
-        <span className="hl-quick-col-count">
-          {items.length === 0
-            ? "Nothing upcoming"
-            : `${items.length} upcoming`}
+        </h3>
+        <span className="hlq-col-count">
+          <span className="num">{items.length}</span> upcoming
         </span>
       </header>
       {items.length === 0 ? (
-        <div className="hl-quick-empty">
-          <Icon name="trend" size={14}/>
-          <span>No {label.toLowerCase()} leads scheduled.</span>
-        </div>
+        <p className="hlq-empty">
+          <Icon name="calendar" size={14}/>
+          <span>
+            No {label} leads on the calendar
+            {undated > 0
+              ? <> — <span className="num">{undated}</span> {undated === 1 ? "lead" : "leads"} worth following up.</>
+              : "."}
+          </span>
+        </p>
       ) : (
-        <ol className="hl-quick-list">
+        <ol className="hlq-list">
           {items.slice(0, CAP).map(r => {
             const company = companyById(r.clientId);
             return (
               <li key={r.id}>
-                <button type="button" className="hl-quick-card" data-tone={tone}
+                <button type="button" className="hlq-card"
                         onClick={() => onOpenDrawer?.(r)}>
-                  <div className="hl-quick-card-when">
-                    <span className="hl-quick-card-date">{fmtQuickDate(r.dateTime)}</span>
-                    <span className="hl-quick-card-time">{fmtQuickTime(r.dateTime)}</span>
-                  </div>
-                  <div className="hl-quick-card-body">
-                    <div className="hl-quick-card-title">{r.title || "Untitled lead"}</div>
+                  <span className="hlq-card-when">
+                    <span className="hlq-card-date num">{fmtQuickDate(r.dateTime)}</span>
+                    <span className="hlq-card-time num">{fmtQuickTime(r.dateTime)}</span>
+                  </span>
+                  <span className="hlq-card-body">
+                    <span className="hlq-card-title">{r.title || "Untitled lead"}</span>
                     {company && (
-                      <div className="hl-quick-card-client">{company.name}</div>
+                      <span className="hlq-card-client">{company.name}</span>
                     )}
-                  </div>
+                  </span>
                   {r.stars > 0 && (
-                    <div className="hl-quick-card-stars" aria-label={starLabel(r.stars, HOT_LEAD_STAR_MAX)}>
-                      {"★".repeat(r.stars)}
-                    </div>
+                    <span className="hlq-card-stars" data-stars={String(r.stars)}>
+                      <Icon name="star" size={12}/>
+                      <span className="num">{r.stars}</span>
+                      <span className="sr-only">{starLabel(r.stars, HOT_LEAD_STAR_MAX)}</span>
+                    </span>
                   )}
+                  <Icon name="chevronRight" size={14} className="hlq-card-go"/>
                 </button>
               </li>
             );
           })}
           {items.length > CAP && (
-            <li className="hl-quick-more">
-              + {items.length - CAP} more in the table below
+            <li className="hlq-more">
+              {items.length - CAP} more in the table below
             </li>
           )}
         </ol>
@@ -4688,22 +5361,20 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
   );
 
   return (
-    <section className="hl-quick-view" aria-label="Upcoming hot leads quick view">
-      <header className="hl-quick-view-head">
-        <h2 className="hl-quick-view-title">Upcoming hot leads</h2>
-        <span className="hl-quick-view-sub">
-          {upcoming.length === 0
-            ? "Nothing scheduled"
-            : `${upcoming.length} scheduled · split by type`}
-        </span>
+    <section className="hlq" aria-label="Upcoming hot leads quick view">
+      <header className="hlq-head">
+        <h2 className="hlq-title">Upcoming hot leads</h2>
       </header>
-      <div className="hl-quick-view-cols">
-        {renderColumn("AI",          "sage", ai)}
-        {renderColumn("Engineering", "blue", eng)}
+      <div className="hlq-cols">
+        {renderColumn("AI",          "sage", ai,  undatedOf("AI"))}
+        {renderColumn("Engineering", "blue", eng, undatedOf("Engineering"))}
       </div>
       {untyped > 0 && (
-        <p className="hl-quick-untyped-hint">
-          {untyped} upcoming {untyped === 1 ? "lead" : "leads"} {untyped === 1 ? "has" : "have"} no type set · pick one to show {untyped === 1 ? "it" : "them"} here.
+        <p className="hlq-hint">
+          <Icon name="info" size={13}/>
+          <span>
+            {untyped} upcoming {untyped === 1 ? "lead" : "leads"} {untyped === 1 ? "has" : "have"} no type set. Pick one to show {untyped === 1 ? "it" : "them"} here.
+          </span>
         </p>
       )}
     </section>
@@ -4748,7 +5419,9 @@ export const HotLeadsTable = ({
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating",      w: "150px", sortKey: "stars",
       sortValue: r => starsRank(r.stars, HOT_LEAD_STAR_MAX) },
-    { label: "__actions",   w: "80px", locked: true },
+    // 100px, not 80: this skin pads cells to 16px a side, which left the
+    // now-visible "Actions" header 48px to render 51px of text.
+    { label: "__actions",   w: "100px", locked: true },
   ];
 
   // Chip tone per Type. Engineering uses --blue (matches the Project total
@@ -4794,33 +5467,42 @@ export const HotLeadsTable = ({
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       primarySort={primarySort}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No hot leads yet"
-      emptyHint="Log early-stage opportunities here — partner intros, conference chats, warm pre-RFPs."
+      emptyHint="Log early-stage opportunities here: partner intros, conference chats, warm pre-RFPs."
       emptyIcon="trend"
       renderRow={(r, _i, gridCols, visibleColumns) => {
         if (r._starsHeader != null) {
           const isUnrated = r._starsHeader === "Unrated";
-          const label = isUnrated
-            ? `Unrated · ${r._count} ${r._count === 1 ? "lead" : "leads"}`
-            : `${"★".repeat(r._starsHeader)}${"☆".repeat(HOT_LEAD_STAR_MAX - r._starsHeader)} · ${r._count} ${r._count === 1 ? "lead" : "leads"}`;
+          const unit = r._count === 1 ? "lead" : "leads";
           return (
-            <div key={r.id} className="trow stars-header"
+            <div key={r.id} className="trow stars-header bxt-grouphead"
                  data-stars={isUnrated ? "0" : String(r._starsHeader)}
                  style={{ gridTemplateColumns: gridCols }}>
-              <div className="td" style={{ color: "var(--text)" }}>
-                {label}
+              <div className="td bxt-grouphead-cell">
+                {isUnrated ? (
+                  <span className="bxt-grouphead-label">Unrated</span>
+                ) : (
+                  <span className="bxt-grouphead-label">
+                    <StarRating value={r._starsHeader} max={HOT_LEAD_STAR_MAX} size="sm"
+                      title={starLabel(r._starsHeader, HOT_LEAD_STAR_MAX)}/>
+                  </span>
+                )}
+                <span className="bxt-grouphead-count"><span className="num">{r._count}</span> {unit}</span>
               </div>
             </div>
           );
         }
+        const leadWhen = r.dateTime ? new Date(r.dateTime) : null;
+        const leadUpcoming = !!(leadWhen && !Number.isNaN(+leadWhen) && +leadWhen >= Date.now());
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${r.title || "lead"}`}/>
             </div>
           ),
           "Type": (
@@ -4829,11 +5511,11 @@ export const HotLeadsTable = ({
                 onChange={v => updateRow(r.id, { type: v })}
                 render={v => v
                   ? <span className={`chip ${hotLeadTypeColor(v)}`}>{v}</span>
-                  : <span className="empty-cell">—</span>}/>
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Title": (
-            <div className="td" style={{ fontWeight: 500 }}>
+            <div className="td bxt-td-identity">
               <EditableCell value={r.title}
                 onChange={v => updateRow(r.id, { title: v })}/>
             </div>
@@ -4842,7 +5524,7 @@ export const HotLeadsTable = ({
             <div className="td subtle" style={{ overflow: "hidden" }}>
               <EditableCell value={r.clientId} type="combobox" options={clientOrFirmOpts}
                 onChange={v => updateRow(r.id, { clientId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Rating": (
@@ -4853,48 +5535,64 @@ export const HotLeadsTable = ({
             </div>
           ),
           "Date & Time": (
-            <div className="td mono subtle">
+            <div className="td mono subtle bxt-td-when" data-upcoming={leadUpcoming ? "true" : undefined}>
               <EditableCell value={r.dateTime} type="datetime-local"
                 onChange={v => updateRow(r.id, { dateTime: v })}
                 format={v => fmtDateTime(v)}/>
             </div>
           ),
           "Anticipated Amount": (
-            <div className="td mono">
-              <EditableCell value={r.anticipatedAmount} type="number"
+            <div className="td mono num">
+              <EditableCell value={r.anticipatedAmount} type="number" align="right"
                 onChange={v => updateRow(r.id, { anticipatedAmount: v })}
-                format={v => v != null && v !== "" ? fmtMoney(v, false) : <span className="empty-cell">—</span>}/>
+                format={v => v != null && v !== "" ? fmtMoney(v, false) : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Attendees": <div className="td"><UserStack ids={r.attendees}/></div>,
           "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
                 format={v => truncCell(v)}/>
             </div>
           ),
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end" }}>
-              <div className="row-actions" onClick={e => e.stopPropagation()}>
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions" onClick={e => e.stopPropagation()}>
                 {deletedMode ? (
-                  <button className="row-btn forward" title="Restore this lead" onClick={() => onRestore?.(r)}>
+                  <button type="button" className="row-btn bxt-rowbtn forward"
+                          title="Restore this lead" aria-label="Restore this lead"
+                          onClick={() => onRestore?.(r)}>
                     <Icon name="undo" size={14}/>
                   </button>
                 ) : (
                   <>
                     {onForward && (
-                      <button className="row-btn forward" title="Move → Proposals"
+                      <button type="button" className="row-btn bxt-rowbtn forward"
+                              title="Move to Proposals" aria-label="Move to Proposals"
                               onClick={() => onForward(r)}>
                         <Icon name="forward" size={14}/>
                       </button>
                     )}
-                    <button className="row-btn alert" title="Set alert" onClick={() => onAlert && onAlert(r)}>
-                      <Icon name="bell" size={14}/>
-                    </button>
-                    <button className="row-btn" title="Delete" onClick={() => onSoftDelete?.(r)} style={{ color: "var(--rose)" }}>
-                      <Icon name="trash" size={14}/>
-                    </button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" className="row-btn bxt-rowbtn"
+                                title="More actions" aria-label="More actions for this lead">
+                          <Icon name="more" size={14}/>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bxt-menu">
+                        <DropdownMenuItem onSelect={() => onAlert && onAlert(r)}>
+                          <Icon name="bell" size={13}/>
+                          <span className="bxt-menu-text">Set alert</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator/>
+                        <DropdownMenuItem destructive onSelect={() => onSoftDelete?.(r)}>
+                          <Icon name="trash" size={13}/>
+                          <span className="bxt-menu-text">Delete lead</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </>
                 )}
               </div>
@@ -4967,22 +5665,50 @@ export const OpenBidsTable = ({
     if (el) el.click();
   };
 
-  // Approval state → chip class. sage = approved (positive, matches "check"
-  // semantics elsewhere); rose = rejected; muted = pending/awaiting.
+  // Approval state → chip class, mapped onto the product-wide semantic
+  // palette: sage = approved, clay/rose = rejected, ochre/accent = awaiting a
+  // decision. Each state also carries its own glyph below, so the state never
+  // relies on colour alone.
   const approvalChipClass = (status) => ({
     approved: "sage",
     rejected: "rose",
-    pending:  "muted",
-  })[status] || "muted";
+    pending:  "accent",
+  })[status] || "accent";
   const approvalLabel = (status) => ({
     approved: "Approved",
     rejected: "Rejected",
     pending:  "Pending",
   })[status] || "Pending";
+  const approvalIcon = (status) => ({
+    approved: "checkCircle",
+    rejected: "ban",
+    pending:  "hourglass",
+  })[status] || "hourglass";
+
+  // Due-date urgency, purely presentational: it colours and annotates the
+  // Due Date cell and never touches the stored value or the sort comparator.
+  // `flag` is the short badge that has to survive a 170px column; `text` is
+  // the full phrasing, carried on the cell's title and for screen readers,
+  // so the state is never conveyed by colour alone.
+  const dueUrgency = (iso) => {
+    if (!iso) return null;
+    const due = new Date(iso);
+    if (Number.isNaN(+due)) return null;
+    const days = Math.floor((+due - Date.now()) / 86400000);
+    if (days < 0)  return { tone: "overdue", icon: "warn",  flag: "Late", text: "Past due" };
+    if (days <= 2) return {
+      tone: "urgent", icon: "clock",
+      flag: days === 0 ? "Today" : `${days}d`,
+      text: days === 0 ? "Due today" : `Due in ${days} ${days === 1 ? "day" : "days"}`,
+    };
+    if (days <= 7) return { tone: "soon", icon: "clock", flag: `${days}d`, text: `Due in ${days} days` };
+    return null;
+  };
 
   return (
     <TableView
       tab={tab}
+      skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
@@ -4994,15 +5720,17 @@ export const OpenBidsTable = ({
         const stampedAt = r.approvedAt ? fmtDateTime(r.approvedAt) : "";
         const isApproved  = r.approvalStatus === "approved";
         const isRejected  = r.approvalStatus === "rejected";
+        const urgency = dueUrgency(r.dueAt);
+        const bidName = r.rfqNumber || "bid";
 
         const cells = {
           "__select": (
             <div className="td row-check" onClick={e => e.stopPropagation()}>
-              <input type="checkbox"/>
+              <input type="checkbox" aria-label={`Select ${bidName}`}/>
             </div>
           ),
           "RFQ/RFP #": (
-            <div className="td mono" style={{ fontSize: 12.5, fontWeight: 500 }}>
+            <div className="td mono bxt-td-identity">
               <EditableCell value={r.rfqNumber}
                 onChange={v => updateRow(r.id, { rfqNumber: v })}/>
             </div>
@@ -5011,30 +5739,43 @@ export const OpenBidsTable = ({
             <div className="td subtle">
               <EditableCell value={r.clientId} type="combobox" options={clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
-                render={v => companyById(v)?.name || <span className="empty-cell">—</span>}/>
+                render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Service": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.serviceDescription} type="select" options={serviceOptions}
                 onChange={v => updateRow(r.id, { serviceDescription: v || null })}
                 render={v => v
-                  ? <span className="chip muted" title={v} style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
-                  : <span className="empty-cell">—</span>}/>
+                  ? <span className="chip muted bxt-chip-trunc" title={v}>{v}</span>
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Due Date": (
-            <div className="td mono" style={{ color: "var(--accent-ink)" }}>
+            <div className="td mono bxt-td-due" data-urgency={urgency?.tone}>
               <EditableCell value={r.dueAt ? String(r.dueAt).slice(0, 16) : ""} type="datetime-local"
                 onChange={v => updateRow(r.id, { dueAt: v ? new Date(v).toISOString() : null })}
-                format={v => v ? fmtDateTime(v) : <span className="empty-cell">—</span>}/>
+                format={v => v
+                  ? (
+                    <span className="bxt-due" title={urgency ? `${fmtDateTime(v)} · ${urgency.text}` : fmtDateTime(v)}>
+                      {urgency && <Icon name={urgency.icon} size={12} className="bxt-due-icon"/>}
+                      <span className="bxt-due-date num">{fmtDateTime(v)}</span>
+                      {urgency && (
+                        <span className="bxt-due-flag">
+                          {urgency.flag}
+                          <span className="sr-only"> {urgency.text}</span>
+                        </span>
+                      )}
+                    </span>
+                  )
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Anticipated Amount": (
-            <div className="td mono">
-              <EditableCell value={r.anticipatedAmount} type="number"
+            <div className="td mono num">
+              <EditableCell value={r.anticipatedAmount} type="number" align="right"
                 onChange={v => updateRow(r.id, { anticipatedAmount: v })}
-                format={v => v != null && v !== "" ? fmtMoney(v, false) : <span className="empty-cell">—</span>}/>
+                format={v => v != null && v !== "" ? fmtMoney(v, false) : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "PDF": (
@@ -5054,28 +5795,34 @@ export const OpenBidsTable = ({
                 }}
               />
               {r.pdfPath ? (
-                <div className="bid-pdf-cell">
-                  <button type="button" className="tool-chip on" title={r.pdfName || "Open PDF"}
+                <div className="bid-pdf-cell bxt-pdf">
+                  <button type="button" className="bxt-filechip"
+                          title={r.pdfName ? `Open ${r.pdfName}` : "Open PDF"}
+                          aria-label={r.pdfName ? `Open ${r.pdfName}` : "Open the attached PDF"}
                           onClick={() => onOpenPdf?.(r)}>
-                    <Icon name="check" size={11}/>
+                    <Icon name="file" size={12}/>
                     <span className="bid-pdf-name">{r.pdfName || "PDF"}</span>
+                    <Icon name="external" size={11} className="bxt-filechip-go"/>
                   </button>
-                  <button type="button" className="row-btn" title="Remove PDF"
-                          onClick={() => onRemovePdf?.(r.id)}
-                          style={{ color: "var(--rose)" }}>
-                    <Icon name="x" size={11}/>
+                  <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-danger"
+                          title="Remove PDF" aria-label="Remove the attached PDF"
+                          onClick={() => onRemovePdf?.(r.id)}>
+                    <Icon name="x" size={12}/>
                   </button>
                 </div>
               ) : (
-                <button type="button" className="tool-chip" onClick={() => triggerUpload(r.id)}
-                        title="Upload an RFQ/RFP PDF (max ~50 MB)">
-                  <Icon name="plus" size={11}/>Upload
+                <button type="button" className="bxt-filechip is-empty"
+                        onClick={() => triggerUpload(r.id)}
+                        aria-label="Attach an RFQ or RFP PDF"
+                        title="Attach an RFQ/RFP PDF (up to about 50 MB)">
+                  <Icon name="attachment" size={12}/>
+                  <span>Attach</span>
                 </button>
               )}
             </div>
           ),
           "Web Link": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.webLink}
                 onChange={v => updateRow(r.id, { webLink: v })}
                 placeholder="https://…"
@@ -5089,15 +5836,16 @@ export const OpenBidsTable = ({
                         catch { return v; }
                       })()}</span>
                     </a>
-                  : <span className="empty-cell">—</span>}/>
+                  : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Approval": (
             <div className="td" onClick={e => e.stopPropagation()}>
-              <div className="bid-approval">
-                <span className={`chip ${approvalChipClass(r.approvalStatus)}`}
+              <div className="bid-approval bxt-approval">
+                <span className={`chip ${approvalChipClass(r.approvalStatus)} bxt-approval-chip`}
                       title={approver ? `${approvalLabel(r.approvalStatus)} by ${approver.name}${stampedAt ? " · " + stampedAt : ""}` : approvalLabel(r.approvalStatus)}>
-                  <span className="chip-dot"/>{approvalLabel(r.approvalStatus)}
+                  <Icon name={approvalIcon(r.approvalStatus)} size={12}/>
+                  {approvalLabel(r.approvalStatus)}
                 </span>
                 {(isApproved || isRejected) && approver && (
                   <span className="bid-approval-meta" title={stampedAt}>
@@ -5105,23 +5853,26 @@ export const OpenBidsTable = ({
                   </span>
                 )}
                 {isAdmin && (
-                  <div className="bid-approval-actions">
+                  <div className="bid-approval-actions bxt-approval-actions">
                     {!isApproved && (
-                      <button type="button" className="row-btn" title="Approve"
-                              onClick={() => onApprove?.(r)} style={{ color: "var(--sage)" }}>
+                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-approve"
+                              title="Approve" aria-label={`Approve ${bidName}`}
+                              onClick={() => onApprove?.(r)}>
                         <Icon name="thumbsUp" size={13}/>
                       </button>
                     )}
                     {!isRejected && (
-                      <button type="button" className="row-btn" title="Reject"
-                              onClick={() => onReject?.(r)} style={{ color: "var(--rose)" }}>
+                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-danger"
+                              title="Reject" aria-label={`Reject ${bidName}`}
+                              onClick={() => onReject?.(r)}>
                         <Icon name="thumbsDown" size={13}/>
                       </button>
                     )}
                     {(isApproved || isRejected) && (
-                      <button type="button" className="row-btn" title="Clear approval"
+                      <button type="button" className="row-btn bxt-rowbtn"
+                              title="Clear approval" aria-label={`Clear the approval on ${bidName}`}
                               onClick={() => onClearApproval?.(r)}>
-                        <Icon name="x" size={12}/>
+                        <Icon name="undo" size={12}/>
                       </button>
                     )}
                   </div>
@@ -5130,42 +5881,57 @@ export const OpenBidsTable = ({
             </div>
           ),
           "Approved By": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               {approver
                 ? <span className="bid-approver">{approver.name}{stampedAt ? ` · ${fmtDate(r.approvedAt)}` : ""}</span>
-                : <span className="empty-cell">—</span>}
+                : <span className="empty-cell">–</span>}
             </div>
           ),
           "Notes": (
-            <div className="td subtle" style={{ fontSize: 12.5 }}>
+            <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
                 format={v => truncCell(v)}/>
             </div>
           ),
           "__actions": (
-            <div className="td" style={{ justifyContent: "flex-end", gap: 4 }}>
-              <div className="row-actions" onClick={e => e.stopPropagation()}>
+            <div className="td bxt-td-actions">
+              <div className="row-actions bxt-rowactions" onClick={e => e.stopPropagation()}>
                 {deletedMode ? (
-                  <button className="row-btn forward" title="Restore this bid" onClick={() => onRestore?.(r)}>
+                  <button type="button" className="row-btn bxt-rowbtn forward"
+                          title="Restore this bid" aria-label="Restore this bid"
+                          onClick={() => onRestore?.(r)}>
                     <Icon name="undo" size={14}/>
                   </button>
                 ) : (
                   <>
                     <button
-                      className="row-btn forward"
+                      type="button"
+                      className="row-btn bxt-rowbtn forward"
                       title={isApproved
                         ? "Move to Proposals"
                         : "Approve this bid before moving forward"}
+                      aria-label={isApproved
+                        ? `Move ${bidName} to Proposals`
+                        : `Move to Proposals, unavailable until ${bidName} is approved`}
                       disabled={!isApproved}
                       onClick={() => isApproved && onForward?.(r)}>
                       <Icon name="forward" size={14}/>
                     </button>
-                    <button className="row-btn" title="Delete"
-                            onClick={() => onSoftDelete?.(r)}
-                            style={{ color: "var(--rose)" }}>
-                      <Icon name="trash" size={13}/>
-                    </button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" className="row-btn bxt-rowbtn"
+                                title="More actions" aria-label={`More actions for ${bidName}`}>
+                          <Icon name="more" size={14}/>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bxt-menu">
+                        <DropdownMenuItem destructive onSelect={() => onSoftDelete?.(r)}>
+                          <Icon name="trash" size={13}/>
+                          <span className="bxt-menu-text">Delete bid</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </>
                 )}
               </div>
@@ -5187,14 +5953,35 @@ export const OpenBidsTable = ({
 
 
 // ---------- Directory (Clients + Companies) ----------
-// One table for both kinds. Section headers (clients first, companies second)
-// come from injectKindHeaders. Columns are a UNION — irrelevant cells render
-// an em-dash for the wrong kind so the visual rhythm holds.
+// One roster for both kinds. Clients come first, companies second, each
+// section introduced by a group bar; columns are a UNION, so a cell that
+// does not apply to a row's kind renders the en-dash placeholder and the
+// visual rhythm holds.
 //
-// Each entity row is *expandable* — a chevron in the leftmost column toggles
-// an inline expand row beneath the parent containing the same Linked Projects
-// list the drawer shows. Multiple rows can be open at once. The drawer is
-// still reachable via double-click (existing behavior preserved).
+// The grid is hand-built rather than routed through TableView because the
+// roster carries two extra structures TableView has no vocabulary for: an
+// inline expand row per entity, and a merge selection that is locked to one
+// kind at a time. It therefore borrows TableView's *chrome* wholesale (the
+// `.bxt-toolbar` search + filter strip, the `.bxt-thead` sortable header,
+// `.trow` / `.td` rows) and declares the ARIA table roles by hand.
+//
+// Each entity row is expandable: a disclosure button in the leading column,
+// mirrored by the Projects count button, toggles an inline row beneath the
+// parent holding the same Linked Projects list the drawer shows. Multiple
+// rows can be open at once. The drawer is still reachable via double-click
+// and via the row's Open details action (existing behaviour preserved).
+
+// Org-type is the client sub-attribute axis; the swatch reads from the
+// product-wide `--org-*` ramp already used by the Proposals / Awarded group
+// bars, and the word is always printed next to it.
+const DIR_ORG_KEY = (v) => String(v || "").trim().toLowerCase() || "unset";
+
+// Kind axis. Icon + word carry it; the tone is a quiet informational one so
+// it can never be confused with the sage / brand / clay status ramp.
+const DIR_KIND_META = {
+  Client:  { label: "Client",  icon: "users",     tone: "info" },
+  Company: { label: "Company", icon: "building",  tone: "outline" },
+};
 export const DirectoryTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, invoice, flashId, filters,
   onOpenProject, onMerge, mergeResetKey,
@@ -5259,14 +6046,76 @@ export const DirectoryTable = ({
     });
   }, [rows, search, projectsByType]);
 
+  // Linked-project totals, resolved once per render instead of once per
+  // cell. Same figure countRefsFor() returns, just cached.
+  const projectCounts = useMemo(() => {
+    const m = new Map();
+    for (const r of (rows || [])) m.set(r.id, countRefsFor(r.id, projectsByType));
+    return m;
+  }, [rows, projectsByType]);
+  const countFor = (r) => projectCounts.get(r.id) ?? 0;
+
+  // Column definitions. `w` feeds the shared grid template, `get` is the
+  // sort key extractor. Nothing here filters or hides a row.
+  const dirColumns = useMemo(() => ([
+    { label: "__expand", w: "40px", locked: true },
+    { label: "__select", w: "42px", locked: true },
+    { label: "Name",           w: "minmax(220px, 2fr)",   sortKey: "name" },
+    // Kind is the outer grouping axis, so it is deliberately not sortable:
+    // the roster always reads clients first, then companies.
+    { label: "Kind",           w: "118px" },
+    { label: "Role / Org Type", w: "168px",               sortKey: "class",
+      get: r => (r.type === "Client" ? (r.orgType || "") : (r.type || "")) },
+    { label: "Related",        w: "minmax(180px, 1.3fr)" },
+    { label: "Projects",       w: "124px",                sortKey: "projects",
+      get: r => countFor(r) },
+    { label: "Contact",        w: "minmax(150px, 1fr)",   sortKey: "contact",
+      get: r => r.contact || "" },
+    { label: "Email",          w: "minmax(180px, 1.2fr)", sortKey: "email",
+      get: r => r.email || "" },
+    { label: "Phone",          w: "140px",                sortKey: "phone",
+      get: r => r.phone || "" },
+    { label: "Location",       w: "minmax(170px, 1.1fr)", sortKey: "address",
+      get: r => r.address || "" },
+    { label: "Notes",          w: "minmax(190px, 1.3fr)", sortKey: "notes",
+      get: r => r.notes || "" },
+    { label: "__actions",      w: "92px", locked: true },
+    // countFor is derived from projectCounts, which is the real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ]), [projectCounts]);
+
+  const dirGridCols = useMemo(() => dirColumns.map(c => c.w).join(" "), [dirColumns]);
+
+  // Interactive sort. The default is name-ascending, which is the order the
+  // roster has always shipped with; cycling a column past "descending"
+  // returns to that default rather than to an arbitrary insertion order.
+  const [sort, setSort] = useState({ key: "name", dir: "asc" });
+  const onSortToggle = (key) => setSort(s => {
+    const next = nextSortDir(s, s.key, key);
+    return (next.key && next.dir) ? next : { key: "name", dir: "asc" };
+  });
+
   const groupedRows = useMemo(() => {
     const byName = (a, b) =>
       String(a.baseName || a.name || "").localeCompare(String(b.baseName || b.name || ""), undefined, { sensitivity: "base" });
+    const col = dirColumns.find(c => c.sortKey === sort.key);
+    const compare = (!col || !col.get)
+      ? byName
+      : (a, b) => {
+        const d = cmp(col.get(a), col.get(b));
+        if (d !== 0) return sort.dir === "desc" ? -d : d;
+        return byName(a, b);
+      };
+    const dirAware = (sort.key === "name" && sort.dir === "desc")
+      ? (a, b) => -byName(a, b)
+      : compare;
+    // Kind stays the outer axis whatever the user sorts by, so the roster
+    // never loses its clients-then-companies reading.
     return {
-      clients: searchableRows.filter(r => r.type === "Client").slice().sort(byName),
-      companies: searchableRows.filter(r => r.type !== "Client").slice().sort(byName),
+      clients: searchableRows.filter(r => r.type === "Client").slice().sort(dirAware),
+      companies: searchableRows.filter(r => r.type !== "Client").slice().sort(dirAware),
     };
-  }, [searchableRows]);
+  }, [searchableRows, sort, dirColumns]);
 
   const snapshotColumns = useMemo(() => ([
     { label: "Name", sortKey: "name" },
@@ -5298,230 +6147,496 @@ export const DirectoryTable = ({
     });
   }, [tab, snapshotColumns, groupedRows, projectsByType, search]);
 
-  const mergeBar = selectedRows.length > 0 ? (
-    <div className="merge-actionbar">
-      <span className="merge-actionbar-count">{selectedRows.length} selected</span>
-      <button className="tool-chip" onClick={clearSelection}>Clear</button>
-      <button className="btn primary sm" onClick={startMerge} disabled={selectedRows.length < 2}>
-        <Icon name="merge" size={13}/>
-        Merge {selectedKind === "Client" ? "clients" : "companies"}
-      </button>
-    </div>
-  ) : null;
-
   const { companyTypeOptions } = buildOptions();
-  const typeColor = t => ({ "Prime": "blue", "Sub": "accent", "Multiple": "rose" }[t] || "muted");
 
-  const renderRelatedParties = (row, isClient) => {
+  const nameOf = (r) => r.baseName || r.name || "directory entry";
+  const hasSearch = !!search.trim();
+
+  // ---- Related parties (firms for a client, clients for a firm) --------
+  const renderRelated = (row, isClient) => {
     const related = relatedDirectoryPartiesFor(row, projectsByType, isClient ? "companies" : "clients");
-    const label = isClient ? "Related firms" : "Related clients";
+    if (related.length === 0) {
+      return (
+        <span className="empty-cell">
+          No related {isClient ? "firms" : "clients"} yet
+        </span>
+      );
+    }
     return (
-      <div className="dir-related">
-        <div className="dir-section-label">{label}</div>
-        {related.length === 0 ? (
-          <div className="dir-related-empty">No related {isClient ? "firms" : "clients"} yet</div>
-        ) : (
-          <div className="dir-related-chips">
-            {related.slice(0, 3).map(p => (
-              <span key={p.id} className="dir-related-chip" title={p.name}>
-                {p.name}
-                <span className="dir-related-count">{p.count}</span>
-              </span>
-            ))}
-            {related.length > 3 && (
-              <span className="dir-related-chip dir-related-more">+{related.length - 3}</span>
-            )}
-          </div>
+      <span className="bxt-dir-related">
+        {related.slice(0, 2).map(p => (
+          <Badge key={p.id} tone="neutral" className="min-w-0 shrink" title={`${p.name} · ${p.count} shared ${p.count === 1 ? "project" : "projects"}`}>
+            <span className="min-w-0 truncate">{p.name}</span>
+            <span className="num shrink-0 font-normal opacity-70">{p.count}</span>
+          </Badge>
+        ))}
+        {related.length > 2 && (
+          <Badge
+            tone="outline"
+            className="shrink-0"
+            title={related.slice(2).map(p => `${p.name} (${p.count})`).join(", ")}
+          >
+            +{related.length - 2}
+            <span className="sr-only"> more related {isClient ? "firms" : "clients"}</span>
+          </Badge>
         )}
-      </div>
+      </span>
     );
   };
 
-  const renderCard = (r) => {
-    const isClient = r.type === "Client";
-    const isExpanded = expandedIds.has(r.id);
+  // ---- One entity row (plus its expand row when open) ------------------
+  const renderRow = (r) => {
+    const isClient        = r.type === "Client";
+    const kindKey         = isClient ? "Client" : "Company";
+    const kindMeta        = DIR_KIND_META[kindKey];
+    const isExpanded      = expandedIds.has(r.id);
+    const isSelected      = selectedIds.has(r.id);
     const otherKindLocked = selectedKind && kindOf(r) !== selectedKind;
-    const projectCount = countRefsFor(r.id, projectsByType);
-    const linked = isExpanded
-      ? linkedProjectsFor(r, projectsByType, invoice)
-      : null;
-    return (
-      <article
+    const projectCount    = countFor(r);
+    const label           = nameOf(r);
+    const panelId         = `bxt-dir-linked-${r.id}`;
+    const linked          = isExpanded ? linkedProjectsFor(r, projectsByType, invoice) : null;
+    const orgKey          = DIR_ORG_KEY(r.orgType);
+
+    const expandLabel = isExpanded
+      ? `Hide the ${projectCount} linked ${projectCount === 1 ? "project" : "projects"} for ${label}`
+      : `Show the ${projectCount} linked ${projectCount === 1 ? "project" : "projects"} for ${label}`;
+
+    const row = (
+      <div
         key={r.id}
         className={
-          "dir-card" +
+          "trow bxt-dirrow" +
           (flashId === r.id ? " flash" : "") +
           (isExpanded ? " is-expanded" : "") +
-          (selectedIds.has(r.id) ? " is-selected" : "")
+          (isSelected ? " selected" : "")
         }
+        role="row"
         data-kind={isClient ? "client" : "company"}
+        style={{ gridTemplateColumns: dirGridCols, cursor: "default" }}
         onDoubleClick={() => onOpenDrawer(r)}
       >
-        <div className="dir-card-head">
-          <label className="dir-card-check" onClick={e => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              checked={selectedIds.has(r.id)}
-              disabled={otherKindLocked}
-              title={otherKindLocked
-                ? `Finish or clear the ${selectedKind.toLowerCase()} selection first — clients and companies can't be merged together.`
-                : "Select to merge"}
-              onChange={() => toggleSelect(r)}
-            />
-          </label>
-          <div className="dir-card-titleblock">
-            <div className="dir-card-name">
-              {isClient ? (
-                <EditableCell value={r.baseName || r.name}
-                  onChange={v => {
-                    const district = r.district || "";
-                    updateRow(r.id, {
-                      baseName: v,
-                      name: district ? v + " — " + district : v,
-                    });
-                  }}/>
-              ) : (
-                <EditableCell value={r.name}
-                  onChange={v => updateRow(r.id, { name: v })}/>
-              )}
-            </div>
-            {!isClient && (
-              <div className="dir-card-kicker">
-                <span className="dir-card-role">
-                  <EditableCell value={r.type} type="select" options={companyTypeOptions}
-                    onChange={v => updateRow(r.id, { type: v })}
-                    render={v => v
-                      ? <span className={`chip ${typeColor(v)}`}>{v}</span>
-                      : <span className="empty-cell">Role —</span>}/>
-                </span>
-              </div>
+        {/* Disclosure — the primary way into an entity's linked projects,
+            a real button so it is reachable and operable from the keyboard. */}
+        <div className="td bxt-dir-disclose" role="cell" onClick={e => e.stopPropagation()}>
+          <button
+            type="button"
+            className="bxt-dir-chevron"
+            aria-expanded={isExpanded}
+            aria-controls={isExpanded ? panelId : undefined}
+            aria-label={expandLabel}
+            title={isExpanded ? "Hide linked projects" : "Show linked projects"}
+            onClick={() => toggleExpand(r.id)}
+          >
+            <Icon name={isExpanded ? "chevronDown" : "chevronRight"} size={14}/>
+          </button>
+        </div>
+
+        <div className="td row-check" role="cell" onClick={e => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            disabled={!!otherKindLocked}
+            aria-label={`Select ${label} for merge`}
+            title={otherKindLocked
+              ? `Finish or clear the ${String(selectedKind).toLowerCase()} selection first. Clients and companies cannot be merged together.`
+              : "Select to merge"}
+            onChange={() => toggleSelect(r)}
+          />
+        </div>
+
+        <div className="td bxt-td-identity bxt-td-stack" role="cell">
+          <span className="bxt-td-fullwidth">
+            {isClient ? (
+              <EditableCell value={r.baseName || r.name}
+                onChange={v => {
+                  const district = r.district || "";
+                  updateRow(r.id, {
+                    baseName: v,
+                    // Fourth and last builder of the merged client display
+                    // name. adaptClient (data.js), adaptInsertedRow and
+                    // updateClients (App.jsx) build the same string, so the
+                    // separator has to match all three or a renamed row would
+                    // render differently from the same row after a reload.
+                    name: district ? v + " – " + district : v,
+                  });
+                }}/>
+            ) : (
+              <EditableCell value={r.name}
+                onChange={v => updateRow(r.id, { name: v })}/>
             )}
-          </div>
-          <div className="dir-card-actions" onClick={e => e.stopPropagation()}>
+          </span>
+          {isClient && r.district && (
+            <span className="bxt-td-sub" title={r.district}>{r.district}</span>
+          )}
+        </div>
+
+        <div className="td" role="cell">
+          <Badge tone={kindMeta.tone} className="max-w-full">
+            <Icon name={kindMeta.icon} size={12} aria-hidden="true"/>
+            <span className="min-w-0 truncate">{kindMeta.label}</span>
+          </Badge>
+        </div>
+
+        {/* Sub-attribute axis: org type for a client (read-only, set on the
+            record), commercial role for a firm (inline editable, as before). */}
+        <div className="td" role="cell">
+          {isClient ? (
+            r.orgType ? (
+              <Badge tone="outline" className="max-w-full" title={`Org type: ${r.orgType}`}>
+                <span className="bxt-dir-orgdot" data-org={orgKey} aria-hidden="true"/>
+                <span className="min-w-0 truncate">{r.orgType}</span>
+              </Badge>
+            ) : (
+              <span className="empty-cell">No org type</span>
+            )
+          ) : (
+            <EditableCell value={r.type} type="select" options={companyTypeOptions}
+              onChange={v => updateRow(r.id, { type: v })}
+              render={v => v
+                ? <RoleChip role={v}/>
+                : <span className="empty-cell">No role</span>}/>
+          )}
+        </div>
+
+        <div className="td bxt-td-note" role="cell">
+          {renderRelated(r, isClient)}
+        </div>
+
+        {/* Second, wordier route to the same disclosure, so the count and
+            the affordance are one control rather than two ideas. */}
+        <div className="td" role="cell" onClick={e => e.stopPropagation()}>
+          <button
+            type="button"
+            className={"bxt-dir-projects" + (isExpanded ? " is-open" : "")}
+            aria-expanded={isExpanded}
+            aria-controls={isExpanded ? panelId : undefined}
+            aria-label={expandLabel}
+            onClick={() => toggleExpand(r.id)}
+          >
+            <Icon name="briefcase" size={12} aria-hidden="true"/>
+            <span className="num">{projectCount}</span>
+            <span className="bxt-dir-projects-word">
+              {projectCount === 1 ? "project" : "projects"}
+            </span>
+          </button>
+        </div>
+
+        <div className="td subtle" role="cell">
+          {r.contact ? truncCell(r.contact, 40) : <span className="empty-cell">–</span>}
+        </div>
+        <div className="td subtle bxt-td-note" role="cell">
+          {r.email ? truncCell(r.email, 48) : <span className="empty-cell">–</span>}
+        </div>
+        <div className="td subtle num" role="cell">
+          {r.phone ? truncCell(r.phone, 24) : <span className="empty-cell">–</span>}
+        </div>
+        <div className="td subtle bxt-td-note" role="cell">
+          {r.address ? truncCell(r.address, 60) : <span className="empty-cell">–</span>}
+        </div>
+        <div className="td subtle bxt-td-note" role="cell">
+          {r.notes ? truncCell(r.notes, 80) : <span className="empty-cell">–</span>}
+        </div>
+
+        <div className="td bxt-td-actions" role="cell">
+          <div className="bxt-rowactions bxt-diractions" onClick={e => e.stopPropagation()}>
             <button
               type="button"
-              className="dir-icon-btn"
+              className="row-btn bxt-rowbtn"
               title="Open details"
-              aria-label={`Open details for ${r.baseName || r.name || "directory entry"}`}
-              onClick={() => onOpenDrawer(r)}>
-              <Icon name="maximize" size={13}/>
+              aria-label={`Open details for ${label}`}
+              onClick={() => onOpenDrawer(r)}
+            >
+              <Icon name="maximize" size={14}/>
             </button>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="row-btn bxt-rowbtn"
+                  title="More actions"
+                  aria-label={`More actions for ${label}`}
+                >
+                  <Icon name="more" size={14}/>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bxt-menu">
+                <DropdownMenuItem onSelect={() => onOpenDrawer(r)}>
+                  <Icon name="maximize" size={13}/>
+                  <span className="bxt-menu-text">Open details</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => toggleExpand(r.id)}>
+                  <Icon name="briefcase" size={13}/>
+                  <span className="bxt-menu-text">
+                    {isExpanded ? "Hide linked projects" : "Show linked projects"}
+                  </span>
+                  <span className="bxt-menu-hint num">{projectCount}</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator/>
+                <DropdownMenuItem
+                  disabled={!!otherKindLocked}
+                  onSelect={() => { if (!otherKindLocked) toggleSelect(r); }}
+                >
+                  <Icon name="merge" size={13}/>
+                  <span className="bxt-menu-text">
+                    {isSelected ? "Remove from merge selection" : "Select for merge"}
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
+      </div>
+    );
 
-        <div className="dir-card-body">
-          {renderRelatedParties(r, isClient)}
+    if (!isExpanded) return row;
 
-          <div className="dir-project-toggle-row">
-            <button
-              type="button"
-              className={"dir-project-toggle" + (isExpanded ? " is-open" : "")}
-              aria-expanded={isExpanded}
-              title={isExpanded ? "Collapse linked projects" : "Expand linked projects"}
-              onClick={(e) => { e.stopPropagation(); toggleExpand(r.id); }}>
-              <Icon name="chevronRight" size={12}/>
-              Linked projects
-              <span className="dir-project-count">{projectCount}</span>
-            </button>
+    return (
+      <React.Fragment key={r.id}>
+        {row}
+        <div
+          className="trow bxt-dirx"
+          role="row"
+          data-kind={isClient ? "client" : "company"}
+          style={{ gridTemplateColumns: dirGridCols }}
+        >
+          <div className="td bxt-dirx-cell" role="cell" aria-colspan={dirColumns.length}>
+            {/* Pinned to the viewport's left edge: the row spans a grid far
+                wider than the screen, so an unpinned panel would scroll out
+                of sight the moment the roster is scrolled sideways. */}
+            <div
+              className="bxt-dirx-inner"
+              id={panelId}
+              role="region"
+              aria-label={`Linked projects for ${label}`}
+            >
+              <LinkedProjectsSection
+                projects={linked}
+                onOpenProject={onOpenProject}
+              />
+            </div>
           </div>
         </div>
-
-        {isExpanded && (
-          <div className="directory-expand-row"
-               data-kind={isClient ? "client" : "company"}
-               role="region"
-               aria-label={`Linked projects for ${r.baseName || r.name}`}>
-            <LinkedProjectsSection
-              projects={linked}
-              onOpenProject={onOpenProject}
-            />
-          </div>
-        )}
-      </article>
+      </React.Fragment>
     );
   };
 
-  const renderGroup = (title, unit, items, kind) => (
-    <section className="dir-group" data-kind={kind}>
-      <div className="dir-group-head">
-        <div>
-          <h3>{title}</h3>
-          <p>{items.length} {items.length === 1 ? unit : `${unit}s`}</p>
-        </div>
+  // ---- Section bar introducing each kind -------------------------------
+  const renderGroupHead = (kind, unit, items) => (
+    <div
+      key={`head-${kind}`}
+      className="trow bxt-grouphead bxt-dirhead"
+      role="row"
+      data-kind={kind}
+      style={{ gridTemplateColumns: dirGridCols }}
+    >
+      <div className="td bxt-grouphead-cell bxt-dirhead-cell" role="cell" aria-colspan={dirColumns.length}>
+        <span className="bxt-dirhead-inner">
+          <span className="bxt-dirhead-dot" aria-hidden="true"/>
+          <span className="bxt-orghead-kicker">Kind</span>
+          <span className="bxt-grouphead-label bxt-truncate">
+            {kind === "client" ? "Clients" : "Companies"}
+          </span>
+          <span className="bxt-grouphead-count">
+            <span className="num">{items.length}</span> {items.length === 1 ? unit : `${unit}s`}
+          </span>
+        </span>
       </div>
-      {items.length > 0 && (
-        <div className="dir-card-grid">
-          {items.map(r => renderCard(r))}
-        </div>
-      )}
-    </section>
+    </div>
   );
 
-  const showNoMatches = search.trim() && searchableRows.length === 0 && (rows || []).length > 0;
+  const showNoMatches = hasSearch && searchableRows.length === 0 && (rows || []).length > 0;
   const totalRows = (rows || []).length;
+  const shownRows = groupedRows.clients.length + groupedRows.companies.length;
 
   return (
-    <div className="tablewrap directory-board-wrap">
-      <div className="toolbar directory-board-toolbar">
-        {filters?.map((f, i) => (
-          <button key={i} className={"tool-chip" + (f.active ? " on" : "")} onClick={f.onClick}>
-            {f.icon && <Icon name={f.icon} size={13}/>}
-            {f.label}
-            {f.count != null && <span style={{ opacity: .6, marginLeft: 2 }}>· {f.count}</span>}
-          </button>
-        ))}
-        {filters?.length ? <div className="tool-sep"/> : null}
-        <label className={"chrome-search directory-board-search" + (search ? " active" : "")}>
-          <Icon name="search" size={13}/>
-          <input
-            className="chrome-search-input"
-            value={search}
-            placeholder="Search directory..."
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
+    // data-skin rather than a `skin` prop: Directory builds its own chrome
+    // (toolbar, thead, rows) instead of going through TableView, but it uses
+    // the same .tablewrap / .bxt-toolbar / .thead / .trow / .td primitives, so
+    // stamping the attribute on the wrapper is all the skin needs to reach it.
+    <div className="tablewrap bxt-dir" data-skin="clean">
+      {/* Same chrome vocabulary as every other Beacon table. */}
+      <div className="bxt-toolbar">
+        <InputGroup
+          className="bxt-search"
+          inputClassName={hasSearch
+            ? "border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
+            : undefined}
+          type="text"
+          placeholder="Search directory"
+          aria-label="Search the directory"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+          leading={<Icon name="search" size={14}/>}
+          trailing={hasSearch ? (
             <button
               type="button"
-              className="chrome-search-clear"
+              className="bxt-search-clear"
+              title="Clear search"
               aria-label="Clear search"
-              onClick={() => setSearch("")}>
+              onClick={() => setSearch("")}
+            >
               <Icon name="x" size={12}/>
             </button>
-          )}
-        </label>
-        <span className="directory-board-count mono">
-          {searchableRows.length} / {totalRows}
-        </span>
-        <div className="ml-auto directory-board-toolbar-right">
-          {mergeBar}
+          ) : null}
+        />
+
+        {filters?.length > 0 && (
+          <div className="bxt-filterstrip" role="group" aria-label="Filters">
+            {filters.map((f, i) => (
+              <button
+                key={i}
+                type="button"
+                className={"bxt-chip" + (f.active ? " is-on" : "")}
+                aria-pressed={!!f.active}
+                onClick={f.onClick}
+              >
+                {f.icon && <Icon name={f.icon} size={13}/>}
+                <span className="bxt-chip-label">{f.label}</span>
+                {f.count != null && <span className="bxt-chip-count num">{f.count}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="bxt-toolbar-actions">
+          <span className="bxt-dir-tally">
+            <span className="num">{shownRows}</span>
+            <span className="bxt-dir-tally-sep">/</span>
+            <span className="num">{totalRows}</span>
+            <span className="sr-only"> entries shown</span>
+          </span>
         </div>
       </div>
-      {search.trim() && (
-        <div className="chrome-search-summary">
-          {showNoMatches
-            ? <>No entries match <span className="mono">"{search}"</span>.</>
-            : <><strong>{searchableRows.length}</strong> of <strong>{totalRows}</strong> match <span className="mono">"{search}"</span></>
-          }
+
+      {/* Merge selection. Its own bar rather than a control squeezed into
+          the toolbar: it appears only while a selection exists, states what
+          is selected, and says why the other kind is locked out. */}
+      {selectedRows.length > 0 && (
+        <div className="bxt-selbar" role="status" aria-live="polite">
+          <span className="bxt-selbar-count">
+            <Icon name="checkAll" size={14} aria-hidden="true"/>
+            <strong className="num">{selectedRows.length}</strong>
+            {" "}
+            {selectedKind === "Client"
+              ? (selectedRows.length === 1 ? "client" : "clients")
+              : (selectedRows.length === 1 ? "company" : "companies")}
+            {" "}selected
+          </span>
+          <span className="bxt-selbar-hint">
+            {selectedRows.length < 2
+              ? "Pick one more record of the same kind to merge."
+              : "Merging keeps a single record and repoints every linked project onto it."}
+          </span>
+          <span className="bxt-selbar-actions">
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              <Icon name="x" size={13}/>Clear
+            </Button>
+            <Button variant="primary" size="sm" onClick={startMerge} disabled={selectedRows.length < 2}>
+              <Icon name="merge" size={13}/>
+              Merge {selectedKind === "Client" ? "clients" : "companies"}
+            </Button>
+          </span>
         </div>
       )}
-      {totalRows === 0 ? (
-        <EmptyState
-          title="No directory entries yet"
-          hint="Clients and companies live here. Add either to start."
-          iconName="users"
-        />
-      ) : showNoMatches ? (
-        <EmptyState
-          title="No matches"
-          hint={`Nothing matches "${search}".`}
-          iconName="search"
-        />
-      ) : (
-        <div className="directory-board">
-          {renderGroup("Clients", "client", groupedRows.clients, "client")}
-          {renderGroup("Companies", "company", groupedRows.companies, "company")}
+
+      {/* Same collapsible shape TableView uses. The skin styles
+          .bxt-searchsummary as a grid row that animates 0fr to 1fr and is
+          driven by data-open, so the older markup (rendered conditionally,
+          no data-open, no inner wrappers) would have sat at zero height and
+          zero opacity forever the moment this table opted into the skin. */}
+      <div
+        className="bxt-searchsummary"
+        data-open={hasSearch ? "true" : undefined}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="bxt-searchsummary-inner">
+          <div className="bxt-searchsummary-text">
+            {hasSearch && (
+              showNoMatches
+                ? <>No entries match <span className="bxt-searchterm">"{search}"</span>.</>
+                : <><strong className="num">{searchableRows.length}</strong> of <strong className="num">{totalRows}</strong> match <span className="bxt-searchterm">"{search}"</span></>
+            )}
+          </div>
         </div>
-      )}
+      </div>
+
+      <div className="table-scroll">
+        {/* The roster is a CSS grid rather than a <table>: rows expand in
+            place and a group bar spans every track. The ARIA roles put the
+            table structure back for assistive technology. */}
+        <div className="table-scroll-body" role="table" aria-label={`${tableAccessibleName(tab)} table`}>
+          <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: dirGridCols }}>
+            {dirColumns.map((c) => {
+              const internal   = isInternalLabel(c.label);
+              const accessible = internal ? internalColumnName(c.label) : c.label;
+              const sortable   = !!c.sortKey;
+              const active     = sortable && sort.key === c.sortKey;
+              return (
+                <div
+                  key={c.label}
+                  className={"th bxt-th" + (active ? " sorted" : "")}
+                  role="columnheader"
+                  aria-sort={sortable ? (active ? (sort.dir === "asc" ? "ascending" : "descending") : "none") : undefined}
+                  data-sorted={active ? (sort.dir === "asc" ? "asc" : "desc") : undefined}
+                >
+                  {sortable ? (
+                    <button
+                      type="button"
+                      className="bxt-th-btn"
+                      onClick={() => onSortToggle(c.sortKey)}
+                      title={`Sort by ${accessible}`}
+                    >
+                      <span className="bxt-th-label">{c.label}</span>
+                      <span className="bxt-th-sort" aria-hidden="true">
+                        <Icon
+                          name={active ? (sort.dir === "asc" ? "chevronUp" : "chevronDown") : "chevronsUpDown"}
+                          size={12}
+                        />
+                      </span>
+                    </button>
+                  ) : (
+                    <span className="bxt-th-label">
+                      {internal ? <span className="sr-only">{accessible}</span> : c.label}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {groupedRows.clients.length > 0 && renderGroupHead("client", "client", groupedRows.clients)}
+          {groupedRows.clients.map(r => renderRow(r))}
+          {groupedRows.companies.length > 0 && renderGroupHead("company", "company", groupedRows.companies)}
+          {groupedRows.companies.map(r => renderRow(r))}
+        </div>
+
+        {/* Outside the role="table" subtree, so no cell-less row is ever
+            announced, and so the message centres on the viewport rather
+            than on the (much wider) column track sum. */}
+        {totalRows === 0 ? (
+          <EmptyState
+            title="No directory entries yet"
+            hint="Add a client or a company and it joins this roster, with every project it is linked to."
+            iconName="users"
+          />
+        ) : showNoMatches ? (
+          <EmptyState
+            title="No matches"
+            hint={`Nothing matches "${search}". Clear the search, or pick a different filter, to see the whole roster.`}
+            iconName="search"
+          />
+        ) : shownRows === 0 ? (
+          <EmptyState
+            title="Nothing in this filter"
+            hint="No client or company is in this group right now. Switch back to All to see the whole roster."
+            iconName="filter"
+          />
+        ) : null}
+      </div>
     </div>
   );
 };
@@ -5595,10 +6710,23 @@ function relatedDirectoryPartiesFor(row, projectsByType, targetKind) {
 // page-head "Export PDF" button works.
 // ======================================================================
 const PTREE_COLS =
-  "minmax(240px,2fr) 132px 112px minmax(150px,1.1fr) minmax(130px,1fr) 150px 120px 96px 152px 84px 126px 96px";
+  "minmax(240px,2fr) 132px 116px minmax(150px,1.1fr) minmax(130px,1fr) 150px 124px 124px 152px 96px 130px 116px";
+// Header descriptors rather than bare strings: the trailing actions column
+// has no visible label but still needs an accessible name, and two columns
+// are right-aligned figures.
 const PTREE_HEADS = [
-  "Project", "Project ID", "Type", "Client / Prime", "Subs", "Contract Type",
-  "Contract", "% Done", "Manager", "+PMs", "Status", "",
+  { label: "Project" },
+  { label: "Project ID" },
+  { label: "Type" },
+  { label: "Client / Prime" },
+  { label: "Subs" },
+  { label: "Contract Type" },
+  { label: "Contract", align: "right" },
+  { label: "% Done", align: "right" },
+  { label: "Manager" },
+  { label: "+PMs" },
+  { label: "Status" },
+  { label: "Actions", silent: true },
 ];
 
 export const ProjectsTable = ({
@@ -5719,180 +6847,341 @@ export const ProjectsTable = ({
 
   if (items.length === 0) {
     return (
-      <div className="ptree-wrap">
+      <div className="tablewrap bxt-ptree" data-skin="clean">
         <EmptyState
           title="No projects yet"
-          hint='Click "New project" to create your first top-level project, then add phases and subphases under it.'
+          hint='Use "New project" to create a top-level project, then add phases and subphases under it.'
           iconName="briefcase"
         />
       </div>
     );
   }
 
-  const typeChip = (it) => (
-    <span className={"chip " + (it.itemType === "main" ? "accent" : "sage")} title={
-      it.itemType === "main"
-        ? "Main — container; time & expenses can't be logged here"
-        : "Standard — time & expenses can be logged here"}>
-      <span className="chip-dot"/>{projectItemTypeLabel(it.itemType)}
-    </span>
+  // Main is a container the team cannot book time against; Standard is
+  // where the work actually lands. Brand tone for the container, sage for
+  // the billable leaf, and the word is always printed beside the swatch.
+  const typeBadge = (it) => (
+    <Badge
+      tone={it.itemType === "main" ? "brand" : "success"}
+      dot
+      className="max-w-full"
+      title={it.itemType === "main"
+        ? "Main: a container, time and expenses cannot be logged here"
+        : "Standard: time and expenses can be logged here"}
+    >
+      <span className="min-w-0 truncate">{projectItemTypeLabel(it.itemType)}</span>
+    </Badge>
   );
-  const statusChip = (it) => {
-    const tone = it.status === "active" ? "sage" : it.status === "between" ? "blue" : "muted";
-    return <span className={"chip " + tone}><span className="chip-dot"/>{projectItemStatusLabel(it.status)}</span>;
+  // Semantic tones per design/README §2: sage on track, steel in-between,
+  // clay closed out.
+  const statusBadge = (it) => {
+    const tone = it.status === "active" ? "success"
+      : it.status === "between" ? "info"
+      : it.status === "closed_out" ? "danger"
+      : "neutral";
+    return (
+      <Badge tone={tone} dot className="max-w-full">
+        <span className="min-w-0 truncate">{projectItemStatusLabel(it.status)}</span>
+      </Badge>
+    );
   };
 
+  const hasQuery = !!query.trim();
+
   return (
-    <div className="ptree-wrap">
-      <div className="ptree-toolbar">
-        <div className="ptree-search">
-          <Icon name="search" size={14}/>
-          <input
-            placeholder="Search projects, IDs, clients, managers…"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-          />
-          {query && (
-            <button className="ptree-search-clear" onClick={() => setQuery("")} title="Clear">
+    // Same reasoning as Directory: the projects tree hand-rolls its chrome
+    // but on the shared primitives, so the attribute is enough.
+    <div className="tablewrap bxt-ptree" data-skin="clean">
+      {/* Same toolbar vocabulary as every other Beacon table: search first,
+          then a scrolling filter strip, then the tools pushed right. */}
+      <div className="bxt-toolbar">
+        <InputGroup
+          className="bxt-search"
+          inputClassName={hasQuery
+            ? "border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
+            : undefined}
+          type="text"
+          placeholder="Search projects"
+          aria-label="Search projects, IDs, clients and managers"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+          leading={<Icon name="search" size={14}/>}
+          trailing={hasQuery ? (
+            <button
+              type="button"
+              className="bxt-search-clear"
+              title="Clear search"
+              aria-label="Clear search"
+              onClick={() => setQuery("")}
+            >
               <Icon name="x" size={12}/>
             </button>
-          )}
-        </div>
-        <div className="ptree-chips">
-          {filterChips.map(chip => (
-            <button
-              key={chip.key}
-              className={"tool-chip" + (activeFilter === chip.key ? " on" : "")}
-              onClick={() => onFilterChange?.(chip.key)}
-            >
-              {chip.icon && <Icon name={chip.icon} size={13}/>}
-              {chip.label}
-              <span style={{ opacity: .6, marginLeft: 2 }}>· {chipCount(chip.key)}</span>
-            </button>
-          ))}
-        </div>
-        <div className="ptree-tools">
-          <button className="tool-chip" onClick={expandAll} title="Expand every project">
-            <Icon name="chevronDown" size={12}/>Expand all
+          ) : null}
+        />
+
+        {filterChips.length > 0 && (
+          <div className="bxt-filterstrip" role="group" aria-label="Filters">
+            {filterChips.map(chip => (
+              <button
+                key={chip.key}
+                type="button"
+                className={"bxt-chip" + (activeFilter === chip.key ? " is-on" : "")}
+                aria-pressed={activeFilter === chip.key}
+                onClick={() => onFilterChange?.(chip.key)}
+              >
+                {chip.icon && <Icon name={chip.icon} size={13}/>}
+                <span className="bxt-chip-label">{chip.label}</span>
+                <span className="bxt-chip-count num">{chipCount(chip.key)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="bxt-toolbar-actions">
+          <button type="button" className="bxt-tool" onClick={expandAll}
+                  title="Expand every project">
+            <Icon name="chevronDown" size={13}/>
+            <span className="bxt-tool-label">Expand all</span>
           </button>
-          <button className="tool-chip" onClick={collapseAll} title="Collapse to top-level">
-            <Icon name="chevronRight" size={12}/>Collapse all
+          <button type="button" className="bxt-tool" onClick={collapseAll}
+                  title="Collapse to top level">
+            <Icon name="chevronRight" size={13}/>
+            <span className="bxt-tool-label">Collapse all</span>
           </button>
         </div>
       </div>
 
+      {/* Collapsible, driven by data-open — see the note on Directory's copy
+          for why the conditional version breaks under the skin. */}
+      <div
+        className="bxt-searchsummary"
+        data-open={isFiltering ? "true" : undefined}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="bxt-searchsummary-inner">
+          <div className="bxt-searchsummary-text">
+            {isFiltering && (
+              flat.length === 0
+                ? (hasQuery
+                  ? <>No projects match <span className="bxt-searchterm">"{query}"</span>.</>
+                  : <>No projects in this filter.</>)
+                : (
+                  <>
+                    <strong className="num">{flat.length}</strong> of{" "}
+                    <strong className="num">{items.length}</strong> shown
+                    {hasQuery && <> for <span className="bxt-searchterm">"{query}"</span></>}
+                  </>
+                )
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="table-scroll">
-        <div className="table-scroll-body" style={{ minWidth: "min-content" }}>
-          <div className="ptree-head" style={{ gridTemplateColumns: PTREE_COLS }}>
-            {PTREE_HEADS.map((h, i) => (
-              <div key={i} className={"ptree-h" + (["Contract", "% Done"].includes(h) ? " right" : "")}>{h}</div>
+        {/* The outline is a CSS grid, not a <table>: rows carry their own
+            depth padding and the tree collapses in place. The ARIA roles
+            put the structure back for assistive tech. */}
+        <div className="table-scroll-body" role="table" aria-label="Projects table">
+          <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: PTREE_COLS }}>
+            {PTREE_HEADS.map((h) => (
+              <div
+                key={h.label}
+                className={"th bxt-th" + (h.align === "right" ? " bxt-th-right" : "")}
+                role="columnheader"
+              >
+                <span className="bxt-th-label">
+                  {h.silent ? <span className="sr-only">{h.label}</span> : h.label}
+                </span>
+              </div>
             ))}
           </div>
 
-          {flat.length === 0 && (
-            <div className="ptree-noresults">No projects match your search / filter.</div>
-          )}
-
-          {flat.map(it => (
-            <div
-              key={it.id}
-              className={"ptree-row" + (flashId === it.id ? " flash" : "") + (it.itemType === "main" ? " is-main" : "")}
-              style={{ gridTemplateColumns: PTREE_COLS }}
-              onDoubleClick={() => it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it)}
-            >
-              {/* Name — indented by depth, with expand chevron. A ROOT project's
-                  name is a link that opens its detail page; phases/subphases
-                  keep the inline name editor. */}
-              <div className="ptree-cell ptree-name" style={{ paddingLeft: 8 + it._depth * 20 }}>
-                {it._hasKids ? (
-                  <button className="ptree-toggle" onClick={(e) => { e.stopPropagation(); toggle(it.id); }}
-                          title={it._collapsed ? "Expand" : "Collapse"}>
-                    <Icon name={it._collapsed ? "chevronRight" : "chevronDown"} size={13}/>
-                  </button>
-                ) : (
-                  <span className="ptree-toggle-spacer"/>
-                )}
-                <span className={"ptree-dot " + (it.itemType === "main" ? "main" : "standard")}/>
-                <span className="ptree-name-text">
-                  {it._depth === 0 ? (
-                    <button className="ptree-open-link" title="Open project detail"
-                            onClick={(e) => { e.stopPropagation(); onOpenProject?.(it); }}>
-                      {it.name}
+          {flat.map(it => {
+            const itemName = it.name || it.localId || "this item";
+            const pct = it.percentComplete == null
+              ? null
+              : Math.max(0, Math.min(100, Number(it.percentComplete) || 0));
+            return (
+              <div
+                key={it.id}
+                className={"trow bxt-ptrow" + (flashId === it.id ? " flash" : "")}
+                role="row"
+                data-itemtype={it.itemType === "main" ? "main" : "standard"}
+                data-depth={it._depth}
+                style={{ gridTemplateColumns: PTREE_COLS, cursor: "default" }}
+                onDoubleClick={() => it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it)}
+              >
+                {/* Name — indented by depth, with expand chevron. A ROOT project's
+                    name is a link that opens its detail page; phases/subphases
+                    keep the inline name editor. */}
+                <div
+                  className="td bxt-pt-name"
+                  role="cell"
+                  style={{ paddingLeft: 12 + it._depth * 20 }}
+                >
+                  {it._hasKids ? (
+                    <button
+                      type="button"
+                      className="bxt-pt-toggle"
+                      aria-expanded={!it._collapsed}
+                      aria-label={`${it._collapsed ? "Expand" : "Collapse"} ${itemName}`}
+                      title={it._collapsed ? "Expand" : "Collapse"}
+                      onClick={(e) => { e.stopPropagation(); toggle(it.id); }}
+                    >
+                      <Icon name={it._collapsed ? "chevronRight" : "chevronDown"} size={13}/>
                     </button>
                   ) : (
-                    <EditableCell value={it.name} type="text"
-                      onChange={(v) => updateRow(it.id, { name: v })}/>
+                    <span className="bxt-pt-togglespacer" aria-hidden="true"/>
                   )}
-                </span>
-              </div>
+                  <span className="bxt-pt-dot" data-itemtype={it.itemType === "main" ? "main" : "standard"} aria-hidden="true"/>
+                  <span className="bxt-pt-nametext">
+                    {/* Indentation alone carries the hierarchy visually, so
+                        the depth is also written out for screen readers. */}
+                    {it._depth > 0 && (
+                      <span className="sr-only">Level {it._depth + 1}, </span>
+                    )}
+                    {it._depth === 0 ? (
+                      <button
+                        type="button"
+                        className="bxt-pt-open"
+                        title="Open project detail"
+                        onClick={(e) => { e.stopPropagation(); onOpenProject?.(it); }}
+                      >
+                        {it.name}
+                      </button>
+                    ) : (
+                      <EditableCell value={it.name} type="text"
+                        onChange={(v) => updateRow(it.id, { name: v })}/>
+                    )}
+                  </span>
+                </div>
 
-              <div className="ptree-cell mono soft">
-                <EditableCell value={it.localId} type="text"
-                  onChange={(v) => updateRow(it.id, { localId: v })}/>
+                <div className="td mono bxt-td-ref" role="cell">
+                  <EditableCell value={it.localId} type="text"
+                    onChange={(v) => updateRow(it.id, { localId: v })}/>
+                </div>
+                <div className="td" role="cell">
+                  <EditableCell value={it.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
+                    render={() => typeBadge(it)}
+                    onChange={(v) => updateRow(it.id, { itemType: v })}/>
+                </div>
+                <div className="td subtle" role="cell">
+                  {companyById(it.clientId)?.name || <span className="empty-cell">–</span>}
+                </div>
+                <div className="td" role="cell">
+                  <SubsCell subs={it.subs}/>
+                </div>
+                <div className="td subtle" role="cell">
+                  <EditableCell value={it.contractType} type="select" options={CONTRACT_TYPE_OPTIONS}
+                    render={(v) => v ? contractTypeLabel(v) : <span className="empty-cell">–</span>}
+                    onChange={(v) => updateRow(it.id, { contractType: v })}/>
+                </div>
+                <div className="td mono num bxt-td-money" role="cell">
+                  <EditableCell value={it.contractAmount} type="number" align="right"
+                    render={(v) => v == null ? <span className="empty-cell">–</span> : fmtMoney(v, false)}
+                    onChange={(v) => updateRow(it.id, { contractAmount: v })}/>
+                </div>
+                <div className="td bxt-td-pct" role="cell">
+                  <EditableCell value={it.percentComplete} type="number" align="right"
+                    render={() => (
+                      <span className="bxt-pct" title={pct == null ? "No progress recorded" : `${pct}% complete`}>
+                        <Progress
+                          className="bxt-pct-bar"
+                          value={pct ?? 0}
+                          tone={pct === 100 ? "success" : "brand"}
+                          aria-label={`${itemName} percent complete`}
+                        />
+                        <span className="bxt-pct-num num">
+                          {pct == null ? "–" : `${pct}%`}
+                        </span>
+                      </span>
+                    )}
+                    onChange={(v) => updateRow(it.id, { percentComplete: v })}/>
+                </div>
+                <div className="td" role="cell">
+                  {it.managerId
+                    ? <UserTag userId={it.managerId} size="xs"/>
+                    : <span className="empty-cell">–</span>}
+                </div>
+                <div className="td" role="cell">
+                  {(it.pmIds && it.pmIds.length)
+                    ? <UserStack ids={it.pmIds} max={3}/>
+                    : <span className="empty-cell">–</span>}
+                </div>
+                <div className="td" role="cell">
+                  <EditableCell value={it.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
+                    render={() => statusBadge(it)}
+                    onChange={(v) => updateRow(it.id, { status: v })}/>
+                </div>
+                <div className="td bxt-td-actions" role="cell">
+                  <div className="bxt-rowactions bxt-ptactions" onClick={e => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      className="row-btn bxt-rowbtn"
+                      title="Add child (phase / subphase)"
+                      aria-label={`Add a phase or subphase under ${itemName}`}
+                      onClick={(e) => { e.stopPropagation(); onAddChild?.(it.id); }}
+                    >
+                      <Icon name="plus" size={13}/>
+                    </button>
+                    <button
+                      type="button"
+                      className="row-btn bxt-rowbtn"
+                      title={it._depth === 0 ? "Open project detail" : "Open details"}
+                      aria-label={it._depth === 0
+                        ? `Open the project detail page for ${itemName}`
+                        : `Open details for ${itemName}`}
+                      onClick={(e) => { e.stopPropagation(); it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it); }}
+                    >
+                      <Icon name={it._depth === 0 ? "maximize" : "eye"} size={13}/>
+                    </button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="row-btn bxt-rowbtn"
+                          title="More actions"
+                          aria-label={`More actions for ${itemName}`}
+                        >
+                          <Icon name="more" size={14}/>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bxt-menu">
+                        <DropdownMenuItem destructive onSelect={() => onDelete?.(it.id)}>
+                          <Icon name="trash" size={13}/>
+                          <span className="bxt-menu-text">
+                            {it._hasKids ? "Delete with children" : "Delete"}
+                          </span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
               </div>
-              <div className="ptree-cell">
-                <EditableCell value={it.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
-                  render={() => typeChip(it)}
-                  onChange={(v) => updateRow(it.id, { itemType: v })}/>
-              </div>
-              <div className="ptree-cell soft">
-                {companyById(it.clientId)?.name || <span className="empty-cell">—</span>}
-              </div>
-              <div className="ptree-cell">
-                <SubsCell subs={it.subs}/>
-              </div>
-              <div className="ptree-cell soft">
-                <EditableCell value={it.contractType} type="select" options={CONTRACT_TYPE_OPTIONS}
-                  render={(v) => v ? contractTypeLabel(v) : <span className="empty-cell">—</span>}
-                  onChange={(v) => updateRow(it.id, { contractType: v })}/>
-              </div>
-              <div className="ptree-cell right mono">
-                <EditableCell value={it.contractAmount} type="number" align="right"
-                  render={(v) => v == null ? <span className="empty-cell">—</span> : fmtMoney(v, false)}
-                  onChange={(v) => updateRow(it.id, { contractAmount: v })}/>
-              </div>
-              <div className="ptree-cell right">
-                <EditableCell value={it.percentComplete} type="number" align="right"
-                  render={(v) => (
-                    <span className="ptree-pct">
-                      <span className="ptree-pct-bar"><span style={{ width: `${Math.max(0, Math.min(100, Number(v) || 0))}%` }}/></span>
-                      <span className="ptree-pct-num">{v == null ? "—" : `${v}%`}</span>
-                    </span>
-                  )}
-                  onChange={(v) => updateRow(it.id, { percentComplete: v })}/>
-              </div>
-              <div className="ptree-cell">
-                {it.managerId
-                  ? <UserTag userId={it.managerId} size="xs"/>
-                  : <span className="empty-cell">—</span>}
-              </div>
-              <div className="ptree-cell">
-                {(it.pmIds && it.pmIds.length)
-                  ? <UserStack ids={it.pmIds} max={3}/>
-                  : <span className="empty-cell">—</span>}
-              </div>
-              <div className="ptree-cell">
-                <EditableCell value={it.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
-                  render={() => statusChip(it)}
-                  onChange={(v) => updateRow(it.id, { status: v })}/>
-              </div>
-              <div className="ptree-cell ptree-actions">
-                <button className="row-btn" title="Add child (phase / subphase)"
-                        onClick={(e) => { e.stopPropagation(); onAddChild?.(it.id); }}>
-                  <Icon name="plus" size={13}/>
-                </button>
-                <button className="row-btn" title={it._depth === 0 ? "Open project detail" : "Open details"}
-                        onClick={(e) => { e.stopPropagation(); it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it); }}>
-                  <Icon name={it._depth === 0 ? "maximize" : "eye"} size={13}/>
-                </button>
-                <button className="row-btn" title="Delete" style={{ color: "var(--rose)" }}
-                        onClick={(e) => { e.stopPropagation(); onDelete?.(it.id); }}>
-                  <Icon name="trash" size={13}/>
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+
+        {/* Outside the role="table" subtree, exactly like TableView does, so
+            no cell-less row is ever announced. */}
+        {flat.length === 0 && (
+          hasQuery ? (
+            <EmptyState
+              title="No matches"
+              hint={`Nothing matches "${query}". Clear the search, or pick a different filter, to see the full tree.`}
+              iconName="search"
+            />
+          ) : (
+            <EmptyState
+              title="Nothing in this filter"
+              hint="No project, phase or subphase is in this state right now. Switch back to All to see the whole tree."
+              iconName="filter"
+            />
+          )
+        )}
       </div>
     </div>
   );

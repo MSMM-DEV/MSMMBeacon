@@ -82,6 +82,97 @@ function planColumnWidths(columns, usableWidth) {
   return fixed.map(x => x == null ? flexW : x * scale);
 }
 
+/**
+ * Draw a filled five-point star as vector geometry.
+ *
+ * The reason this exists rather than a "★" in a cell: jsPDF's stock Helvetica
+ * is WinAnsi/Latin-1 and has no U+2605, and jsPDF writes the code point's high
+ * byte when it meets one — so "★★★" printed as "&&&". Falling back to ASCII
+ * "***" encodes correctly but Helvetica's asterisk is a small superscript
+ * glyph; at 7pt a row of them reads as apostrophes, not as a rating.
+ *
+ * A path has no encoding, no font, and no size floor. It is the same shape at
+ * any scale and needs nothing embedded in the file.
+ *
+ * @param doc    jsPDF instance
+ * @param cx,cy  centre, in the document's units (mm here)
+ * @param outerR outer radius; the star spans 2*outerR
+ * @param color  [r,g,b], 0-255
+ */
+export function drawStar(doc, cx, cy, outerR, color) {
+  // 0.382 is the classic five-point ratio (1/phi^2) — the inner vertices sit
+  // where the arms' edges would intersect if extended, which is what makes the
+  // points read as sharp rather than as a blunt decagon.
+  const innerR = outerR * 0.382;
+  const pts = [];
+  for (let k = 0; k < 10; k++) {
+    const angle = ((-90 + k * 36) * Math.PI) / 180;
+    const r = k % 2 === 0 ? outerR : innerR;
+    pts.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)]);
+  }
+  // doc.lines() takes RELATIVE segments from a starting point, so walk the
+  // absolute vertices into deltas. `closed` joins the last point back to the
+  // first; "F" fills without stroking, which keeps the edges crisp at 2mm.
+  const deltas = [];
+  for (let i = 1; i < pts.length; i++) {
+    deltas.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+  }
+  doc.setFillColor(color[0], color[1], color[2]);
+  doc.lines(deltas, pts[0][0], pts[0][1], [1, 1], "F", true);
+}
+
+/** Public path of the company mark drawn in the PDF footer.
+ *  3299x816 RGBA, so roughly 4:1 — the drawing code reads the real ratio off
+ *  the asset rather than assuming it, and a replacement of any proportion
+ *  will render correctly. */
+export const PDF_FOOTER_LOGO_SRC = "/msmm_logo.png";
+
+/**
+ * Load the footer logo once per session as a data URL.
+ *
+ * jsPDF's addImage needs the bytes, not a URL, so the file is fetched and read
+ * into a data URL; the natural dimensions come back with it so the caller can
+ * size by height and let the width follow the real aspect ratio rather than a
+ * hardcoded guess that would squash the logo if the asset is ever replaced.
+ *
+ * Resolves to null on any failure, including the file simply not being there.
+ * That is deliberate: a missing brand asset should cost you the logo, not the
+ * export. The footer falls back to the "MSMM Beacon" wordmark.
+ */
+let _footerLogo;
+export function loadFooterLogo() {
+  if (_footerLogo !== undefined) return _footerLogo;
+  _footerLogo = (async () => {
+    try {
+      const res = await fetch(PDF_FOOTER_LOGO_SRC, { cache: "force-cache" });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      // A 200 is not proof the file exists. The dev server and most SPA hosts
+      // answer an unknown path with index.html rather than a 404, so without a
+      // type check the "logo" would be a page of markup that only fails later,
+      // during decode.
+      if (!blob.size || !/^image\//.test(blob.type)) return null;
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(new Error("read failed"));
+        fr.readAsDataURL(blob);
+      });
+      const dims = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+      });
+      if (!dims?.w || !dims?.h) return null;
+      return { dataUrl, ratio: dims.w / dims.h };
+    } catch {
+      return null;
+    }
+  })();
+  return _footerLogo;
+}
+
 export async function exportPDF(columns, rows, filename, options = {}) {
   const {
     title,
@@ -101,9 +192,18 @@ export async function exportPDF(columns, rows, filename, options = {}) {
                           // the table. Receives autotable's `data` (which
                           // exposes `data.cell.{x,y,width,height}` and
                           // `data.doc`) plus the originating row+column.
+    stampTime = true,     // Print "Exported <now>" in the header meta line.
+                          // Turn off when the caller supplies its own stamp in
+                          // `subtitle` so the line doesn't carry two.
+    footerLogo = false,   // Draw the company logo in the page footer instead
+                          // of the "MSMM Beacon" wordmark. Falls back to the
+                          // wordmark when the asset is missing.
   } = options;
 
   const { jsPDF, autoTable } = await loadPdfDeps();
+  // Resolved before the table is laid out because didDrawPage fires
+  // synchronously per page and cannot await.
+  const logo = footerLogo ? await loadFooterLogo() : null;
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -119,7 +219,13 @@ export async function exportPDF(columns, rows, filename, options = {}) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(110, 102, 89);
-  const meta = `${subtitle ? subtitle + " · " : ""}Exported ${new Date().toLocaleString()} · ${rows.length} ${rows.length === 1 ? "row" : "rows"}`;
+  // `stampTime: false` suppresses this line's own timestamp. Callers that put
+  // one in `subtitle` themselves — with the app's formatting and the
+  // exporter's name attached — would otherwise print the same fact twice, in
+  // two different formats, on one line. Defaults to on so every existing
+  // caller keeps the timestamp it has always had.
+  const stamp = stampTime ? `Exported ${new Date().toLocaleString()} · ` : "";
+  const meta = `${subtitle ? subtitle + " · " : ""}${stamp}${rows.length} ${rows.length === 1 ? "row" : "rows"}`;
   doc.text(meta, margin, margin + 10);
 
   // Thin divider line
@@ -235,7 +341,14 @@ export async function exportPDF(columns, rows, filename, options = {}) {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(147, 137, 116);
-      doc.text("MSMM Beacon", margin, pageH - 5);
+      if (logo) {
+        // Sized by height so the mark sits on the same baseline as the page
+        // number; the width follows the asset's real aspect ratio.
+        const h = 6;
+        doc.addImage(logo.dataUrl, "PNG", margin, pageH - 3 - h, h * logo.ratio, h);
+      } else {
+        doc.text("MSMM Beacon", margin, pageH - 5);
+      }
       doc.text(`Page ${pageNum}`, pageW - margin, pageH - 5, { align: "right" });
     },
   });

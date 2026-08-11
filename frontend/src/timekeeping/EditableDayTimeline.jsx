@@ -2,21 +2,26 @@
 // the personal "Edit Day" sheet).
 //
 // A vertical 6 AM → 8 PM hour rail (64 px/hour) that renders each interval as a
-// card. The canvas is now a PURE VISUAL + SELECTION layer — it does not drag:
-//   • click a card  → select it (opens the inspector on the right / bottom sheet)
+// card. The canvas is a PURE VISUAL + SELECTION layer — it does not drag:
+//   • click (or focus + Enter) a card → select it, which opens the inspector
 // All time editing happens in the inspector's start/end time fields, and new
 // blocks are added via the "Add block" button. Dragging was removed because the
 // edge/body drag gestures were effectively unusable on touch devices; the time
 // inputs cover move (edit both ends), resize (edit one end), and create.
 //
+// Because the edges are NOT draggable, the card renders explicit boundary rules
+// at its start and end plus an "Edit times" affordance on hover/focus, so the
+// editable handles read as "these two times are what you change", not as a
+// drag target that silently does nothing.
+//
 // "Done for the day" (eod) blocks are not rendered here — a finished day shows
 // no trailing block, matching every read-only timeline (see mergeDisplaySegments
 // / HIDDEN_DISPLAY_CATEGORIES in data.js).
 //
-// Presence drives color (green = at desk / IN, rose = out / OUT), never category.
+// Presence drives color (sage = at desk / IN, clay = out / OUT), never category.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Icon } from "../icons";
+import { Icon } from "@/icons";
 import {
   ctMinutesOfIso, intervalTone, HIDDEN_DISPLAY_CATEGORIES,
   TK_CATEGORY_LABEL, fmtClock, fmtHM, todayInCT,
@@ -95,31 +100,40 @@ export function EditableDayTimeline({
   const select = (iv) => { if (!disabled && !busy) onSelectInterval?.(iv); };
 
   return (
-    <div className={`tk-edit ${disabled ? "is-disabled" : ""} is-static`}>
-      <div className="tk-edit-scroller" ref={scrollerRef}>
-        <div className="tk-edit-track" ref={trackRef} style={{ height: TRACK_HEIGHT }}>
-          <div className="tk-edit-track-bg" aria-hidden="true" />
+    <div className={`tka-et ${disabled ? "is-disabled" : ""} ${busy ? "is-busy" : ""}`}>
+      <div className="tka-et-legend">
+        <span className="tka-et-legenditem"><span className="tka-swatch tone-sage" aria-hidden="true"/>At desk</span>
+        <span className="tka-et-legenditem"><span className="tka-swatch tone-rose" aria-hidden="true"/>Out</span>
+        <span className="tka-et-legendhint">
+          <Icon name="edit" size={11}/>
+          Select a block to change its times
+        </span>
+      </div>
 
-          <div className="tk-edit-gutter" aria-hidden="true">
+      <div className="tka-et-scroller" ref={scrollerRef} tabIndex={-1}>
+        <div className="tka-et-track" ref={trackRef} style={{ height: TRACK_HEIGHT }}>
+          <div className="tka-et-bg" aria-hidden="true" />
+
+          <div className="tka-et-gutter" aria-hidden="true">
             {hours.map((h) => (
-              <div key={h} className="tk-edit-hour-label" style={{ top: (h - TRACK_START_HR) * HOUR_PX - 6 }}>
+              <span key={h} className="tka-et-hour num" style={{ top: (h - TRACK_START_HR) * HOUR_PX - 6 }}>
                 {hourLabel(h)}
-              </div>
+              </span>
             ))}
           </div>
-          <div className="tk-edit-grid" aria-hidden="true">
-            {hours.map((h, i) => <div key={h} className="tk-edit-hour-line" style={{ top: i * HOUR_PX }} />)}
+          <div className="tka-et-grid" aria-hidden="true">
+            {hours.map((h, i) => <span key={h} className="tka-et-hourline" style={{ top: i * HOUR_PX }} />)}
             {hours.slice(0, -1).map((h, i) => (
-              <div key={`half-${h}`} className="tk-edit-half-line" style={{ top: i * HOUR_PX + HOUR_PX / 2 }} />
+              <span key={`half-${h}`} className="tka-et-halfline" style={{ top: i * HOUR_PX + HOUR_PX / 2 }} />
             ))}
           </div>
 
           <div
-            className="tk-edit-workday"
+            className="tka-et-workday"
             style={{ top: minToY(8 * 60), height: minToY(17 * 60) - minToY(8 * 60) }}
             aria-hidden="true"
           >
-            <span className="tk-edit-workday-tag">Workday · 8a – 5p</span>
+            <span className="tka-et-workday-tag">Workday · 8a to 5p</span>
           </div>
 
           {blocks.map((blk) => {
@@ -132,62 +146,72 @@ export function EditableDayTimeline({
             const isAdmin = iv.categorySource === "admin";
             const isUser  = iv.categorySource === "user";
             const dur = Math.max(0, Math.round(endMin - startMin));
+            const catLabel = TK_CATEGORY_LABEL[iv.category] || iv.category;
+            const endLabel = blk.isOpen ? "now" : fmtClock(iv.endAt);
 
             return (
               <button
                 type="button"
                 key={iv.id}
-                className={`tk-edit-card tone-${tone} ${blk.isOpen ? "is-open" : ""} ${isSel ? "is-selected" : ""} ${compact ? "is-compact" : ""}`}
+                className={`tka-et-card tone-${tone} ${blk.isOpen ? "is-open" : ""} ${isSel ? "is-selected" : ""} ${compact ? "is-compact" : ""}`}
                 style={{ top, height }}
                 data-category={iv.category}
                 data-source={iv.categorySource}
+                aria-pressed={isSel}
+                aria-label={`${catLabel}, ${fmtClock(iv.startAt)} to ${endLabel}, ${fmtHM(dur)}. Select to edit.`}
                 onClick={() => select(iv)}
-                title={`${fmtClock(iv.startAt)} – ${iv.endAt ? fmtClock(iv.endAt) : "now"} · ${TK_CATEGORY_LABEL[iv.category] || iv.category}`}
+                title={`${fmtClock(iv.startAt)} – ${endLabel} · ${catLabel}`}
               >
-                <div className="tk-edit-card-body">
-                  <div className="tk-edit-card-row">
-                    <span className="tk-edit-card-time">{fmtClock(iv.startAt)}</span>
-                    <span className="tk-edit-card-dur">{fmtHM(dur)}</span>
-                  </div>
+                {/* Boundary rules — the two times the inspector edits. */}
+                <span className="tka-et-edge is-start" aria-hidden="true"/>
+                <span className="tka-et-edge is-end" aria-hidden="true"/>
+
+                <span className="tka-et-card-body">
+                  <span className="tka-et-card-row">
+                    <span className="tka-et-card-time num">{fmtClock(iv.startAt)}</span>
+                    <span className="tka-et-card-dur num">{fmtHM(dur)}</span>
+                  </span>
                   {!compact && (
-                    <div className="tk-edit-card-label">
+                    <span className="tka-et-card-label">
                       {iv.outlookEventId && <Icon name="link" size={11} />}
-                      {iv.outlookEventSubject || TK_CATEGORY_LABEL[iv.category] || iv.category}
-                    </div>
+                      {iv.outlookEventSubject || catLabel}
+                    </span>
                   )}
                   {!compact && iv.notes && (
-                    <div className="tk-edit-card-note"><Icon name="edit" size={10} /><span>{iv.notes}</span></div>
+                    <span className="tka-et-card-note"><Icon name="note" size={11} /><span>{iv.notes}</span></span>
                   )}
-                  <div className="tk-edit-card-foot">
-                    <span className="tk-edit-card-time-end">
-                      {blk.isOpen ? "now" : fmtClock(iv.endAt)}
-                    </span>
+                  <span className="tka-et-card-foot">
+                    <span className="tka-et-card-end num">{endLabel}</span>
                     {(isAdmin || isUser) && (
-                      <span className={`tk-edit-card-src is-${iv.categorySource}`}>
+                      <span className={`tka-et-card-src is-${iv.categorySource}`}>
                         <Icon name="check" size={10} /> {iv.categorySource}
                       </span>
                     )}
-                  </div>
-                </div>
+                  </span>
+                </span>
 
-                {blk.isOpen && <span className="tk-edit-card-livedot" aria-hidden="true" />}
-                {iv.notes && compact && <span className="tk-edit-card-notedot" aria-hidden="true" />}
+                <span className="tka-et-card-cta" aria-hidden="true">
+                  <Icon name="edit" size={11}/> Edit times
+                </span>
+
+                {blk.isOpen && <span className="tka-et-livedot" aria-hidden="true" />}
+                {iv.notes && compact && <span className="tka-et-notedot" aria-hidden="true" />}
               </button>
             );
           })}
 
           {isToday && (
-            <div className="tk-edit-now" style={{ top: minToY(nowMin) }} aria-hidden="true">
-              <span className="tk-edit-now-dot" />
-              <span className="tk-edit-now-line" />
+            <div className="tka-et-now" style={{ top: minToY(nowMin) }} aria-hidden="true">
+              <span className="tka-et-now-dot" />
+              <span className="tka-et-now-line" />
             </div>
           )}
 
           {blocks.length === 0 && (
-            <div className="tk-edit-empty">
-              <Icon name="clock" size={18} />
+            <div className="tka-et-empty">
+              <Icon name="clock" size={20} />
               <span>No punches on this day</span>
-              {!disabled && <span className="tk-edit-empty-hint">Use “Add block” to enter a time</span>}
+              {!disabled && <span className="tka-et-empty-hint">Use Add block to enter a time</span>}
             </div>
           )}
         </div>

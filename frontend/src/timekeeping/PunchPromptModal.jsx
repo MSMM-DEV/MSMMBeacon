@@ -11,15 +11,20 @@
 // Save writes via setIntervalCategory (always sets category_source='user' so
 // the classifier won't overwrite it).
 //
-// Visual: bottom-sheet on phones (inherits the .modal-narrow phone treatment
-// added in the mobile-responsive pass), centered card on desktop. Hero
-// category chip-grid replaces the dropdown so picks are one-tap on touch.
+// Visual: built on the shared Dialog, which is a bottom sheet on phones and a
+// centred card from `sm` up. The category chips are a radio group sized for
+// thumbs, each one a full tap target with its own icon so the grid reads
+// without relying on the tint.
 
 import React, { useEffect, useState } from "react";
 import { Icon } from "../icons";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  DialogBody, DialogFooter, Button, Label, Textarea,
+} from "@/ui";
+import {
   fmtClock, setIntervalCategory,
-  TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
+  TK_CATEGORY_TONE,
 } from "../data";
 
 // Ordered to match the punch-context. A punch-in starts an IN interval; a
@@ -120,51 +125,54 @@ export function PunchPromptModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-narrow tk-punch-prompt" onClick={e => e.stopPropagation()}
-        role="dialog" aria-modal="true" aria-labelledby="tk-punch-prompt-title">
-        <div className="modal-head">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="modal-eyebrow">{eyebrow}</div>
-            <h3 className="modal-title" id="tk-punch-prompt-title">{headline}</h3>
-          </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={16}/>
-          </button>
-        </div>
-        <div className="modal-body">
-          {/* Hero chip grid — one-tap category pick on touch */}
-          <div className="tk-prompt-grid" role="radiogroup" aria-label="Category">
-            {choicesForKind(kind).map(c => (
-              <button
-                key={c.key}
-                type="button"
-                role="radio"
-                aria-checked={category === c.key}
-                className={`tk-prompt-chip tone-${TK_CATEGORY_TONE[c.key] || "muted"} ${category === c.key ? "is-active" : ""}`}
-                onClick={() => setCategory(c.key)}
-              >
-                <span className="tk-prompt-chip-icon" aria-hidden="true">
-                  <Icon name={CATEGORY_ICON[c.key] || "note"} size={16} />
-                </span>
-                {c.label}
-              </button>
-            ))}
-          </div>
-          <div className={`tk-prompt-presence ${kind === "in" ? "is-in" : "is-out"}`}>
-            <span className="tk-prompt-presence-dot" />
-            {kind === "in"
-              ? "Saved as in-time unless you later mark this meeting as away."
-              : "This starts an away-time block. You can edit the category later if plans change."}
+    <Dialog open onOpenChange={(open) => { if (!open) onClose?.(); }}>
+      <DialogContent size="sm" className="tsx-dialog">
+        <DialogHeader>
+          <DialogTitle>{headline}</DialogTitle>
+          <DialogDescription>{eyebrow}</DialogDescription>
+        </DialogHeader>
+
+        <DialogBody className="tsx-form">
+          <div className="tsx-field">
+            <Label id="tsx-prompt-cat-label">Category</Label>
+            {/* Hero chip grid — one-tap category pick on touch */}
+            <div className="tsx-chipgrid" role="radiogroup" aria-labelledby="tsx-prompt-cat-label">
+              {choicesForKind(kind).map(c => (
+                <button
+                  key={c.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={category === c.key}
+                  className={`tsx-chip tone-${TK_CATEGORY_TONE[c.key] || "muted"} ${category === c.key ? "is-active" : ""}`}
+                  onClick={() => setCategory(c.key)}
+                >
+                  <span className="tsx-chip-icon" aria-hidden="true">
+                    <Icon name={CATEGORY_ICON[c.key] || "note"} size={16} />
+                  </span>
+                  <span className="tsx-chip-label">{c.label}</span>
+                  <span className="tsx-chip-check" aria-hidden="true">
+                    <Icon name="check" size={13}/>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="form-row">
-            <label className="form-label" htmlFor="tk-prompt-notes">
-              Add a note <span className="form-label-soft">(optional)</span>
-            </label>
-            <textarea
+          <p className={`tsx-note ${kind === "in" ? "tone-in" : "tone-out"}`}>
+            <span className="tsx-note-dot" aria-hidden="true"/>
+            <span>
+              {kind === "in"
+                ? "Saved as in-time unless you later mark this meeting as away."
+                : "This starts an away-time block. You can edit the category later if plans change."}
+            </span>
+          </p>
+
+          <div className="tsx-field">
+            <Label htmlFor="tk-prompt-notes">
+              Add a note <span className="tsx-optional">(optional)</span>
+            </Label>
+            <Textarea
               id="tk-prompt-notes"
-              className="form-input"
               rows={3}
               maxLength={400}
               placeholder={kind === "in"
@@ -175,17 +183,21 @@ export function PunchPromptModal({
             />
           </div>
 
-          {err && <div className="form-error" role="alert">{err}</div>}
-        </div>
-        <div className="modal-foot">
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
-            Skip
-          </button>
-          <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
-            {busy ? "Saving…" : (kind === "in" ? "Save & start" : "Save")}
-          </button>
-        </div>
-      </div>
-    </div>
+          {err && (
+            <p className="tsx-note tone-bad" role="alert">
+              <Icon name="warn" size={13}/>
+              <span>{err}</span>
+            </p>
+          )}
+        </DialogBody>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Skip</Button>
+          <Button variant="primary" onClick={save} disabled={busy} loading={busy}>
+            {busy ? "Saving…" : (kind === "in" ? "Save and start" : "Save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

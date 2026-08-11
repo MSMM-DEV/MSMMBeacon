@@ -16,6 +16,147 @@ import {
 import { SearchableSelect } from "./primitives.jsx";
 import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
 import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
+import {
+  Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetTitle, SheetDescription,
+  Dialog, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle, DialogDescription,
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogFooter, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
+  Alert, Badge, Button, EmptyState,
+} from "@/ui";
+
+// ==========================================================================
+// SHARED DRAWER + MODAL LAYER
+//
+// Every overlay below is a Radix surface from `@/ui` — Sheet for the record
+// drawer and the pipeline transition, Dialog for the forms, AlertDialog for
+// the confirms. Focus trapping, escape-to-close, focus restore, scroll lock
+// and the aria wiring therefore come from the kit rather than being
+// hand-rolled per panel.
+//
+// Control flow is deliberately unchanged: App.jsx mounts each of these only
+// while it is open, so `open` is hard-wired true and `onOpenChange` funnels
+// straight back into the caller's own `onClose`. Same props in, same
+// callbacks out.
+// ==========================================================================
+
+/** Product-wide placeholder for an empty value (en dash, never an em dash). */
+const EMPTY = "–";
+
+/**
+ * Radix dismisses a modal surface on any pointer-down outside its content.
+ * `SearchableSelect` renders its option list through a portal on <body>,
+ * i.e. outside the panel, so picking an option would otherwise close the
+ * whole drawer. Keep the panel open for those interactions only; a click on
+ * the scrim still closes as before.
+ */
+function keepOpenForPortalMenus(e) {
+  const t = e?.detail?.originalEvent?.target;
+  if (t && t.nodeType === 1 && typeof t.closest === "function"
+      && t.closest(".searchable-menu, .searchable-select, .menu")) {
+    e.preventDefault();
+  }
+}
+
+/** `onOpenChange` adaptor: the panel is mounted only while open, so the only
+ *  transition Radix can report is open → closed. */
+const closeVia = (onClose) => (open) => { if (!open) onClose?.(); };
+
+/* Right-side record panel from `sm` up, full-height bottom sheet below it.
+   The kit's `side="right"` variant supplies the desktop geometry; these
+   `max-sm:` overrides re-anchor the panel to the bottom edge and swap the
+   slide axis by retargeting tw-animate's enter/exit translate variables. */
+const SHEET_SIDE_TO_BOTTOM = [
+  "bx-panelkit",
+  "sm:w-[min(94vw,680px)]",
+  "max-sm:inset-x-0 max-sm:inset-y-auto max-sm:left-0 max-sm:right-0 max-sm:bottom-0",
+  "max-sm:h-[94dvh] max-sm:w-full max-sm:max-w-none",
+  "max-sm:rounded-t-[var(--radius-xl)] max-sm:border-l-0 max-sm:border-t",
+  "max-sm:[--tw-enter-translate-x:0px] max-sm:[--tw-exit-translate-x:0px]",
+  "max-sm:[--tw-enter-translate-y:100%] max-sm:[--tw-exit-translate-y:100%]",
+].join(" ");
+
+/** Uppercase section heading used to break a long panel body into real groups.
+ *
+ *  No trailing rule. The heading used to run a hairline from the title out to
+ *  the panel's right edge, which stacked against the borders the panel already
+ *  draws — the sheet header's own bottom border directly above the first
+ *  section, and the dashed field separators below it — and read as a doubled
+ *  line rather than as one divider. The uppercase, muted, tracked heading is
+ *  enough of a break on its own, and the gap between sections does the rest. */
+function PanelSection({ icon, title, count, action, children, className = "" }) {
+  return (
+    <section className={"min-w-0" + (className ? " " + className : "")}>
+      <div className="mb-2 flex min-w-0 items-center gap-2">
+        <h3 className="m-0 flex min-w-0 items-center gap-1.5 text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-muted)]">
+          {icon ? <Icon name={icon} size={12}/> : null}
+          <span className="truncate">{title}</span>
+          {count != null && (
+            <span className="num rounded-[var(--radius-full)] bg-[var(--surface-3)] px-1.5 py-px text-[length:var(--fs-2xs)] font-semibold text-[var(--text-muted)]">
+              {count}
+            </span>
+          )}
+        </h3>
+        {action ? <span className="ml-auto">{action}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** One label + control row. Stacks on phones, two columns from `sm` up. */
+function PanelField({ label, hint, required, multiline = false, children }) {
+  return (
+    <div className="grid grid-cols-1 gap-1.5 border-b border-dashed border-[var(--border)] py-2.5 last:border-b-0 sm:grid-cols-[minmax(0,140px)_minmax(0,1fr)] sm:gap-4">
+      <div className={"flex items-start gap-1 text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]" + (multiline ? "" : " sm:pt-2")}>
+        <span className="min-w-0 break-words">{label}</span>
+        {required ? <span className="text-[var(--destructive)]" aria-hidden="true">*</span> : null}
+      </div>
+      <div className="min-w-0">
+        {children}
+        {hint ? (
+          <p className="m-0 mt-1 text-[length:var(--fs-xs)] leading-[var(--lh-snug)] text-[var(--text-soft)]">{hint}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Definition row used by the read-only "carried forward" summaries. */
+function PanelDefRow({ term, children }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,132px)_minmax(0,1fr)] items-baseline gap-3 py-1.5">
+      <dt className="min-w-0 break-words text-[length:var(--fs-xs)] font-medium uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">{term}</dt>
+      <dd className="m-0 min-w-0 break-words text-[length:var(--fs-sm)] text-[var(--text)]">{children}</dd>
+    </div>
+  );
+}
+
+/* Status vocabulary. Semantics are fixed product-wide (see design/README
+   section 2): sage = awarded/approved, clay = closed out/rejected,
+   brand = awaiting/attention, steel = paused or in-between,
+   neutral = potential. Never signalled by colour alone — every badge below
+   carries both a label and a glyph. */
+const STATUS_TONE = {
+  "Potential":        { tone: "neutral", icon: "dot" },
+  "Proposal":         { tone: "brand",   icon: "hourglass" },
+  "Awaiting Verdict": { tone: "brand",   icon: "hourglass" },
+  "Awarded":          { tone: "success", icon: "checkCircle" },
+  "Closed Out":       { tone: "danger",  icon: "ban" },
+  "Booked":           { tone: "info",    icon: "calendar" },
+  "Scheduled":        { tone: "brand",   icon: "calendarClock" },
+  "Happened":         { tone: "neutral", icon: "check" },
+};
+
+function RecordStatusBadge({ status }) {
+  if (!status) return null;
+  const meta = STATUS_TONE[status] || { tone: "neutral", icon: "dot" };
+  return (
+    <Badge tone={meta.tone}>
+      <Icon name={meta.icon} size={12}/>
+      {status}
+    </Badge>
+  );
+}
 
 // Multi-user picker used by both the PMs field and Events attendees.
 // Search-as-you-type dropdown; selected users render as chips with remove-x.
@@ -35,7 +176,9 @@ function UsersField({ value, onChange, placeholder = "Pick users…" }) {
         return (
           <span key={uid} className="tag">
             <span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
-            <button type="button" onClick={(e) => { e.stopPropagation(); onChange(ids.filter(x => x !== uid)); }}>
+            <button type="button"
+                    aria-label={`Remove ${u.name}`}
+                    onClick={(e) => { e.stopPropagation(); onChange(ids.filter(x => x !== uid)); }}>
               <Icon name="x" size={10}/>
             </button>
           </span>
@@ -65,16 +208,22 @@ function UsersField({ value, onChange, placeholder = "Pick users…" }) {
 
 // ============ LINKED PROJECTS (drawer subsection for Directory rows) ============
 // Renders a flat list of projects this client/company is associated with, each
-// row chip-coded by status (Potential / Awaiting / Awarded / Closed) plus a
-// small INV badge when the project has a linked anticipated_invoice row.
+// row badged by status (Potential / Awaiting / Awarded / Closed) plus a small
+// INV marker when the project has a linked anticipated_invoice row.
 // Sort: Awaiting → Awarded → Potential → Closed Out, then year DESC inside.
 const STATUS_CHIP = {
-  potential:  { label: "Potential",  cls: "accent" },
-  awaiting:   { label: "Awaiting",   cls: "blue"   },
-  awarded:    { label: "Awarded",    cls: "sage"   },
-  closed:     { label: "Closed",     cls: "muted"  },
+  potential:  { label: "Potential",  tone: "neutral", icon: "dot" },
+  awaiting:   { label: "Awaiting",   tone: "brand",   icon: "hourglass" },
+  awarded:    { label: "Awarded",    tone: "success", icon: "checkCircle" },
+  closed:     { label: "Closed",     tone: "danger",  icon: "ban" },
 };
 const STATUS_ORDER = { awaiting: 1, awarded: 2, potential: 3, closed: 4 };
+
+const LIST_ROW =
+  "group flex w-full min-w-0 items-start gap-3 rounded-[var(--radius-sm)] px-2 py-2.5 text-left " +
+  "transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] " +
+  "hover:bg-[var(--surface-2)] active:bg-[var(--surface-3)] " +
+  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]";
 
 export function LinkedProjectsSection({ projects, onOpenProject }) {
   const sorted = [...(projects || [])].sort((a, b) => {
@@ -87,109 +236,176 @@ export function LinkedProjectsSection({ projects, onOpenProject }) {
   const invoiceCount = sorted.filter(p => p.hasInvoice).length;
 
   return (
-    <div className="drawer-section linked-projects" style={{ marginTop: 22 }}>
-      <div className="linked-projects-head">
-        <div className="section-title" style={{ margin: 0 }}>
-          <Icon name="briefcase" size={12}/>
-          Linked Projects · {projectCount}
-        </div>
-        {invoiceCount > 0 && (
-          <span className="linked-projects-breakdown mono">
-            {invoiceCount} {invoiceCount === 1 ? "invoice" : "invoices"}
-          </span>
-        )}
-      </div>
+    <PanelSection
+      icon="briefcase"
+      title="Linked projects"
+      count={projectCount}
+      className="mt-5"
+      action={invoiceCount > 0 ? (
+        <span className="num shrink-0 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+          {invoiceCount} {invoiceCount === 1 ? "invoice" : "invoices"}
+        </span>
+      ) : null}
+    >
       {projectCount === 0 ? (
-        <div className="drawer-section-empty">
-          No projects link to this {/* eslint-disable-next-line */}
-          entry yet.
-        </div>
+        <EmptyState
+          compact
+          title="No linked projects"
+          description="Projects appear here once this record is set as their client, prime or sub."
+        />
       ) : (
-        <ul className="linked-projects-list">
+        <ul className="m-0 flex list-none flex-col gap-px p-0">
           {sorted.map(p => {
-            const meta = STATUS_CHIP[p.statusKey] || { label: p.statusKey, cls: "muted" };
+            const meta = STATUS_CHIP[p.statusKey] || { label: p.statusKey, tone: "neutral", icon: "dot" };
             return (
-              <li key={p.id}
-                  className="linked-project"
+              <li key={p.id} className="min-w-0">
+                <button
+                  type="button"
+                  className={LIST_ROW}
                   data-status={p.statusKey}
-                  onClick={() => onOpenProject?.(p.id, p.statusKey)}>
-                <span className={`chip ${meta.cls}`}>{meta.label}</span>
-                <span className="linked-project-year mono">{p.year || "—"}</span>
-                <span className="linked-project-name">{p.name}</span>
-                {p.hasInvoice && (
-                  <span className="chip-mini invoice-badge"
-                        title={p.invoiceTooltip || "Linked anticipated_invoice row"}>
-                    INV
+                  onClick={() => onOpenProject?.(p.id, p.statusKey)}
+                >
+                  <Badge tone={meta.tone} className="mt-px">
+                    <Icon name={meta.icon} size={12}/>
+                    {meta.label}
+                  </Badge>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+                      {p.name}
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                      <span className="num">{p.year || EMPTY}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="num">{p.projectNumber || EMPTY}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="truncate">{p.role}</span>
+                      {p.hasInvoice && (
+                        <Badge
+                          tone="info"
+                          size="sm"
+                          title={p.invoiceTooltip || "Linked anticipated_invoice row"}
+                        >
+                          <Icon name="wallet" size={11}/>
+                          INV
+                        </Badge>
+                      )}
+                    </span>
                   </span>
-                )}
-                <span className="linked-project-num mono subtle">{p.projectNumber || "—"}</span>
-                <span className="linked-project-role chip muted">{p.role}</span>
+                  <Icon
+                    name="chevronRight"
+                    size={14}
+                    className="mt-1 shrink-0 text-[var(--text-soft)] transition-transform duration-[var(--dur-fast)] ease-[var(--ease-out)] group-hover:translate-x-0.5"
+                  />
+                </button>
               </li>
             );
           })}
         </ul>
       )}
-    </div>
+    </PanelSection>
   );
 }
 
 // ============ LINKED SUBS (drawer subsection for Invoice rows) ============
 // Shown below the editable fields when an Invoice row is open. Reads the
 // linked project's project_subs (already on the project's `subs` array via
-// the loader) and renders a compact list. Includes an inline "+ Add sub"
+// the loader) and renders a compact list. Includes an inline "Add sub"
 // trigger that opens the AddSubModal — same flow as the table's expand row.
 export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
+  const total = subs.reduce((a, s) => a + (Number(s.amt) || 0), 0);
   return (
-    <div className="drawer-section linked-subs" style={{ marginTop: 22 }}>
-      <div className="linked-projects-head">
-        <div className="section-title" style={{ margin: 0 }}>
-          <Icon name="briefcase" size={12}/>
-          Linked Subs · {subs.length}
-        </div>
-        <button
+    <PanelSection
+      icon="briefcase"
+      title="Linked subs"
+      count={subs.length}
+      className="mt-5"
+      action={
+        <Button
           type="button"
-          className="invoice-add-sub-btn"
+          size="xs"
+          variant="subtle"
           onClick={onAddSub}
           title="Add a sub to this project"
-          style={{ fontSize: 11 }}>
-          <Icon name="plus" size={11}/>
+        >
+          <Icon name="plus" size={12}/>
           Add sub
-        </button>
-      </div>
-      {!invoiceLinked && subs.length === 0 && (
-        <div className="drawer-section-empty">
-          No subs yet. Click "Add sub" — we'll wire this invoice to a project
-          automatically.
-        </div>
+        </Button>
+      }
+    >
+      {subs.length === 0 ? (
+        <EmptyState
+          compact
+          title="No subs yet"
+          description={invoiceLinked
+            ? "No subs are tracked on this project yet."
+            : "Choose “Add sub” and Beacon links this invoice to a project for you."}
+        />
+      ) : (
+        <>
+          <ul className="m-0 flex list-none flex-col gap-px p-0">
+            {subs.map((s, i) => {
+              const company = companyById(s.cId);
+              return (
+                <li
+                  key={i}
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-[var(--radius-sm)] px-2 py-2 hover:bg-[var(--surface-2)]"
+                >
+                  <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+                    {company?.name || EMPTY}
+                  </span>
+                  <span className="num shrink-0 text-[length:var(--fs-sm)] tabular-nums text-[var(--text)]">
+                    {s.amt ? fmtMoney(s.amt) : <span className="text-[var(--text-soft)]">{EMPTY}</span>}
+                  </span>
+                  <span className="col-span-2 min-w-0 truncate text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                    {s.desc || EMPTY}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-[var(--border)] px-2 pt-2">
+            <span className="text-[length:var(--fs-xs)] uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
+              Total
+            </span>
+            <span className="num text-[length:var(--fs-sm)] font-semibold text-[var(--text)]">
+              {fmtMoney(total)}
+            </span>
+          </div>
+        </>
       )}
-      {invoiceLinked && subs.length === 0 && (
-        <div className="drawer-section-empty">
-          No subs tracked on this project yet.
-        </div>
-      )}
-      {subs.length > 0 && (
-        <ul className="linked-subs-list">
-          {subs.map((s, i) => {
-            const company = companyById(s.cId);
-            return (
-              <li key={i} className="linked-sub">
-                <span className="linked-sub-name">{company?.name || "—"}</span>
-                <span className="linked-sub-discipline mono subtle">
-                  {s.desc || "—"}
-                </span>
-                <span className="linked-sub-amount mono">
-                  {s.amt ? fmtMoney(s.amt) : <span className="empty-cell">—</span>}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+    </PanelSection>
   );
 }
 
 // ============ DETAIL DRAWER (read/edit a row) ============
+// Field groups. Purely presentational: the per-table `fields` arrays below
+// stay the single source of truth for WHICH fields exist and in what order —
+// this map only decides which heading a field sits under, and any field not
+// listed here falls through into a trailing "More" group so the drawer is
+// still the complete editor for the row.
+const FIELD_GROUPS = [
+  { id: "overview", title: "Overview", icon: "clipboard",
+    keys: ["year","name","title","localId","projectNumber","rfqNumber","parentId","itemType",
+           "type","baseName","district","orgType","stars","probability"] },
+  { id: "parties", title: "People and firms", icon: "users",
+    keys: ["clientId","primeId","role","subs","pmIds","managerId","attendees"] },
+  { id: "contact", title: "Contact", icon: "mail",
+    keys: ["contact","email","phone","address"] },
+  { id: "commercial", title: "Contract and money", icon: "wallet",
+    keys: ["amount","msmm","msmmUsed","msmmRemaining","remainingStart","anticipatedAmount",
+           "clientContract","msmmContract","contractType","contractAmount","pools",
+           "anticipatedInvoiceStartMonth","laborCost","expenseCost","billedServices",
+           "billedExpenses","billedTaxes","totalBilled"] },
+  { id: "schedule", title: "Dates and status", icon: "calendar",
+    keys: ["status","stage","dateTime","dueAt","dateSubmitted","anticipatedResultDate",
+           "contractExpiry","dateClosed","nextActionDate","dates","startDate","dueDate",
+           "percentComplete"] },
+  { id: "location", title: "Location", icon: "pin",
+    keys: ["addressLine1","addressLine2","city","state","pinCode"] },
+  { id: "narrative", title: "Notes and detail", icon: "note",
+    keys: ["notes","details","description","reason","serviceDescription","webLink"] },
+];
+
 export const DetailDrawer = ({
   row, table, onClose, onUpdate, onForward, onAlert, onDelete,
   onCloseOut, onDemoteFromOrange, onMoveBack,
@@ -304,7 +520,7 @@ export const DetailDrawer = ({
       { k: "amount",         label: "Total Contract Value",    type: "money" },
       // Linked-pair MSMM is edited on the expanded HZ sub row, not in this
       // project-level drawer. Unlinked rows keep their legacy derived fallback.
-      { k: "remainingStart", label: "Rollforward (from 2025)",   type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated — admins only" },
+      { k: "remainingStart", label: "Rollforward (from 2025)",   type: "money", readOnlyIf: () => !isAdmin, readOnlyHint: "Auto-calculated, admins only" },
       { k: "description",    label: "Description",             type: "textarea", placeholder: "Project scope / description…" },
       // Notes moved to the threaded, multi-author Notes log — opened from the
       // "Notes" chip on the Invoice row (InvoiceNotesThread). No single-text
@@ -402,9 +618,9 @@ export const DetailDrawer = ({
       { k: "status",          label: "Status",            type: "kvselect", options: PROJECT_ITEM_STATUS_OPTIONS },
       { k: "laborCost",       label: "Total Labor Cost",     type: "money" },
       { k: "expenseCost",     label: "Total Expense Cost",   type: "money" },
-      { k: "billedServices",  label: "Billed — Services",    type: "money" },
-      { k: "billedExpenses",  label: "Billed — Expenses",    type: "money" },
-      { k: "billedTaxes",     label: "Billed — Taxes",       type: "money" },
+      { k: "billedServices",  label: "Billed: Services",     type: "money" },
+      { k: "billedExpenses",  label: "Billed: Expenses",     type: "money" },
+      { k: "billedTaxes",     label: "Billed: Taxes",        type: "money" },
       { k: "totalBilled",     label: "Total Billed / Paid",  type: "money" },
       { k: "addressLine1",    label: "Address Line 1" },
       { k: "addressLine2",    label: "Address Line 2" },
@@ -423,7 +639,7 @@ export const DetailDrawer = ({
       if (f.type === "users") {
         const ids = val || [];
         if (ids.length === 0) {
-          return <div className="field-readonly muted">— no MSMM attendees</div>;
+          return <div className="field-readonly muted">No MSMM attendees</div>;
         }
         return (
           <div className="field-readonly">
@@ -446,12 +662,12 @@ export const DetailDrawer = ({
         // "2026-12-10T15:30:00+00:00"). Run through fmtDateTime so the
         // drawer shows the local wall-clock ("Dec 10 · 9:30 AM") like the
         // table/calendar do — NOT the raw UTC ISO string.
-        return <div className="field-readonly mono">{val ? fmtDateTime(val) : "—"}</div>;
+        return <div className="field-readonly mono num">{val ? fmtDateTime(val) : EMPTY}</div>;
       }
       if (f.type === "money") {
         return (
-          <div className="field-readonly mono">
-            {val != null && val !== "" ? fmtMoney(val) : <span className="muted">—</span>}
+          <div className="field-readonly mono num">
+            {val != null && val !== "" ? fmtMoney(val) : <span className="muted">{EMPTY}</span>}
             {f.readOnlyHint && (
               <span className="muted" style={{ fontSize: 11, marginLeft: 8, fontFamily: "var(--font-body)" }}>
                 {f.readOnlyHint}
@@ -460,7 +676,7 @@ export const DetailDrawer = ({
           </div>
         );
       }
-      return <div className="field-readonly">{val || <span className="muted">—</span>}</div>;
+      return <div className="field-readonly">{val || <span className="muted">{EMPTY}</span>}</div>;
     }
     if (f.type === "textarea") return <textarea className="textarea" defaultValue={val || ""} placeholder={f.placeholder} onBlur={e => set(e.target.value)}/>;
     if (f.type === "stars") return (
@@ -468,7 +684,7 @@ export const DetailDrawer = ({
     );
     if (f.type === "select") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
-        <option value="">—</option>
+        <option value="">{EMPTY}</option>
         {f.options.map(o => <option key={o}>{o}</option>)}
       </select>
     );
@@ -500,7 +716,7 @@ export const DetailDrawer = ({
     );
     if (f.type === "user") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value)}>
-        <option value="">—</option>
+        <option value="">{EMPTY}</option>
         {USERS.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
       </select>
     );
@@ -509,21 +725,21 @@ export const DetailDrawer = ({
                   placeholder={f.placeholder || "Pick MSMM users…"}/>
     );
     if (f.type === "money") return (
-      <input className="input" type="number" defaultValue={val || ""} onBlur={e => set(Number(e.target.value))}
+      <input className="input mono num" type="number" defaultValue={val || ""} onBlur={e => set(Number(e.target.value))}
         style={{ fontFamily: "var(--font-mono)" }}/>
     );
     if (f.type === "date" || f.type === "datetime") return (
-      <input className="input" type={f.type === "datetime" ? "datetime-local" : "date"} defaultValue={val || ""} onBlur={e => set(e.target.value)}
+      <input className="input mono num" type={f.type === "datetime" ? "datetime-local" : "date"} defaultValue={val || ""} onBlur={e => set(e.target.value)}
         style={{ fontFamily: "var(--font-mono)" }}/>
     );
     if (f.type === "mono") return (
-      <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}
+      <input className="input mono num" defaultValue={val || ""} onBlur={e => set(e.target.value)}
         style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
     );
     if (f.type === "month") return (
       <select className="select" value={val || ""}
               onChange={e => set(e.target.value === "" ? null : Number(e.target.value))}>
-        <option value="">—</option>
+        <option value="">{EMPTY}</option>
         {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
       </select>
     );
@@ -539,19 +755,15 @@ export const DetailDrawer = ({
       const removeSub = (i) => set(subs.filter((_, j) => j !== i));
       const addSub = () => set([...subs, { cId: null, desc: "", amt: 0 }]);
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className="flex min-w-0 flex-col gap-2">
           {subs.length === 0 && (
-            <div style={{
-              fontSize: 12.5, color: "var(--text-soft)", fontStyle: "italic",
-              padding: "6px 10px", background: "var(--surface-2)",
-              border: "1px dashed var(--border)", borderRadius: 8,
-            }}>
-              No subs yet — click "Add sub" below to add one.
-            </div>
+            <p className="m-0 rounded-[var(--radius-sm)] border border-dashed border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+              No subs yet. Use the button below to add one.
+            </p>
           )}
           {subs.map((s, i) => (
-            <div key={i} className="subrow"
-                 style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr) 110px 30px" }}>
+            <div key={i}
+                 className="grid min-w-0 grid-cols-1 gap-2 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-2)] p-2 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_110px_32px] sm:items-center">
               <SearchableSelect
                 value={s.cId || ""}
                 options={SUB_OPTIONS}
@@ -565,7 +777,7 @@ export const DetailDrawer = ({
                 onChange={e => updateSub(i, { desc: e.target.value })}
               />
               <input
-                className="input mono"
+                className="input mono num"
                 type="number"
                 placeholder="$"
                 min="0"
@@ -573,30 +785,25 @@ export const DetailDrawer = ({
                 onChange={e => updateSub(i, { amt: e.target.value === "" ? 0 : Number(e.target.value) })}
                 style={{ fontFamily: "var(--font-mono)", textAlign: "right" }}
               />
-              <button
-                className="row-btn"
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Remove sub"
                 title="Remove sub"
+                className="justify-self-end text-[var(--rose)] hover:bg-[var(--rose-soft)] hover:text-[var(--rose-ink)]"
                 onClick={() => removeSub(i)}
-                style={{ color: "var(--rose)" }}
               >
-                <Icon name="trash" size={12}/>
-              </button>
+                <Icon name="trash" size={13}/>
+              </Button>
             </div>
           ))}
-          <div style={{
-            display: "flex", alignItems: "center",
-            justifyContent: "space-between",
-            marginTop: subs.length ? 4 : 2,
-          }}>
-            <button
-              className="tool-chip"
-              onClick={addSub}
-              style={{ borderStyle: "solid", borderColor: "var(--accent-soft)", color: "var(--accent-ink)", background: "var(--accent-softer)" }}
-            >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button type="button" size="xs" variant="subtle" onClick={addSub}>
               <Icon name="plus" size={12}/>Add sub
-            </button>
+            </Button>
             {subs.length > 0 && (
-              <span className="mono" style={{ fontSize: 11, color: "var(--text-soft)" }}>
+              <span className="num text-[length:var(--fs-xs)] text-[var(--text-soft)]">
                 Total: {fmtMoney(subs.reduce((a, s) => a + (Number(s.amt) || 0), 0))}
               </span>
             )}
@@ -608,7 +815,7 @@ export const DetailDrawer = ({
     // Status / Contract Type on a project item.
     if (f.type === "kvselect") return (
       <select className="select" value={val || ""} onChange={e => set(e.target.value || null)}>
-        {f.allowEmpty && <option value="">—</option>}
+        {f.allowEmpty && <option value="">{EMPTY}</option>}
         {(f.options || []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     );
@@ -625,7 +832,7 @@ export const DetailDrawer = ({
         <SearchableSelect
           value={val || ""}
           options={opts}
-          placeholder="None — top-level project"
+          placeholder="None, top-level project"
           onChange={v => set(v || null)}
         />
       );
@@ -636,49 +843,50 @@ export const DetailDrawer = ({
       const subs = val || [];
       const avail = SUB_OPTIONS.filter(o => !subs.some(s => s.cId === o.value));
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className="flex min-w-0 flex-col gap-2">
           {subs.length === 0 && (
-            <div style={{
-              fontSize: 12.5, color: "var(--text-soft)", fontStyle: "italic",
-              padding: "6px 10px", background: "var(--surface-2)",
-              border: "1px dashed var(--border)", borderRadius: 8,
-            }}>
-              No subs yet — pick a firm below to add one.
-            </div>
+            <p className="m-0 rounded-[var(--radius-sm)] border border-dashed border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+              No subs yet. Pick a firm below to add one.
+            </p>
           )}
           {subs.map((s, i) => (
-            <div key={s.cId || i} className="subrow"
-                 style={{ gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) 110px 30px" }}>
-              <div className="field-readonly" style={{ fontSize: 12.5, alignSelf: "center" }}>
-                {companyById(s.cId)?.name || "—"}
+            <div key={s.cId || i}
+                 className="grid min-w-0 grid-cols-1 gap-2 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-2)] p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_110px_32px] sm:items-center">
+              <div className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+                {companyById(s.cId)?.name || EMPTY}
               </div>
               <input className="input" placeholder="Discipline (e.g. Survey)"
                      defaultValue={s.desc || ""}
                      onBlur={e => onUpdateProjectSub?.(s.cId, { desc: e.target.value })}/>
-              <input className="input mono" type="number" placeholder="$" min="0"
+              <input className="input mono num" type="number" placeholder="$" min="0"
                      defaultValue={s.amt ?? ""}
                      onBlur={e => onUpdateProjectSub?.(s.cId, { amt: e.target.value === "" ? 0 : Number(e.target.value) })}
                      style={{ fontFamily: "var(--font-mono)", textAlign: "right" }}/>
-              <button className="row-btn" title="Remove sub"
-                      onClick={() => onRemoveProjectSub?.(s.cId)} style={{ color: "var(--rose)" }}>
-                <Icon name="trash" size={12}/>
-              </button>
+              <Button type="button" size="icon-sm" variant="ghost"
+                      aria-label="Remove sub" title="Remove sub"
+                      className="justify-self-end text-[var(--rose)] hover:bg-[var(--rose-soft)] hover:text-[var(--rose-ink)]"
+                      onClick={() => onRemoveProjectSub?.(s.cId)}>
+                <Icon name="trash" size={13}/>
+              </Button>
             </div>
           ))}
-          <div style={{ marginTop: subs.length ? 4 : 2 }}>
-            <SearchableSelect
-              value=""
-              options={avail}
-              placeholder="Add a sub firm…"
-              onChange={v => { if (v) onAddProjectSub?.(v); }}
-            />
-          </div>
+          <SearchableSelect
+            value=""
+            options={avail}
+            placeholder="Add a sub firm…"
+            onChange={v => { if (v) onAddProjectSub?.(v); }}
+          />
         </div>
       );
     }
     return <input className="input" defaultValue={val || ""} onBlur={e => set(e.target.value)}/>;
   };
 
+  // Every table the drawer can open needs an entry. `hotleads` was missing, so
+  // on Leads & Bids the badge rendered with no text at all — which is why it
+  // read as a bare, unexplained icon rather than as a label for the kind of
+  // record on screen. (The Deleted tabs pass a no-op onOpenDrawer and never
+  // reach here, so they need no entry.)
   const titleMap = {
     potential: "Potential Project",
     awaiting:  "Proposal",
@@ -688,6 +896,7 @@ export const DetailDrawer = ({
     events:    "Event",
     clients:   "Client",
     companies: "Company",
+    hotleads:  "Hot Lead",
     openbids:  "Open Bid",
     projects:  "Project",
   };
@@ -695,92 +904,145 @@ export const DetailDrawer = ({
     ? (row.type === "Client" ? "Client" : "Company")
     : titleMap[table];
 
+  // ---- Presentation-only derivations -------------------------------------
+  const visibleFields = fields.filter(f => !f.showIf || f.showIf(row));
+  const grouped = FIELD_GROUPS
+    .map(g => ({ ...g, items: visibleFields.filter(f => g.keys.includes(f.k)) }))
+    .filter(g => g.items.length > 0);
+  const claimed = new Set(grouped.flatMap(g => g.items.map(f => f.k)));
+  const leftovers = visibleFields.filter(f => !claimed.has(f.k));
+  if (leftovers.length) grouped.push({ id: "more", title: "More", icon: "sliders", items: leftovers });
+
+  const recordTitle = row.name || row.title || row.rfqNumber || EMPTY;
+  const clientName  = row.clientId ? (companyById(row.clientId)?.name || null) : null;
+  const headerBits  = [];
+  if (row.year) headerBits.push(String(row.year));
+  if (clientName) headerBits.push(clientName);
+  if (row.role) headerBits.push(row.role);
+  const headerMoney = [row.amount, row.contractAmount, row.anticipatedAmount]
+    .find(v => v != null && v !== "");
+
+  const hasStageActions = !!(onMoveBack || onDemoteFromOrange || onCloseOut || onAddChild);
+
   return (
-    <>
-      <div className="overlay" onClick={onClose}/>
-      <div className="drawer">
-        <div className="drawer-head">
-          <div>
-            <div className="drawer-eyebrow">
-              <Icon name="briefcase" size={12}/>
-              {titleLabel}
-              {row.projectNumber && <span className="mono" style={{ marginLeft: 6, color: "var(--text-soft)" }}>· {row.projectNumber}</span>}
-            </div>
-            <h3 className="drawer-title">{row.name || row.title || row.rfqNumber || "—"}</h3>
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            {onForward && <button className="btn sm primary" onClick={onForward}><Icon name="forward" size={13}/>Move forward</button>}
-            {onMoveBack && (
-              <span className="move-back-group" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                <span style={{ fontSize: 11.5, color: "var(--text-soft)" }}>Move back:</span>
-                <button className="btn sm" onClick={() => onMoveBack("awaiting")} title="Reopen as Proposal">
-                  <Icon name="back" size={12}/>Proposal
-                </button>
-                <button className="btn sm" onClick={() => onMoveBack("awarded")} title="Reopen as Awarded">
-                  <Icon name="back" size={12}/>Awarded
-                </button>
-                <button className="btn sm" onClick={() => onMoveBack("invoice")} title="Reopen as Active (Invoice)">
-                  <Icon name="back" size={12}/>Invoice
-                </button>
+    <Sheet open onOpenChange={closeVia(onClose)}>
+      <SheetContent
+        side="right"
+        className={SHEET_SIDE_TO_BOTTOM}
+        onPointerDownOutside={keepOpenForPortalMenus}
+        onFocusOutside={keepOpenForPortalMenus}
+        onInteractOutside={keepOpenForPortalMenus}
+      >
+        <SheetHeader className="gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {/* No icon. The badge already says what the record is, in words,
+                and a briefcase glyph in front of "Hot Lead" or "Company" adds
+                no information the label doesn't carry — it was the same
+                picture on every record type. */}
+            <Badge tone="outline">{titleLabel}</Badge>
+            {row.projectNumber && (
+              <span className="num text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                #{row.projectNumber}
               </span>
             )}
-            {onDemoteFromOrange && (
-              <button
-                className="btn sm"
-                onClick={onDemoteFromOrange}
-                style={{ color: "var(--prob-orange)" }}
-                title="Demote from Orange — the Invoice row is removed and the project reappears in Potential."
-              >
-                <Icon name="forward" size={13}/>Move to Potential
-              </button>
-            )}
-            {onCloseOut && (
-              <button
-                className="btn sm"
-                onClick={onCloseOut}
-                style={{ color: "var(--rose)" }}
-              >
-                <Icon name="x" size={13}/>Close out
-              </button>
-            )}
-            {onAddChild && (
-              <button className="btn sm" onClick={onAddChild} title="Add a phase / subphase under this item">
-                <Icon name="plus" size={13}/>Add child
-              </button>
-            )}
-            {onAlert && <button className="btn sm" onClick={onAlert}><Icon name="bell" size={13}/>Alert</button>}
-            <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
+            <RecordStatusBadge status={row.status}/>
           </div>
-        </div>
-        <div className="drawer-body">
+          <SheetTitle className="break-words text-[length:var(--fs-xl)] leading-[var(--lh-tight)]">
+            {recordTitle}
+          </SheetTitle>
+          <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {headerBits.length > 0 ? (
+              <span className="min-w-0 break-words">{headerBits.join(" · ")}</span>
+            ) : (
+              <span>Record detail</span>
+            )}
+            {headerMoney != null && (
+              <span className="num font-semibold text-[var(--text)]">{fmtMoney(headerMoney)}</span>
+            )}
+          </SheetDescription>
+        </SheetHeader>
+
+        <SheetBody className="flex flex-col gap-5">
           {table === "events" && row.source === "outlook" && (
-            <div className="drawer-outlook-banner">
-              <span className="outlook-banner-mark"><Icon name="mail" size={11}/></span>
-              <span className="outlook-banner-text">
-                Synced from Outlook
+            <Alert tone="info" icon={null} className="items-center gap-2">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <Icon name="mail" size={13}/>
+                <span className="font-semibold">Synced from Outlook</span>
                 {row.outlookOrganizer?.email && (
-                  <span className="muted"> · organized by {row.outlookOrganizer.name || row.outlookOrganizer.email}</span>
+                  <span className="min-w-0 break-words opacity-80">
+                    organized by {row.outlookOrganizer.name || row.outlookOrganizer.email}
+                  </span>
+                )}
+                {row.outlookWebLink && (
+                  <a className="inline-flex items-center gap-1 font-semibold underline underline-offset-2"
+                     href={row.outlookWebLink}
+                     target="_blank"
+                     rel="noreferrer noopener">
+                    Edit in Outlook
+                    <Icon name="external" size={11}/>
+                  </a>
                 )}
               </span>
-              {row.outlookWebLink && (
-                <a className="outlook-banner-link"
-                   href={row.outlookWebLink}
-                   target="_blank"
-                   rel="noreferrer noopener">
-                  Edit in Outlook
-                  <Icon name="link" size={10}/>
-                </a>
-              )}
-            </div>
+            </Alert>
           )}
-          {fields.filter(f => !f.showIf || f.showIf(row)).map(f => (
-            <div key={f.k} className="field">
-              <div className="field-label">{f.label}</div>
-              <div className={"field-value" + (f.type === "textarea" || f.type === "subs" || f.type === "projectSubs" ? " multiline" : "")}>
-                {renderInput(f)}
+
+          {hasStageActions && (
+            <PanelSection icon="forward" title="Move this record">
+              <div className="flex flex-wrap items-center gap-2">
+                {onMoveBack && (
+                  <>
+                    <span className="text-[length:var(--fs-xs)] text-[var(--text-soft)]">Reopen as</span>
+                    <Button type="button" size="sm" onClick={() => onMoveBack("awaiting")} title="Reopen as Proposal">
+                      <Icon name="back" size={13}/>Proposal
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => onMoveBack("awarded")} title="Reopen as Awarded">
+                      <Icon name="back" size={13}/>Awarded
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => onMoveBack("invoice")} title="Reopen as Active (Invoice)">
+                      <Icon name="back" size={13}/>Invoice
+                    </Button>
+                  </>
+                )}
+                {onDemoteFromOrange && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={onDemoteFromOrange}
+                    title="Demote from Orange. The Invoice row is removed and the project reappears in Potential."
+                  >
+                    <Icon name="back" size={13}/>Move to Potential
+                  </Button>
+                )}
+                {onAddChild && (
+                  <Button type="button" size="sm" onClick={onAddChild} title="Add a phase / subphase under this item">
+                    <Icon name="plus" size={13}/>Add child
+                  </Button>
+                )}
+                {onCloseOut && (
+                  <Button type="button" size="sm" variant="destructive-soft" onClick={onCloseOut}>
+                    <Icon name="ban" size={13}/>Close out
+                  </Button>
+                )}
               </div>
-            </div>
+            </PanelSection>
+          )}
+
+          {grouped.map(g => (
+            <PanelSection key={g.id} icon={g.icon} title={g.title}>
+              <div className="min-w-0">
+                {g.items.map(f => (
+                  <PanelField
+                    key={f.k}
+                    label={f.label}
+                    multiline={f.type === "textarea" || f.type === "subs" || f.type === "projectSubs"}
+                  >
+                    {renderInput(f)}
+                  </PanelField>
+                ))}
+              </div>
+            </PanelSection>
           ))}
+
           {table === "openbids" && (() => {
             const approver = row.approvedBy ? userById(row.approvedBy) : null;
             const stampedAt = row.approvedAt;
@@ -789,129 +1051,132 @@ export const DetailDrawer = ({
             const isRejected = row.approvalStatus === "rejected";
             return (
               <>
-                <div className="section-title" style={{ marginTop: 22 }}>
-                  <Icon name="check" size={12}/>Approval
-                </div>
-                <div className="bid-approval-panel">
-                  <div className="bid-approval-state">
-                    <span className={"chip " + (isApproved ? "sage" : isRejected ? "rose" : "muted")}
-                          style={{ fontWeight: 600 }}>
-                      <span className="chip-dot"/>
-                      {isApproved ? "Approved" : isRejected ? "Rejected" : "Pending"}
-                    </span>
-                    {(isApproved || isRejected) && approver && (
-                      <span className="bid-approval-meta-large">
-                        by <strong>{approver.name}</strong>
-                        {stampedAt && <> · <span className="mono">{new Date(stampedAt).toLocaleString()}</span></>}
-                      </span>
+                <PanelSection icon="shieldCheck" title="Approval">
+                  <div className="flex flex-col gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Badge tone={isApproved ? "success" : isRejected ? "danger" : "neutral"}>
+                        <Icon name={isApproved ? "checkCircle" : isRejected ? "ban" : "hourglass"} size={12}/>
+                        {isApproved ? "Approved" : isRejected ? "Rejected" : "Pending"}
+                      </Badge>
+                      {(isApproved || isRejected) && approver && (
+                        <span className="min-w-0 text-[length:var(--fs-xs)] text-[var(--text-muted)]">
+                          by <strong className="font-semibold text-[var(--text)]">{approver.name}</strong>
+                          {stampedAt && <> · <span className="num">{new Date(stampedAt).toLocaleString()}</span></>}
+                        </span>
+                      )}
+                    </div>
+                    {isAdmin ? (
+                      <div className="flex flex-wrap gap-2">
+                        {!isApproved && onApproveBid && (
+                          <Button type="button" size="sm" onClick={onApproveBid}
+                                  className="border-[var(--sage-line)] text-[var(--sage-ink)] hover:bg-[var(--sage-soft)]">
+                            <Icon name="thumbsUp" size={13}/>Approve
+                          </Button>
+                        )}
+                        {!isRejected && onRejectBid && (
+                          <Button type="button" size="sm" variant="destructive-soft" onClick={onRejectBid}>
+                            <Icon name="thumbsDown" size={13}/>Reject
+                          </Button>
+                        )}
+                        {(isApproved || isRejected) && onClearBidApproval && (
+                          <Button type="button" size="sm" variant="ghost" onClick={onClearBidApproval}>
+                            <Icon name="undo" size={13}/>Clear
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      isPending && (
+                        <p className="m-0 flex items-center gap-1.5 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                          <Icon name="lock" size={12}/> Only Admins can approve or reject a bid.
+                        </p>
+                      )
                     )}
                   </div>
-                  {isAdmin ? (
-                    <div className="bid-approval-controls">
-                      {!isApproved && onApproveBid && (
-                        <button className="btn sm" onClick={onApproveBid}
-                                style={{ borderColor: "var(--sage)", color: "var(--sage)" }}>
-                          <Icon name="thumbsUp" size={13}/>Approve
-                        </button>
-                      )}
-                      {!isRejected && onRejectBid && (
-                        <button className="btn sm" onClick={onRejectBid}
-                                style={{ borderColor: "var(--rose)", color: "var(--rose)" }}>
-                          <Icon name="thumbsDown" size={13}/>Reject
-                        </button>
-                      )}
-                      {(isApproved || isRejected) && onClearBidApproval && (
-                        <button className="btn sm" onClick={onClearBidApproval}>
-                          <Icon name="undo" size={13}/>Clear
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    isPending && (
-                      <div style={{ fontSize: 12, color: "var(--text-soft)" }}>
-                        <Icon name="lock" size={11}/> Only Admins can approve or reject a bid.
-                      </div>
-                    )
-                  )}
-                </div>
+                </PanelSection>
 
-                <div className="section-title" style={{ marginTop: 22 }}>
-                  <Icon name="export" size={12}/>RFQ/RFP PDF
-                </div>
-                <div className="bid-pdf-panel">
-                  {row.pdfPath ? (
-                    <div className="bid-pdf-row">
-                      <button type="button" className="tool-chip on" onClick={onOpenBidPdf}
-                              title={row.pdfName || "Open PDF"}>
-                        <Icon name="check" size={11}/>
-                        <span className="bid-pdf-name">{row.pdfName || "PDF attached"}</span>
-                      </button>
-                      {onRemoveBidPdf && (
-                        <button type="button" className="row-btn" title="Remove PDF"
-                                onClick={onRemoveBidPdf} style={{ color: "var(--rose)" }}>
-                          <Icon name="x" size={11}/>
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: "var(--text-soft)", marginBottom: 8 }}>
-                      No PDF attached.
-                    </div>
-                  )}
-                  <label className="tool-chip" style={{ cursor: "pointer" }}>
-                    <Icon name="plus" size={11}/>
-                    {row.pdfPath ? "Replace PDF…" : "Upload PDF…"}
-                    <input type="file" accept="application/pdf,.pdf"
-                           style={{ display: "none" }}
-                           onChange={e => {
-                             const f = e.target.files?.[0];
-                             if (f && onUploadBidPdf) onUploadBidPdf(f);
-                             e.target.value = "";
-                           }}/>
-                  </label>
-                </div>
+                <PanelSection icon="attachment" title="RFQ/RFP PDF">
+                  <div className="flex flex-col gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                    {row.pdfPath ? (
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Button type="button" size="sm" variant="subtle" onClick={onOpenBidPdf}
+                                className="min-w-0 flex-1 justify-start"
+                                title={row.pdfName || "Open PDF"}>
+                          <Icon name="file" size={13}/>
+                          <span className="min-w-0 truncate">{row.pdfName || "PDF attached"}</span>
+                        </Button>
+                        {onRemoveBidPdf && (
+                          <Button type="button" size="icon-sm" variant="ghost"
+                                  aria-label="Remove PDF" title="Remove PDF"
+                                  className="text-[var(--rose)] hover:bg-[var(--rose-soft)] hover:text-[var(--rose-ink)]"
+                                  onClick={onRemoveBidPdf}>
+                            <Icon name="x" size={13}/>
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="m-0 text-[length:var(--fs-xs)] text-[var(--text-soft)]">No PDF attached.</p>
+                    )}
+                    <Button asChild size="sm" variant="default" className="self-start">
+                      <label className="cursor-pointer">
+                        <Icon name="upload" size={13}/>
+                        {row.pdfPath ? "Replace PDF…" : "Upload PDF…"}
+                        <input type="file" accept="application/pdf,.pdf"
+                               className="sr-only"
+                               onChange={e => {
+                                 const f = e.target.files?.[0];
+                                 if (f && onUploadBidPdf) onUploadBidPdf(f);
+                                 e.target.value = "";
+                               }}/>
+                      </label>
+                    </Button>
+                  </div>
+                </PanelSection>
 
                 {row.movedToProjectId && (
-                  <>
-                    <div className="section-title" style={{ marginTop: 22 }}>
-                      <Icon name="forward" size={12}/>Moved Forward
-                    </div>
-                    <div className="chip accent" style={{ fontSize: 12 }}>
-                      <Icon name="forward" size={11}/>
-                      Linked to Proposals project · {row.movedToProjectId.slice(0, 8)}
-                    </div>
-                  </>
+                  <PanelSection icon="forward" title="Moved forward">
+                    <p className="m-0 flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--fs-sm)] text-[var(--text-muted)]">
+                      <Icon name="link" size={13}/>
+                      Linked to a Proposals project
+                      <span className="num text-[var(--text-soft)]">{row.movedToProjectId.slice(0, 8)}</span>
+                    </p>
+                  </PanelSection>
                 )}
               </>
             );
           })()}
+
           {table === "events" && (row.outlookExternalAttendees || []).length > 0 && (
-            <>
-              <div className="section-title" style={{ marginTop: 22 }}>
-                <Icon name="users" size={12}/>
-                External invitees · {row.outlookExternalAttendees.length}
-              </div>
-              <div className="ext-chips">
+            <PanelSection icon="users" title="External invitees" count={row.outlookExternalAttendees.length}>
+              <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
                 {row.outlookExternalAttendees.map((a, i) => (
-                  <span key={`${a.email}-${i}`}
-                        className={"ext-chip" + (a.response === "declined" ? " declined" : a.response === "accepted" ? " accepted" : "")}
-                        title={`${a.name || a.email} · ${a.response || "no response"}`}>
-                    {a.name && <span className="ext-chip-name">{a.name}</span>}
-                    <span className="ext-chip-email mono">{a.email}</span>
-                  </span>
+                  <li key={`${a.email}-${i}`}>
+                    <Badge
+                      tone={a.response === "declined" ? "danger" : a.response === "accepted" ? "success" : "neutral"}
+                      className="max-w-full"
+                      title={`${a.name || a.email} · ${a.response || "no response"}`}
+                    >
+                      <Icon
+                        name={a.response === "declined" ? "x" : a.response === "accepted" ? "check" : "dot"}
+                        size={11}
+                      />
+                      <span className="min-w-0 truncate">{a.name || a.email}</span>
+                    </Badge>
+                  </li>
                 ))}
-              </div>
-            </>
+              </ul>
+            </PanelSection>
           )}
+
           {row.sourceId && (
-            <>
-              <div className="section-title" style={{ marginTop: 22 }}><Icon name="link" size={12}/>Linked history</div>
-              <div className="chip accent" style={{ fontSize: 12 }}>
-                <Icon name="forward" size={11}/>
-                Carried forward from previous stage · {row.sourceId}
-              </div>
-            </>
+            <PanelSection icon="link" title="Linked history">
+              <p className="m-0 flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--fs-sm)] text-[var(--text-muted)]">
+                <Icon name="forward" size={13}/>
+                Carried forward from a previous stage
+                <span className="num text-[var(--text-soft)]">{row.sourceId}</span>
+              </p>
+            </PanelSection>
           )}
+
           {table === "directory" && linkedProjects && (
             <LinkedProjectsSection
               projects={linkedProjects}
@@ -925,23 +1190,33 @@ export const DetailDrawer = ({
               onAddSub={onAddSub}
             />
           )}
-        </div>
-        <div className="drawer-foot">
-          {onDelete && (
-            <button
-              className="btn ghost sm"
-              style={{ color: "var(--rose)" }}
-              onClick={onDelete}
-            >
-              <Icon name="trash" size={13}/>Delete
-            </button>
-          )}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, color: "var(--text-soft)", fontSize: 12 }}>
-            <Icon name="check" size={12}/>Local-only (wire writes to Supabase next)
+        </SheetBody>
+
+        <SheetFooter className="flex-wrap justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {onDelete && (
+              <Button type="button" size="sm" variant="destructive-soft" onClick={onDelete}>
+                <Icon name="trash" size={13}/>Delete
+              </Button>
+            )}
           </div>
-        </div>
-      </div>
-    </>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {onAlert && (
+              <Button type="button" size="sm" onClick={onAlert}>
+                <Icon name="bell" size={13}/>Alert
+              </Button>
+            )}
+            {onForward ? (
+              <Button type="button" size="sm" variant="primary" onClick={onForward}>
+                <Icon name="forward" size={13}/>Move forward
+              </Button>
+            ) : (
+              <Button type="button" size="sm" onClick={onClose}>Done</Button>
+            )}
+          </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 };
 
@@ -1082,7 +1357,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
           value: row.anticipatedAmount != null ? fmtMoney(row.anticipatedAmount, false) : "" },
         { k: "msmmRemaining",    label: "MSMM Remaining",               type: "money", value: 0 },
         { k: "notes",            label: "Notes",                        type: "textarea", value: row.notes || "",
-          placeholder: "Lead notes carry over — edit freely." },
+          placeholder: "Lead notes carry over. Edit freely." },
       ],
     },
     "openbids→awaiting": {
@@ -1124,10 +1399,10 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
   };
   const formatCarried = (k) => {
     const v = row[k];
-    if (v == null || v === "") return "—";
-    if (k === "clientId") return companyById(v)?.name || "—";
-    if (k === "pmIds") return (v || []).map(id => userById(id)?.name).filter(Boolean).join(", ") || "—";
-    if (k === "subs") return (v || []).map(s => `${companyById(s.cId)?.name?.split(" ")[0] || s.desc || "Sub"} (${fmtMoney(s.amt)})`).join(", ") || "—";
+    if (v == null || v === "") return EMPTY;
+    if (k === "clientId") return companyById(v)?.name || EMPTY;
+    if (k === "pmIds") return (v || []).map(id => userById(id)?.name).filter(Boolean).join(", ") || EMPTY;
+    if (k === "subs") return (v || []).map(s => `${companyById(s.cId)?.name?.split(" ")[0] || s.desc || "Sub"} (${fmtMoney(s.amt)})`).join(", ") || EMPTY;
     if (k === "msmmUsed" || k === "msmmRemaining") return fmtMoney(v);
     if (k === "dateSubmitted") return fmtDate(v);
     return v;
@@ -1136,62 +1411,120 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
   const renderField = (f) => {
     const val = data[f.k];
     const set = (v) => setData(d => ({ ...d, [f.k]: v }));
-    if (f.type === "pill") return <span className="chip accent" style={{ fontWeight: 600 }}><span className="chip-dot"/>{val}</span>;
+    if (f.type === "pill") return <RecordStatusBadge status={val}/>;
     if (f.type === "select") return (
       <select className="select" value={val} onChange={e => set(e.target.value)}>
         {f.options.map(o => <option key={o}>{o}</option>)}
       </select>
     );
-    if (f.type === "date") return <input className="input" type="date" value={val} onChange={e => set(e.target.value)} style={{ fontFamily: "var(--font-mono)" }}/>;
-    if (f.type === "money") return <input className="input" type="number" value={val} onChange={e => set(Number(e.target.value))} style={{ fontFamily: "var(--font-mono)" }}/>;
+    if (f.type === "date") return <input className="input mono num" type="date" value={val} onChange={e => set(e.target.value)} style={{ fontFamily: "var(--font-mono)" }}/>;
+    if (f.type === "money") return <input className="input mono num" type="number" value={val} onChange={e => set(Number(e.target.value))} style={{ fontFamily: "var(--font-mono)" }}/>;
     if (f.type === "textarea") return <textarea className="textarea" value={val} placeholder={f.placeholder} onChange={e => set(e.target.value)}/>;
     return <input className="input" value={val} placeholder={f.placeholder} onChange={e => set(e.target.value)}/>;
   };
 
+  // Stage vocabulary for the from → to transition strip. Presentation only:
+  // `from` / `to` themselves are untouched and still drive `configs`.
+  const STAGE_LABEL = {
+    potential: "Potential",
+    awaiting:  "Proposal",
+    awarded:   "Awarded",
+    closed:    "Closed Out",
+    invoice:   "Anticipated Invoice",
+    hotleads:  "Hot Lead",
+    openbids:  "Open Bid",
+  };
+  const STAGE_TONE = {
+    potential: "neutral", awaiting: "brand",  awarded: "success",
+    closed:    "danger",  invoice:  "info",   hotleads: "brand", openbids: "brand",
+  };
+  const fromLabel = STAGE_LABEL[from] || from;
+  const toLabel   = STAGE_LABEL[to]   || to;
+  const rowLabel  = row.name || row.title || row.rfqNumber || EMPTY;
+
   return (
-    <>
-      <div className="overlay" onClick={onClose}/>
-      <div className="drawer">
-        <div className="drawer-head">
-          <div>
-            <div className="drawer-eyebrow">
-              <Icon name="forward" size={12}/>{cfg.subtitle}
+    <Sheet open onOpenChange={closeVia(onClose)}>
+      <SheetContent
+        side="right"
+        className={SHEET_SIDE_TO_BOTTOM}
+        onPointerDownOutside={keepOpenForPortalMenus}
+        onFocusOutside={keepOpenForPortalMenus}
+        onInteractOutside={keepOpenForPortalMenus}
+      >
+        <SheetHeader className="gap-2">
+          <Badge tone="outline" className="self-start">
+            <Icon name="forward" size={11}/>
+            Move forward
+          </Badge>
+          <SheetTitle className="break-words text-[length:var(--fs-xl)] leading-[var(--lh-tight)]">
+            {cfg.title}
+          </SheetTitle>
+          <SheetDescription className="break-words">{cfg.subtitle}</SheetDescription>
+        </SheetHeader>
+
+        <SheetBody className="flex flex-col gap-5">
+          {/* The transition itself, stated once and unmistakably. */}
+          <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
+            <p className="m-0 mb-2 truncate text-[length:var(--fs-sm)] font-semibold text-[var(--text)]" title={rowLabel}>
+              {rowLabel}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex flex-col gap-1">
+                <span className="text-[length:var(--fs-2xs)] uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">From</span>
+                <Badge tone={STAGE_TONE[from] || "neutral"}>{fromLabel}</Badge>
+              </span>
+              <Icon name="forward" size={16} className="mt-4 shrink-0 text-[var(--text-soft)]"/>
+              <span className="flex flex-col gap-1">
+                <span className="text-[length:var(--fs-2xs)] uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">To</span>
+                <Badge tone={STAGE_TONE[to] || "neutral"}>{toLabel}</Badge>
+              </span>
             </div>
-            <h3 className="drawer-title">{cfg.title}</h3>
           </div>
-          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
-        <div className="drawer-body">
-          <div className="carried-section">
-            <div className="carried-title"><Icon name="check" size={11}/>Carried forward · locked</div>
-            <dl className="carried-grid">
+
+          <PanelSection icon="lock" title="Carried forward" count={cfg.carried.length}>
+            <p className="m-0 mb-2 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+              These values copy across as they are. They cannot be edited here.
+            </p>
+            <dl className="m-0 divide-y divide-[var(--border)] rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1">
               {cfg.carried.map(k => (
-                <React.Fragment key={k}>
-                  <dt>{labels[k] || k}</dt>
-                  <dd>{formatCarried(k)}</dd>
-                </React.Fragment>
+                <PanelDefRow key={k} term={labels[k] || k}>{formatCarried(k)}</PanelDefRow>
               ))}
             </dl>
-          </div>
-          <div className="section-title"><Icon name="sparkles" size={12}/>New fields required</div>
-          {cfg.newFields.map(f => (
-            <div key={f.k} className="field">
-              <div className="field-label">{f.label}</div>
-              <div className={"field-value" + (f.type === "textarea" ? " multiline" : "")}>
-                {renderField(f)}
-                {f.hint && <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>{f.hint}</div>}
-              </div>
+          </PanelSection>
+
+          <PanelSection icon="compose" title="Fields to complete" count={cfg.newFields.length}>
+            <div className="min-w-0">
+              {cfg.newFields.map(f => {
+                const required = /\s\*$/.test(f.label);
+                return (
+                  <PanelField
+                    key={f.k}
+                    label={f.label.replace(/\s*\*$/, "")}
+                    required={required}
+                    hint={f.hint}
+                    multiline={f.type === "textarea"}
+                  >
+                    {renderField(f)}
+                  </PanelField>
+                );
+              })}
             </div>
-          ))}
-        </div>
-        <div className="drawer-foot">
-          <button className="btn ghost sm" onClick={onClose}>Cancel</button>
-          <button className="btn primary sm" onClick={() => onConfirm(data)}>
-            <Icon name="forward" size={13}/>{cfg.title}
-          </button>
-        </div>
-      </div>
-    </>
+          </PanelSection>
+        </SheetBody>
+
+        <SheetFooter className="flex-wrap justify-between gap-2">
+          <span className="min-w-0 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+            {cfg.carried.length} carried, {cfg.newFields.length} to complete
+          </span>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Button type="button" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="button" size="sm" variant="primary" onClick={() => onConfirm(data)}>
+              <Icon name="forward" size={13}/>{cfg.title}
+            </Button>
+          </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 };
 
@@ -1239,6 +1572,28 @@ function computeFromAnchor(anchor, offsetMinutes) {
   };
 }
 
+// Chip button used by the anchor / offset / recurrence pickers. Selection is
+// carried by aria-pressed and a check glyph as well as by colour.
+const CHIP_BTN =
+  "inline-flex min-h-9 items-center gap-1.5 rounded-[var(--radius-full)] border px-3 py-1 " +
+  "text-[length:var(--fs-xs)] font-medium " +
+  "transition-[background-color,border-color,color] duration-[var(--dur-fast)] ease-[var(--ease-out)] " +
+  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] active:translate-y-px " +
+  "disabled:pointer-events-none disabled:opacity-45";
+const CHIP_OFF =
+  "border-[var(--border-strong)] bg-[var(--surface)] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]";
+const CHIP_ON =
+  "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent-ink)]";
+const chipCls = (on) => `${CHIP_BTN} ${on ? CHIP_ON : CHIP_OFF}`;
+
+const RECUR_LABEL = {
+  "one-time": "Does not repeat",
+  weekly:     "Weekly",
+  biweekly:   "Every 2 weeks",
+  monthly:    "Monthly",
+  custom:     "Custom",
+};
+
 export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
   const USERS = getUsers();
   const [recipients, setRecipients] = useState([...(row.pmIds || [])]);
@@ -1275,28 +1630,34 @@ export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
   const onManualTime = (v) => { setTime(v); setOffsetKey(null); };
 
   return (
-    <>
-      <div className="overlay" onClick={onClose}/>
-      <div className="modal">
-        <div className="modal-head">
-          <div className="icon-badge"><Icon name="bell" size={16}/></div>
-          <div style={{ flex: 1 }}>
-            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Set alert</div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>{row.name || row.title}</h3>
-            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
-              Beacon will email tagged users at the scheduled time with a link to this row.
-            </div>
-          </div>
-          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <div className="field-label" style={{ marginBottom: 6 }}>Notify</div>
+    <Dialog open onOpenChange={closeVia(onClose)}>
+      <DialogContent
+        size="md"
+        className="bx-panelkit"
+        onPointerDownOutside={keepOpenForPortalMenus}
+        onFocusOutside={keepOpenForPortalMenus}
+        onInteractOutside={keepOpenForPortalMenus}
+      >
+        <DialogHeader className="gap-2">
+          <Badge tone="outline" className="self-start">
+            <Icon name="bell" size={11}/>
+            Set alert
+          </Badge>
+          <DialogTitle className="break-words">{row.name || row.title}</DialogTitle>
+          <DialogDescription>
+            Beacon emails the tagged users at the scheduled time with a link to this row.
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody className="flex flex-col gap-5">
+          <PanelSection icon="users" title="Notify" count={recipients.length}>
             <div className="tag-input" onClick={() => setPicking(true)} style={{ position: "relative" }}>
               {recipients.map(uid => {
                 const u = userById(uid); if (!u) return null;
                 return <span key={uid} className="tag"><span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
-                  <button onClick={(e) => { e.stopPropagation(); setRecipients(recipients.filter(x => x !== uid)); }}>
+                  <button type="button"
+                          aria-label={`Remove ${u.name}`}
+                          onClick={(e) => { e.stopPropagation(); setRecipients(recipients.filter(x => x !== uid)); }}>
                     <Icon name="x" size={10}/></button></span>;
               })}
               <input placeholder={recipients.length ? "Add another…" : "Pick MSMM users…"}
@@ -1308,7 +1669,7 @@ export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
               {picking && available.length > 0 && (
                 <div className="menu" style={{ left: 0, right: 0, top: "calc(100% + 4px)", position: "absolute", margin: 4 }}>
                   {available.slice(0, 6).map(u => (
-                    <button key={u.id} className="menu-item"
+                    <button key={u.id} type="button" className="menu-item"
                       onMouseDown={() => { setRecipients([...recipients, u.id]); setPickQ(""); }}>
                       <span className={`avatar xs ${u.color}`}>{u.initials}</span>
                       <span>{u.name}</span>
@@ -1317,77 +1678,125 @@ export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
                 </div>
               )}
             </div>
-          </div>
+            {recipients.length === 0 && (
+              <p className="m-0 mt-1.5 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                Nobody is tagged yet, so this alert will not reach anyone.
+              </p>
+            )}
+          </PanelSection>
 
           {anchors.length > 0 && (
-            <div>
-              <div className="field-label" style={{ marginBottom: 6 }}>Anchor to</div>
-              <div className="alert-anchor-chips">
-                {anchors.map(a => (
-                  <button key={a.field} type="button"
-                    className={"anchor-chip" + (anchorField === a.field ? " active" : "")}
-                    onClick={() => pickAnchor(a)}>
-                    <span className="anchor-chip-label">{a.label}</span>
-                    <span className="anchor-chip-date">{fmtDate(a.value)}</span>
-                  </button>
-                ))}
+            <PanelSection icon="link" title="Anchor to a date on this row">
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Anchor date">
+                {anchors.map(a => {
+                  const on = anchorField === a.field;
+                  return (
+                    <button key={a.field} type="button"
+                      aria-pressed={on}
+                      className={chipCls(on)}
+                      onClick={() => pickAnchor(a)}>
+                      {on && <Icon name="check" size={11}/>}
+                      <span>{a.label}</span>
+                      <span className="num opacity-70">{fmtDate(a.value)}</span>
+                    </button>
+                  );
+                })}
                 <button type="button"
-                  className={"anchor-chip" + (anchorField === null ? " active" : "")}
+                  aria-pressed={anchorField === null}
+                  className={chipCls(anchorField === null)}
                   onClick={clearAnchor}>
-                  <span className="anchor-chip-label">None (pick manually)</span>
+                  {anchorField === null && <Icon name="check" size={11}/>}
+                  None (pick manually)
                 </button>
               </div>
-              <div className="alert-offset-chips" style={{ marginTop: 8 }}>
+              <p className="m-0 mt-2 mb-1.5 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                Fire this far before the anchor. A date without a time is treated as
+                <span className="num"> {String(DEFAULT_ANCHOR_HOUR).padStart(2, "0")}:00</span> local.
+              </p>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Offset before the anchor">
                 {OFFSET_PRESETS.map(p => (
                   <button key={p.key} type="button"
                     disabled={!anchorField && anchors.length === 0}
-                    className={"offset-chip" + (offsetKey === p.key ? " active" : "")}
-                    onClick={() => pickOffset(p)}>{p.label}</button>
+                    aria-pressed={offsetKey === p.key}
+                    className={chipCls(offsetKey === p.key)}
+                    onClick={() => pickOffset(p)}>
+                    {offsetKey === p.key && <Icon name="check" size={11}/>}
+                    {p.label}
+                  </button>
                 ))}
                 <button type="button"
-                  className={"offset-chip" + (offsetKey === null ? " active" : "")}
-                  onClick={() => setOffsetKey(null)}>Custom…</button>
+                  aria-pressed={offsetKey === null}
+                  className={chipCls(offsetKey === null)}
+                  onClick={() => setOffsetKey(null)}>
+                  {offsetKey === null && <Icon name="check" size={11}/>}
+                  Custom…
+                </button>
               </div>
-            </div>
+            </PanelSection>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div>
-              <div className="field-label" style={{ marginBottom: 6 }}>First alert date</div>
-              <input className="input" type="date" value={date} onChange={e => onManualDate(e.target.value)}
-                style={{ fontFamily: "var(--font-mono)" }}/>
+          <PanelSection icon="calendarClock" title="When">
+            <div className="grid grid-cols-1 gap-3 xs:grid-cols-2">
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <label htmlFor="beacon-alert-date"
+                       className="text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
+                  First alert date
+                </label>
+                <input id="beacon-alert-date" className="input mono num" type="date" value={date}
+                       onChange={e => onManualDate(e.target.value)}
+                       style={{ fontFamily: "var(--font-mono)" }}/>
+              </div>
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <label htmlFor="beacon-alert-time"
+                       className="text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
+                  Time
+                </label>
+                <input id="beacon-alert-time" className="input mono num" type="time" value={time}
+                       onChange={e => onManualTime(e.target.value)}
+                       style={{ fontFamily: "var(--font-mono)" }}/>
+              </div>
             </div>
-            <div>
-              <div className="field-label" style={{ marginBottom: 6 }}>Time</div>
-              <input className="input" type="time" value={time} onChange={e => onManualTime(e.target.value)}
-                style={{ fontFamily: "var(--font-mono)" }}/>
-            </div>
-          </div>
+            <p className="m-0 mt-2 flex flex-wrap items-center gap-1.5 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+              <Icon name="info" size={12}/>
+              Times are read in your browser timezone,
+              <span className="num font-medium text-[var(--text-muted)]">{BROWSER_TZ}</span>
+            </p>
+          </PanelSection>
 
-          <div>
-            <div className="field-label" style={{ marginBottom: 6 }}>Recurrence</div>
-            <div className="radio-row">
+          <PanelSection icon="refresh" title="Recurrence">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Recurrence">
               {["one-time","weekly","biweekly","monthly","custom"].map(r => (
-                <button key={r} className={"radio-chip" + (recur === r ? " active" : "")}
-                  onClick={() => setRecur(r)}>{r}</button>
+                <button key={r} type="button"
+                  aria-pressed={recur === r}
+                  className={chipCls(recur === r)}
+                  onClick={() => setRecur(r)}>
+                  {recur === r && <Icon name="check" size={11}/>}
+                  {RECUR_LABEL[r] || r}
+                </button>
               ))}
             </div>
-          </div>
+          </PanelSection>
 
-          <div>
-            <div className="field-label" style={{ marginBottom: 6 }}>Message (optional)</div>
+          <PanelSection icon="note" title="Message">
             <textarea className="textarea" value={message} onChange={e => setMessage(e.target.value)}
+              aria-label="Alert message (optional)"
               placeholder="e.g. Reminder: verdict expected this week. Check in with client PM."/>
-          </div>
-        </div>
-        <div className="modal-foot">
-          <div style={{ fontSize: 12, color: "var(--text-soft)", display: "flex", alignItems: "center", gap: 6 }}>
+            <p className="m-0 mt-1 text-[length:var(--fs-xs)] text-[var(--text-soft)]">Optional.</p>
+          </PanelSection>
+        </DialogBody>
+
+        <DialogFooter className="max-sm:flex-col sm:justify-between">
+          <p className="m-0 flex min-w-0 flex-wrap items-center gap-1.5 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
             <Icon name="clock" size={12}/>
-            First send {fmtDate(date)} at {time} · {recur === "one-time" ? "does not repeat" : `repeats ${recur}`}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn sm" onClick={onClose}>Cancel</button>
-            <button className="btn primary sm" onClick={() => {
+            <span className="min-w-0">
+              First send <span className="num font-medium text-[var(--text-muted)]">{fmtDate(date)}</span> at{" "}
+              <span className="num font-medium text-[var(--text-muted)]">{time}</span> ·{" "}
+              {recur === "one-time" ? "does not repeat" : `repeats ${recur}`}
+            </span>
+          </p>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Button type="button" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="button" size="sm" variant="primary" onClick={() => {
               const preset = OFFSET_PRESETS.find(p => p.key === offsetKey);
               onConfirm({
                 recipients, date, time, recur, message,
@@ -1397,11 +1806,11 @@ export const AlertModal = ({ row, anchors = [], onClose, onConfirm }) => {
               });
             }}>
               <Icon name="bell" size={13}/>Schedule alert
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
-    </>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -2052,7 +2461,7 @@ export const AddSubModal = ({
   const handleSubmit = async () => {
     if (!canSubmit) return;
     if (needsProjectLink && !invoiceId) {
-      setError("Missing invoice id — can't auto-link.");
+      setError("Missing invoice id, cannot auto-link.");
       return;
     }
     setBusy(true); setError("");
@@ -2092,92 +2501,91 @@ export const AddSubModal = ({
   };
 
   return (
-    <>
-      <div className="overlay" onClick={onClose}/>
-      <div className="modal" style={{ width: 480 }}>
-        <div className="modal-head">
-          <div className="icon-badge"><Icon name="plus" size={16}/></div>
-          <div style={{ flex: 1 }}>
-            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>
-              {isPrime ? "Add prime" : "Add sub"}
-            </div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>
-              {projectName || invoiceRow?.name || "Project"}
-            </h3>
-            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
-              {isPrime
-                ? "The Prime is the upstream firm hiring MSMM on this project. Enter the contract amount; monthly billing tracks beneath."
-                : "Subs are firms hired on this project. Enter their total contract amount; monthly invoices live on the row that appears beneath."}
-            </div>
-          </div>
-          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
+    <Dialog open onOpenChange={closeVia(onClose)}>
+      <DialogContent
+        size="md"
+        className="bx-panelkit"
+        onPointerDownOutside={keepOpenForPortalMenus}
+        onFocusOutside={keepOpenForPortalMenus}
+        onInteractOutside={keepOpenForPortalMenus}
+      >
+        <DialogHeader className="gap-2">
+          <Badge tone="outline" className="self-start">
+            <Icon name="plus" size={11}/>
+            {isPrime ? "Add prime" : "Add sub"}
+          </Badge>
+          <DialogTitle className="break-words">
+            {projectName || invoiceRow?.name || "Project"}
+          </DialogTitle>
+          <DialogDescription>
+            {isPrime
+              ? "The Prime is the upstream firm hiring MSMM on this project. Enter the contract amount; monthly billing tracks beneath."
+              : "Subs are firms hired on this project. Enter their total contract amount; monthly invoices live on the row that appears beneath."}
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <DialogBody className="flex flex-col gap-3">
           {needsProjectLink && (
-            <div style={{
-              display: "flex", alignItems: "flex-start", gap: 8,
-              padding: "8px 12px",
-              background: "var(--surface-2)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              marginBottom: 6,
-              fontSize: 11.5, color: "var(--text-soft)", lineHeight: 1.45,
-            }}>
-              <Icon name="link" size={11}/>
-              <span>
-                This invoice isn't linked to a project yet — we'll set that
-                up automatically when you save.
-              </span>
-            </div>
+            <Alert tone="info">
+              This invoice isn't linked to a project yet. Beacon sets that link up
+              automatically when you save.
+            </Alert>
           )}
-          <div className="field">
-            <div className="field-label">{isPrime ? "Prime firm *" : "Company *"}</div>
-            <div className="field-value">
+
+          <div className="min-w-0">
+            <PanelField label={isPrime ? "Prime firm" : "Company"} required multiline={creating}>
               {creating ? (
-                <div className="newfirm-card">
-                  <div className="newfirm-head">
-                    <Icon name="briefcase" size={12}/>
-                    <span className="newfirm-title">New firm</span>
-                    <span className="newfirm-note">adds to the Directory</span>
-                    <button type="button" className="newfirm-x" onClick={cancelCreate}
-                            disabled={nfBusy} title="Cancel">
-                      <Icon name="x" size={12}/>
-                    </button>
+                <div className="flex flex-col gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                  <div className="flex items-center gap-2">
+                    <Icon name="briefcase" size={13}/>
+                    <span className="text-[length:var(--fs-sm)] font-semibold text-[var(--text)]">New firm</span>
+                    <span className="text-[length:var(--fs-xs)] text-[var(--text-soft)]">adds to the Directory</span>
+                    <Button type="button" size="icon-sm" variant="ghost"
+                            className="ml-auto" aria-label="Cancel new firm" title="Cancel"
+                            onClick={cancelCreate} disabled={nfBusy}>
+                      <Icon name="x" size={13}/>
+                    </Button>
                   </div>
                   <input className="input" autoFocus
+                         aria-label="Firm name"
+                         aria-invalid={nfError ? "true" : undefined}
                          placeholder="Firm name *"
                          value={nf.name}
                          disabled={nfBusy}
                          onChange={(e) => setNf(p => ({ ...p, name: e.target.value }))}
                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveNewFirm(); } }}/>
-                  <div className="newfirm-grid">
+                  <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
                     <input className="input"
+                           aria-label="Contact"
                            placeholder="Contact"
                            value={nf.contact}
                            disabled={nfBusy}
                            onChange={(e) => setNf(p => ({ ...p, contact: e.target.value }))}/>
                     <input className="input"
+                           aria-label="Email"
                            placeholder="Email"
                            value={nf.email}
                            disabled={nfBusy}
                            onChange={(e) => setNf(p => ({ ...p, email: e.target.value }))}/>
                   </div>
                   <input className="input"
+                         aria-label="Phone"
                          placeholder="Phone"
                          value={nf.phone}
                          disabled={nfBusy}
                          onChange={(e) => setNf(p => ({ ...p, phone: e.target.value }))}/>
-                  {nfError && <div className="newfirm-error">{nfError}</div>}
-                  <div className="newfirm-actions">
-                    <button type="button" className="btn sm" onClick={cancelCreate} disabled={nfBusy}>
+                  {nfError && (
+                    <p role="alert" className="m-0 text-[length:var(--fs-xs)] text-[var(--destructive)]">{nfError}</p>
+                  )}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button type="button" size="sm" onClick={cancelCreate} disabled={nfBusy}>
                       Cancel
-                    </button>
-                    <button type="button" className="btn primary sm"
+                    </Button>
+                    <Button type="button" size="sm" variant="primary" loading={nfBusy}
                             onClick={saveNewFirm} disabled={nfBusy || !nf.name.trim()}>
-                      <Icon name="check" size={12}/>
+                      {!nfBusy && <Icon name="check" size={13}/>}
                       {nfBusy ? "Adding…" : "Add & select"}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -2190,51 +2598,46 @@ export const AddSubModal = ({
                   createLabel={isPrime ? "Add a new prime firm…" : "Add a new firm…"}
                 />
               )}
-            </div>
-          </div>
-          <div className="field">
-            <div className="field-label">Service / discipline</div>
-            <div className="field-value">
+            </PanelField>
+            <PanelField label="Service / discipline">
               <input className="input"
+                     aria-label="Service or discipline"
                      placeholder="e.g. Survey, Civil, MEP"
                      value={discipline}
                      onChange={(e) => setDiscipline(e.target.value)}
                      disabled={busy}/>
-            </div>
-          </div>
-          <div className="field">
-            <div className="field-label">Total amount</div>
-            <div className="field-value">
-              <input className="input mono"
+            </PanelField>
+            <PanelField label="Total amount">
+              <input className="input mono num"
+                     aria-label="Total amount"
                      type="number" min="0" step="any"
                      placeholder="$0"
                      value={amount}
                      onChange={(e) => setAmount(e.target.value)}
                      disabled={busy}
                      style={{ fontFamily: "var(--font-mono)" }}/>
-            </div>
+            </PanelField>
           </div>
-          {error && (
-            <div style={{ color: "var(--rose)", fontSize: 12, marginTop: 6 }}>
-              {error}
-            </div>
-          )}
-        </div>
 
-        <div className="modal-foot">
-          <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
-            Firm not listed? Type its name and choose <strong>Create</strong> — it's added to the Directory.
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
-            <button className="btn primary sm" onClick={handleSubmit} disabled={!canSubmit}>
-              <Icon name="check" size={13}/>
+          {error && <Alert tone="danger" role="alert">{error}</Alert>}
+        </DialogBody>
+
+        <DialogFooter className="max-sm:flex-col sm:justify-between">
+          <p className="m-0 min-w-0 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+            Firm not listed? Type its name and choose <strong className="font-semibold">Create</strong> to
+            add it to the Directory.
+          </p>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Button type="button" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button type="button" size="sm" variant="primary" loading={busy}
+                    onClick={handleSubmit} disabled={!canSubmit}>
+              {!busy && <Icon name="check" size={13}/>}
               {busy ? "Saving…" : (isPrime ? "Add prime" : "Add sub")}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
-    </>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -2307,39 +2710,34 @@ export const MergeModal = ({
   };
 
   return (
-    <>
-      <div className="overlay" onClick={busy ? undefined : onClose}/>
-      <div className="modal merge-modal" style={{ width: 540 }}>
-        <div className="modal-head">
-          <div className="icon-badge"><Icon name="merge" size={16}/></div>
-          <div style={{ flex: 1 }}>
-            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>
-              Directory · Merge
-            </div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>
-              Merge {entities.length} {isClient ? "clients" : "companies"} into one
-            </h3>
-            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
-              Pick the record to <strong>keep</strong>. Every reference on the others —
-              across Open Bids, Awaiting, Awarded, Closed Out, Potential, Invoice
-              {isClient ? "" : ", sub-invoices"} and Hot Leads — moves to it, then the
-              duplicates are deleted.
-            </div>
-          </div>
-          <button className="drawer-close" onClick={onClose} disabled={busy}>
-            <Icon name="x" size={16}/>
-          </button>
-        </div>
+    <Dialog open onOpenChange={busy ? undefined : closeVia(onClose)}>
+      <DialogContent size="md" className="bx-panelkit">
+        <DialogHeader className="gap-2">
+          <Badge tone="outline" className="self-start">
+            <Icon name="merge" size={11}/>
+            Directory merge
+          </Badge>
+          <DialogTitle className="break-words">
+            Merge {entities.length} {isClient ? "clients" : "companies"} into one
+          </DialogTitle>
+          <DialogDescription>
+            Pick the record to <strong className="font-semibold text-[var(--text)]">keep</strong>. Every
+            reference on the others (across Open Bids, Awaiting, Awarded, Closed Out, Potential, Invoice
+            {isClient ? "" : ", sub-invoices"} and Hot Leads) moves to it, then the duplicates are deleted.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <DialogBody className="flex flex-col gap-3">
           {survivorLocked && (
-            <div className="merge-note">
-              <Icon name="lock" size={12}/>
-              <span><strong>MSMM</strong> can't be deleted, so it's kept as the surviving record.</span>
-            </div>
+            <Alert tone="info" icon={null}>
+              <span className="flex items-start gap-2">
+                <Icon name="lock" size={13} className="mt-px shrink-0"/>
+                <span><strong className="font-semibold">MSMM</strong> can't be deleted, so it is kept as the surviving record.</span>
+              </span>
+            </Alert>
           )}
 
-          <div className="merge-cards">
+          <div className="flex flex-col gap-2" role="radiogroup" aria-label="Record to keep">
             {entities.map(e => {
               const isSurv = e.id === survivorId;
               const s = summaries.get(e.id);
@@ -2348,77 +2746,94 @@ export const MergeModal = ({
                 <button
                   key={e.id}
                   type="button"
-                  className={"merge-card" + (isSurv ? " survivor" : " loser") + (disabled && !isSurv ? " is-disabled" : "")}
+                  role="radio"
+                  className={
+                    "flex w-full min-w-0 items-start gap-3 rounded-[var(--radius-md)] border p-3 text-left " +
+                    "transition-[background-color,border-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] " +
+                    "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] " +
+                    "disabled:cursor-not-allowed disabled:opacity-60 " +
+                    (isSurv
+                      ? "border-[var(--sage-line)] bg-[var(--sage-soft)]"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)]")
+                  }
                   onClick={() => { if (!disabled && !survivorLocked) setSurvivorId(e.id); }}
                   disabled={disabled && !isSurv}
-                  aria-pressed={isSurv}>
-                  <span className={"merge-radio" + (isSurv ? " on" : "")}>
-                    {isSurv && <Icon name="check" size={11}/>}
+                  aria-checked={isSurv}>
+                  <span
+                    aria-hidden="true"
+                    className={
+                      "mt-px grid size-[18px] shrink-0 place-items-center rounded-full border " +
+                      (isSurv
+                        ? "border-[var(--sage)] bg-[var(--sage)] text-[var(--success-foreground)]"
+                        : "border-[var(--border-strong)] bg-[var(--surface)]")
+                    }>
+                    {isSurv && <Icon name="check" size={11} stroke={3}/>}
                   </span>
-                  <span className="merge-card-main">
-                    <span className="merge-card-name">
-                      {nameOf(e)}
-                      {e.isMsmm && <span className="merge-msmm-tag">MSMM</span>}
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-semibold text-[var(--text)]">
+                        {nameOf(e)}
+                      </span>
+                      {e.isMsmm && <Badge tone="brand" size="sm">MSMM</Badge>}
                     </span>
-                    <span className="merge-card-sub">
-                      {subOf(e) && <span className="merge-card-kindchip">{subOf(e)}</span>}
-                      <span className="merge-card-refs">{summaryLine(s)}</span>
+                    <span className="flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--fs-xs)] text-[var(--text-muted)]">
+                      {subOf(e) && <Badge tone="outline" size="sm">{subOf(e)}</Badge>}
+                      <span className="min-w-0 truncate">{summaryLine(s)}</span>
                     </span>
                   </span>
-                  <span className={"merge-badge " + (isSurv ? "keep" : "drop")}>
+                  <Badge tone={isSurv ? "success" : "danger"} className="mt-px shrink-0">
+                    <Icon name={isSurv ? "check" : "trash"} size={11}/>
                     {isSurv ? "Keep" : "Merge & delete"}
-                  </span>
+                  </Badge>
                 </button>
               );
             })}
           </div>
 
-          <div className="merge-summary">
-            <Icon name="forward" size={13}/>
-            <span>
+          <div className="flex items-start gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3 text-[length:var(--fs-sm)] text-[var(--text-muted)]">
+            <Icon name="forward" size={14} className="mt-px shrink-0"/>
+            <span className="min-w-0">
               {totalRefs > 0 ? (
-                <><strong>{totalRefs}</strong> reference{totalRefs > 1 ? "s" : ""} will be repointed to{" "}
-                <strong>{survivor ? nameOf(survivor) : "—"}</strong>.</>
+                <><strong className="num font-semibold text-[var(--text)]">{totalRefs}</strong> reference{totalRefs > 1 ? "s" : ""} will be repointed to{" "}
+                <strong className="font-semibold text-[var(--text)]">{survivor ? nameOf(survivor) : EMPTY}</strong>.</>
               ) : (
-                <>No references to repoint — the duplicate{losers.length > 1 ? "s" : ""} will just be removed.</>
+                <>No references to repoint. The duplicate{losers.length > 1 ? "s" : ""} will just be removed.</>
               )}{" "}
-              {losers.length} record{losers.length > 1 ? "s" : ""} deleted.
+              <span className="num">{losers.length}</span> record{losers.length > 1 ? "s" : ""} deleted.
             </span>
           </div>
 
-          <div className="merge-warn">
-            <Icon name="warn" size={13}/>
-            <span>This can't be undone. Storage attachments stay in place and remain visible on the kept record.</span>
-          </div>
+          <Alert tone="warning">
+            This can't be undone. Storage attachments stay in place and remain visible on the kept record.
+          </Alert>
 
-          {error && (
-            <div style={{ color: "var(--rose)", fontSize: 12 }}>{error}</div>
-          )}
-        </div>
+          {error && <Alert tone="danger" role="alert">{error}</Alert>}
+        </DialogBody>
 
-        <div className="modal-foot">
-          <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
-            Profile fields (contact, email…) aren't merged — only references move.
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
-            <button className="btn primary sm" onClick={handleSubmit}
+        <DialogFooter className="max-sm:flex-col sm:justify-between">
+          <p className="m-0 min-w-0 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+            Profile fields (contact, email…) aren't merged; only references move.
+          </p>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Button type="button" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button type="button" size="sm" variant="destructive" loading={busy}
+                    onClick={handleSubmit}
                     disabled={busy || !survivorId || losers.length === 0}>
-              <Icon name="merge" size={13}/>
+              {!busy && <Icon name="merge" size={13}/>}
               {busy ? "Merging…" : `Merge ${losers.length} → 1`}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
-    </>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 // ---------- ConfirmDialog ----------
-// Small reusable confirmation prompt. Renders above other modals (elevated
-// z-index via .confirm-overlay/.confirm-modal) so it stacks correctly whether
-// it's triggered from a table cell or from inside another open modal. `onConfirm`
-// may be async; the dialog shows a working state and closes when it resolves.
+// Small reusable confirmation prompt. Built on the kit's AlertDialog so it is
+// a real alertdialog (assertive role, no accidental outside-click dismissal)
+// and so it stacks above whatever surface raised it. `onConfirm` may be
+// async; the dialog shows a working state and closes when it resolves.
 export const ConfirmDialog = ({
   title = "Are you sure?",
   message,
@@ -2437,38 +2852,49 @@ export const ConfirmDialog = ({
     catch { /* the underlying action surfaces its own toast on failure */ }
     onClose?.();
   };
+  const isDanger = tone === "danger";
   return (
-    <>
-      <div className="overlay confirm-overlay" onClick={busy ? undefined : onClose}/>
-      <div className="modal confirm-modal" style={{ width: 420 }} role="alertdialog" aria-modal="true">
-        <div className="modal-head">
-          <div className={"icon-badge" + (tone === "danger" ? " danger" : "")}>
-            <Icon name={icon} size={16}/>
+    <AlertDialog open onOpenChange={busy ? undefined : closeVia(onClose)}>
+      <AlertDialogContent className="bx-panelkit z-[130]">
+        <AlertDialogHeader>
+          <div className="flex items-start gap-3">
+            <span
+              aria-hidden="true"
+              className={
+                "grid size-9 shrink-0 place-items-center rounded-[var(--radius-md)] border " +
+                (isDanger
+                  ? "border-[var(--rose-line)] bg-[var(--rose-soft)] text-[var(--rose-ink)]"
+                  : "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent-ink)]")
+              }>
+              <Icon name={icon} size={17}/>
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <AlertDialogTitle className="break-words">{title}</AlertDialogTitle>
+              {message ? (
+                <AlertDialogDescription className="break-words">{message}</AlertDialogDescription>
+              ) : (
+                <AlertDialogDescription className="sr-only">
+                  {isDanger ? "This action cannot be undone." : "Confirm to continue."}
+                </AlertDialogDescription>
+              )}
+            </div>
           </div>
-          <div style={{ flex: 1 }}>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>{title}</h3>
-          </div>
-          <button className="drawer-close" onClick={onClose} disabled={busy}>
-            <Icon name="x" size={16}/>
-          </button>
-        </div>
-        {message && (
-          <div className="modal-body">
-            <p className="confirm-message">{message}</p>
-          </div>
-        )}
-        <div className="modal-foot" style={{ justifyContent: "flex-end", gap: 8 }}>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
           {!hideCancel && (
-            <button className="btn sm" onClick={onClose} disabled={busy}>{cancelLabel}</button>
+            <AlertDialogCancel disabled={busy}>{cancelLabel}</AlertDialogCancel>
           )}
-          <button className={"btn sm " + (tone === "danger" ? "danger" : "primary")}
-                  onClick={run} disabled={busy}>
-            {!busy && tone === "danger" && <Icon name={icon} size={13}/>}
+          <AlertDialogAction
+            variant={isDanger ? "destructive" : "primary"}
+            disabled={busy}
+            aria-busy={busy || undefined}
+            onClick={(e) => { e.preventDefault(); run(); }}>
+            {!busy && isDanger && <Icon name={icon} size={13}/>}
             {busy ? "Working…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };
 
@@ -2496,47 +2922,57 @@ export const AddContractProjectModal = ({
     try { await onSubmit(trimmed); onClose(); }
     catch (e) { setErr(e?.message || String(e)); setBusy(false); }
   };
+  const shownError = err || liveError;
   return (
-    <>
-      <div className="overlay confirm-overlay" onClick={busy ? undefined : onClose}/>
-      <div className="modal confirm-modal" style={{ width: 460 }} role="dialog" aria-modal="true">
-        <div className="modal-head">
-          <div className="icon-badge"><Icon name="plus" size={16}/></div>
-          <div style={{ flex: 1 }}>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>Add project under this contract</h3>
-          </div>
-          <button className="drawer-close" onClick={onClose} disabled={busy}><Icon name="x" size={16}/></button>
-        </div>
-        <div className="modal-body">
-          <p className="confirm-message" style={{ marginBottom: 12 }}>
-            Adding another invoice project under <strong>{projectName || "this contract"}</strong>
+    <Dialog open onOpenChange={busy ? undefined : closeVia(onClose)}>
+      <DialogContent size="sm" className="bx-panelkit z-[130]">
+        <DialogHeader className="gap-2">
+          <Badge tone="outline" className="self-start">
+            <Icon name="plus" size={11}/>
+            Contract
+          </Badge>
+          <DialogTitle>Add project under this contract</DialogTitle>
+          <DialogDescription>
+            Adding another invoice project under <strong className="font-semibold text-[var(--text)]">{projectName || "this contract"}</strong>
             {existingNumber ? <> (already has #{existingNumber})</> : null}. It keeps the same project
-            name{invType ? <> and is created as <strong>{invType}</strong></> : null}. Enter a new
-            project number — it must be unique in the Invoice table.
-          </p>
-          <div className="field-label" style={{ marginBottom: 6 }}>New project number</div>
-          <input
-            className="input mono" autoFocus value={num}
-            onChange={e => { setNum(e.target.value); setErr(""); }}
-            onKeyDown={e => {
-              if (e.key === "Enter") submit();
-              if (e.key === "Escape") onClose();
-            }}
-            placeholder="e.g. 202609"
-          />
-          {(err || liveError) && (
-            <p className="confirm-message" style={{ color: "var(--rose)", marginTop: 8, marginBottom: 0 }}>
-              {err || liveError}
-            </p>
-          )}
-        </div>
-        <div className="modal-foot" style={{ justifyContent: "flex-end", gap: 8 }}>
-          <button className="btn sm" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn sm primary" onClick={submit} disabled={busy || !trimmed || !!liveError}>
+            name{invType ? <> and is created as <strong className="font-semibold text-[var(--text)]">{invType}</strong></> : null}. Enter a new
+            project number. It must be unique in the Invoice table.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="beacon-contract-projnum"
+                   className="text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
+              New project number
+            </label>
+            <input
+              id="beacon-contract-projnum"
+              className="input mono num" autoFocus value={num}
+              aria-invalid={shownError ? "true" : undefined}
+              aria-describedby={shownError ? "beacon-contract-projnum-err" : undefined}
+              onChange={e => { setNum(e.target.value); setErr(""); }}
+              onKeyDown={e => {
+                if (e.key === "Enter") submit();
+                if (e.key === "Escape") onClose();
+              }}
+              placeholder="e.g. 202609"
+            />
+            {shownError && (
+              <p id="beacon-contract-projnum-err" role="alert"
+                 className="m-0 text-[length:var(--fs-xs)] text-[var(--destructive)]">
+                {shownError}
+              </p>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button type="button" size="sm" variant="primary" loading={busy}
+                  onClick={submit} disabled={busy || !trimmed || !!liveError}>
             {busy ? "Creating…" : "Create invoice project"}
-          </button>
-        </div>
-      </div>
-    </>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };

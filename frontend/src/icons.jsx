@@ -1,66 +1,184 @@
 import React from "react";
+import {
+  AlignLeft, ArrowLeft, ArrowRight, ArrowUpDown, Ban, Bell, BellRing, Blocks, Bookmark,
+  Braces, Briefcase, Building2, Calendar, CalendarClock, CalendarDays, ChartColumn,
+  Check, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
+  ChevronsLeft, ChevronsRight, ChevronsUpDown, CircleDot, CircleHelp, ClipboardList, Clock,
+  Columns3, Copy, CreditCard, Download, Ellipsis, ExternalLink, Eye, EyeOff, File, FileText,
+  Files, Filter, Flag, FolderOpen, Gauge, GitMerge, Hash, History, Hourglass, Inbox, Info,
+  KeyRound, LayoutGrid, Link2, ListChecks, Loader2, Lock, LogOut, Mail, Maximize2, Menu,
+  Minimize2, Minus, Moon, MoreHorizontal, MoreVertical, Nfc, OctagonAlert, Paperclip, Pause,
+  PencilLine, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Send, Settings, Shield,
+  ShieldCheck, SlidersHorizontal, Sparkles, Square, SquarePen, Star, Sun, Table2, Tag,
+  ThumbsDown, ThumbsUp, Timer, Trash2, TrendingUp, TriangleAlert, Undo2, Upload, User,
+  UserCheck, UserPlus, Users, Utensils, Wallet, X, Zap,
+} from "lucide-react";
 
-export const Icon = ({ name, size = 16, stroke = 1.6 }) => {
-  const paths = {
-    search:   <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-    plus:     <><path d="M12 5v14M5 12h14" /></>,
-    filter:   <><path d="M3 5h18M6 12h12M10 19h4" /></>,
-    sort:     <><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" /></>,
-    forward:  <><path d="M13 5l7 7-7 7M5 12h14" /></>,
-    back:     <><path d="M11 5l-7 7 7 7M19 12H5" /></>,
-    undo:     <><path d="M3 7v6h6"/><path d="M3 13a9 9 0 1 1 3 6.7"/></>,
-    bell:     <><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10 21a2 2 0 0 0 4 0" /></>,
-    close:    <><path d="M6 6l12 12M18 6l6 12" transform="scale(1)"/></>,
-    x:        <><path d="M6 6l12 12M18 6L6 18"/></>,
-    moon:     <><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></>,
-    sun:      <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></>,
-    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.76l.06.06a2 2 0 1 1-2.82 2.82l-.06-.06a1.6 1.6 0 0 0-1.76-.32 1.6 1.6 0 0 0-1 1.46V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.46 1.6 1.6 0 0 0-1.76.32l-.06.06a2 2 0 1 1-2.82-2.82l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.46-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.32-1.76l-.06-.06a2 2 0 1 1 2.82-2.82l.06.06A1.6 1.6 0 0 0 9 4.6a1.6 1.6 0 0 0 1-1.46V3a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 4.6a1.6 1.6 0 0 0 1.76-.32l.06-.06a2 2 0 1 1 2.82 2.82l-.06.06A1.6 1.6 0 0 0 19.4 9a1.6 1.6 0 0 0 1.46 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/></>,
-    more:     <><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></>,
-    note:      <><path d="M5 3h9l5 5v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 17h6"/></>,
-    alignLeft: <><path d="M4 6h16M4 11h16M4 16h10"/></>,
-    calendar: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></>,
-    clock:    <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
-    utensils: <><path d="M7 2v8M4 2v8M10 2v8M4 10h6M7 10v12"/><path d="M17 2v20"/><path d="M17 2c2.2 1.8 3.2 4 3.2 6.6 0 2.4-1.1 4.1-3.2 4.9"/></>,
-    check:    <><path d="M4 12l5 5L20 6"/></>,
-    chevronDown: <><path d="M6 9l6 6 6-6"/></>,
-    chevronRight: <><path d="M9 6l6 6-6 6"/></>,
-    user:     <><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></>,
-    users:    <><circle cx="9" cy="8" r="3.5"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 3.5a3.5 3.5 0 0 1 0 7M22 21a7 7 0 0 0-5-6.7"/></>,
-    link:     <><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 1 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></>,
-    edit:     <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/></>,
-    copy:     <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>,
-    trash:    <><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6"/></>,
-    trend:    <><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>,
-    briefcase:<><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></>,
-    bolt:     <><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></>,
-    export:   <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5-5 5 5M12 5v12"/></>,
-    columns:  <><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="15" y="3" width="6" height="18" rx="1"/></>,
-    flag:     <><path d="M4 21V4h12l-2 4 2 4H4"/></>,
-    sparkles: <><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l3 3M15 15l3 3M6 18l3-3M15 9l3-3"/></>,
-    lock:     <><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/></>,
-    mail:     <><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 7 9-7"/></>,
-    eye:      <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
-    eyeOff:   <><path d="M10.6 6.1A11 11 0 0 1 22 12s-1.3 2.6-3.9 4.6M6.1 6.1 2 12s3.5 7 10 7a10 10 0 0 0 5.8-1.8M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2"/></>,
-    logout:   <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></>,
-    shield:   <><path d="M12 3 4 6v6c0 5 3.5 8.5 8 9 4.5-.5 8-4 8-9V6l-8-3Z"/></>,
-    ban:      <><circle cx="12" cy="12" r="9"/><path d="m5.5 5.5 13 13"/></>,
-    thumbsUp:   <><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0V8a3 3 0 0 1 3-3l1 4v2h6a2 2 0 0 1 2 2l-2 7a2 2 0 0 1-2 1H7"/></>,
-    thumbsDown: <><path d="M17 13V4h3a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-3Zm0 0v3a3 3 0 0 1-3 3l-1-4v-2H7a2 2 0 0 1-2-2l2-7a2 2 0 0 1 2-1h8"/></>,
-    pin:        <><path d="M12 21s7-7.5 7-13a7 7 0 0 0-14 0c0 5.5 7 13 7 13Z"/><circle cx="12" cy="8" r="2.5"/></>,
-    refresh:    <><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></>,
-    maximize:   <><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></>,
-    minimize:   <><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></>,
-    hash:       <><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></>,
-    merge:      <><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="12" r="2.6"/><path d="M6 8.6v6.8"/><path d="M8.5 6.4A7 7 0 0 0 15.4 12"/></>,
-    warn:       <><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></>,
-    pause:      <><path d="M9 5v14M15 5v14"/></>,
-    play:       <><path d="M7 5l12 7-12 7V5Z"/></>,
-  };
-  const d = paths[name];
+/**
+ * Beacon icon registry.
+ *
+ * The `<Icon name="…" />` call signature is unchanged from the original
+ * hand-drawn set — every one of the ~600 existing call sites keeps working
+ * — but the glyphs now come from Lucide, so weight, corner radius, terminal
+ * style and optical size are consistent across the whole application
+ * instead of drifting per hand-authored path.
+ *
+ * Names are the historic Beacon keys on the left, mapped to their Lucide
+ * equivalent on the right. Add new entries here rather than importing
+ * Lucide directly in a page, so the registry stays the single inventory of
+ * every glyph the product uses.
+ */
+const REGISTRY = {
+  // ---- navigation / chrome
+  search: Search,
+  menu: Menu,
+  filter: Filter,
+  sliders: SlidersHorizontal,
+  sort: ArrowUpDown,
+  forward: ArrowRight,
+  back: ArrowLeft,
+  chevronDown: ChevronDown,
+  chevronUp: ChevronUp,
+  chevronLeft: ChevronLeft,
+  chevronRight: ChevronRight,
+  chevronsLeft: ChevronsLeft,
+  chevronsRight: ChevronsRight,
+  chevronsUpDown: ChevronsUpDown,
+  more: MoreHorizontal,
+  moreVertical: MoreVertical,
+  ellipsis: Ellipsis,
+  columns: Columns3,
+  grid: LayoutGrid,
+  table: Table2,
+  maximize: Maximize2,
+  minimize: Minimize2,
+  external: ExternalLink,
+
+  // ---- actions
+  plus: Plus,
+  minus: Minus,
+  edit: PencilLine,
+  compose: SquarePen,
+  copy: Copy,
+  trash: Trash2,
+  undo: Undo2,
+  restore: RotateCcw,
+  refresh: RefreshCw,
+  export: Upload,
+  download: Download,
+  upload: Upload,
+  send: Send,
+  link: Link2,
+  merge: GitMerge,
+  pin: Pin,
+  tag: Tag,
+  bookmark: Bookmark,
+
+  // ---- state / status
+  check: Check,
+  checkAll: CheckCheck,
+  checkCircle: CheckCircle2,
+  x: X,
+  close: X,
+  ban: Ban,
+  warn: TriangleAlert,
+  danger: OctagonAlert,
+  info: Info,
+  help: CircleHelp,
+  dot: CircleDot,
+  square: Square,
+  pause: Pause,
+  play: Play,
+  spinner: Loader2,
+  hourglass: Hourglass,
+
+  // ---- objects / domain
+  note: FileText,
+  file: File,
+  files: Files,
+  folder: FolderOpen,
+  attachment: Paperclip,
+  clipboard: ClipboardList,
+  checklist: ListChecks,
+  alignLeft: AlignLeft,
+  hash: Hash,
+  braces: Braces,
+  briefcase: Briefcase,
+  building: Building2,
+  wallet: Wallet,
+  card: CreditCard,
+  flag: Flag,
+  trend: TrendingUp,
+  chart: ChartColumn,
+  gauge: Gauge,
+  blocks: Blocks,
+  inbox: Inbox,
+  star: Star,
+
+  // ---- time
+  calendar: Calendar,
+  calendarDays: CalendarDays,
+  calendarClock: CalendarClock,
+  clock: Clock,
+  timer: Timer,
+  history: History,
+  utensils: Utensils,
+
+  // ---- people / auth
+  user: User,
+  users: Users,
+  userCheck: UserCheck,
+  userPlus: UserPlus,
+  lock: Lock,
+  key: KeyRound,
+  shield: Shield,
+  shieldCheck: ShieldCheck,
+  logout: LogOut,
+  mail: Mail,
+  eye: Eye,
+  eyeOff: EyeOff,
+  nfc: Nfc,
+
+  // ---- feedback
+  thumbsUp: ThumbsUp,
+  thumbsDown: ThumbsDown,
+  bell: Bell,
+  bellRing: BellRing,
+  sparkles: Sparkles,
+  bolt: Zap,
+
+  // ---- appearance
+  sun: Sun,
+  moon: Moon,
+  settings: Settings,
+};
+
+/**
+ * @param {string}  name   registry key (see REGISTRY above)
+ * @param {number}  size   px, applied to both axes
+ * @param {number}  stroke stroke width; Lucide's own default is 2, Beacon
+ *                         runs slightly lighter so icons sit beside 12–14px
+ *                         text without out-weighting it
+ */
+export const Icon = ({ name, size = 16, stroke = 1.75, className, ...rest }) => {
+  const Glyph = REGISTRY[name];
+  if (!Glyph) {
+    if (import.meta.env?.DEV && name) {
+      console.warn(`[Icon] unknown icon name: "${name}"`);
+    }
+    return null;
+  }
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round">
-      {d}
-    </svg>
+    <Glyph
+      width={size}
+      height={size}
+      strokeWidth={stroke}
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+      {...rest}
+    />
   );
 };
+
+export const ICON_NAMES = Object.keys(REGISTRY);

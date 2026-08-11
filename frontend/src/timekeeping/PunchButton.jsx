@@ -18,6 +18,13 @@
 // Geolocation: best-effort, capped at 1200 ms so the punch never blocks on
 // it. Captured for audit / future geofencing; declines or timeouts don't
 // affect the punch.
+//
+// Presentation (ui-v2.0): a single card that answers three questions without
+// scrolling on a phone — am I in or out, how long has this run, and what does
+// pressing the button do next. Every non-actionable state (offline, locked,
+// checking, fetch error) explains itself in a note tied to the control with
+// aria-describedby, and the current state is mirrored into a polite live
+// region so a screen reader hears the toggle flip.
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
@@ -112,24 +119,24 @@ export function PunchButton({
   const showOut = !isUnknown && !isFetchErr && !locked && !error && state === "out";
 
   let label;
-  if (!online)         label = "OFFLINE";
-  else if (locked)     label = "WEEK LOCKED";
+  if (!online)         label = "Offline";
+  else if (locked)     label = "Week locked";
   else if (busy)       label = state === "in" ? "Punching out…" : "Punching in…";
-  else if (error)      label = "RETRY";
-  else if (isFetchErr) label = "RETRY";
+  else if (error)      label = "Retry";
+  else if (isFetchErr) label = "Retry";
   else if (isUnknown)  label = "Checking…";
   else if (showIn)     label = "Punch out";
   else                 label = "Punch in";
 
   const cls = [
-    "tk-punch-btn",
-    !online      ? "tk-punch-offline" : "",
-    locked       ? "tk-punch-locked"  : "",
-    error || isFetchErr ? "tk-punch-error"  : "",
-    isUnknown    ? "tk-punch-loading" : "",
-    online && showIn   ? "tk-punch-out" : "",
-    online && showOut  ? "tk-punch-in"  : "",
-    busy         ? "is-loading"       : "",
+    "tsx-punch-go",
+    !online      ? "is-offline" : "",
+    locked       ? "is-locked"  : "",
+    error || isFetchErr ? "is-error"  : "",
+    isUnknown    ? "is-checking" : "",
+    online && showIn   ? "is-punchout" : "",
+    online && showOut  ? "is-punchin"  : "",
+    busy         ? "is-busy"       : "",
   ].filter(Boolean).join(" ");
 
   const iconName = !online   ? "ban"
@@ -159,58 +166,116 @@ export function PunchButton({
       ? `Punch in. ${statusTitle}. Total Hours Worked ${fmtHM(todayMinutesWork || 0)}.`
       : label;
 
+  // What pressing the control does next, in plain words. Sits under the label
+  // so nobody has to infer the direction from the colour.
+  const actionHint = busy ? null
+    : showIn  ? "Ends the session you have running"
+    : showOut ? "Starts a new work session"
+    : null;
+
+  // Why the control is unavailable (or what it is waiting on). Rendered as a
+  // note and wired to the button with aria-describedby.
+  const note = !online
+    ? "You are offline. Punching needs a connection, so try again once you are back on network."
+    : locked
+      ? "This week is locked, so punches are closed. An admin can reopen it if something needs fixing."
+      : isUnknown
+        ? "Checking your current punch state. The button unlocks as soon as we know whether you are in or out."
+        : busy
+          ? "Sending your punch. This takes a moment on a slow connection."
+          : error
+            ? error
+            : isFetchErr
+              ? "We could not load your timesheet. Press to try again."
+              : null;
+  const noteTone = (!online || locked) ? "muted" : (error || isFetchErr) ? "bad" : "info";
+  const noteId = note ? "tsx-punch-note" : undefined;
+
   return (
-    <div className={`tk-punch-wrap ${statusKind ? `is-${statusKind}` : "is-standalone"}`}>
-      {statusKind && (
-        <div className="tk-punch-status-card">
-          <span className="tk-punch-status-kicker">Current status</span>
-          <div className="tk-punch-status-main">
-            <span className={`tk-punch-status-dot tone-${statusKind}`} aria-hidden="true"/>
-            <strong>
-              <span className="tk-punch-status-title-full">{statusTitle}</span>
-              <span className="tk-punch-status-title-short">{statusTitleShort}</span>
-            </strong>
-          </div>
-          <div className="tk-punch-status-meta">
+    <section className={`tsx-punch is-${statusKind || "unknown"}`} aria-label="Punch clock">
+      <p className="sr-only" role="status" aria-live="polite">
+        {statusTitle || label}
+      </p>
+
+      <div className="tsx-punch-card">
+        <header className={`tsx-punch-state tone-${statusKind || "unknown"}`}>
+          <span className="tsx-punch-kicker">Current status</span>
+          <p className="tsx-punch-title">
+            <span className={`tsx-punch-dot tone-${statusKind || "unknown"}`} aria-hidden="true">
+              <span className="tsx-punch-dot-core"/>
+            </span>
+            <span className="tsx-punch-title-full">{statusTitle || label}</span>
+            <span className="tsx-punch-title-short">{statusTitleShort || label}</span>
+          </p>
+
+          <div className="tsx-punch-readout">
             {showIn ? (
               <>
-                <span>Session Started At <strong>{fmtClock(openSince)}</strong></span>
-                <span>Current Session <strong>{fmtHM(elapsed)}</strong></span>
-                <span>Total Hours Worked <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
+                <div className="tsx-punch-figure">
+                  <span className="tsx-punch-figure-val num">{fmtHM(elapsed)}</span>
+                  <span className="tsx-punch-figure-key">this session</span>
+                </div>
+                <dl className="tsx-punch-facts">
+                  <div>
+                    <dt>Started</dt>
+                    <dd className="num">{fmtClock(openSince)}</dd>
+                  </div>
+                  <div>
+                    <dt>Worked today</dt>
+                    <dd className="num">{fmtHM(todayMinutesWork || 0)}</dd>
+                  </div>
+                </dl>
+              </>
+            ) : showOut ? (
+              <>
+                <div className="tsx-punch-figure">
+                  <span className="tsx-punch-figure-val num">{fmtHM(todayMinutesWork || 0)}</span>
+                  <span className="tsx-punch-figure-key">worked today</span>
+                </div>
+                <p className="tsx-punch-hint">Ready to start your next work session.</p>
               </>
             ) : (
-              <>
-                <span>Ready to start your next work session</span>
-                <span>Total Hours Worked <strong>{fmtHM(todayMinutesWork || 0)}</strong></span>
-              </>
+              <div className="tsx-punch-figure is-placeholder">
+                <span className="tsx-punch-figure-val num" aria-hidden="true">–</span>
+                <span className="tsx-punch-figure-key">{label}</span>
+              </div>
             )}
           </div>
+        </header>
+
+        <div className="tsx-punch-action">
+          <button
+            type="button"
+            className={cls}
+            onClick={handleClick}
+            disabled={disabled}
+            aria-busy={busy || isUnknown}
+            aria-label={actionLabel}
+            aria-describedby={noteId}
+          >
+            <span className="tsx-punch-go-icon" aria-hidden="true">
+              {busy
+                ? <Icon name="spinner" size={26} className="tsx-spin"/>
+                : <Icon name={iconName} size={26}/>}
+            </span>
+            <span className="tsx-punch-go-copy">
+              <span className="tsx-punch-go-label">{label}</span>
+              {actionHint && <span className="tsx-punch-go-hint">{actionHint}</span>}
+            </span>
+          </button>
+
+          {note && (
+            <p
+              id={noteId}
+              className={`tsx-punch-note tone-${noteTone}`}
+              role={(error || isFetchErr) ? "alert" : "status"}
+            >
+              <Icon name={(error || isFetchErr) ? "warn" : !online ? "ban" : locked ? "lock" : "info"} size={13}/>
+              <span>{note}</span>
+            </p>
+          )}
         </div>
-      )}
-      <button
-        type="button"
-        className={cls}
-        onClick={handleClick}
-        disabled={disabled}
-        aria-busy={busy || isUnknown}
-        aria-label={actionLabel}
-      >
-        <span className="tk-punch-icon">
-          <Icon name={iconName} size={30}/>
-        </span>
-        <span className="tk-punch-label">{label}</span>
-      </button>
-      {!online && (
-        <div className="tk-punch-error-msg" role="status">
-          You're offline — punching needs a connection. Try again once you're back online.
-        </div>
-      )}
-      {online && error && (
-        <div className="tk-punch-error-msg" role="alert">{error}</div>
-      )}
-      {online && !error && isFetchErr && (
-        <div className="tk-punch-error-msg" role="alert">Couldn't load your timesheet. Tap to retry.</div>
-      )}
-    </div>
+      </div>
+    </section>
   );
 }

@@ -1,8 +1,11 @@
 // TimeSettingsPanel — admin-only knobs for the timekeeping system. Writes
 // land on the singleton beacon_v2.app_settings row.
 
-import React, { useEffect, useState } from "react";
-import { Icon } from "../icons";
+import React, { useEffect, useId, useState } from "react";
+import { Icon } from "@/icons";
+import {
+  Alert, Button, Field, Input, Separator, Skeleton, Switch, Textarea,
+} from "@/ui";
 import { loadTimekeepingSettings, updateTimekeepingSettings } from "../data";
 
 export function TimeSettingsPanel() {
@@ -10,6 +13,7 @@ export function TimeSettingsPanel() {
   const [busy, setBusy] = useState(false);
   const [msg,  setMsg]  = useState(null);
   const [err,  setErr]  = useState(null);
+  const id = useId();
 
   useEffect(() => {
     let live = true;
@@ -17,7 +21,17 @@ export function TimeSettingsPanel() {
     return () => { live = false; };
   }, []);
 
-  if (!s) return <div className="page-empty">Loading settings…</div>;
+  if (!s) {
+    return (
+      <div className="tka-settings" aria-busy="true">
+        <Skeleton className="h-5 w-40"/>
+        <Skeleton className="h-14 w-full"/>
+        <Skeleton className="h-14 w-full"/>
+        <Skeleton className="h-44 w-full"/>
+        <span className="sr-only">Loading settings</span>
+      </div>
+    );
+  }
 
   const set = (k, v) => setS(prev => ({ ...prev, [k]: v }));
 
@@ -47,101 +61,188 @@ export function TimeSettingsPanel() {
   };
 
   return (
-    <div className="tk-settings">
-      <header className="tk-section-head">
-        <h3>Settings</h3>
+    <div className="tka-settings">
+      <header className="tka-sectionhead">
+        <div className="tka-sectionhead-titles">
+          <h3 className="tka-sectionhead-title">Timekeeping settings</h3>
+          <p className="tka-sectionhead-sub">
+            These values drive the punch endpoint, the rule classifier, and the alerts admins receive.
+          </p>
+        </div>
       </header>
 
-      <label className="tk-settings-toggle">
-        <input type="checkbox" checked={!!s.tk_enabled}
-          onChange={e => set("tk_enabled", e.target.checked)}/>
-        <span><strong>Timekeeping enabled</strong> — turning off pauses the punch endpoint and hides the personal tab.</span>
-      </label>
+      {/* ---- switches ---- */}
+      <section className="tka-settings-block">
+        <div className="tka-toggle">
+          <Switch
+            id={`${id}-enabled`}
+            checked={!!s.tk_enabled}
+            onCheckedChange={(v) => set("tk_enabled", v)}
+          />
+          <label className="tka-toggle-text" htmlFor={`${id}-enabled`}>
+            <span className="tka-toggle-title">Timekeeping enabled</span>
+            <span className="tka-toggle-sub">
+              Turning this off pauses the punch endpoint and hides the personal Timesheet tab.
+            </span>
+          </label>
+        </div>
 
-      <label className="tk-settings-toggle">
-        <input type="checkbox" checked={s.tk_auto_punchout_enabled !== false}
-          onChange={e => set("tk_auto_punchout_enabled", e.target.checked)}/>
-        <span><strong>Auto punch-out at end of day</strong> — anyone still clocked in when the EOD window ends (below) is automatically punched out and marked <em>done for the day</em>.</span>
-      </label>
+        <div className="tka-toggle">
+          <Switch
+            id={`${id}-autoout`}
+            checked={s.tk_auto_punchout_enabled !== false}
+            onCheckedChange={(v) => set("tk_auto_punchout_enabled", v)}
+          />
+          <label className="tka-toggle-text" htmlFor={`${id}-autoout`}>
+            <span className="tka-toggle-title">Auto punch-out at end of day</span>
+            <span className="tka-toggle-sub">
+              Anyone still clocked in when the EOD window ends (below) is punched out
+              automatically and marked done for the day.
+            </span>
+          </label>
+        </div>
+      </section>
 
-      <div className="tk-settings-grid">
-        <div className="form-row">
-          <label className="form-label">Business timezone</label>
-          <input className="form-input" value={s.tk_business_tz || ""}
-            onChange={e => set("tk_business_tz", e.target.value)}/>
+      <Separator/>
+
+      {/* ---- day shape ---- */}
+      <section className="tka-settings-block">
+        <h4 className="tka-settings-legend">Business day</h4>
+        <div className="tka-settings-grid">
+          <Field label="Business timezone" htmlFor={`${id}-tz`}>
+            <Input
+              id={`${id}-tz`}
+              value={s.tk_business_tz || ""}
+              onChange={e => set("tk_business_tz", e.target.value)}
+            />
+          </Field>
+          <Field label="Workday (hours)" htmlFor={`${id}-workday`}>
+            <Input
+              id={`${id}-workday`}
+              type="number" min={1} max={24} step={0.25}
+              className="num"
+              value={s.tk_workday_hours ?? 8}
+              onChange={e => set("tk_workday_hours", e.target.value)}
+            />
+          </Field>
+          <Field label="Overtime threshold (min/day)" htmlFor={`${id}-ot`}>
+            <Input
+              id={`${id}-ot`}
+              type="number" min={120} max={960} step={15}
+              className="num"
+              value={s.tk_overtime_threshold_min ?? 480}
+              onChange={e => set("tk_overtime_threshold_min", e.target.value)}
+            />
+          </Field>
         </div>
-        <div className="form-row">
-          <label className="form-label">Workday (hours)</label>
-          <input type="number" min={1} max={24} step={0.25} className="form-input"
-            value={s.tk_workday_hours ?? 8}
-            onChange={e => set("tk_workday_hours", e.target.value)}/>
+      </section>
+
+      <Separator/>
+
+      {/* ---- classifier windows ---- */}
+      <section className="tka-settings-block">
+        <h4 className="tka-settings-legend">Classifier windows</h4>
+        <div className="tka-settings-grid">
+          <Field
+            label="EOD window start (CT)"
+            htmlFor={`${id}-eods`}
+            hint="Closed gaps starting at or after this hour are tagged as eod."
+          >
+            <Input
+              id={`${id}-eods`}
+              type="time" className="num"
+              value={s.tk_eod_window_start || "16:00"}
+              onChange={e => set("tk_eod_window_start", e.target.value)}
+            />
+          </Field>
+          <Field label="EOD window end (CT)" htmlFor={`${id}-eode`}>
+            <Input
+              id={`${id}-eode`}
+              type="time" className="num"
+              value={s.tk_eod_window_end || "19:00"}
+              onChange={e => set("tk_eod_window_end", e.target.value)}
+            />
+          </Field>
+          <Field label="Lunch window start (CT)" htmlFor={`${id}-lunchs`}>
+            <Input
+              id={`${id}-lunchs`}
+              type="time" className="num"
+              value={s.tk_lunch_window_start || "11:30"}
+              onChange={e => set("tk_lunch_window_start", e.target.value)}
+            />
+          </Field>
+          <Field label="Lunch window end (CT)" htmlFor={`${id}-lunche`}>
+            <Input
+              id={`${id}-lunche`}
+              type="time" className="num"
+              value={s.tk_lunch_window_end || "13:30"}
+              onChange={e => set("tk_lunch_window_end", e.target.value)}
+            />
+          </Field>
         </div>
-        <div className="form-row">
-          <label className="form-label">Overtime threshold (min/day)</label>
-          <input type="number" min={120} max={960} step={15} className="form-input"
-            value={s.tk_overtime_threshold_min ?? 480}
-            onChange={e => set("tk_overtime_threshold_min", e.target.value)}/>
+      </section>
+
+      <Separator/>
+
+      {/* ---- alerts + buffers ---- */}
+      <section className="tka-settings-block">
+        <h4 className="tka-settings-legend">Alerts and buffers</h4>
+        <div className="tka-settings-grid">
+          <Field label="Untagged-meeting alert delay (min)" htmlFor={`${id}-untagged`}>
+            <Input
+              id={`${id}-untagged`}
+              type="number" min={5} max={240} step={5}
+              className="num"
+              value={s.tk_untagged_alert_after_min ?? 30}
+              onChange={e => set("tk_untagged_alert_after_min", e.target.value)}
+            />
+          </Field>
+          <Field label="Default travel buffer per meeting (min)" htmlFor={`${id}-travel`}>
+            <Input
+              id={`${id}-travel`}
+              type="number" min={0} max={120} step={5}
+              className="num"
+              value={s.tk_default_travel_buffer_min ?? 30}
+              onChange={e => set("tk_default_travel_buffer_min", e.target.value)}
+            />
+          </Field>
         </div>
-        <div className="form-row">
-          <label className="form-label">EOD window start (CT)</label>
-          <input type="time" className="form-input"
-            value={s.tk_eod_window_start || "16:00"}
-            onChange={e => set("tk_eod_window_start", e.target.value)}/>
-          <p className="form-help">Closed gaps starting at or after this hour are tagged as <em>eod</em> by the rule classifier.</p>
-        </div>
-        <div className="form-row">
-          <label className="form-label">EOD window end (CT)</label>
-          <input type="time" className="form-input"
-            value={s.tk_eod_window_end || "19:00"}
-            onChange={e => set("tk_eod_window_end", e.target.value)}/>
-        </div>
-        <div className="form-row">
-          <label className="form-label">Lunch window start (CT)</label>
-          <input type="time" className="form-input"
-            value={s.tk_lunch_window_start || "11:30"}
-            onChange={e => set("tk_lunch_window_start", e.target.value)}/>
-        </div>
-        <div className="form-row">
-          <label className="form-label">Lunch window end (CT)</label>
-          <input type="time" className="form-input"
-            value={s.tk_lunch_window_end || "13:30"}
-            onChange={e => set("tk_lunch_window_end", e.target.value)}/>
-        </div>
-        <div className="form-row">
-          <label className="form-label">Untagged-meeting alert delay (min)</label>
-          <input type="number" min={5} max={240} step={5} className="form-input"
-            value={s.tk_untagged_alert_after_min ?? 30}
-            onChange={e => set("tk_untagged_alert_after_min", e.target.value)}/>
-        </div>
-        <div className="form-row">
-          <label className="form-label">Default travel buffer per meeting (min)</label>
-          <input type="number" min={0} max={120} step={5} className="form-input"
-            value={s.tk_default_travel_buffer_min ?? 30}
-            onChange={e => set("tk_default_travel_buffer_min", e.target.value)}/>
-        </div>
-        <div className="form-row" style={{ gridColumn: "1 / -1" }}>
-          <label className="form-label">Company holidays (one per line, YYYY-MM-DD)</label>
-          <textarea className="form-input" rows={3}
+
+        <Field
+          label="Company holidays"
+          htmlFor={`${id}-holidays`}
+          hint="One per line, formatted YYYY-MM-DD. Anything that is not a valid date is dropped on save."
+          className="tka-settings-wide"
+        >
+          <Textarea
+            id={`${id}-holidays`}
+            rows={3}
+            className="num"
             value={(s.tk_holidays || []).join("\n")}
-            onChange={e => set("tk_holidays", e.target.value.split(/\s+/).filter(Boolean))}/>
-        </div>
+            onChange={e => set("tk_holidays", e.target.value.split(/\s+/).filter(Boolean))}
+          />
+        </Field>
+      </section>
+
+      <div className="tka-settings-foot">
+        <Button variant="primary" onClick={save} disabled={busy} loading={busy}>
+          {busy ? "Saving" : "Save settings"}
+        </Button>
+        {msg && (
+          <span className="tka-savedok" role="status">
+            <Icon name="checkCircle" size={14}/> {msg}
+          </span>
+        )}
       </div>
 
-      <div className="tk-settings-foot">
-        <button className="btn btn-primary" onClick={save} disabled={busy}>
-          {busy ? "Saving…" : "Save settings"}
-        </button>
-        {msg && <span className="form-ok"><Icon name="check" size={13}/> {msg}</span>}
-        {err && <div className="form-error">{err}</div>}
-      </div>
+      {err && <Alert tone="danger" title="Could not save">{err}</Alert>}
 
-      <aside className="tk-settings-note">
-        <strong>Note:</strong> The DB trigger functions (fn_classify_interval,
-        fn_recompute_day) currently hardcode "America/Chicago". Changing the
-        business timezone here updates the UI and the Edge Function classifier
-        but not the trigger functions — open a migration when you need a
-        different tz applied at the trigger layer.
-      </aside>
+      <Alert tone="info" title="Timezone changes stop at the trigger layer">
+        The DB trigger functions (fn_classify_interval, fn_recompute_day) still hardcode
+        "America/Chicago". Changing the business timezone here updates the UI and the Edge
+        Function classifier only. Open a migration when a different timezone has to apply
+        at the trigger layer.
+      </Alert>
     </div>
   );
 }

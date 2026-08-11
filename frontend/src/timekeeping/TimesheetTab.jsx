@@ -2,11 +2,14 @@
 // timeline, this week's summary card, recent corrections, plus a focused
 // "tag your meeting" prompt when the day has untagged_meeting flags.
 //
-// Phone-first layout: the punch button is the visual anchor and sized for
-// thumb reach (~240 px tall on ≤640).
+// Phone-first layout: this page is opened from the PWA far more often than
+// from a desktop, so the punch control is the first thing under the date bar,
+// sized for thumb reach, and everything below it is a single column until
+// there is genuinely room for the presence rail (lg and up).
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
+import { Button, EmptyState } from "@/ui";
 import {
   getCurrentBeaconUser, todayInCT, weekStartCT, fmtHM,
   loadPunchState, loadDayDetail, loadMyWeek,
@@ -15,6 +18,7 @@ import {
 } from "../data";
 import { PunchButton } from "./PunchButton";
 import { DayCalendar } from "./DayCalendar";
+import { DayTimeline } from "./DayTimeline";
 import { WeekSummary } from "./WeekSummary";
 import { UserDayModal } from "./UserDayModal";
 import { PunchPromptModal } from "./PunchPromptModal";
@@ -138,6 +142,10 @@ export function TimesheetTab({ focusDate = null }) {
   const untaggedCount = (day.intervals || []).filter(i =>
     i.category === "meeting_untagged" && !i.endAt ? false : i.category === "meeting_untagged"
   ).length;
+  const dayIntervals = day.intervals || [];
+  const dayPunches   = day.punches || [];
+  const dayLeave     = day.leaveBlocks || [];
+  const hasDayActivity = dayIntervals.length > 0 || dayPunches.length > 0;
   const sectionTabId = (key) => `tk-timesheet-${key}-tab`;
   const sectionPanelId = (key) => `tk-timesheet-${key}-panel`;
   const selectSection = (key) => setSection(key);
@@ -156,9 +164,9 @@ export function TimesheetTab({ focusDate = null }) {
   };
 
   return (
-    <div className="tk-timesheet-page">
+    <div className="tsx-page">
 
-      <div className="subtabs tk-timesheet-switch" role="tablist" aria-label="Timesheet section" onKeyDown={onSectionKeyDown}>
+      <div className="tsx-switch" role="tablist" aria-label="Timesheet section" onKeyDown={onSectionKeyDown}>
         {[
           ["time", "Time", "clock"],
           ["leave", "Leave", "sun"],
@@ -167,14 +175,14 @@ export function TimesheetTab({ focusDate = null }) {
             key={key}
             type="button"
             id={sectionTabId(key)}
-            className={`subtab tk-timesheet-switch-btn ${section === key ? "active" : ""}`}
+            className={`tsx-switch-btn ${section === key ? "is-active" : ""}`}
             role="tab"
             aria-selected={section === key}
             aria-controls={sectionPanelId(key)}
             tabIndex={section === key ? 0 : -1}
             onClick={() => selectSection(key)}
           >
-            <Icon name={icon} size={13}/>
+            <Icon name={icon} size={14}/>
             <span>{label}</span>
           </button>
         ))}
@@ -183,42 +191,51 @@ export function TimesheetTab({ focusDate = null }) {
       {section === "time" ? (
         <div
           id={sectionPanelId("time")}
-          className="tk-timesheet-panel"
+          className="tsx-panel"
           role="tabpanel"
           aria-labelledby={sectionTabId("time")}
         >
-          <header className={`tk-ts-commandbar ${isToday ? "is-today" : "is-other-day"}`}>
-            <div className="tk-ts-command-copy">
-              <h3>{isToday ? "Today" : formatDateLabel(date)}</h3>
+          <header className={`tsx-daybar ${isToday ? "is-today" : "is-other-day"}`}>
+            <div className="tsx-daybar-copy">
+              <span className="tsx-daybar-eyebrow">{isToday ? "Timesheet" : "Viewing"}</span>
+              <h3 className="tsx-daybar-title">{isToday ? "Today" : formatDateLabel(date)}</h3>
             </div>
 
-            <div className="tk-day-bar" role="group" aria-label="Timesheet date">
-              <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, -1)} aria-label="Previous day">
+            <div className="tsx-daynav" role="group" aria-label="Timesheet date">
+              <Button
+                variant="ghost" size="icon-sm"
+                onClick={() => shiftDay(date, setDate, -1)}
+                aria-label="Previous day"
+              >
                 <Icon name="back" size={14}/>
-              </button>
+              </Button>
               <input
                 type="date"
-                className="tk-day-input"
+                className="tsx-dateinput num"
                 aria-label="Timesheet date"
                 value={date}
                 onChange={e => setDate(e.target.value || todayInCT())}
                 max={todayInCT()}
               />
-              <button className="btn btn-ghost btn-sm" onClick={() => shiftDay(date, setDate, +1)}
-                disabled={date >= todayInCT()} aria-label="Next day">
+              <Button
+                variant="ghost" size="icon-sm"
+                onClick={() => shiftDay(date, setDate, +1)}
+                disabled={date >= todayInCT()}
+                aria-label="Next day"
+              >
                 <Icon name="forward" size={14}/>
-              </button>
+              </Button>
               {!isToday && (
-                <button className="btn btn-ghost btn-sm" onClick={() => setDate(todayInCT())}>
+                <Button variant="subtle" size="sm" onClick={() => setDate(todayInCT())}>
                   Today
-                </button>
+                </Button>
               )}
             </div>
           </header>
 
           {/* Hero punch panel — only on today */}
           {isToday && (
-            <section className="tk-hero">
+            <section className="tsx-hero" aria-label="Punch clock and today's totals">
               <PunchButton
                 phase={phase}
                 state={punchedIn ? "in" : "out"}
@@ -230,94 +247,125 @@ export function TimesheetTab({ focusDate = null }) {
                 onRetry={() => refresh()}
               />
               {phaseError && phase === "ready" && (
-                <div className="tk-hero-warn-banner" role="alert">
-                  <Icon name="warn" size={12}/> Couldn't refresh — showing last-known state. <button className="link-btn" type="button" onClick={() => refresh()}>Retry</button>
-                </div>
+                <p className="tsx-note tone-warn" role="alert">
+                  <Icon name="warn" size={13}/>
+                  <span>
+                    We could not refresh, so this is your last known state.{" "}
+                    <button className="tsx-inline-btn" type="button" onClick={() => refresh()}>Retry</button>
+                  </span>
+                </p>
               )}
               {(state.today?.minutesMeeting > 0 || state.today?.minutesLunch > 0 || untaggedCount > 0) && (
-                <div className="tk-hero-side tk-hero-side-inline">
+                <dl className="tsx-hero-facts">
                   {state.today?.minutesMeeting > 0 && (
-                    <div className="tk-hero-row">
-                      <span className="tk-hero-key">Meetings</span>
-                      <span className="tk-hero-val">{fmtHM(state.today.minutesMeeting)}</span>
+                    <div className="tsx-hero-fact">
+                      <dt>Meetings</dt>
+                      <dd className="num">{fmtHM(state.today.minutesMeeting)}</dd>
                     </div>
                   )}
                   {state.today?.minutesLunch > 0 && (
-                    <div className="tk-hero-row">
-                      <span className="tk-hero-key">Lunch</span>
-                      <span className="tk-hero-val">{fmtHM(state.today.minutesLunch)}</span>
+                    <div className="tsx-hero-fact">
+                      <dt>Lunch</dt>
+                      <dd className="num">{fmtHM(state.today.minutesLunch)}</dd>
                     </div>
                   )}
                   {untaggedCount > 0 && (
-                    <div className="tk-hero-row tk-hero-warn">
-                      <Icon name="warn" size={14}/>
-                      <span>
+                    <div className="tsx-hero-fact is-warn">
+                      <dt><Icon name="warn" size={13}/> Needs a tag</dt>
+                      <dd>
                         {untaggedCount === 1
-                          ? "1 time block needs a tag"
-                          : `${untaggedCount} time blocks need tags`}
-                      </span>
+                          ? "1 time block"
+                          : `${untaggedCount} time blocks`}
+                      </dd>
                     </div>
                   )}
-                </div>
+                </dl>
               )}
             </section>
           )}
 
-          <div className="tk-timesheet-grid">
-            <main className="tk-timesheet-main">
+          <div className="tsx-grid">
+            <main className="tsx-main">
 
               {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
-              <section className="tk-day-card tk-day-card-cal">
-                <header className="tk-day-card-head">
-                  <div className="tk-day-card-head-meta">
-                    <h3>My day</h3>
-                    <span className="tk-day-card-sub">
-                      <span>{fmtHM(todayMinutes)} Total Hours Worked</span>
-                    </span>
+              <section className="tsx-day" aria-labelledby="tsx-day-title">
+                <header className="tsx-day-head">
+                  <div className="tsx-day-headline">
+                    <h3 className="tsx-day-title" id="tsx-day-title">My day</h3>
+                    <p className="tsx-day-sub">
+                      <span className="num">{fmtHM(todayMinutes)}</span> total hours worked
+                    </p>
                   </div>
-                  <div className="tk-day-card-head-actions">
-                    <button
-                      type="button"
-                      className="tk-correction-cta tk-correction-cta-primary"
-                      onClick={() => setEditDay(true)}
-                      aria-label={`Edit timesheet day for ${formatDateLabel(date)}`}
-                    >
-                      <Icon name="edit" size={13}/> Edit day
-                    </button>
-                  </div>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => setEditDay(true)}
+                    aria-label={`Edit timesheet day for ${formatDateLabel(date)}`}
+                  >
+                    <Icon name="edit" size={13}/> Edit day
+                  </Button>
                 </header>
 
                 {/* Approved-leave band(s) for this day */}
-                {(day.leaveBlocks || []).length > 0 && (
-                  <div className="tk-leave-band-wrap">
-                    {day.leaveBlocks.map((lb, i) => (
-                      <div key={lb.id || i} className={`tk-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
+                {dayLeave.length > 0 && (
+                  <ul className="tsx-day-leave">
+                    {dayLeave.map((lb, i) => (
+                      <li key={lb.id || i} className={`tsx-day-leave-band tone-${lb.leaveType === "sick" ? "blue" : "sage"}`}>
                         <Icon name="sun" size={13}/>
-                        <span className="tk-leave-band-label">
-                          {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · {lb.hoursPerDay}h
+                        <span className="tsx-day-leave-label">
+                          {lb.leaveType === "sick" ? "Sick leave" : "Vacation"} · <span className="num">{lb.hoursPerDay}h</span>
                         </span>
-                        <span className="tk-leave-band-badge">approved</span>
-                      </div>
+                        <span className="tsx-day-leave-badge">approved</span>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
-                {/*
-                  List-view across every viewport width. The absolute-positioned
-                  hour rail can't avoid overlap when several punches cluster within
-                  a short window (punch markers collide with interval cards at the
-                  card boundaries; back-to-back intervals abut). The list scales
-                  linearly with the count, never overlaps, and surfaces category /
-                  note / source / Outlook subject as primary content. Matches what
-                  the admin's UserDayModal already does.
-                */}
-                <DayCalendar
-                  date={date}
-                  intervals={day.intervals}
-                  punches={day.punches}
-                  onIntervalClick={setFocusInterval}
-                  onAddTagForInterval={setFocusInterval}
-                  forceList
-                />
+
+                {hasDayActivity ? (
+                  <>
+                    {/* Overview strip: where the day's blocks sit between 6a and 8p.
+                        The list below carries the detail. */}
+                    <div className="tsx-day-strip">
+                      <DayTimeline
+                        date={date}
+                        intervals={dayIntervals}
+                        onIntervalClick={setFocusInterval}
+                        height={34}
+                      />
+                    </div>
+
+                    {/*
+                      List-view across every viewport width. The absolute-positioned
+                      hour rail can't avoid overlap when several punches cluster within
+                      a short window (punch markers collide with interval cards at the
+                      card boundaries; back-to-back intervals abut). The list scales
+                      linearly with the count, never overlaps, and surfaces category /
+                      note / source / Outlook subject as primary content. Matches what
+                      the admin's UserDayModal already does.
+                    */}
+                    <DayCalendar
+                      date={date}
+                      intervals={day.intervals}
+                      punches={day.punches}
+                      onIntervalClick={setFocusInterval}
+                      onAddTagForInterval={setFocusInterval}
+                      forceList
+                    />
+                  </>
+                ) : (
+                  <EmptyState
+                    compact
+                    title={isToday ? "No punches yet today" : "No punches on this day"}
+                    description={isToday
+                      ? "Punch in above, or tap your badge on a Pi reader, and every block lands here with its category and notes."
+                      : "Nothing was recorded for this date. Use Edit day to add the punches that are missing."}
+                    action={(
+                      <Button variant="default" size="sm" onClick={() => setEditDay(true)}>
+                        <Icon name="edit" size={13}/> Edit day
+                      </Button>
+                    )}
+                  />
+                )}
               </section>
 
               {/* Week summary */}
@@ -331,7 +379,7 @@ export function TimesheetTab({ focusDate = null }) {
               />
             </main>
 
-            <aside className="tk-timesheet-side">
+            <aside className="tsx-side">
               <TeamPresenceView date={date} onDate={setDate} embedded />
             </aside>
           </div>
@@ -339,7 +387,7 @@ export function TimesheetTab({ focusDate = null }) {
       ) : (
         <div
           id={sectionPanelId("leave")}
-          className="tk-timesheet-panel tk-leave-panel-self"
+          className="tsx-panel"
           role="tabpanel"
           aria-labelledby={sectionTabId("leave")}
         >

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useId } from "react";
 import { Icon } from "./icons.jsx";
 import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf, dedupeSubsByCompanyKind,
   createProjectItem, addProjectItemSub, validateProjectItemContract,
@@ -6,6 +6,12 @@ import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenB
 import { SearchableSelect, StarRating } from "./primitives.jsx";
 import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
 import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
+import { cn } from "@/lib/utils";
+import {
+  Alert, Button, Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, Field, Input, InputGroup, RadioGroup, RadioGroupItem,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, inputBase,
+} from "@/ui";
 
 // ============ CREATE MODAL ============
 // "New X" flow for potential / events / clients / companies.
@@ -19,6 +25,12 @@ import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
 //      so the freshly-created entry shows its relations immediately.
 //
 // Errors after step 1 are reported inline; the main row stays in the DB.
+//
+// Presentation (ui-v2.0): the shell is the shared Radix `Dialog` from @/ui —
+// a bottom sheet on phones, a centred dialog from `sm` up, with a pinned
+// header/footer and a single scrolling body. Fields are grouped into titled
+// sections laid out two-up from `md`. None of that touches the data path:
+// every field name, default, coercion and write below is unchanged.
 
 // In v2, Potential, Awaiting, and Awarded all INSERT into the same
 // `projects` table — they differ only in the `status` column (set in
@@ -272,6 +284,153 @@ const REQUIRED = {
   projects:  ["local_id", "name"],
 };
 
+// Human names for the required fields, used only by the submit-time
+// summary. Purely presentational — REQUIRED above is still the rule.
+const REQUIRED_LABELS = {
+  project_name:   "Project name",
+  title:          "Title",
+  name:           "Name",
+  year:           "Year",
+  local_id:       "Project ID",
+  rfq_rfp_number: "RFQ/RFP number",
+};
+
+// Radix Select refuses an empty-string item value, but several of these
+// fields legitimately store "" for "not set". This sentinel stands in for
+// that row in the listbox and is mapped straight back to "" on pick, so the
+// form state and the insert payload are byte-identical to the old <select>.
+const NO_VALUE = "__none__";
+
+// The @/ui input styling, reused for controls the kit does not own
+// (the SearchableSelect combobox renders its own <input>).
+const CONTROL_CLASS = cn(inputBase, "h-[var(--control-h)]");
+
+// --------------------- field scaffolding ---------------------
+// Wraps the kit `Field` with the id / aria-describedby / aria-invalid wiring
+// every control in this modal needs.
+//
+//   default    control owns `id`; the label points at it with htmlFor.
+//   group      control is a composite (combobox, star rating, sub editor);
+//              it is wrapped in a labelled role="group" instead.
+//   labelledBy control names itself from the label (RadioGroup).
+//
+// The render prop receives two arguments:
+//   (a) DOM-safe props to spread straight onto a control, and
+//   (b) the same information unpacked, for composites that need it by name.
+function FormRow({ id, label, required, hint, error, wide, group, labelledBy, children }) {
+  const labelId = `${id}-label`;
+  const errorId = `${id}-error`;
+  const hintId  = `${id}-hint`;
+  const describedBy = error ? errorId : hint ? hintId : undefined;
+
+  const domProps = {
+    id,
+    "aria-describedby": describedBy,
+    "aria-invalid": error ? true : undefined,
+  };
+  const meta = { id, labelId, describedBy, invalid: !!error };
+
+  const control = typeof children === "function"
+    ? children(domProps, meta)
+    : children;
+
+  return (
+    <Field
+      className={cn("cm-field", wide && "cm-wide")}
+      label={<span id={labelId}>{label}</span>}
+      htmlFor={group || labelledBy ? undefined : id}
+      required={required}
+      error={error ? <span id={errorId}>{error}</span> : null}
+      hint={hint ? <span id={hintId}>{hint}</span> : null}
+    >
+      {group ? (
+        <div role="group" aria-labelledby={labelId} aria-describedby={describedBy} className="min-w-0">
+          {control}
+        </div>
+      ) : control}
+    </Field>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <section className="cm-section">
+      {/* DialogTitle is the h2; sections are the next level down. */}
+      <h3 className="cm-section-title">{title}</h3>
+      <div className="cm-grid">{children}</div>
+    </section>
+  );
+}
+
+/** Currency field: leading $, right-aligned tabular figures, decimal keypad. */
+function MoneyInput({ className, ...props }) {
+  return (
+    <InputGroup
+      type="number"
+      inputMode="decimal"
+      leading={<span className="text-[length:var(--fs-sm)] font-medium">$</span>}
+      className={className}
+      inputClassName="num text-right"
+      {...props}
+    />
+  );
+}
+
+/**
+ * Radix Select bound to a plain string form value.
+ *
+ * `emptyLabel` adds the "not set" row; picking it writes "" back to the form,
+ * which is exactly what the old `<option value="">` did.
+ */
+function FormSelect({ id, labelId, describedBy, invalid, value, onValueChange, options, emptyLabel, placeholder }) {
+  const empty = value === "" || value == null;
+  return (
+    <Select
+      value={empty ? (emptyLabel ? NO_VALUE : undefined) : String(value)}
+      onValueChange={(v) => onValueChange(v === NO_VALUE ? "" : v)}
+    >
+      <SelectTrigger
+        id={id}
+        aria-labelledby={labelId ? `${labelId} ${id}` : undefined}
+        aria-describedby={describedBy}
+        aria-invalid={invalid || undefined}
+      >
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {emptyLabel ? <SelectItem value={NO_VALUE}>{emptyLabel}</SelectItem> : null}
+        {options.map(o => (
+          <SelectItem key={String(o.value)} value={String(o.value)}>{o.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Segmented single-choice row. Values are written through untouched. */
+function FormRadios({ labelId, describedBy, value, onValueChange, options }) {
+  const base = labelId || "radios";
+  return (
+    <RadioGroup
+      className="flex flex-wrap items-center gap-4 min-h-[var(--control-h)] cm-radios"
+      value={value}
+      onValueChange={onValueChange}
+      aria-labelledby={labelId}
+      aria-describedby={describedBy}
+    >
+      {options.map(o => {
+        const itemId = `${base}-${String(o.value).replace(/\W+/g, "_")}`;
+        return (
+          <div key={String(o.value)} className="cm-radio">
+            <RadioGroupItem value={String(o.value)} id={itemId} />
+            <label htmlFor={itemId}>{o.label}</label>
+          </div>
+        );
+      })}
+    </RadioGroup>
+  );
+}
+
 // --------------------- shared sub-editor ---------------------
 // Same pattern the DetailDrawer uses. Companies dropdown excludes Client-type.
 function SubsEditor({ value, companies, onChange }) {
@@ -284,48 +443,42 @@ function SubsEditor({ value, companies, onChange }) {
   const remove = (i) => onChange(subs.filter((_, j) => j !== i));
   const add = () => onChange([...subs, { cId: null, desc: "", amt: 0 }]);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div className="cm-subs">
       {subs.length === 0 && (
-        <div style={{
-          fontSize: 12.5, color: "var(--text-soft)", fontStyle: "italic",
-          padding: "6px 10px", background: "var(--surface-2)",
-          border: "1px dashed var(--border)", borderRadius: 8,
-        }}>
-          No subs yet — click "Add sub" below to add one.
-        </div>
+        <p className="cm-empty">No subs yet. Add one below.</p>
       )}
       {subs.map((s, i) => (
-        <div key={i} className="subrow"
-             style={{ gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr) 110px 30px" }}>
+        <div key={i} className="cm-subrow">
           <SearchableSelect
             value={s.cId || ""}
             options={subOptions}
             placeholder="Search companies…"
+            inputClassName={CONTROL_CLASS}
             onChange={v => update(i, { cId: v || null })}
           />
-          <input className="input" placeholder="Discipline (e.g. Survey)"
-                 value={s.desc || ""} onChange={e => update(i, { desc: e.target.value })}/>
-          <input className="input mono" type="number" placeholder="$" min="0"
+          <Input placeholder="Discipline (e.g. Survey)"
+                 aria-label={`Sub ${i + 1} discipline`}
+                 value={s.desc || ""}
+                 onChange={e => update(i, { desc: e.target.value })}/>
+          <Input type="number" inputMode="decimal" placeholder="$" min="0"
+                 aria-label={`Sub ${i + 1} amount`}
+                 className="num text-right"
                  value={s.amt ?? ""}
-                 onChange={e => update(i, { amt: e.target.value === "" ? 0 : Number(e.target.value) })}
-                 style={{ fontFamily: "var(--font-mono)", textAlign: "right" }}/>
-          <button type="button" className="row-btn" title="Remove sub"
-                  onClick={() => remove(i)} style={{ color: "var(--rose)" }}>
-            <Icon name="trash" size={12}/>
-          </button>
+                 onChange={e => update(i, { amt: e.target.value === "" ? 0 : Number(e.target.value) })}/>
+          <Button type="button" variant="ghost" size="icon-sm"
+                  className="cm-subrm"
+                  aria-label={`Remove sub ${i + 1}`}
+                  onClick={() => remove(i)}>
+            <Icon name="trash" size={13}/>
+          </Button>
         </div>
       ))}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginTop: subs.length ? 4 : 2,
-      }}>
-        <button type="button" className="tool-chip" onClick={add}
-                style={{ borderStyle: "solid", borderColor: "var(--accent-soft)",
-                         color: "var(--accent-ink)", background: "var(--accent-softer)" }}>
+      <div className="cm-subfoot">
+        <Button type="button" variant="subtle" size="xs" onClick={add}>
           <Icon name="plus" size={12}/>Add sub
-        </button>
+        </Button>
         {subs.length > 0 && (
-          <span className="mono" style={{ fontSize: 11, color: "var(--text-soft)" }}>
+          <span className="cm-subtotal num">
             Total: {fmtMoney(subs.reduce((a, s) => a + (Number(s.amt) || 0), 0))}
           </span>
         )}
@@ -335,21 +488,22 @@ function SubsEditor({ value, companies, onChange }) {
 }
 
 // --------------------- multi-user picker ---------------------
-function UserMultiPicker({ value, users, onChange, placeholder = "Pick users…" }) {
+function UserMultiPicker({ value, users, onChange, placeholder = "Pick users…", id, describedBy }) {
   const ids = value || [];
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const pool = users || [];
   const available = pool.filter(u => !ids.includes(u.id) && (!q || u.name.toLowerCase().includes(q.toLowerCase())));
   return (
-    <div className="tag-input" onClick={() => setOpen(true)} style={{ position: "relative" }}>
+    <div className="cm-tagbox" onClick={() => setOpen(true)}>
       {ids.map(uid => {
         const u = pool.find(x => x.id === uid);
         if (!u) return null;
         return (
-          <span key={uid} className="tag">
-            <span className={`avatar xs ${u.color}`}>{u.initials}</span>{u.name}
-            <button type="button" onClick={(e) => {
+          <span key={uid} className="cm-tag">
+            <span className={`avatar xs ${u.color}`}>{u.initials}</span>
+            <span className="cm-tag-name">{u.name}</span>
+            <button type="button" aria-label={`Remove ${u.name}`} onClick={(e) => {
               e.stopPropagation();
               onChange(ids.filter(x => x !== uid));
             }}>
@@ -358,18 +512,20 @@ function UserMultiPicker({ value, users, onChange, placeholder = "Pick users…"
           </span>
         );
       })}
-      <input placeholder={ids.length ? "Add another…" : placeholder}
+      <input id={id}
+             aria-describedby={describedBy}
+             placeholder={ids.length ? "Add another…" : placeholder}
              value={q}
              onChange={e => { setQ(e.target.value); setOpen(true); }}
              onFocus={() => setOpen(true)}
              onBlur={() => setTimeout(() => setOpen(false), 150)}/>
       {open && available.length > 0 && (
-        <div className="menu" style={{ left: 0, right: 0, top: "calc(100% + 4px)", position: "absolute", margin: 4 }}>
+        <div className="cm-usermenu">
           {available.slice(0, 6).map(u => (
-            <button key={u.id} type="button" className="menu-item"
+            <button key={u.id} type="button"
                     onMouseDown={() => { onChange([...ids, u.id]); setQ(""); }}>
               <span className={`avatar xs ${u.color}`}>{u.initials}</span>
-              <span>{u.name}</span>
+              <span className="cm-tag-name">{u.name}</span>
             </button>
           ))}
         </div>
@@ -403,18 +559,44 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
   const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}), ...(seed || {}) }));
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  // Presentation-only: which fields the user has left, and whether a submit
+  // has been attempted. Neither participates in the submit rule below.
+  const [touched, setTouched] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const uid = useId();
+  const summaryRef = useRef(null);
 
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    if (error) summaryRef.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
 
   if (!dbTable || !titleCfg) return null;
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const isEmpty = (v) => v === undefined || v === null || v === "";
   const requiredOk = required.every(k => !isEmpty(form[k]));
+
+  const fid = (k) => `${uid}-${k}`;
+  const touch = (k) => setTouched(t => (t[k] ? t : { ...t, [k]: true }));
+  // A required field is flagged only once the user has left it (or tried to
+  // submit). The rule itself is unchanged: REQUIRED[table] must be non-empty.
+  const missing = (k) => required.includes(k) && isEmpty(form[k])
+    && (submitted || touched[k]) ? "Required." : undefined;
+  // Bind a plain text/number/date control to a form key.
+  const bind = (k) => ({
+    value: form[k],
+    onChange: (e) => set(k, e.target.value),
+    onBlur: () => touch(k),
+  });
+
+  const idLabel = form.parent_id ? "Phase / Subphase ID" : "Project ID";
+  const requiredLabel = (k) => (
+    table === "projects" && k === "local_id" ? idLabel
+      : table === "projects" && k === "name" ? "Project name"
+      : REQUIRED_LABELS[k] || k
+  );
+  const missingRequired = required.filter(k => isEmpty(form[k]));
 
   // Build the payload by picking only real DB columns. Omit empty values
   // so default/NULL-able columns stay untouched. Coerce numerics.
@@ -435,6 +617,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
   };
 
   const onSubmit = async () => {
+    setSubmitted(true);
     if (!requiredOk || pending) return;
     setError("");
     setPending(true);
@@ -699,222 +882,286 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     onClose();
   };
 
+  // ---- reusable field fragments -------------------------------------
+  const notesRow = (key = "notes", label = "Notes", placeholder) => (
+    <FormRow id={fid(key)} label={label} wide>
+      {(p) => <Textarea {...p} rows={3} placeholder={placeholder} {...bind(key)}/>}
+    </FormRow>
+  );
+
+  const subsRow = () => (
+    <FormRow id={fid("subs")} label="Subs" wide group>
+      <SubsEditor value={form.subs} companies={companies}
+                  onChange={next => set("subs", next)}/>
+    </FormRow>
+  );
+
+  const peopleRow = (key, label, placeholder = "Pick MSMM users…") => (
+    <FormRow id={fid(key)} label={label} wide>
+      {(p, m) => (
+        <UserMultiPicker value={form[key]} users={users}
+                         id={m.id} describedBy={m.describedBy}
+                         onChange={next => set(key, next)}
+                         placeholder={placeholder}/>
+      )}
+    </FormRow>
+  );
+
+  const clientRow = (label, options, placeholder) => (
+    <FormRow id={fid("client_id")} label={label} group>
+      <SearchableSelect
+        value={form.client_id || ""}
+        options={options}
+        placeholder={placeholder}
+        inputClassName={CONTROL_CLASS}
+        onChange={v => set("client_id", v || "")}
+      />
+    </FormRow>
+  );
+
+  const yearRow = (isRequired = false) => (
+    <FormRow id={fid("year")} label="Year" required={isRequired} error={missing("year")}>
+      {(p) => <Input {...p} type="number" inputMode="numeric" className="num" {...bind("year")}/>}
+    </FormRow>
+  );
+
+  const projectNumberRow = (label = "Project number", placeholder) => (
+    <FormRow id={fid("project_number")} label={label}>
+      {(p) => (
+        <Input {...p} className="font-mono num" placeholder={placeholder}
+               {...bind("project_number")}/>
+      )}
+    </FormRow>
+  );
+
+  const contractNumberRows = () => (
+    <>
+      <FormRow id={fid("client_contract_number")} label="Client contract #">
+        {(p) => (
+          <Input {...p} className="font-mono num" placeholder="e.g. POSL-2026-045"
+                 {...bind("client_contract_number")}/>
+        )}
+      </FormRow>
+      <FormRow id={fid("msmm_contract_number")} label="MSMM contract #">
+        {(p) => (
+          <Input {...p} className="font-mono num" placeholder="e.g. MSMM-2026-045"
+                 {...bind("msmm_contract_number")}/>
+        )}
+      </FormRow>
+    </>
+  );
+
+  const msmmUsageRows = () => (
+    <>
+      <FormRow id={fid("msmm_used")} label="MSMM used">
+        {(p) => <MoneyInput {...p} placeholder="0" {...bind("msmm_used")}/>}
+      </FormRow>
+      <FormRow id={fid("msmm_remaining")} label="MSMM remaining">
+        {(p) => <MoneyInput {...p} placeholder="0" {...bind("msmm_remaining")}/>}
+      </FormRow>
+    </>
+  );
+
+  const dateRow = (key, label, hint) => (
+    <FormRow id={fid(key)} label={label} hint={hint}>
+      {(p) => <Input {...p} type="date" className="num" {...bind(key)}/>}
+    </FormRow>
+  );
+
   const renderFields = () => {
     if (table === "projects") {
       const parentOptions = (projectItems || [])
         .map(it => ({ value: it.id, label: `${it.localId} · ${it.name}` }));
       const userOptions = (users || []).map(u => ({ value: u.id, label: u.name }));
       const parentItem = (projectItems || []).find(it => it.id === form.parent_id);
-      const idLabel = form.parent_id ? "Phase / Subphase ID *" : "Project ID *";
       return (
         <>
-          <Field label={idLabel}>
-            <input className="input mono" autoFocus value={form.local_id}
-                   onChange={e => set("local_id", e.target.value)}
-                   placeholder={form.parent_id ? "e.g. 1, 2, 2.1, 0" : "e.g. 202311"}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-            <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>
-              {form.parent_id
-                ? "Unique within its parent only — another project can reuse the same phase ID."
-                : "Unique across all projects."}
-            </div>
-          </Field>
-          <Field label="Project Name *">
-            <input className="input" value={form.name}
-                   onChange={e => set("name", e.target.value)}/>
-          </Field>
-          <Field label="Parent project">
-            <SearchableSelect
-              value={form.parent_id || ""}
-              options={parentOptions}
-              placeholder="None — top-level project"
-              onChange={v => set("parent_id", v || "")}
-            />
-            {parentItem && parentItem.contractAmount != null && (
-              <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>
-                Parent contract: {fmtMoney(parentItem.contractAmount, false)} — children can't exceed this in total.
-              </div>
-            )}
-          </Field>
-          <Field label="Type">
-            <select className="select" value={form.item_type}
-                    onChange={e => set("item_type", e.target.value)}>
-              {PROJECT_ITEM_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <div style={{ fontSize: 11.5, color: "var(--text-soft)", marginTop: 4 }}>
-              {form.item_type === "main"
-                ? "Main — a container. Time & expenses can't be logged against it."
-                : "Standard — an active work item. Time & expenses can be logged here."}
-            </div>
-          </Field>
-          <Field label="Client / Prime">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={clientOrFirmOptions}
-              placeholder="Search clients or firms…"
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Subs" multiline>
-            <SubsEditor value={form.subs} companies={companies}
-                        onChange={next => set("subs", next)}/>
-          </Field>
-          <Field label="Contract Type">
-            <select className="select" value={form.contract_type}
-                    onChange={e => set("contract_type", e.target.value)}>
-              <option value="">—</option>
-              {CONTRACT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Contract Amount">
-            <input className="input mono" type="number" value={form.contract_amount}
-                   onChange={e => set("contract_amount", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="Start Date">
-            <input className="input" type="date" value={form.start_date}
-                   onChange={e => set("start_date", e.target.value)}/>
-          </Field>
-          <Field label="Due Date">
-            <input className="input" type="date" value={form.due_date}
-                   onChange={e => set("due_date", e.target.value)}/>
-          </Field>
-          <Field label="Percent Complete">
-            <input className="input mono" type="number" min="0" max="100" value={form.percent_complete}
-                   onChange={e => set("percent_complete", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="Manager">
-            <SearchableSelect
-              value={form.manager_user_id || ""}
-              options={userOptions}
-              placeholder="Pick a manager…"
-              onChange={v => set("manager_user_id", v || "")}
-            />
-          </Field>
-          <Field label="Additional Project Managers" multiline>
-            <UserMultiPicker value={form.pm_user_ids} users={users}
-                             onChange={next => set("pm_user_ids", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Status">
-            <select className="select" value={form.status}
-                    onChange={e => set("status", e.target.value)}>
-              {PROJECT_ITEM_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </Field>
-          <Field label="Address Line 1">
-            <input className="input" value={form.address_line1}
-                   onChange={e => set("address_line1", e.target.value)}/>
-          </Field>
-          <Field label="Address Line 2">
-            <input className="input" value={form.address_line2}
-                   onChange={e => set("address_line2", e.target.value)}/>
-          </Field>
-          <Field label="City">
-            <input className="input" value={form.city}
-                   onChange={e => set("city", e.target.value)}/>
-          </Field>
-          <Field label="State">
-            <input className="input" value={form.state}
-                   onChange={e => set("state", e.target.value)}/>
-          </Field>
-          <Field label="PIN Code">
-            <input className="input" value={form.pin_code}
-                   onChange={e => set("pin_code", e.target.value)}/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="input" rows={3} value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
+          <Section title="Identification">
+            <FormRow id={fid("local_id")} label={idLabel} required
+                     error={missing("local_id")}
+                     hint={form.parent_id
+                       ? "Unique within its parent only. Another project can reuse the same phase ID."
+                       : "Unique across all projects."}>
+              {(p) => (
+                <Input {...p} autoFocus className="font-mono num"
+                       placeholder={form.parent_id ? "e.g. 1, 2, 2.1, 0" : "e.g. 202311"}
+                       {...bind("local_id")}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("name")} label="Project name" required error={missing("name")}>
+              {(p) => <Input {...p} {...bind("name")}/>}
+            </FormRow>
+            <FormRow id={fid("parent_id")} label="Parent project" wide group
+                     hint={parentItem && parentItem.contractAmount != null
+                       ? `Parent contract: ${fmtMoney(parentItem.contractAmount, false)}. Children cannot exceed this in total.`
+                       : undefined}>
+              <SearchableSelect
+                value={form.parent_id || ""}
+                options={parentOptions}
+                placeholder="No parent (top-level project)"
+                inputClassName={CONTROL_CLASS}
+                onChange={v => set("parent_id", v || "")}
+              />
+            </FormRow>
+            <FormRow id={fid("item_type")} label="Type"
+                     hint={form.item_type === "main"
+                       ? "Main: a container. Time and expenses cannot be logged against it."
+                       : "Standard: an active work item. Time and expenses can be logged here."}>
+              {(p, m) => (
+                <FormSelect {...m} value={form.item_type} options={PROJECT_ITEM_TYPE_OPTIONS}
+                            onValueChange={v => set("item_type", v)}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("status")} label="Status">
+              {(p, m) => (
+                <FormSelect {...m} value={form.status} options={PROJECT_ITEM_STATUS_OPTIONS}
+                            onValueChange={v => set("status", v)}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Client and team">
+            <FormRow id={fid("client_id")} label="Client / Prime" group>
+              <SearchableSelect
+                value={form.client_id || ""}
+                options={clientOrFirmOptions}
+                placeholder="Search clients or firms…"
+                inputClassName={CONTROL_CLASS}
+                onChange={v => set("client_id", v || "")}
+              />
+            </FormRow>
+            <FormRow id={fid("manager_user_id")} label="Manager" group>
+              <SearchableSelect
+                value={form.manager_user_id || ""}
+                options={userOptions}
+                placeholder="Pick a manager…"
+                inputClassName={CONTROL_CLASS}
+                onChange={v => set("manager_user_id", v || "")}
+              />
+            </FormRow>
+            {subsRow()}
+            {peopleRow("pm_user_ids", "Additional project managers")}
+          </Section>
+
+          <Section title="Contract">
+            <FormRow id={fid("contract_type")} label="Contract type">
+              {(p, m) => (
+                <FormSelect {...m} value={form.contract_type} options={CONTRACT_TYPE_OPTIONS}
+                            emptyLabel="None" placeholder="None"
+                            onValueChange={v => set("contract_type", v)}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("contract_amount")} label="Contract amount">
+              {(p) => <MoneyInput {...p} placeholder="0" {...bind("contract_amount")}/>}
+            </FormRow>
+            {dateRow("start_date", "Start date")}
+            {dateRow("due_date", "Due date")}
+            <FormRow id={fid("percent_complete")} label="Percent complete">
+              {(p) => (
+                <Input {...p} type="number" inputMode="numeric" min="0" max="100" placeholder="0"
+                       className="num text-right" {...bind("percent_complete")}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Location">
+            <FormRow id={fid("address_line1")} label="Address line 1" wide>
+              {(p) => <Input {...p} autoComplete="address-line1" {...bind("address_line1")}/>}
+            </FormRow>
+            <FormRow id={fid("address_line2")} label="Address line 2" wide>
+              {(p) => <Input {...p} autoComplete="address-line2" {...bind("address_line2")}/>}
+            </FormRow>
+            <FormRow id={fid("city")} label="City">
+              {(p) => <Input {...p} autoComplete="address-level2" {...bind("city")}/>}
+            </FormRow>
+            <FormRow id={fid("state")} label="State">
+              {(p) => <Input {...p} autoComplete="address-level1" {...bind("state")}/>}
+            </FormRow>
+            <FormRow id={fid("pin_code")} label="PIN code">
+              {(p) => <Input {...p} inputMode="numeric" className="num" {...bind("pin_code")}/>}
+            </FormRow>
+          </Section>
+
+          <Section title="Notes">
+            {notesRow()}
+          </Section>
         </>
       );
     }
+
     if (table === "potential") {
       return (
         <>
-          <Field label="Project Name *">
-            <input className="input" autoFocus value={form.project_name}
-                   onChange={e => set("project_name", e.target.value)}/>
-          </Field>
-          <Field label="Year">
-            <input className="input" type="number" value={form.year}
-                   onChange={e => set("year", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Role">
-            <select className="select" value={form.role} onChange={e => set("role", e.target.value)}>
-              <option value="">—</option>
-              <option value="Prime">Prime</option>
-              <option value="Sub">Sub</option>
-            </select>
-          </Field>
-          <Field label="Client">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={form.role === "Sub" ? clientOrFirmOptions : clientOptions}
-              placeholder={form.role === "Sub" ? "Search clients or firms…" : "Search clients…"}
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Total Contract Amount">
-            <input className="input" type="number" value={form.total_contract_amount}
-                   onChange={e => set("total_contract_amount", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="MSMM Amount">
-            <input className="input" type="number" value={form.msmm_amount}
-                   onChange={e => set("msmm_amount", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="Subs" multiline>
-            <SubsEditor value={form.subs} companies={companies}
-                        onChange={next => set("subs", next)}/>
-          </Field>
-          <Field label="PMs" multiline>
-            <UserMultiPicker value={form.pm_user_ids} users={users}
-                             onChange={next => set("pm_user_ids", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Probability">
-            <select className="select" value={form.probability}
-                    onChange={e => set("probability", e.target.value)}>
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-              <option value="Orange">Orange (pre-awarded)</option>
-            </select>
-          </Field>
-          {form.probability === "Orange" && (
-            <Field label="Anticipated Invoice Start Month">
-              <select className="select" value={form.anticipated_invoice_start_month}
-                      onChange={e => set("anticipated_invoice_start_month", e.target.value)}>
-                <option value="">—</option>
-                {MONTHS.map((m, i) => (
-                  <option key={i + 1} value={i + 1}>{m}</option>
-                ))}
-              </select>
-            </Field>
-          )}
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
-          <Field label="Dates and Comments">
-            <input className="input" value={form.next_action_note}
-                   onChange={e => set("next_action_note", e.target.value)}
-                   placeholder="e.g. decision expected 4/2/26"/>
-          </Field>
-          <Field label="Next Action Date">
-            <input className="input" type="date" value={form.next_action_date}
-                   onChange={e => set("next_action_date", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Project Number">
-            <input className="input" value={form.project_number}
-                   onChange={e => set("project_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
+          <Section title="Project details">
+            <FormRow id={fid("project_name")} label="Project name" required wide
+                     error={missing("project_name")}>
+              {(p) => <Input {...p} autoFocus {...bind("project_name")}/>}
+            </FormRow>
+            {projectNumberRow()}
+            {yearRow()}
+            <FormRow id={fid("role")} label="Role">
+              {(p, m) => (
+                <FormSelect {...m} value={form.role} emptyLabel="None" placeholder="None"
+                            options={[{ value: "Prime", label: "Prime" }, { value: "Sub", label: "Sub" }]}
+                            onValueChange={v => set("role", v)}/>
+              )}
+            </FormRow>
+            {clientRow(
+              "Client",
+              form.role === "Sub" ? clientOrFirmOptions : clientOptions,
+              form.role === "Sub" ? "Search clients or firms…" : "Search clients…"
+            )}
+          </Section>
+
+          <Section title="Contract value">
+            <FormRow id={fid("total_contract_amount")} label="Total contract amount">
+              {(p) => <MoneyInput {...p} placeholder="0" {...bind("total_contract_amount")}/>}
+            </FormRow>
+            <FormRow id={fid("msmm_amount")} label="MSMM amount">
+              {(p) => <MoneyInput {...p} placeholder="0" {...bind("msmm_amount")}/>}
+            </FormRow>
+            {subsRow()}
+          </Section>
+
+          <Section title="Team">
+            {peopleRow("pm_user_ids", "PMs")}
+          </Section>
+
+          <Section title="Pipeline">
+            <FormRow id={fid("probability")} label="Probability">
+              {(p, m) => (
+                <FormSelect {...m} value={form.probability}
+                            options={[
+                              { value: "High", label: "High" },
+                              { value: "Medium", label: "Medium" },
+                              { value: "Low", label: "Low" },
+                              { value: "Orange", label: "Orange (pre-awarded)" },
+                            ]}
+                            onValueChange={v => set("probability", v)}/>
+              )}
+            </FormRow>
+            {form.probability === "Orange" && (
+              <FormRow id={fid("anticipated_invoice_start_month")} label="Anticipated invoice start month">
+                {(p, meta) => (
+                  <FormSelect {...meta} value={form.anticipated_invoice_start_month}
+                              emptyLabel="None" placeholder="None"
+                              options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))}
+                              onValueChange={v => set("anticipated_invoice_start_month", v)}/>
+                )}
+              </FormRow>
+            )}
+          </Section>
+
+          <Section title="Follow up">
+            <FormRow id={fid("next_action_note")} label="Dates and comments">
+              {(p) => (
+                <Input {...p} placeholder="e.g. decision expected 4/2/26"
+                       {...bind("next_action_note")}/>
+              )}
+            </FormRow>
+            {dateRow("next_action_date", "Next action date")}
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -922,73 +1169,38 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "awaiting") {
       return (
         <>
-          <Field label="Project Name *">
-            <input className="input" autoFocus value={form.project_name}
-                   onChange={e => set("project_name", e.target.value)}/>
-          </Field>
-          <Field label="Year">
-            <input className="input" type="number" value={form.year}
-                   onChange={e => set("year", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Client">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={form.role === "Sub" ? clientOrFirmOptions : clientOptions}
-              placeholder={form.role === "Sub" ? "Search clients or firms…" : "Search clients…"}
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Subs" multiline>
-            <SubsEditor value={form.subs} companies={companies}
-                        onChange={next => set("subs", next)}/>
-          </Field>
-          <Field label="PMs" multiline>
-            <UserMultiPicker value={form.pm_user_ids} users={users}
-                             onChange={next => set("pm_user_ids", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Date Submitted">
-            <input className="input" type="date" value={form.date_submitted}
-                   onChange={e => set("date_submitted", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Anticipated Result Date">
-            <input className="input" type="date" value={form.anticipated_result_date}
-                   onChange={e => set("anticipated_result_date", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Client Contract #">
-            <input className="input" value={form.client_contract_number}
-                   onChange={e => set("client_contract_number", e.target.value)}
-                   placeholder="e.g. POSL-2026-045"
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="MSMM Contract #">
-            <input className="input" value={form.msmm_contract_number}
-                   onChange={e => set("msmm_contract_number", e.target.value)}
-                   placeholder="e.g. MSMM-2026-045"
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="MSMM Used">
-            <input className="input" type="number" value={form.msmm_used}
-                   onChange={e => set("msmm_used", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="MSMM Remaining">
-            <input className="input" type="number" value={form.msmm_remaining}
-                   onChange={e => set("msmm_remaining", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
-          <Field label="Project Number">
-            <input className="input" value={form.project_number}
-                   onChange={e => set("project_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
+          <Section title="Project details">
+            <FormRow id={fid("project_name")} label="Project name" required wide
+                     error={missing("project_name")}>
+              {(p) => <Input {...p} autoFocus {...bind("project_name")}/>}
+            </FormRow>
+            {projectNumberRow()}
+            {yearRow()}
+            {clientRow(
+              "Client",
+              form.role === "Sub" ? clientOrFirmOptions : clientOptions,
+              form.role === "Sub" ? "Search clients or firms…" : "Search clients…"
+            )}
+          </Section>
+
+          <Section title="Team">
+            {subsRow()}
+            {peopleRow("pm_user_ids", "PMs")}
+          </Section>
+
+          <Section title="Submission">
+            {dateRow("date_submitted", "Date submitted")}
+            {dateRow("anticipated_result_date", "Anticipated result date")}
+          </Section>
+
+          <Section title="Contract">
+            {contractNumberRows()}
+            {msmmUsageRows()}
+          </Section>
+
+          <Section title="Notes">
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -996,113 +1208,65 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "awarded") {
       return (
         <>
-          <Field label="Project Name *">
-            <input className="input" autoFocus value={form.project_name}
-                   onChange={e => set("project_name", e.target.value)}/>
-          </Field>
-          <Field label="Year">
-            <input className="input" type="number" value={form.year}
-                   onChange={e => set("year", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Role">
-            <div className="seg" style={{ maxWidth: 220 }}>
-              <button type="button"
-                      className={"seg-btn" + (form.role === "Prime" ? " active" : "")}
-                      onClick={() => set("role", "Prime")}>
-                Prime
-              </button>
-              <button type="button"
-                      className={"seg-btn" + (form.role === "Sub" ? " active" : "")}
-                      onClick={() => set("role", "Sub")}>
-                Sub
-              </button>
-            </div>
-          </Field>
-          <Field label="Client">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={clientOptions}
-              placeholder="Search clients…"
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Prime">
-            <SearchableSelect
-              value={form.prime_id || ""}
-              options={clientOrFirmOptions}
-              placeholder="Search clients or firms…"
-              onChange={v => set("prime_id", v || "")}
-            />
-          </Field>
-          <Field label="Stage">
-            <select className="select" value={form.stage}
-                    onChange={e => set("stage", e.target.value)}>
-              <option value="">—</option>
-              <option value="Multi-Use Contract">Multi-Use Contract</option>
-              <option value="Single Use Contract (Project)">Single Use Contract (Project)</option>
-              <option value="AE Selected List">AE Selected List</option>
-            </select>
-          </Field>
-          <Field label="Pool">
-            <input className="input" value={form.pool}
-                   onChange={e => set("pool", e.target.value)}
-                   placeholder="e.g. Pool A"/>
-          </Field>
-          <Field label="Contract Expiry Date">
-            <input className="input" type="date" value={form.contract_expiry_date}
-                   onChange={e => set("contract_expiry_date", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Subs" multiline>
-            <SubsEditor value={form.subs} companies={companies}
-                        onChange={next => set("subs", next)}/>
-          </Field>
-          <Field label="PMs" multiline>
-            <UserMultiPicker value={form.pm_user_ids} users={users}
-                             onChange={next => set("pm_user_ids", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Date Submitted">
-            <input className="input" type="date" value={form.date_submitted}
-                   onChange={e => set("date_submitted", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Client Contract #">
-            <input className="input" value={form.client_contract_number}
-                   onChange={e => set("client_contract_number", e.target.value)}
-                   placeholder="e.g. POSL-2026-045"
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="MSMM Contract #">
-            <input className="input" value={form.msmm_contract_number}
-                   onChange={e => set("msmm_contract_number", e.target.value)}
-                   placeholder="e.g. MSMM-2026-045"
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
-          <Field label="MSMM Used">
-            <input className="input" type="number" value={form.msmm_used}
-                   onChange={e => set("msmm_used", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="MSMM Remaining">
-            <input className="input" type="number" value={form.msmm_remaining}
-                   onChange={e => set("msmm_remaining", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }} placeholder="0"/>
-          </Field>
-          <Field label="Details" multiline>
-            <textarea className="textarea" value={form.details}
-                      onChange={e => set("details", e.target.value)}/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
-          <Field label="Project Number">
-            <input className="input" value={form.project_number}
-                   onChange={e => set("project_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}/>
-          </Field>
+          <Section title="Project details">
+            <FormRow id={fid("project_name")} label="Project name" required wide
+                     error={missing("project_name")}>
+              {(p) => <Input {...p} autoFocus {...bind("project_name")}/>}
+            </FormRow>
+            {projectNumberRow()}
+            {yearRow()}
+            <FormRow id={fid("role")} label="Role" labelledBy>
+              {(p, m) => (
+                <FormRadios {...m} value={form.role}
+                            options={[{ value: "Prime", label: "Prime" }, { value: "Sub", label: "Sub" }]}
+                            onValueChange={v => set("role", v)}/>
+              )}
+            </FormRow>
+            {clientRow("Client", clientOptions, "Search clients…")}
+            <FormRow id={fid("prime_id")} label="Prime" group>
+              <SearchableSelect
+                value={form.prime_id || ""}
+                options={clientOrFirmOptions}
+                placeholder="Search clients or firms…"
+                inputClassName={CONTROL_CLASS}
+                onChange={v => set("prime_id", v || "")}
+              />
+            </FormRow>
+          </Section>
+
+          <Section title="Award">
+            <FormRow id={fid("stage")} label="Stage">
+              {(p, m) => (
+                <FormSelect {...m} value={form.stage} emptyLabel="None" placeholder="None"
+                            options={[
+                              { value: "Multi-Use Contract", label: "Multi-Use Contract" },
+                              { value: "Single Use Contract (Project)", label: "Single Use Contract (Project)" },
+                              { value: "AE Selected List", label: "AE Selected List" },
+                            ]}
+                            onValueChange={v => set("stage", v)}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("pool")} label="Pool">
+              {(p) => <Input {...p} placeholder="e.g. Pool A" {...bind("pool")}/>}
+            </FormRow>
+            {dateRow("contract_expiry_date", "Contract expiry date")}
+            {dateRow("date_submitted", "Date submitted")}
+          </Section>
+
+          <Section title="Team">
+            {subsRow()}
+            {peopleRow("pm_user_ids", "PMs")}
+          </Section>
+
+          <Section title="Contract">
+            {contractNumberRows()}
+            {msmmUsageRows()}
+          </Section>
+
+          <Section title="Notes">
+            {notesRow("details", "Details")}
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -1110,49 +1274,48 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "events") {
       return (
         <>
-          <Field label="Title *">
-            <input className="input" autoFocus value={form.title}
-                   onChange={e => set("title", e.target.value)}/>
-          </Field>
-          <Field label="Status">
-            <select className="select" value={form.status}
-                    onChange={e => set("status", e.target.value)}>
-              <option value="Booked">Booked</option>
-              <option value="Happened">Happened</option>
-            </select>
-          </Field>
-          <Field label="Type">
-            <select className="select" value={form.type}
-                    onChange={e => set("type", e.target.value)}>
-              <option value="">—</option>
-              <option value="Partner">Partner</option>
-              <option value="AI">AI</option>
-              <option value="Project">Project</option>
-              <option value="Meetings">Meetings</option>
-              <option value="Board Meetings">Board Meetings</option>
-              <option value="Event">Event</option>
-            </select>
-          </Field>
-          <Field label="Date & Time">
-            <input className="input" type="datetime-local" value={form.event_datetime}
-                   onChange={e => set("event_datetime", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Rating">
-            <StarRating
-              value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
-              onChange={v => set("stars", v == null ? "" : v)}
-            />
-          </Field>
-          <Field label="Attendees" multiline>
-            <UserMultiPicker value={form.attendees} users={users}
-                             onChange={next => set("attendees", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
+          <Section title="Event">
+            <FormRow id={fid("title")} label="Title" required wide error={missing("title")}>
+              {(p) => <Input {...p} autoFocus {...bind("title")}/>}
+            </FormRow>
+            <FormRow id={fid("status")} label="Status">
+              {(p, m) => (
+                <FormSelect {...m} value={form.status}
+                            options={[
+                              { value: "Booked", label: "Booked" },
+                              { value: "Happened", label: "Happened" },
+                            ]}
+                            onValueChange={v => set("status", v)}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("type")} label="Type">
+              {(p, m) => (
+                <FormSelect {...m} value={form.type} emptyLabel="None" placeholder="None"
+                            options={["Partner", "AI", "Project", "Meetings", "Board Meetings", "Event"]
+                              .map(v => ({ value: v, label: v }))}
+                            onValueChange={v => set("type", v)}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("event_datetime")} label="Date and time">
+              {(p) => (
+                <Input {...p} type="datetime-local" className="num" {...bind("event_datetime")}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("stars")} label="Rating" group>
+              <StarRating
+                value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
+                onChange={v => set("stars", v == null ? "" : v)}
+              />
+            </FormRow>
+          </Section>
+
+          <Section title="People">
+            {peopleRow("attendees", "Attendees")}
+          </Section>
+
+          <Section title="Notes">
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -1160,53 +1323,47 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "hotleads") {
       return (
         <>
-          <Field label="Title *">
-            <input className="input" autoFocus value={form.title}
-                   onChange={e => set("title", e.target.value)}/>
-          </Field>
-          <Field label="Type">
-            <select className="select" value={form.type || ""}
-                    onChange={e => set("type", e.target.value)}>
-              <option value="">—</option>
-              <option value="Engineering">Engineering</option>
-              <option value="AI">AI</option>
-            </select>
-          </Field>
-          <Field label="Client / Firm">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={clientOrFirmOptions}
-              placeholder="Search clients or firms…"
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Date & Time">
-            <input className="input" type="datetime-local" value={form.date_time}
-                   onChange={e => set("date_time", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Anticipated Amount">
-            <input className="input" type="number" value={form.anticipated_amount}
-                   onChange={e => set("anticipated_amount", e.target.value)}
-                   placeholder="Expected contract value"
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Rating">
-            <StarRating
-              value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
-              max={HOT_LEAD_STAR_MAX}
-              onChange={v => set("stars", v == null ? "" : v)}
-            />
-          </Field>
-          <Field label="Attendees" multiline>
-            <UserMultiPicker value={form.attendees} users={users}
-                             onChange={next => set("attendees", next)}
-                             placeholder="Pick MSMM users…"/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
+          <Section title="Lead">
+            <FormRow id={fid("title")} label="Title" required wide error={missing("title")}>
+              {(p) => <Input {...p} autoFocus {...bind("title")}/>}
+            </FormRow>
+            <FormRow id={fid("type")} label="Type">
+              {(p, m) => (
+                <FormSelect {...m} value={form.type || ""} emptyLabel="None" placeholder="None"
+                            options={[
+                              { value: "Engineering", label: "Engineering" },
+                              { value: "AI", label: "AI" },
+                            ]}
+                            onValueChange={v => set("type", v)}/>
+              )}
+            </FormRow>
+            {clientRow("Client / Firm", clientOrFirmOptions, "Search clients or firms…")}
+            <FormRow id={fid("date_time")} label="Date and time">
+              {(p) => (
+                <Input {...p} type="datetime-local" className="num" {...bind("date_time")}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("anticipated_amount")} label="Anticipated amount">
+              {(p) => (
+                <MoneyInput {...p} placeholder="Expected contract value" {...bind("anticipated_amount")}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("stars")} label="Rating" group>
+              <StarRating
+                value={form.stars === "" || form.stars == null ? null : Number(form.stars)}
+                max={HOT_LEAD_STAR_MAX}
+                onChange={v => set("stars", v == null ? "" : v)}
+              />
+            </FormRow>
+          </Section>
+
+          <Section title="People">
+            {peopleRow("attendees", "Attendees")}
+          </Section>
+
+          <Section title="Notes">
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -1214,48 +1371,41 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "clients") {
       return (
         <>
-          <Field label="Name *">
-            <input className="input" autoFocus value={form.name}
-                   onChange={e => set("name", e.target.value)}/>
-          </Field>
-          <Field label="District / State">
-            <input className="input" value={form.district}
-                   onChange={e => set("district", e.target.value)}
-                   placeholder="e.g. MVN-New Orleans District"/>
-          </Field>
-          <Field label="Org Type">
-            <select className="select" value={form.org_type}
-                    onChange={e => set("org_type", e.target.value)}>
-              <option value="">—</option>
-              <option value="City">City</option>
-              <option value="State">State</option>
-              <option value="Federal">Federal</option>
-              <option value="Local">Local</option>
-              <option value="Parish">Parish</option>
-              <option value="Regional">Regional</option>
-              <option value="Other">Other</option>
-            </select>
-          </Field>
-          <Field label="Contact Person">
-            <input className="input" value={form.contact_person}
-                   onChange={e => set("contact_person", e.target.value)}/>
-          </Field>
-          <Field label="Email">
-            <input className="input" type="email" value={form.email}
-                   onChange={e => set("email", e.target.value)}/>
-          </Field>
-          <Field label="Phone">
-            <input className="input" type="tel" value={form.phone}
-                   onChange={e => set("phone", e.target.value)}/>
-          </Field>
-          <Field label="Address">
-            <input className="input" value={form.address}
-                   onChange={e => set("address", e.target.value)}/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
+          <Section title="Organization">
+            <FormRow id={fid("name")} label="Name" required wide error={missing("name")}>
+              {(p) => <Input {...p} autoFocus {...bind("name")}/>}
+            </FormRow>
+            <FormRow id={fid("district")} label="District / State">
+              {(p) => <Input {...p} placeholder="e.g. MVN-New Orleans District" {...bind("district")}/>}
+            </FormRow>
+            <FormRow id={fid("org_type")} label="Org type">
+              {(p, m) => (
+                <FormSelect {...m} value={form.org_type} emptyLabel="None" placeholder="None"
+                            options={["City", "State", "Federal", "Local", "Parish", "Regional", "Other"]
+                              .map(v => ({ value: v, label: v }))}
+                            onValueChange={v => set("org_type", v)}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Contact">
+            <FormRow id={fid("contact_person")} label="Contact person">
+              {(p) => <Input {...p} autoComplete="name" {...bind("contact_person")}/>}
+            </FormRow>
+            <FormRow id={fid("email")} label="Email">
+              {(p) => <Input {...p} type="email" inputMode="email" autoComplete="email" {...bind("email")}/>}
+            </FormRow>
+            <FormRow id={fid("phone")} label="Phone">
+              {(p) => <Input {...p} type="tel" inputMode="tel" autoComplete="tel" className="num" {...bind("phone")}/>}
+            </FormRow>
+            <FormRow id={fid("address")} label="Address">
+              {(p) => <Input {...p} {...bind("address")}/>}
+            </FormRow>
+          </Section>
+
+          <Section title="Notes">
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -1263,30 +1413,30 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "companies") {
       return (
         <>
-          <Field label="Name *">
-            <input className="input" autoFocus value={form.name}
-                   onChange={e => set("name", e.target.value)}/>
-          </Field>
-          <Field label="Contact Person">
-            <input className="input" value={form.contact_person}
-                   onChange={e => set("contact_person", e.target.value)}/>
-          </Field>
-          <Field label="Email">
-            <input className="input" type="email" value={form.email}
-                   onChange={e => set("email", e.target.value)}/>
-          </Field>
-          <Field label="Phone">
-            <input className="input" type="tel" value={form.phone}
-                   onChange={e => set("phone", e.target.value)}/>
-          </Field>
-          <Field label="Address">
-            <input className="input" value={form.address}
-                   onChange={e => set("address", e.target.value)}/>
-          </Field>
-          <Field label="Notes" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}/>
-          </Field>
+          <Section title="Company">
+            <FormRow id={fid("name")} label="Name" required wide error={missing("name")}>
+              {(p) => <Input {...p} autoFocus {...bind("name")}/>}
+            </FormRow>
+          </Section>
+
+          <Section title="Contact">
+            <FormRow id={fid("contact_person")} label="Contact person">
+              {(p) => <Input {...p} autoComplete="name" {...bind("contact_person")}/>}
+            </FormRow>
+            <FormRow id={fid("email")} label="Email">
+              {(p) => <Input {...p} type="email" inputMode="email" autoComplete="email" {...bind("email")}/>}
+            </FormRow>
+            <FormRow id={fid("phone")} label="Phone">
+              {(p) => <Input {...p} type="tel" inputMode="tel" autoComplete="tel" className="num" {...bind("phone")}/>}
+            </FormRow>
+            <FormRow id={fid("address")} label="Address">
+              {(p) => <Input {...p} {...bind("address")}/>}
+            </FormRow>
+          </Section>
+
+          <Section title="Notes">
+            {notesRow()}
+          </Section>
         </>
       );
     }
@@ -1294,54 +1444,39 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     if (table === "invoice") {
       return (
         <>
-          <Field label="Project Name *">
-            <input className="input" autoFocus value={form.project_name}
-                   onChange={e => set("project_name", e.target.value)}/>
-          </Field>
-          <Field label="Year *">
-            <input className="input" type="number" value={form.year}
-                   onChange={e => set("year", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Project #">
-            <input className="input" value={form.project_number}
-                   onChange={e => set("project_number", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}
-                   placeholder="e.g. 24-101"/>
-          </Field>
-          <Field label="Type">
-            <div className="seg" style={{ maxWidth: 280 }}>
-              {INVOICE_TYPE_OPTIONS.map(t => (
-                <button key={t} type="button"
-                        className={"seg-btn" + (form.type === t ? " active" : "")}
-                        onClick={() => set("type", t)}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </Field>
-          <Field label="Total Contract Value">
-            <input className="input" type="number" value={form.contract_amount}
-                   onChange={e => set("contract_amount", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}
-                   placeholder="0"/>
-          </Field>
-          {/* Linked-pair MSMM is initialized when the HZ sibling is created and
-              edited from its expanded sub row — no create-time field here. */}
-          <Field label="MSMM Rollforward (carry-in from 2025)">
-            <input className="input" type="number"
-                   value={form.msmm_remaining_to_bill_year_start}
-                   onChange={e => set("msmm_remaining_to_bill_year_start", e.target.value)}
-                   style={{ fontFamily: "var(--font-mono)" }}
-                   placeholder="0"/>
-          </Field>
-          <Field label="PMs">
-            <UserMultiPicker
-              value={form.pm_user_ids}
-              users={users}
-              onChange={(ids) => set("pm_user_ids", ids)}
-              placeholder="Pick PMs…"/>
-          </Field>
+          <Section title="Project">
+            <FormRow id={fid("project_name")} label="Project name" required wide
+                     error={missing("project_name")}>
+              {(p) => <Input {...p} autoFocus {...bind("project_name")}/>}
+            </FormRow>
+            {projectNumberRow("Project #", "e.g. 24-101")}
+            {yearRow(true)}
+            <FormRow id={fid("type")} label="Type" wide labelledBy>
+              {(p, m) => (
+                <FormRadios {...m} value={form.type}
+                            options={INVOICE_TYPE_OPTIONS.map(t => ({ value: t, label: t }))}
+                            onValueChange={v => set("type", v)}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Amounts">
+            <FormRow id={fid("contract_amount")} label="Total contract value">
+              {(p) => <MoneyInput {...p} placeholder="0" {...bind("contract_amount")}/>}
+            </FormRow>
+            {/* Linked-pair MSMM is initialized when the HZ sibling is created and
+                edited from its expanded sub row — no create-time field here. */}
+            <FormRow id={fid("msmm_remaining_to_bill_year_start")}
+                     label="MSMM rollforward (carry-in from 2025)">
+              {(p) => (
+                <MoneyInput {...p} placeholder="0" {...bind("msmm_remaining_to_bill_year_start")}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Team">
+            {peopleRow("pm_user_ids", "PMs", "Pick PMs…")}
+          </Section>
         </>
       );
     }
@@ -1370,110 +1505,102 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
       };
       return (
         <>
-          <Field label="RFQ/RFP Number *">
-            <input className="input" autoFocus value={form.rfq_rfp_number}
-                   onChange={e => set("rfq_rfp_number", e.target.value)}
-                   placeholder="e.g. RFQ-2026-014 or 0x4F2"
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Client / Parish (optional)">
-            <SearchableSelect
-              value={form.client_id || ""}
-              options={clientOptions}
-              placeholder="Search clients…"
-              onChange={v => set("client_id", v || "")}
-            />
-          </Field>
-          <Field label="Description of Service (optional)">
-            <select className="select" value={form.service_description}
-                    onChange={e => set("service_description", e.target.value)}>
-              <option value="">—</option>
-              {BID_SERVICE_OPTIONS.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Due Date (optional)">
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <input className="input" type="date" value={dueDate}
-                     onChange={e => setDuePart("date", e.target.value)}
-                     style={{ fontFamily: "var(--font-mono)", flex: "1 1 160px" }}
-                     aria-label="Due date"/>
-              <input className="input" type="time" value={dueTime}
-                     onChange={e => setDuePart("time", e.target.value)}
-                     style={{ fontFamily: "var(--font-mono)", flex: "0 1 130px" }}
-                     aria-label="Due time"
-                     disabled={!dueDate}
-                     title={!dueDate ? "Pick a date first" : ""}/>
-              {form.due_at && (
-                <button type="button" className="row-btn"
-                        title="Clear due date"
-                        onClick={() => set("due_at", "")}
-                        style={{ color: "var(--rose)" }}>
-                  <Icon name="x" size={11}/>
-                </button>
+          <Section title="Bid">
+            <FormRow id={fid("rfq_rfp_number")} label="RFQ/RFP number" required wide
+                     error={missing("rfq_rfp_number")}>
+              {(p) => (
+                <Input {...p} autoFocus className="font-mono num"
+                       placeholder="e.g. RFQ-2026-014 or 0x4F2"
+                       {...bind("rfq_rfp_number")}/>
               )}
-            </div>
-          </Field>
-          <Field label="RFQ PDF File (optional)">
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <label className="tool-chip" style={{ cursor: "pointer" }}>
-                <Icon name="plus" size={11}/>
-                {stagedFile ? "Choose another…" : "Choose PDF…"}
-                <input type="file" accept="application/pdf,.pdf"
-                       style={{ display: "none" }}
-                       onChange={e => set("_pdf_file", e.target.files?.[0] || null)}/>
-              </label>
-              {stagedFile && (
-                <>
-                  <span style={{ fontSize: 12, color: "var(--text-soft)", maxWidth: 220,
-                                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                        title={stagedFile.name}>
-                    {stagedFile.name}
-                  </span>
-                  <button type="button" className="row-btn" title="Remove"
-                          onClick={() => set("_pdf_file", null)}
-                          style={{ color: "var(--rose)" }}>
-                    <Icon name="x" size={11}/>
-                  </button>
-                </>
+            </FormRow>
+            {clientRow("Client / Parish", clientOptions, "Search clients…")}
+            <FormRow id={fid("service_description")} label="Description of service">
+              {(p, m) => (
+                <FormSelect {...m} value={form.service_description}
+                            emptyLabel="None" placeholder="None"
+                            options={BID_SERVICE_OPTIONS.map(s => ({ value: s, label: s }))}
+                            onValueChange={v => set("service_description", v)}/>
               )}
-              <span style={{ fontSize: 11, color: "var(--text-muted)", flexBasis: "100%" }}>
-                Uploads after the bid is created. You can also attach a PDF later from the row or drawer.
-              </span>
+            </FormRow>
+            <FormRow id={fid("anticipated_amount")} label="Anticipated amount">
+              {(p) => (
+                <MoneyInput {...p} placeholder="Expected contract value" {...bind("anticipated_amount")}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Due date">
+            <FormRow id={fid("due_date_part")} label="Date">
+              {(p) => (
+                <Input {...p} type="date" className="num" value={dueDate}
+                       onChange={e => setDuePart("date", e.target.value)}/>
+              )}
+            </FormRow>
+            <FormRow id={fid("due_time_part")} label="Time"
+                     hint={dueDate ? "Leave blank for 23:59." : "Pick a date first."}>
+              {(p) => (
+                <Input {...p} type="time" className="num" value={dueTime}
+                       disabled={!dueDate}
+                       onChange={e => setDuePart("time", e.target.value)}/>
+              )}
+            </FormRow>
+            {form.due_at && (
+              <div className="cm-wide">
+                <Button type="button" variant="ghost" size="sm"
+                        onClick={() => set("due_at", "")}>
+                  <Icon name="x" size={12}/>Clear due date
+                </Button>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Attachment and links">
+            <FormRow id={fid("_pdf_file")} label="RFQ PDF file" wide
+                     hint="Uploads after the bid is created. You can also attach a PDF later from the row or drawer.">
+              {(p) => (
+                <div className="cm-file">
+                  <Input {...p}
+                         key={stagedFile ? "picked" : "empty"}
+                         type="file" accept="application/pdf,.pdf"
+                         className="h-auto py-1.5"
+                         onChange={e => set("_pdf_file", e.target.files?.[0] || null)}/>
+                  {stagedFile && (
+                    <div className="cm-fileinfo">
+                      <Icon name="attachment" size={12}/>
+                      <span className="cm-filename" title={stagedFile.name}>{stagedFile.name}</span>
+                      <Button type="button" variant="ghost" size="icon-sm"
+                              aria-label="Remove staged PDF"
+                              onClick={() => set("_pdf_file", null)}>
+                        <Icon name="x" size={12}/>
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </FormRow>
+            <FormRow id={fid("web_link")} label="Web link" wide>
+              {/* type="text" not "url" so the browser doesn't refuse a value
+                  like "google.com". We don't validate the format at the DB
+                  level either — the field is a free-text hyperlink hint. */}
+              {(p) => (
+                <Input {...p} type="text" inputMode="url" placeholder="https://…" {...bind("web_link")}/>
+              )}
+            </FormRow>
+          </Section>
+
+          <Section title="Notes">
+            {notesRow("notes", "Notes", "Anything to flag for the approver…")}
+            <div className="cm-wide">
+              <Alert tone="neutral" icon={null}>
+                <span className="cm-note">
+                  <Icon name="lock" size={12}/>
+                  <span>New bids start as <strong>Pending</strong>. An Admin approves the bid
+                  before it can move forward to Proposals.</span>
+                </span>
+              </Alert>
             </div>
-          </Field>
-          <Field label="Web Link (optional)">
-            {/* type="text" not "url" so the browser doesn't refuse a value
-                like "google.com". We don't validate the format at the DB
-                level either — the field is a free-text hyperlink hint. */}
-            <input className="input" type="text" value={form.web_link}
-                   onChange={e => set("web_link", e.target.value)}
-                   placeholder="https://…"/>
-          </Field>
-          <Field label="Anticipated Amount (optional)">
-            <input className="input" type="number" value={form.anticipated_amount}
-                   onChange={e => set("anticipated_amount", e.target.value)}
-                   placeholder="Expected contract value"
-                   style={{ fontFamily: "var(--font-mono)" }}/>
-          </Field>
-          <Field label="Notes (optional)" multiline>
-            <textarea className="textarea" value={form.notes}
-                      onChange={e => set("notes", e.target.value)}
-                      placeholder="Anything to flag for the approver…"/>
-          </Field>
-          <div style={{
-            background: "var(--surface-2)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            padding: "10px 12px",
-            fontSize: 12,
-            color: "var(--text-soft)",
-            marginTop: 4,
-          }}>
-            <Icon name="lock" size={11}/> New bids start as <strong>Pending</strong>.
-            An Admin approves the bid before it can move forward to Proposals.
-          </div>
+          </Section>
         </>
       );
     }
@@ -1481,47 +1608,66 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     return null;
   };
 
+  // Keep the dialog open when the pointer lands in the SearchableSelect menu:
+  // that menu is portalled to document.body, so Radix would otherwise read it
+  // as an outside interaction and dismiss.
+  const isComboboxSurface = (e) => {
+    const target = e?.detail?.originalEvent?.target ?? e?.target;
+    return target instanceof Element && !!target.closest(".searchable-menu");
+  };
+  const keepOpenOverCombobox = (e) => { if (isComboboxSurface(e)) e.preventDefault(); };
+
   return (
-    <>
-      <div className="overlay" onClick={onClose}/>
-      <div className="modal" style={{ width: 560, maxHeight: "86vh", display: "flex", flexDirection: "column" }}>
-        <div className="modal-head">
-          <div className="icon-badge"><Icon name={titleCfg.icon} size={16}/></div>
-          <div style={{ flex: 1 }}>
-            <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Create</div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>{titleCfg.title}</h3>
-          </div>
-          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
-        <div className="modal-body" style={{ overflowY: "auto", flex: 1 }}>
-          {renderFields()}
-          {error && (
-            <div style={{ color: "var(--rose)", fontSize: 12, marginTop: 10 }}>
-              {error}
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        size="lg"
+        aria-busy={pending || undefined}
+        onPointerDownOutside={keepOpenOverCombobox}
+        onInteractOutside={keepOpenOverCombobox}
+        onFocusOutside={keepOpenOverCombobox}
+      >
+        <DialogHeader>
+          <div className="cm-headrow">
+            <span className="cm-badge" aria-hidden="true">
+              <Icon name={titleCfg.icon} size={16}/>
+            </span>
+            <div className="min-w-0">
+              <p className="cm-eyebrow">Create</p>
+              <DialogTitle>{titleCfg.title}</DialogTitle>
+              <DialogDescription>Fields marked with an asterisk are required.</DialogDescription>
             </div>
-          )}
-        </div>
-        <div className="modal-foot">
-          <div style={{ fontSize: 12, color: "var(--text-soft)" }}>* required</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn sm" onClick={onClose} disabled={pending}>Cancel</button>
-            <button className="btn primary sm"
-                    onClick={onSubmit}
-                    disabled={!requiredOk || pending}>
-              <Icon name="check" size={13}/>
-              {pending ? "Saving…" : "Create"}
-            </button>
           </div>
-        </div>
-      </div>
-    </>
+        </DialogHeader>
+
+        <DialogBody className="cm-body">
+          {error ? (
+            <div ref={summaryRef}>
+              <Alert tone="danger">{error}</Alert>
+            </div>
+          ) : submitted && !requiredOk ? (
+            <div ref={summaryRef}>
+              <Alert tone="danger" title="Missing required fields">
+                Fill in {missingRequired.map(requiredLabel).join(", ")} to continue.
+              </Alert>
+            </div>
+          ) : null}
+          {renderFields()}
+        </DialogBody>
+
+        <DialogFooter>
+          <Button variant="default" className="min-h-11 sm:min-h-0"
+                  onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button variant="primary" className="min-h-11 sm:min-h-0"
+                  onClick={onSubmit}
+                  loading={pending}
+                  disabled={!requiredOk || pending}>
+            {!pending && <Icon name="check" size={14}/>}
+            {pending ? "Saving…" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
-
-// Small helper to keep the field markup tight.
-const Field = ({ label, multiline, children }) => (
-  <div className="field">
-    <div className="field-label">{label}</div>
-    <div className={"field-value" + (multiline ? " multiline" : "")}>{children}</div>
-  </div>
-);
