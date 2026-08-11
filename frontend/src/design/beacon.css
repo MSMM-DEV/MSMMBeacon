@@ -218,7 +218,19 @@ body {
     background-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
-.bx-navitem > svg { flex: 0 0 auto; }
+/* Nav glyphs carry more weight than the Icon component's 1.75 default. That
+   default exists so an icon doesn't out-weigh the 12–14px text beside it —
+   but in the collapsed rail there IS no text beside it, and a hairline glyph
+   alone in a 60px strip reads as faint rather than quiet (worst in dark mode,
+   where thin strokes lose the most against the surface). 2.25 rather than 2.5:
+   past that the denser glyphs start closing up — calendarDays' dots thicken
+   toward their frame and sliders' knobs merge with their tracks.
+
+   Applied in both rail states, not just collapsed, so the weight doesn't
+   visibly shift under the pointer as the rail expands. Unscoped so the Sheet
+   drawer copy — which renders outside .bx-shell — matches. CSS `stroke-width`
+   overrides Lucide's presentation attribute, so this needs no prop threading. */
+.bx-navitem > svg { flex: 0 0 auto; stroke-width: 2.25; }
 .bx-navitem-label {
   flex: 1 1 auto;
   min-width: 0;
