@@ -336,7 +336,14 @@ body {
 @media (min-width: 1024px) {
   .bx-shell[data-collapsed="true"] .bx-rail {
     width: var(--sidebar-w-collapsed);
-    overflow: hidden;              /* clips the full-width column below */
+    /* `clip`, NOT `hidden`. Both clip, but `hidden` also makes the box a
+       scroll container — and with a 248px column inside a 60px box it becomes
+       a horizontally scrollable one. The `scrollIntoView({ inline: "center" })`
+       that App.jsx runs on mount and every tab change walks up and scrolls
+       EVERY scrollable ancestor, so it dragged the rail 95px sideways and put
+       the icons at x = -75: a completely blank sidebar on every page load.
+       `overflow: clip` cannot be scrolled, programmatically or otherwise. */
+    overflow: clip;
     /* Above the topbar (40) so the expanded panel paints over the page,
        below the record drawers / modals (50–60) whose scrim must still
        dim it. `.bx-rail` is already `position: relative`, so this applies. */
