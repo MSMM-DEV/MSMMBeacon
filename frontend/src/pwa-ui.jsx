@@ -123,8 +123,16 @@ export function PwaOfflineChip() {
 // "Later" dismisses (the SW keeps waiting; next reload picks it up).
 // ---------------------------------------------------------------------
 export function PwaUpdateToast() {
-  const { needRefresh } = usePwa();
+  const { needRefresh, updateIn } = usePwa();
   if (!needRefresh) return null;
+
+  // `updateIn` is null once the countdown has run out (or been exhausted after
+  // repeated failed attempts) — say so plainly rather than showing "in 0s".
+  const counting = typeof updateIn === "number" && updateIn > 0;
+  const sub = counting
+    ? `Updating automatically in ${updateIn}s — no need to clear anything.`
+    : "Updating now…";
+
   return (
     <div className="pwa-toast" role="alertdialog" aria-labelledby="pwa-toast-title">
       <div className="pwa-toast-body">
@@ -133,7 +141,10 @@ export function PwaUpdateToast() {
         </div>
         <div className="pwa-toast-text">
           <div id="pwa-toast-title" className="pwa-toast-title">New version available</div>
-          <div className="pwa-toast-sub">Refresh to load the latest Beacon.</div>
+          {/* Polite, not assertive: the countdown re-renders every second and
+              an assertive region would make a screen reader interrupt on each
+              tick. The buttons carry the actual choice. */}
+          <div className="pwa-toast-sub" aria-live="polite">{sub}</div>
         </div>
       </div>
       <div className="pwa-toast-actions">
@@ -141,7 +152,7 @@ export function PwaUpdateToast() {
           Later
         </button>
         <button type="button" className="pwa-toast-btn pwa-toast-btn-primary" onClick={applyUpdate}>
-          Refresh
+          Update now
         </button>
       </div>
     </div>

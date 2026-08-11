@@ -196,7 +196,14 @@ const NAV_ICONS = {
 
 // localStorage key for the desktop rail's collapsed state. This is a per-device
 // UI preference (like the theme in beacon-tweaks), never application data.
-const RAIL_COLLAPSED_KEY = "beacon.ui.railCollapsed";
+//
+// `.v2` is deliberate. The v1 key was written by a mount effect, so it recorded
+// "0" (expanded) for every user who had ever opened the app, whether or not
+// they had touched the toggle. Reading those values back would pin the rail
+// open for the entire company and hide the hover-expand behaviour completely.
+// A fresh key lets "unset" honestly mean "never chosen" — see the reader below,
+// which now only ever writes in response to a real click.
+const RAIL_COLLAPSED_KEY = "beacon.ui.railCollapsed.v2";
 
 // Sub-tab strip definitions for the multi-tab groups.
 const SUB_TABS = {
@@ -1221,14 +1228,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // ---- App-shell chrome state (presentation only) --------------------
   // `railCollapsed` shrinks the desktop rail to an icon strip; `navOpen`
   // drives the sub-1024px overlay drawer. Neither touches app data.
+  // Collapsed is the DEFAULT (Gmail-style): the rail rests as an icon strip and
+  // expands on hover, so the tables get the full width until you reach for the
+  // nav. An explicit toggle pins it open, and that choice is what persists —
+  // an unset key means "never chosen", not "expanded".
   const [railCollapsed, setRailCollapsed] = useState(() => {
-    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; }
-    catch { return false; }
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) !== "0"; }
+    catch { return true; }
   });
-  useEffect(() => {
-    try { localStorage.setItem(RAIL_COLLAPSED_KEY, railCollapsed ? "1" : "0"); }
-    catch { /* storage disabled — fine */ }
-  }, [railCollapsed]);
+  // Persist ONLY on a real toggle. The previous version wrote from an effect
+  // keyed on [railCollapsed], which fired on mount and so recorded a preference
+  // nobody had expressed — that is what silently pinned the rail open for
+  // everyone. An effect cannot tell "the user chose this" from "this is the
+  // default", so the write belongs on the click.
+  const toggleRail = () => setRailCollapsed(prev => {
+    const next = !prev;
+    try { localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0"); }
+    catch { /* storage disabled — the choice just won't survive a reload */ }
+    return next;
+  });
   const [navOpen, setNavOpen] = useState(false);
   // Crossing into desktop retires the drawer. The persistent rail takes over
   // there, and leaving the Sheet mounted would keep a focus trap on a panel
@@ -5811,21 +5829,27 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const navItem = (g) => {
     const active = g.tabs.includes(tab);
     const count = groupCount(g);
+    // No tooltip on the collapsed rail: hovering it now expands the whole
+    // sidebar and reveals every real label, so a floating duplicate of the one
+    // label under the cursor would fire at the same moment and just add noise.
+    // The collapsed styles `display: none` the label span, which takes it out
+    // of the accessibility tree too — hence the explicit aria-label, so the
+    // button is still named for screen readers at the collapsed width.
     return (
-      <Tooltip key={g.key} label={railCollapsed ? g.label : ""} side="right">
-        <button
-          type="button"
-          className="bx-navitem"
-          data-active={active ? "true" : "false"}
-          data-count={count == null ? undefined : count}
-          aria-current={active ? "page" : undefined}
-          onClick={() => { gotoGroup(g); setNavOpen(false); }}
-        >
-          <Icon name={NAV_ICONS[g.key]} size={16}/>
-          <span className="bx-navitem-label">{g.label}</span>
-          {count != null && <span className="bx-navcount">{count}</span>}
-        </button>
-      </Tooltip>
+      <button
+        key={g.key}
+        type="button"
+        aria-label={g.label}
+        className="bx-navitem"
+        data-active={active ? "true" : "false"}
+        data-count={count == null ? undefined : count}
+        aria-current={active ? "page" : undefined}
+        onClick={() => { gotoGroup(g); setNavOpen(false); }}
+      >
+        <Icon name={NAV_ICONS[g.key]} size={16}/>
+        <span className="bx-navitem-label">{g.label}</span>
+        {count != null && <span className="bx-navcount">{count}</span>}
+      </button>
     );
   };
 
@@ -5865,12 +5889,12 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         <button
           type="button"
           className="bx-navitem bx-railtoggle"
-          onClick={() => setRailCollapsed(v => !v)}
+          onClick={toggleRail}
           aria-pressed={railCollapsed}
           aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <Icon name={railCollapsed ? "chevronsRight" : "chevronsLeft"} size={16}/>
-          <span className="bx-navitem-label">Collapse</span>
+          <span className="bx-navitem-label">{railCollapsed ? "Keep open" : "Collapse"}</span>
         </button>
       </div>
     </>
@@ -7218,15 +7242,27 @@ export default function App() {
     if (fresh) setBeaconUser(fresh);
   };
 
-  if (phase === "error") return <LoadingScreen error={error}/>;
-  if (phase === "anon")  return <LoginPage onSignedIn={hydrate}/>;
-  if (phase !== "ready" || !data) return <LoadingScreen/>;
-  return (
+  // The update toast lives OUTSIDE the auth gate. It used to be mounted only
+  // inside BeaconApp, so anyone parked on the login screen — or on the loading
+  // screen while a slow hydrate ran — got no update UI at all, which is exactly
+  // the audience most likely to be sitting on a stale build.
+  const body =
+    phase === "error"                ? <LoadingScreen error={error}/>          :
+    phase === "anon"                 ? <LoginPage onSignedIn={hydrate}/>       :
+    (phase !== "ready" || !data)     ? <LoadingScreen/>                        :
     <BeaconApp
       initial={data}
       currentUser={beaconUser}
       onSignOut={handleSignOut}
       onRefreshCurrentUser={refreshCurrentUser}
-    />
+    />;
+
+  return (
+    <>
+      {body}
+      {/* Signed-in renders this itself inside BeaconApp's shell (so it sits in
+          the app's stacking context); here it covers every pre-auth phase. */}
+      {phase !== "ready" && <PwaUpdateToast/>}
+    </>
   );
 }
