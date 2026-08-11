@@ -15,9 +15,14 @@ const BUILD_ID = String(Date.now());
 //
 // `registerType: 'prompt'` — we surface an "Update available" toast in
 // App.jsx and call updateSW() manually. Avoids the "user hard-reloads and
-// loses unsaved state without warning" trap.
+// loses unsaved state without warning" trap. src/pwa.js auto-applies the
+// update on a countdown so nobody has to know what a hard refresh is.
 //
 // Caching strategy:
+//   • index.html / SPA navigations — NETWORK FIRST (runtimeCaching below),
+//     NOT precached. This is what makes a plain refresh land on the newest
+//     deploy; a precached shell is served cache-first and is exactly why
+//     users used to have to clear their cache after every release.
 //   • Static build assets (JS/CSS/PNG/SVG/WOFF2) — precached on install,
 //     served cache-first forever (Vite hashes them, so a new build = new URL).
 //   • Google Fonts CSS / files — stale-while-revalidate / cache-first so the
@@ -26,8 +31,8 @@ const BUILD_ID = String(Date.now());
 //     want to serve stale timesheet / project data, and a cached punch
 //     response would lie about the user's IN/OUT state.
 //
-// `navigateFallback: '/index.html'` makes the SPA work offline for any
-// route — the cached shell loads, the in-memory app shows offline UX.
+// Offline still works: the NetworkFirst shell falls back to the last-seen
+// index.html, and every asset it references is in the precache.
 
 export default defineConfig({
   define: {
@@ -103,19 +108,46 @@ export default defineConfig({
         ],
       },
       workbox: {
-        navigateFallback:         "/index.html",
-        navigateFallbackDenylist: [
-          /^\/api\//,
-          /^\/functions\//,
-          /\/auth\//,
-          /\/realtime\//,
-        ],
-        globPatterns:                ["**/*.{js,css,html,ico,png,svg,webmanifest,woff,woff2}"],
+        // index.html is deliberately NOT precached (no `html` in globPatterns,
+        // no navigateFallback). A precached shell is served cache-first, which
+        // is what made a plain refresh keep showing the OLD build — the user's
+        // only escape was a hard reload / "clear cache". Navigations now go
+        // through the NetworkFirst route below: online you always get the live
+        // index.html (and therefore the live hashed bundle), offline you get
+        // the last-seen copy from the runtime cache.
+        //
+        // `navigateFallback: null` MUST be explicit. vite-plugin-pwa defaults it
+        // to "index.html"; leaving it unset injects a NavigationRoute bound to
+        // the *precache* — registered ahead of our runtimeCaching, so it would
+        // win every navigation and silently re-create the cache-first shell we
+        // just removed (pointing at a URL that is no longer precached).
+        navigateFallback:            null,
+        globPatterns:                ["**/*.{js,css,ico,png,svg,webmanifest,woff,woff2}"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,   // 5 MB ceiling
         cleanupOutdatedCaches:        true,
         clientsClaim:                 true,
-        skipWaiting:                  false,             // we control activation via the update prompt
+        // A new worker ACTIVATES as soon as it installs instead of parking in
+        // `waiting`. A waiting worker is only released when every tab of the
+        // app closes — a normal reload keeps the old worker in control, so
+        // "just refresh" provably could not pick up a deploy. src/pwa.js still
+        // owns *when* the page reloads, so nobody is yanked mid-edit.
+        skipWaiting:                  true,
         runtimeCaching: [
+          // App shell / SPA navigations — NETWORK FIRST. This is the rule that
+          // makes an ordinary refresh enough to land on the newest build.
+          // `ignoreSearch` lets the offline fallback answer `/?tab=projects`
+          // from the single cached `/` document.
+          {
+            urlPattern: ({ request }) => request.mode === "navigate",
+            handler:    "NetworkFirst",
+            options: {
+              cacheName:             "beacon-app-shell",
+              networkTimeoutSeconds: 3,
+              expiration:            { maxEntries: 8 },
+              matchOptions:          { ignoreSearch: true },
+              cacheableResponse:     { statuses: [200] },
+            },
+          },
           // Google Fonts CSS — stale-while-revalidate
           {
             urlPattern: ({ url }) => url.origin === "https://fonts.googleapis.com",

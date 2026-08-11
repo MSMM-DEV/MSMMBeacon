@@ -30,6 +30,17 @@ const SW_UPDATE_POLL_MS = 60_000;
 // when reg.update() keeps re-fetching an unchanged (edge-cached) worker.
 const BUILD_ID = (typeof __BUILD_ID__ !== "undefined") ? __BUILD_ID__ : null;
 
+// How long the "New version available" toast counts down before it applies
+// itself. The toast used to sit there until someone clicked Refresh — most
+// people never did, so they stayed on a stale build and were told to "clear
+// your cache". The update now lands on its own; "Later" opts out for that
+// build, and the countdown holds while the user is actually typing.
+const AUTO_APPLY_MS = 45_000;
+
+// sessionStorage flag shared with App.jsx's export-path handler, so the two
+// stale-chunk recovery routes can only ever produce ONE automatic reload.
+const CHUNK_RELOAD_KEY = "beacon.chunkReloaded";
+
 // ----------------------------------------------------------------------
 // Minimal subscribable store
 // ----------------------------------------------------------------------
@@ -38,21 +49,37 @@ const state = {
   installEvent:   null,
   canInstall:     false,
   installed:      isStandalone(),
-  // Update flow
+  // Update flow. `updateIn` is the seconds left on the auto-apply countdown
+  // (null when no update is pending or the user chose "Later").
   needRefresh:    false,
+  updateIn:       null,
   offlineReady:   false,
   // Network
   online:         typeof navigator === "undefined" ? true : navigator.onLine,
 };
 
 const listeners = new Set();
-function emit() { for (const l of listeners) l(state); }
+
+// Subscribers get a fresh SNAPSHOT, never `state` itself. This is load-bearing:
+// usePwa() feeds what it receives straight into a useState setter, and React
+// bails out of the re-render when the next value is Object.is-equal to the
+// current one. Handing out the same mutable object every time therefore made
+// every notification a no-op — the update toast, the install chip and the
+// offline pill could only ever appear if their flag was already true at mount,
+// which is never true for an update that lands seconds into the session. That
+// is why "New version available" was effectively invisible and clearing the
+// cache by hand looked like the only way to get a new build.
+const snapshot = () => ({ ...state });
+function emit() {
+  const snap = snapshot();
+  for (const l of listeners) l(snap);
+}
 function subscribe(fn) {
   listeners.add(fn);
-  fn(state);
+  fn(snapshot());
   return () => listeners.delete(fn);
 }
-function getState() { return state; }
+function getState() { return snapshot(); }
 
 // Detect "running as installed app" so the install button can hide itself.
 function isStandalone() {
@@ -70,6 +97,70 @@ function isStandalone() {
 let _updateSW = null;
 let _versionHeartbeat = null;
 
+// Auto-apply bookkeeping.
+//   _remoteBuildId — newest buildId /version.json has reported this session.
+//   _snoozedBuildId — the build the user pressed "Later" on; suppressed until
+//                     a *different* build ships, so we nag once per release.
+//   _countdown      — the 1 Hz interval driving state.updateIn.
+let _remoteBuildId  = null;
+let _snoozedBuildId = null;
+let _countdown      = null;
+
+// Don't reload out from under someone mid-sentence. The countdown parks at 0
+// while focus is in a text control and fires the moment they click away — the
+// tables save optimistically, but a half-typed cell has nothing behind it yet.
+function userIsTyping() {
+  if (typeof document === "undefined") return false;
+  const el = document.activeElement;
+  if (!el || el === document.body) return false;
+  if (el.isContentEditable) return true;
+  const tag = (el.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select";
+}
+
+// Single entry point for "a newer build exists" — reached from the service
+// worker's onNeedRefresh AND from the /version.json heartbeat. Hidden tab →
+// apply immediately (the reload happens off-screen). Visible tab → raise the
+// toast and start the countdown.
+function raiseUpdate() {
+  const build = _remoteBuildId;
+  if (build && build === _snoozedBuildId) return;   // user chose "Later" for this release
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    applyUpdate();
+    return;
+  }
+  if (_countdown) return;                            // already counting down
+  state.needRefresh = true;
+  state.updateIn    = Math.round(AUTO_APPLY_MS / 1000);
+  emit();
+  _countdown = setInterval(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      applyUpdate();
+      return;
+    }
+    if (state.updateIn > 0) { state.updateIn -= 1; emit(); return; }
+    if (userIsTyping()) return;                      // hold at 0 until they stop
+    applyUpdate();
+  }, 1000);
+}
+
+function stopCountdown() {
+  if (_countdown) { clearInterval(_countdown); _countdown = null; }
+}
+
+// A dynamic import() that 404s means this tab is running a build whose chunks
+// the server has already replaced — Vite fires `vite:preloadError` for it.
+// That is a stale-build signal, not an app failure: reload once (guarded, so a
+// genuinely broken chunk can't put us in a reload loop) and the NetworkFirst
+// shell hands back the current build.
+function reloadForStaleChunk() {
+  try {
+    if (sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1") return;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
+  } catch { /* storage disabled — the once-per-page guard below still holds */ }
+  window.location.reload();
+}
+
 // Build-version heartbeat. Fetch /version.json through a UNIQUE cache-busted
 // URL (so no HTTP/edge cache can mask it) and, if its buildId differs from the
 // one compiled into this bundle, treat it exactly like an SW update: nudge the
@@ -81,13 +172,11 @@ async function checkVersion(reg) {
     const res = await fetch("/version.json?_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) return;
     const { buildId } = await res.json();
-    if (BUILD_ID && buildId && buildId !== BUILD_ID) {
+    if (!buildId) return;
+    _remoteBuildId = buildId;
+    if (BUILD_ID && buildId !== BUILD_ID) {
       if (reg) reg.update().catch(() => {});
-      state.needRefresh = true;
-      emit();
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        applyUpdate();
-      }
+      raiseUpdate();
     }
   } catch { /* offline / parse error — ignore, the next tick retries */ }
 }
@@ -99,18 +188,11 @@ export function initPwa() {
   try {
     _updateSW = registerSW({
       immediate: true,
-      onNeedRefresh() {
-        state.needRefresh = true;
-        emit();
-        // If the update lands while the app is backgrounded, apply it silently
-        // now: the reload happens off-screen and the user returns to the fresh
-        // build + fresh data (loadBeacon re-runs on reload) with zero clicks.
-        // While the app is VISIBLE we leave the toast up instead, so an active
-        // editor isn't yanked mid-task — they click Refresh when ready.
-        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-          applyUpdate();
-        }
-      },
+      // A new worker installed. With `skipWaiting: true` it has already taken
+      // control, so the precache is the new build and this tab is the only
+      // stale thing left — raiseUpdate() reloads it silently when backgrounded
+      // and on a visible countdown otherwise.
+      onNeedRefresh() { raiseUpdate(); },
       onOfflineReady() {
         state.offlineReady = true;
         emit();
@@ -124,6 +206,16 @@ export function initPwa() {
     // virtual module unavailable (e.g. SSR or older browser) — silently skip.
     if (import.meta.env.PROD) console.warn("[pwa] registerSW unavailable:", e);
   }
+
+  // 1b. Stale-chunk self-heal. Vite fires `vite:preloadError` when a lazily
+  //     imported chunk fails to load — which, in production, almost always
+  //     means this tab is running a build whose chunks the deploy replaced.
+  //     Recover automatically instead of leaving a dead button (or a blank
+  //     screen) that the user can only fix with a hard refresh.
+  window.addEventListener("vite:preloadError", (e) => {
+    e.preventDefault?.();          // stop Vite's default "throw" behaviour
+    reloadForStaleChunk();
+  });
 
   // 2. beforeinstallprompt — Chrome/Edge/Android-WebView. iOS Safari does
   //    NOT fire this; users have to use Share → Add to Home Screen.
@@ -204,39 +296,79 @@ export async function promptInstall() {
   return choice;
 }
 
-// User accepted the "new version available" prompt. Reliably load the newest
-// build regardless of service-worker state:
-//   • If a new worker is WAITING → activate it (skipWaiting); the plugin reloads
-//     on controllerchange, with a hard-reload backstop in case it doesn't.
-//   • If NO worker is waiting → the toast came from the version heartbeat while
-//     the SW couldn't install a new one (e.g. an edge-cached sw.js). Unregister
-//     the SW + clear the caches so the reload fetches a fresh shell from the
-//     network instead of the stale precache. This is why the button used to look
-//     dead: _updateSW(true) is a silent no-op when nothing is waiting.
+// Load the newest build, escalating only as far as it has to. Three tiers,
+// because the cheap path is right almost every time and the expensive one
+// throws away the offline precache:
+//
+//   1st attempt — a worker is WAITING → activate it, then reload. With
+//     `skipWaiting: true` that is rare; usually there is nothing waiting and
+//     the plain reload is enough, because the navigation is NetworkFirst and
+//     the active worker's precache is already the new build.
+//   2nd attempt — we reloaded for this exact build and came back *still* on
+//     the old one. Something upstream is serving a stale shell (an edge-cached
+//     sw.js is the classic cause). Unregister the worker and wipe every cache
+//     so the reload has to go to the network. This is the "clear your cache"
+//     step, performed for the user instead of explained to them.
+//   4th+ — stop reloading. A deploy that never converges would otherwise put
+//     the tab in a reload loop, which is far worse than a stale build; the
+//     toast stays up and the Refresh button still works by hand.
+const UPDATE_ATTEMPT_KEY = "beacon.updateAttempt";
+const MAX_AUTO_ATTEMPTS  = 3;
+
+function readAttempt() {
+  try { return JSON.parse(sessionStorage.getItem(UPDATE_ATTEMPT_KEY) || "null"); }
+  catch { return null; }
+}
+function writeAttempt(v) {
+  try { sessionStorage.setItem(UPDATE_ATTEMPT_KEY, JSON.stringify(v)); } catch { /* storage off */ }
+}
+
 export async function applyUpdate() {
+  stopCountdown();
+  state.needRefresh = false;
+  state.updateIn    = null;
+  emit();
+
+  const target = _remoteBuildId || "sw";
+  const prev   = readAttempt();
+  const tries  = (prev && prev.build === target ? prev.tries : 0) + 1;
+  writeAttempt({ build: target, tries });
+
+  if (tries > MAX_AUTO_ATTEMPTS) {
+    // Reloading demonstrably isn't converging — surface it rather than loop.
+    state.needRefresh = true;
+    emit();
+    return;
+  }
+
   try {
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      const hasWaiting = regs.some(r => r.waiting);
-      if (hasWaiting && typeof _updateSW === "function") {
+      if (tries >= 2) {
+        // Escalate: nothing short of a network-fresh shell has worked.
+        await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+        if (typeof caches !== "undefined" && caches.keys) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+        }
+      } else if (regs.some(r => r.waiting) && typeof _updateSW === "function") {
         _updateSW(true);                                    // reloads on controllerchange
         setTimeout(() => window.location.reload(), 1500);   // backstop if it doesn't
         return;
-      }
-      // No waiting worker → force a network-fresh load.
-      await Promise.all(regs.map(r => r.unregister().catch(() => {})));
-      if (typeof caches !== "undefined" && caches.keys) {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
       }
     }
   } catch { /* fall through to a plain reload */ }
   window.location.reload();
 }
 
-// User dismissed the update — keep the SW waiting; the next reload picks it up.
+// User chose "Later". Cancel the countdown and stay quiet about THIS release —
+// the next deploy raises the toast again. The new worker is already active, so
+// their next ordinary reload picks the build up regardless.
 export function dismissUpdate() {
+  stopCountdown();
+  _snoozedBuildId  = _remoteBuildId;
   state.needRefresh = false;
+  state.updateIn    = null;
   emit();
 }
 
