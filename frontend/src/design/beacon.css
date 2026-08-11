@@ -306,10 +306,29 @@ body {
    i.e. by adding a second rule that has to stay in sync with this one.
    Overflowing in flow needs no such counterpart.
 
-   Everything below is scoped to `:not(:hover):not(:focus-within)` — that
-   is the whole mechanism; the expanded look is simply the rail's own
-   default styling reasserting itself, so there is no second set of rules
-   to keep in sync there either.
+   THE INNER COLUMN NEVER REFLOWS. `.bx-rail-head/-scroll/-foot` are pinned
+   to the full `--sidebar-w` in both states and the rail clips them, so
+   expanding only changes the rail's width and the clip rect — the icons,
+   labels and pills keep the exact same geometry throughout. The earlier
+   version instead restyled the contents at the collapsed width (icons
+   centred, padding and gap zeroed, labels `display: none`), which meant
+   every one of those jumped discontinuously at t=0 while the width was
+   still tweening: the icons snapped from centre to left-aligned and the
+   labels popped in at full size inside a 60px box. That was the stutter.
+   Only `width` and `opacity` animate now, and text fades instead of
+   flipping `display` (which cannot tween at all).
+
+   The trade is that icons sit ~2px left of the 60px strip's centre rather
+   than dead centre — `.bx-rail-scroll` padding (8px) + `.bx-navitem`
+   padding (12px) puts a 16px icon's centre at 28px instead of 30px. Two
+   pixels of asymmetry is a fair price for never reflowing.
+
+   Resting-state rules are scoped to `:not(:hover):not(:has(:focus-visible))`.
+   `:has(:focus-visible)` rather than `:focus-within` is deliberate: clicking
+   a nav item leaves DOM focus on that button, so `:focus-within` held the
+   rail open after the pointer left and the user had to click elsewhere to
+   dismiss it. `:focus-visible` only matches keyboard focus, so the keyboard
+   path still expands the rail while a mouse click does not.
 
    Wrapped in a desktop media query because below `lg` the rail is a
    drawer that always shows its labels (see the block after this one).
@@ -317,58 +336,87 @@ body {
 @media (min-width: 1024px) {
   .bx-shell[data-collapsed="true"] .bx-rail {
     width: var(--sidebar-w-collapsed);
+    overflow: hidden;              /* clips the full-width column below */
     /* Above the topbar (40) so the expanded panel paints over the page,
        below the record drawers / modals (50–60) whose scrim must still
        dim it. `.bx-rail` is already `position: relative`, so this applies. */
     z-index: 45;
-    /* --dur-fast, not --dur-normal: this fires on plain pointer movement, so
-       it has to feel like a reveal rather than an animation. It also keeps the
-       window short in which the labels (which flip with `display`, and so
-       can't tween) are out of step with the width. --ease-out rather than
-       --ease-spring for the same reason — no overshoot on a hover. */
+    /* Only the rail box resizes — its contents are a fixed width — so this
+       is a cheap layout + a clip per frame. --ease-out (a strong decelerate)
+       reads as a reveal; --ease-spring would overshoot the width and wobble
+       the clip edge, which is the opposite of smooth on a hover. */
     transition:
-      width var(--dur-fast) var(--ease-out),
-      box-shadow var(--dur-fast) var(--ease-out);
+      width var(--dur-normal) var(--ease-out),
+      box-shadow var(--dur-normal) var(--ease-out);
   }
   .bx-shell[data-collapsed="true"] .bx-rail:hover,
-  .bx-shell[data-collapsed="true"] .bx-rail:focus-within {
+  .bx-shell[data-collapsed="true"] .bx-rail:has(:focus-visible) {
     width: var(--sidebar-w);
     box-shadow: var(--shadow-xl);
   }
 
-  /* Resting (un-hovered) collapsed styling. Labels leave layout AND the
-     accessibility tree — the nav buttons carry an explicit aria-label in
-     App.jsx so they stay named. */
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:focus-within) :is(
+  /* Lay the column out at the expanded width in BOTH states. This is what
+     makes the animation smooth; everything else here is just cosmetics. */
+  .bx-shell[data-collapsed="true"] :is(.bx-rail-head, .bx-rail-scroll, .bx-rail-foot) {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+  }
+
+  /* Text fades with the width instead of popping. Slightly slower on the
+     way in (and started late) than on the way out, so glyphs are never
+     caught half-clipped by the advancing edge. */
+  .bx-shell[data-collapsed="true"] :is(
     .bx-wordmark,
     .bx-navitem-label,
     .bx-navcount,
     .bx-navlabel > span
   ) {
-    display: none;
+    transition: opacity var(--dur-normal) var(--ease-out) 60ms;
   }
-  /* Section headings degrade to hairline separators at icon width. */
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:focus-within) .bx-navlabel {
+  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:has(:focus-visible)) :is(
+    .bx-wordmark,
+    .bx-navitem-label,
+    .bx-navcount,
+    .bx-navlabel > span
+  ) {
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+
+  /* Section headings keep their box (reflowing it would defeat the point)
+     and fade to a hairline drawn across the visible strip. */
+  .bx-shell[data-collapsed="true"] .bx-navlabel { position: relative; }
+  .bx-shell[data-collapsed="true"] .bx-navlabel::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: var(--sp-3);
+    width: calc(var(--sidebar-w-collapsed) - var(--sp-2) - var(--sp-3) * 2);
     height: 1px;
-    margin: var(--sp-2) var(--sp-3);
-    padding: 0;
     background: var(--border);
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:focus-within) .bx-rail-head {
-    justify-content: center;
-    padding: 0;
+  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:has(:focus-visible))
+    .bx-navlabel::after {
+    opacity: 1;
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:focus-within) .bx-navitem {
-    justify-content: center;
-    padding: 0;
-    gap: 0;
-  }
-  /* The count pill can't fit, so a non-zero count becomes a dot. */
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:focus-within)
+
+  /* The count pill sits out at the far edge and is clipped away, so a
+     non-zero count reads as a dot tucked against the icon instead.
+     Declared ONLY in the resting state, never unconditionally: `::after` on
+     `.bx-navitem` is shared with the pipeline flow connector
+     (`[data-flow="pipeline"] .bx-navitem + .bx-navitem::after`), and this
+     selector outranks it — claiming the pseudo-element in both states would
+     silently delete the connector whenever the rail was hover-expanded.
+     The cost is that the dot pops rather than fades, which at 5px against
+     fading text is not something you can see. */
+  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:has(:focus-visible))
     .bx-navitem[data-count]:not([data-count="0"])::after {
     content: "";
     position: absolute;
-    top: 6px; right: 8px;
+    top: 5px;
+    left: 26px;
     width: 5px; height: 5px;
     border-radius: var(--radius-full);
     background: var(--accent);
