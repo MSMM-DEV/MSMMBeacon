@@ -32,7 +32,7 @@ import {
   fmtHM, fmtClock, todayInCT, userById,
   ctMinutesOfIso, ctWallMinToISO,
   TK_CATEGORY_LABEL, TK_CATEGORY_TONE,
-  adminEditPunches, adminAddInterval, adminDeleteInterval, adminReclassifyInterval,
+  adminAddInterval, adminDeleteInterval, saveTimeBlock,
   tkUnlockWeek, tkResolveCorrection,
 } from "../data";
 import { EditableDayTimeline } from "./EditableDayTimeline";
@@ -50,12 +50,6 @@ const minToHHMM = (m) => `${pad2(Math.floor(m / 60))}:${pad2(Math.round(m) % 60)
 const hhmmToMin = (s) => { const [h, m] = (s || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
 const shiftDay = (iso, d) => { const x = new Date(`${iso}T12:00:00`); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
 const fmtLong = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-const findByBounds = (list, startISO, endISO) => {
-  const ws = +new Date(startISO);
-  return (list || []).find((iv) =>
-    Math.abs(+new Date(iv.startAt) - ws) < 60000 &&
-    (endISO == null ? iv.endAt == null : (iv.endAt && Math.abs(+new Date(iv.endAt) - +new Date(endISO)) < 60000)));
-};
 
 export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode = false }) {
   const [date, setDate] = useState(initialDate || todayInCT());
@@ -160,46 +154,22 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
 
   const selectInterval = (iv) => { setMode("edit"); setSelectedId(iv.id); setCreateDraft(null); };
 
+  // The punch-edit → re-derive → re-match → reclassify sequence lives in
+  // data.js `saveTimeBlock`, shared with the Timesheet's block popover so the
+  // two editors of the same object can't drift apart.
   const saveSelected = (draft) => guard(async () => {
     const sel = day.intervals.find((iv) => iv.id === draft.id);
     if (!sel) throw new Error("block no longer exists, reopen it");
-    const baseStart = ctMinutesOfIso(sel.startAt);
-    const baseEnd = sel.endAt ? ctMinutesOfIso(sel.endAt) : null;
-    const newStart = hhmmToMin(draft.start);
-    const newEnd = sel.endAt ? hhmmToMin(draft.end) : null;
-    if (newEnd != null && newEnd - newStart < 5) throw new Error("end must be at least 5 minutes after start");
-
-    const startChanged = !!sel.startPunchId && newStart !== baseStart;
-    const endChanged = !!sel.endPunchId && !!sel.endAt && newEnd !== baseEnd;
-    let finalStartISO = sel.startAt, finalEndISO = sel.endAt;
-    const edits = [];
-    if (startChanged) { finalStartISO = ctWallMinToISO(date, newStart); edits.push({ id: sel.startPunchId, punchedAt: finalStartISO }); }
-    if (endChanged) { finalEndISO = ctWallMinToISO(date, newEnd); edits.push({ id: sel.endPunchId, punchedAt: finalEndISO }); }
-    if (edits.length) await adminEditPunches(edits, userId, date);
-
-    const catChanged = draft.category !== sel.category;
-    const noteChanged = (draft.notes || "") !== (sel.notes || "");
-    let relocated = true;
-    if (catChanged || noteChanged) {
-      let targetId = sel.id;
-      if (edits.length) {
-        // Punch IDs survive fn_rebuild_user_day (it re-derives intervals from
-        // the SAME punches), so re-match on punch id — far more reliable than
-        // timestamp bounds, which can collide on shared boundaries.
-        const fresh = await loadDayDetail(userId, date);
-        const match =
-          fresh.intervals.find((iv) => iv.startPunchId && iv.startPunchId === sel.startPunchId) ||
-          fresh.intervals.find((iv) => iv.endPunchId && iv.endPunchId === sel.endPunchId) ||
-          findByBounds(fresh.intervals, finalStartISO, finalEndISO);
-        targetId = match ? match.id : null;
-        relocated = !!match;
-      }
-      if (targetId) {
-        await adminReclassifyInterval(targetId, {
-          category: draft.category, notes: draft.notes, outlookEventId: sel.outlookEventId, interval: sel,
-        }, userId, date);
-      }
-    }
+    const { relocated } = await saveTimeBlock({
+      interval: sel, userId, date,
+      startMin: hhmmToMin(draft.start),
+      endMin:   sel.endAt ? hhmmToMin(draft.end) : null,
+      category: draft.category,
+      notes:    draft.notes,
+      // Self-service edits are the user's own, even though this editor is
+      // shared with Time Admin — provenance should say who actually changed it.
+      source:   selfMode ? "user" : "admin",
+    });
     await refresh(); onDirty?.(); setMode("idle"); setSelectedId(null);
     flash(relocated ? "Block updated" : "Times saved, reopen the block to retag");
   });
@@ -340,7 +310,13 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
             <div className="tka-de-hero">
               <span className="tka-eyebrow">Day at a glance</span>
               <div className="tka-de-herobar">
-                <DayTimeline date={date} intervals={day.intervals} height={28} showHourGrid={false} onIntervalClick={selectInterval} />
+                <DayTimeline
+                  date={date} intervals={day.intervals} height={28} showHourGrid={false}
+                  onIntervalClick={selectInterval}
+                  actionHint="Select this block."
+                  // The editable canvas below is the same day, selectable.
+                  focusable={false}
+                />
               </div>
             </div>
 

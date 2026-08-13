@@ -652,6 +652,7 @@ function DayMatrix({ rows, date, onOpenUserDay, isCompact }) {
                     date={date}
                     intervals={r.intervals}
                     onIntervalClick={() => onOpenUserDay?.({ userId: r.user.id, date })}
+                    actionHint="Open this day."
                     height={isCompact ? 18 : 24}
                     showHourGrid={false}
                   />

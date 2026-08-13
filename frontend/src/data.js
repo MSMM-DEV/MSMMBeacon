@@ -4182,7 +4182,10 @@ function rebuildHint(msg) {
 
 // Move one or more existing punches to new instants, then rebuild the day once.
 //   edits: [{ id, punchedAt }]  (punchedAt = ISO string)
-export async function adminEditPunches(edits, userId, date) {
+// Named for what it does, not who does it: `tk_punches_self_write`
+// (20260607160000) lets a user edit their OWN punches, so this is the self
+// path too — prefer saveTimeBlock() over calling this directly.
+export async function editPunchTimes(edits, userId, date) {
   let firstErr = null;
   await Promise.all((edits || []).map(async (e) => {
     if (!e?.id || !e?.punchedAt) return;
@@ -4246,6 +4249,110 @@ export async function adminReclassifyInterval(intervalId, { category, notes = nu
   if (error) throw new Error(`reclassify: ${error.message}`);
   const { error: rErr } = await supabase.rpc("fn_recompute_day", { _user_id: userId, _date: date });
   if (rErr) throw new Error(`recompute: ${rErr.message}`);
+}
+
+// Minimum length of a time block, in minutes. Enforced client-side in every
+// editor so the user gets an inline message instead of a rebuild that silently
+// swallows a zero-length block.
+export const TIME_BLOCK_MIN_MINUTES = 5;
+
+// Match a re-derived interval by its boundary timestamps. Last-resort fallback
+// for saveTimeBlock — punch-id matching is preferred because bounds collide
+// whenever two blocks share a boundary (which, in the toggle model, is always).
+function findIntervalByBounds(list, startISO, endISO) {
+  const ws = +new Date(startISO);
+  return (list || []).find((iv) =>
+    Math.abs(+new Date(iv.startAt) - ws) < 60000 &&
+    (endISO == null
+      ? iv.endAt == null
+      : (iv.endAt && Math.abs(+new Date(iv.endAt) - +new Date(endISO)) < 60000)));
+}
+
+// Save one time block — the SINGLE write path behind both block editors: the
+// Timesheet's block popover and the day editor's inspector. Both surfaces edit
+// the same object, so they must not carry separate copies of this sequence.
+//
+// Punches are the source of truth. A time change edits `time_punches` and the
+// interval is then RE-DERIVED by fn_rebuild_user_day, which means the interval
+// id can change out from under us. That is why a category/note change applied
+// after a time change has to re-match on startPunchId/endPunchId first — the
+// ids survive the rebuild (it re-derives from the same punches) while the
+// interval id does not.
+//
+// `startMin`/`endMin` are CT wall-clock minutes-since-midnight; pass null to
+// leave a boundary untouched. `source` decides provenance: "user" for someone
+// editing their own day, "admin" for Time Admin editing somebody else's.
+export async function saveTimeBlock({
+  interval, userId, date,
+  startMin = null, endMin = null,
+  category = null, notes = null,
+  source = "user",
+}) {
+  if (!interval) throw new Error("this block no longer exists — reopen it");
+  if (!userId || !date) throw new Error("missing user or date");
+
+  const baseStart = ctMinutesOfIso(interval.startAt);
+  const baseEnd   = interval.endAt ? ctMinutesOfIso(interval.endAt) : null;
+  const nextStart = startMin == null ? baseStart : Math.round(startMin);
+  const nextEnd   = interval.endAt == null
+    ? null
+    : (endMin == null ? baseEnd : Math.round(endMin));
+
+  const startChanged = !!interval.startPunchId && nextStart !== baseStart;
+  const endChanged   = !!interval.endPunchId && interval.endAt != null && nextEnd !== baseEnd;
+
+  // A merged display segment carries the FIRST interval's id and the LAST
+  // one's endAt (see mergeDisplaySegments), so writing a boundary from it would
+  // edit the wrong punch. Tags and notes are still safe — they apply to the id.
+  if ((startChanged || endChanged) && interval.merged) {
+    throw new Error("this block is a merged view of several punches — use Edit your time to change its times");
+  }
+  if (nextEnd != null && nextEnd - nextStart < TIME_BLOCK_MIN_MINUTES) {
+    throw new Error(`a block must be at least ${TIME_BLOCK_MIN_MINUTES} minutes long`);
+  }
+
+  let finalStartISO = interval.startAt;
+  let finalEndISO   = interval.endAt;
+  const edits = [];
+  if (startChanged) {
+    finalStartISO = ctWallMinToISO(date, nextStart);
+    edits.push({ id: interval.startPunchId, punchedAt: finalStartISO });
+  }
+  if (endChanged) {
+    finalEndISO = ctWallMinToISO(date, nextEnd);
+    edits.push({ id: interval.endPunchId, punchedAt: finalEndISO });
+  }
+  if (edits.length) await editPunchTimes(edits, userId, date);
+
+  const nextCategory = category == null ? interval.category : category;
+  const catChanged   = nextCategory !== interval.category;
+  const noteChanged  = (notes || "") !== (interval.notes || "");
+
+  let relocated = true;
+  if (catChanged || noteChanged) {
+    let targetId = interval.id;
+    if (edits.length) {
+      const fresh = await loadDayDetail(userId, date);
+      const match =
+        fresh.intervals.find((iv) => iv.startPunchId && iv.startPunchId === interval.startPunchId) ||
+        fresh.intervals.find((iv) => iv.endPunchId   && iv.endPunchId   === interval.endPunchId) ||
+        findIntervalByBounds(fresh.intervals, finalStartISO, finalEndISO);
+      targetId  = match ? match.id : null;
+      relocated = !!match;
+    }
+    if (targetId) {
+      const patch = {
+        category: nextCategory,
+        notes,
+        outlookEventId: interval.outlookEventId,
+        interval,
+      };
+      if (source === "admin") await adminReclassifyInterval(targetId, patch, userId, date);
+      else                    await setIntervalCategory(targetId, patch);
+    }
+  }
+
+  return { timesChanged: edits.length > 0, relocated };
 }
 
 // Load the week-lock row for the week containing a date (admin editor banner).

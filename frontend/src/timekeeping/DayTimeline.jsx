@@ -54,6 +54,14 @@ export function DayTimeline({
   height = 28,
   showHourGrid = true,
   leaveBlocks = [],           // approved-leave overlay band(s) for this (user, date)
+  // What a click actually does here, spoken. The admin grids open the whole day
+  // rather than the block, so they say so instead of promising a block editor.
+  actionHint = "Edit time block.",
+  // false → segments stay clickable but leave the tab order. Hosts that render
+  // a SECOND, richer representation of the same intervals below (the Timesheet's
+  // day list, the day editor's canvas) pass false so each block takes one tab
+  // stop per day, not two.
+  focusable = true,
 }) {
   const leave = (leaveBlocks || [])[0] || null;
   const span = TRACK_END_HOUR - TRACK_START_HOUR;
@@ -174,12 +182,13 @@ export function DayTimeline({
                 ? {
                     type: "button",
                     onClick: (e) => { e.stopPropagation(); onIntervalClick(iv); },
+                    ...(focusable ? {} : { tabIndex: -1 }),
                   }
                 : { role: "img" })}
               className={`tsx-tl-seg tone-${tone}`}
               style={{ left: `${left}%`, width: `${width}%` }}
               title={tooltipFor(iv)}
-              aria-label={ariaLabelFor(iv)}
+              aria-label={ariaLabelFor(iv, actionHint)}
               data-category={iv.category}
               data-source={iv.categorySource}
             >
@@ -208,8 +217,11 @@ export function DayTimeline({
 }
 
 // Spoken label. Presence comes first because colour is the only other thing
-// carrying it, and a screen reader user never sees the tone.
-function ariaLabelFor(iv) {
+// carrying it, and a screen reader user never sees the tone. The trailing hint
+// has to match what the host actually does — this used to promise "change the
+// category" on a control that now edits times too, and the day list one
+// component away already promised "Edit this time block" for the same object.
+function ariaLabelFor(iv, actionHint = "Edit time block.") {
   const parts = [
     iv.isOut ? "Away" : "At desk",
     `${fmtClock(iv.startAt)} to ${iv.endAt ? fmtClock(iv.endAt) : "now"}`,
@@ -218,7 +230,7 @@ function ariaLabelFor(iv) {
     iv.outlookEventSubject ? `Calendar event ${iv.outlookEventSubject}` : null,
     iv.notes ? `Note ${iv.notes}` : null,
   ].filter(Boolean);
-  return `${parts.join(", ")}. Open to change the category.`;
+  return `${parts.join(", ")}. ${actionHint}`;
 }
 
 function tooltipFor(iv) {

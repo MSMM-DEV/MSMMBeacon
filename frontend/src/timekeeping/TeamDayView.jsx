@@ -99,6 +99,7 @@ export function TeamDayView({ date, onDate, onUserDay }) {
                       intervals={r.intervals}
                       leaveBlocks={r.leaveBlocks}
                       onIntervalClick={() => onUserDay?.({ userId: r.user.id, date })}
+                      actionHint="Open this day."
                       height={22}
                       showHourGrid={false}
                     />

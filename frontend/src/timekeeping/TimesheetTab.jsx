@@ -9,7 +9,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Icon } from "../icons";
-import { Button, EmptyState } from "@/ui";
+import { Button, EmptyState, Tabs, TabsList, TabsTrigger, TabsContent } from "@/ui";
 import {
   getCurrentBeaconUser, todayInCT, weekStartCT, fmtHM,
   loadPunchState, loadDayDetail, loadMyWeek,
@@ -146,55 +146,27 @@ export function TimesheetTab({ focusDate = null }) {
   const dayPunches   = day.punches || [];
   const dayLeave     = day.leaveBlocks || [];
   const hasDayActivity = dayIntervals.length > 0 || dayPunches.length > 0;
-  const sectionTabId = (key) => `tk-timesheet-${key}-tab`;
-  const sectionPanelId = (key) => `tk-timesheet-${key}-panel`;
-  const selectSection = (key) => setSection(key);
-  const focusSection = (key) => {
-    window.requestAnimationFrame(() => document.getElementById(sectionTabId(key))?.focus());
-  };
-  const onSectionKeyDown = (e) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
-    e.preventDefault();
-    const next =
-      e.key === "Home" ? "time" :
-      e.key === "End" ? "leave" :
-      section === "time" ? "leave" : "time";
-    setSection(next);
-    focusSection(next);
-  };
-
   return (
-    <div className="tsx-page">
+    // Time / Leave is page-level section switching, so it uses the shared
+    // underline Tabs strip every other multi-section page uses — this was a
+    // hand-rolled pill switch, the one page in the app that looked different.
+    // Radix also owns the roving tabindex, so the local arrow-key handler went
+    // away with it.
+    <Tabs value={section} onValueChange={setSection} className="tsx-page">
 
-      <div className="tsx-switch" role="tablist" aria-label="Timesheet section" onKeyDown={onSectionKeyDown}>
+      <TabsList aria-label="Timesheet sections">
         {[
           ["time", "Time", "clock"],
           ["leave", "Leave", "sun"],
         ].map(([key, label, icon]) => (
-          <button
-            key={key}
-            type="button"
-            id={sectionTabId(key)}
-            className={`tsx-switch-btn ${section === key ? "is-active" : ""}`}
-            role="tab"
-            aria-selected={section === key}
-            aria-controls={sectionPanelId(key)}
-            tabIndex={section === key ? 0 : -1}
-            onClick={() => selectSection(key)}
-          >
+          <TabsTrigger key={key} value={key}>
             <Icon name={icon} size={14}/>
-            <span>{label}</span>
-          </button>
+            {label}
+          </TabsTrigger>
         ))}
-      </div>
+      </TabsList>
 
-      {section === "time" ? (
-        <div
-          id={sectionPanelId("time")}
-          className="tsx-panel"
-          role="tabpanel"
-          aria-labelledby={sectionTabId("time")}
-        >
+      <TabsContent value="time" className="tsx-panel">
           <header className={`tsx-daybar ${isToday ? "is-today" : "is-other-day"}`}>
             <div className="tsx-daybar-copy">
               <span className="tsx-daybar-eyebrow">{isToday ? "Timesheet" : "Viewing"}</span>
@@ -296,13 +268,16 @@ export function TimesheetTab({ focusDate = null }) {
                       <span className="num">{fmtHM(todayMinutes)}</span> total hours worked
                     </p>
                   </div>
+                  {/* Day-level work: add a block that was never punched, delete
+                      one, step across dates. Everything block-level is a click
+                      on the block itself. */}
                   <Button
                     variant="default"
                     size="sm"
                     onClick={() => setEditDay(true)}
-                    aria-label={`Edit timesheet day for ${formatDateLabel(date)}`}
+                    aria-label={`Edit your time for ${formatDateLabel(date)}`}
                   >
-                    <Icon name="edit" size={13}/> Edit day
+                    <Icon name="edit" size={13}/> Edit your time
                   </Button>
                 </header>
 
@@ -331,6 +306,9 @@ export function TimesheetTab({ focusDate = null }) {
                         intervals={dayIntervals}
                         onIntervalClick={setFocusInterval}
                         height={34}
+                        // The list below carries the same blocks with all of
+                        // this as text, so it owns the tab order.
+                        focusable={false}
                       />
                     </div>
 
@@ -349,6 +327,7 @@ export function TimesheetTab({ focusDate = null }) {
                       punches={day.punches}
                       onIntervalClick={setFocusInterval}
                       onAddTagForInterval={setFocusInterval}
+                      selectedId={focusInterval?.id || null}
                       forceList
                     />
                   </>
@@ -358,10 +337,10 @@ export function TimesheetTab({ focusDate = null }) {
                     title={isToday ? "No punches yet today" : "No punches on this day"}
                     description={isToday
                       ? "Punch in above, or tap your badge on a Pi reader, and every block lands here with its category and notes."
-                      : "Nothing was recorded for this date. Use Edit day to add the punches that are missing."}
+                      : "Nothing was recorded for this date. Add the punches that are missing, then click any block to change its times or tag."}
                     action={(
                       <Button variant="default" size="sm" onClick={() => setEditDay(true)}>
-                        <Icon name="edit" size={13}/> Edit day
+                        <Icon name="edit" size={13}/> Edit your time
                       </Button>
                     )}
                   />
@@ -383,17 +362,11 @@ export function TimesheetTab({ focusDate = null }) {
               <TeamPresenceView date={date} onDate={setDate} embedded />
             </aside>
           </div>
-        </div>
-      ) : (
-        <div
-          id={sectionPanelId("leave")}
-          className="tsx-panel"
-          role="tabpanel"
-          aria-labelledby={sectionTabId("leave")}
-        >
-          <MyLeaveSection reloadKey={leaveReloadKey} onRequest={() => setShowLeave(true)}/>
-        </div>
-      )}
+      </TabsContent>
+
+      <TabsContent value="leave" className="tsx-panel">
+        <MyLeaveSection reloadKey={leaveReloadKey} onRequest={() => setShowLeave(true)}/>
+      </TabsContent>
 
       {/* Modals */}
       {editDay && (
@@ -409,6 +382,8 @@ export function TimesheetTab({ focusDate = null }) {
         <IntervalReclassifyPopover
           interval={focusInterval}
           locked={locked}
+          date={date}
+          userId={userId}
           onClose={() => setFocusInterval(null)}
           onSaved={refresh}
         />
@@ -428,7 +403,7 @@ export function TimesheetTab({ focusDate = null }) {
           onSubmitted={() => setLeaveReloadKey(k => k + 1)}
         />
       )}
-    </div>
+    </Tabs>
   );
 }
 

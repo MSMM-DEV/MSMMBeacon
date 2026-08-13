@@ -108,6 +108,8 @@ export function DayCalendar({
   onIntervalClick,
   onAddTagForInterval,        // optional — opens reclassify on an untagged interval
   forceList = false,          // true → always render the list view (UserDayModal opts in)
+  selectedId = null,          // block currently open in the editor — held visibly
+                              // selected so the overlay doesn't lose the user's place
 }) {
   const isMobile = useIsMobile();
   const isToday = date === new Date().toLocaleDateString("en-CA", { timeZone: TZ });
@@ -206,6 +208,7 @@ export function DayCalendar({
         onIntervalClick={onIntervalClick}
         onAddTagForInterval={onAddTagForInterval}
         isToday={isToday}
+        selectedId={selectedId}
       />
     );
   }
@@ -400,6 +403,7 @@ function DayList({
   onIntervalClick,
   onAddTagForInterval,
   isToday,
+  selectedId = null,
 }) {
   // Sort + interleave (interval startMin, gap startMin). Merge/eod-hide the
   // intervals for display so the phone list mirrors the desktop track.
@@ -429,6 +433,7 @@ function DayList({
               key={item.iv.id || `iv-${i}`}
               iv={item.iv}
               isToday={isToday}
+              isSelected={!!selectedId && item.iv.id === selectedId}
               onClick={() => {
                 const isUntag = item.iv.category === "meeting_untagged" &&
                   item.iv.categorySource !== "user" &&
@@ -447,7 +452,7 @@ function DayList({
   );
 }
 
-function DayListIntervalCard({ iv, isToday, onClick }) {
+function DayListIntervalCard({ iv, isToday, onClick, isSelected = false }) {
   const isOpen     = iv.endAt == null;
   const isUntagged = iv.category === "meeting_untagged" && iv.categorySource !== "user" && iv.categorySource !== "admin";
   const tone       = intervalTone(iv);   // green = at desk, red = out
@@ -456,13 +461,14 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
     : Math.max(0, Math.floor((Date.now() - +new Date(iv.startAt)) / 60_000));
   const label      = TK_CATEGORY_LABEL[iv.category] || iv.category;
   const iconName   = categoryIconName(iv.category);
-  const actionText = isUntagged ? "Tag this time block" : "Edit this time block";
+  // Same wording as the strip's spoken label — one object, one promise.
+  const actionText = isUntagged ? "Tag time block" : "Edit time block";
   const timeText   = `${fmtClock(iv.startAt)} to ${iv.endAt ? fmtClock(iv.endAt) : "now"}`;
 
   return (
     <button
       type="button"
-      className={`tk-day-list-card tone-${tone} ${isOpen ? "is-open" : ""} ${isUntagged ? "is-untagged" : ""}`}
+      className={`tk-day-list-card tone-${tone} ${isOpen ? "is-open" : ""} ${isUntagged ? "is-untagged" : ""} ${isSelected ? "is-selected" : ""}`}
       onClick={onClick}
       aria-label={`${actionText}: ${timeText}, ${label}, ${fmtHM(minutes)}`}
       data-category={iv.category}
@@ -498,6 +504,12 @@ function DayListIntervalCard({ iv, isToday, onClick }) {
             <Icon name="edit" size={11}/> tag this
           </span>
         )}
+        {/* The row is a real button, but the only thing that said so was a
+            border-colour shift on hover. Reserved space, so revealing it on
+            hover / focus / selection never reflows the card. */}
+        <span className="tk-day-list-card-edit" aria-hidden="true">
+          <Icon name="edit" size={11}/> Edit
+        </span>
       </div>
 
       {iv.outlookEventSubject && (

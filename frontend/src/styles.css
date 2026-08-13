@@ -14000,6 +14000,39 @@ html, body { overflow-x: clip; }
   outline: 1px solid color-mix(in srgb, var(--tk-stripe, var(--accent)) 38%, transparent);
   outline-offset: -2px;
 }
+/* Held while the block editor is open over the page, so the overlay doesn't
+   cost the user their place in the day. */
+.tk-day-list-card.is-selected {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  outline-offset: -1px;
+}
+/* "Edit" affordance — always in the layout, revealed on hover / focus /
+   selection so the reveal can't reflow the chips row. */
+.tk-day-list-card-edit {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 11px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 160ms ease, color 160ms ease;
+}
+.tk-day-list-card:hover .tk-day-list-card-edit,
+.tk-day-list-card:focus-visible .tk-day-list-card-edit,
+.tk-day-list-card.is-selected .tk-day-list-card-edit {
+  opacity: 1;
+  color: var(--accent);
+}
+/* Touch has no hover: showing it faintly at rest is the only way the
+   affordance reaches a phone at all. */
+@media (hover: none) {
+  .tk-day-list-card-edit { opacity: .55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-day-list-card-edit { transition: none; }
+}
 .tk-day-list-card-head {
   display: grid;
   gap: 7px;
@@ -21136,45 +21169,9 @@ html, body { overflow-x: clip; }
 }
 .tsx-panel { display: grid; gap: var(--sp-5); min-width: 0; }
 
-/* Time / Leave switch — a two-stop segmented control, thumb-sized. */
-.tsx-switch {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: var(--surface-2);
-  width: max-content;
-  max-width: 100%;
-}
-.tsx-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 var(--sp-4);
-  border: 0;
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  letter-spacing: var(--tracking-snug);
-  cursor: pointer;
-  transition:
-    background-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-.tsx-switch-btn:hover { color: var(--text); background: var(--surface-3); }
-.tsx-switch-btn:active { translate: 0 1px; }
-.tsx-switch-btn.is-active {
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow-xs);
-}
-.tsx-switch-btn.is-active svg { color: var(--accent); }
+/* Time / Leave used to be a bespoke pill switch here. It now renders through
+   the shared underline <Tabs> strip (ui/tabs.jsx) like every other page-level
+   section switcher, so the local styles are gone rather than overridden. */
 
 /* ------------------------------------------------------------- day bar */
 .tsx-daybar {
