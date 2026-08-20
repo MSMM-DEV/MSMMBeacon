@@ -852,7 +852,16 @@ body {
   overflow: hidden;
 }
 @media (min-width: 560px)  { .bx-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1100px) { .bx-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* Column count follows the card count (App.jsx sets --bx-metrics-cols from
+   stats.length). The grid draws its 1px separators as background showing
+   through the gap, so a track with no card in it reads as a solid slab of
+   border colour — the count has to track the cards, not be pinned at 4. */
+@media (min-width: 1100px) { .bx-metrics { grid-template-columns: repeat(var(--bx-metrics-cols, 4), minmax(0, 1fr)); } }
+/* Same hole, one band down: an odd number of cards leaves the last cell of
+   the 2-col band empty. Let the trailing card run the full row instead. */
+@media (min-width: 560px) and (max-width: 1099.98px) {
+  .bx-metric:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
 
 .bx-metric {
   display: flex;

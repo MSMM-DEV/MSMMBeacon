@@ -46,7 +46,6 @@ import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import { invoiceIsOrange } from "./invoice-orange.js";
-import { hotLeadStatsBreakdown } from "./stats.js";
 import {
   HZ_INVOICE_TYPES,
   INVOICE_TYPE_OPTIONS,
@@ -155,7 +154,12 @@ const NAV_GROUPS = [
   // Leads & Bids → Proposals → Awarded → Invoice ⇄ In-Between → Closed Out.
   // The "potential" TAB KEY stays valid (deep links + Directory project
   // jumps still render the hidden page); it's just not navigable from here.
-  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids", "leads-deleted"] },
+  // Leads & Bids is HIDDEN from the rail (2026-08). Same treatment Potential
+  // got: the tab keys stay valid so `?tab=hotleads&rowId=` deep links from
+  // alert emails and the Dispatch Desk still render the page (and its sub-tab
+  // strip) — it is just not navigable. Nothing was removed from the DB.
+  // Drop `hidden` to put the pill back.
+  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids", "leads-deleted"], hidden: true },
   { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded", "proposals-deleted"] },
   { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "pipeline", tabs: ["invoice", "between", "closed"] },
   { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "side", tabs: ["projects"] },
@@ -1311,6 +1315,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // remap to "invoice".
     if (saved === "clients" || saved === "companies") return "directory";
     if (saved === "soq" || saved === "quad") return "invoice";
+    // Leads & Bids was hidden from the rail (2026-08). A user whose last
+    // session ended there would otherwise reopen onto a page they can no
+    // longer navigate back to. Explicit ?tab= deep links still win — they are
+    // handled in the effect below, after this initializer.
+    if (saved === "hotleads" || saved === "openbids" || saved === "leads-deleted") return "invoice";
     return saved;
   });
   // Deep-link landing: if the URL carries ?tab=X&rowId=Y (from an alert email),
@@ -5720,7 +5729,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   }));
 
   const stats = useMemo(() => {
-    const hotLeadBreakdown = hotLeadStatsBreakdown(hotLeads);
+    // No Hot Leads card: Leads & Bids is hidden from the app (2026-08), so a
+    // summary of it has nowhere to lead. The lead rows themselves are
+    // untouched in the DB.
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
     // In-Between: paused projects (merged) — contract value sitting on hold.
     const paused = invoiceMerged.filter(r => r.billingState === "between");
@@ -5732,12 +5743,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .filter(r => (r.billingState || "active") !== "closed")
       .reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
-      { label: "Hot Leads",           breakdown: hotLeadBreakdown },
       { label: "Total Proposal/Awarded", val: awd, sub: `${awarded.length} awarded`, spark: [5,5,6,7,6,7,8,9,10,11] },
       { label: "In-Between",          val: btw, sub: `${paused.length} paused`,       spark: [4,4,3,4,3,3,4,3,3,4] },
       { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
-  }, [awarded, invoice, invoiceMerged, actualThru, hotLeads]);
+  }, [awarded, invoice, invoiceMerged, actualThru]);
 
   // Type-filter predicate for the Invoice sub-tab counts (mirrors InvoiceTable's
   // matchesType). Inactive when all types are selected → counts everything.
@@ -5890,7 +5900,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           // filtered out for non-admins. A section left with nothing to show
           // renders nothing, so no empty labelled block is left behind.
           const items = NAV_GROUPS.filter(
-            g => g.group === section.group && (!g.adminOnly || isAdmin)
+            g => g.group === section.group && !g.hidden && (!g.adminOnly || isAdmin)
           );
           if (!items.length) return null;
           return (
@@ -6173,22 +6183,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         )}
 
         {["awaiting","awarded","invoice","between","closed"].includes(tab) && (
-          <section className="bx-metrics" aria-label="Pipeline summary">
+          <section
+            className="bx-metrics"
+            style={{ "--bx-metrics-cols": stats.length }}
+            aria-label="Pipeline summary"
+          >
             {stats.map((s, i) => (
               <div key={i} className="bx-metric">
                 <h2 className="bx-metric-label">{s.label}</h2>
-                {s.breakdown ? (
-                  <dl className="bx-metric-split" aria-label="Hot leads by star rating">
-                    {s.breakdown.items.map(item => (
-                      <div key={item.key} className="bx-metric-splititem">
-                        <dt className="bx-truncate">{item.label}</dt>
-                        <dd className="num bx-truncate">{fmtMoney(item.value, false)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                ) : (
-                  <p className="bx-metric-value num">{fmtMoney(s.val, false)}</p>
-                )}
+                <p className="bx-metric-value num">{fmtMoney(s.val, false)}</p>
                 {(s.sub || s.spark) && (
                   <div className="bx-metric-foot">
                     {s.sub && <span className="bx-metric-sub bx-truncate">{s.sub}</span>}
