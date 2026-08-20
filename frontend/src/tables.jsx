@@ -45,6 +45,12 @@ import {
   EGNYTE_LOCAL_ROOT_STORAGE_KEY,
   openLocalFolderWithHelper,
 } from "./egnyte-links.js";
+import {
+  contractValue,
+  amendmentsTotal,
+  subIsAmendable,
+} from "./invoice-amendments.js";
+import { AmendmentsModal, ContractBreakdownPopover } from "./invoice-amendments.jsx";
 import { HOT_LEAD_STAR_MAX, starLabel, starsRank } from "./star-rating.js";
 import {
   Button, InputGroup, Badge, Progress,
@@ -2648,6 +2654,12 @@ export const InvoiceTable = ({
   // doesn't provide it.
   typeFilter: propTypeFilter,
   setTypeFilter: propSetTypeFilter,
+  // ---- Contract amendments (20260820120000) ----
+  // Both resolvers live in App.jsx, which already owns the merged-group ids and
+  // the linked ENG↔MHZ / PM↔MHZ PM sibling ids an amendment set spans.
+  projectAmendments,    // (row) => amendment[]  — for the project's Total Contract Value
+  subAmendmentsFor,     // (projectId, companyId, kind) => amendment[]
+  onAmendmentsChanged,  // () => void  — re-read amendments after a mutation
 }) => {
   const USERS = getUsers();
   const invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
@@ -2670,18 +2682,42 @@ export const InvoiceTable = ({
   // MSMM hires (money MSMM pays out). The kind='prime' entry on a Sub-role
   // project is informational only (it records the upstream firm hiring
   // MSMM, for cross-reference); it must not be subtracted from Total CV.
+  // ---- Contract AMENDMENTS ------------------------------------------------
+  // Contract Value = contract amount + Σ amendments, at every scope. The
+  // amended figure is what the rest of this table reads — Total Billed, Total
+  // Remaining, the MSMM `Total − Σ subs` derivation and the grand totals — so
+  // the Contract Value column can never disagree with the columns beside it.
+  //
+  // Sub amendments are resolved ONCE here and stapled onto each sub entry as
+  // `s.amendments`, because the downstream helpers (subRollforward,
+  // subTotalBilled, …) receive a sub without its parent row and so can't look
+  // the project id up themselves.
+  const projAmendments = (r) => projectAmendments?.(r) || [];
+  const projContract   = (r) => contractValue(r?.amount, projAmendments(r));
+  const subContract    = (s) => contractValue(s?.contractAmount, s?.amendments);
+  // App.jsx already annotates the matrix it passes in; re-resolving would only
+  // churn object identities. This stays as the fallback for any caller that
+  // hands over a raw sub matrix.
+  const withSubAmendments = (r, entries) => (entries || []).map(s =>
+    (!subIsAmendable(s) || s.amendments)
+      ? s
+      : { ...s, amendments: subAmendmentsFor?.(r.sourceId, s.companyId, s.kind || "sub") || [] });
+  // Every sub entry for a project, amendment-annotated. The single door both
+  // subListFor (MSMM math) and invoiceSubRowsFor (rendering) go through.
+  const subEntriesFor = (r) => withSubAmendments(r, subInvoices?.get(r.sourceId) || []);
+
   const subListFor = (r) =>
-    (subInvoices?.get(r.sourceId) || []).filter(s => (s.kind || "sub") === "sub");
+    subEntriesFor(r).filter(s => (s.kind || "sub") === "sub");
   const msmmContractAuto = (r) => {
-    const total = Number(r.amount || 0);
-    const subValues = subListFor(r).map(s => s.contractAmount);
+    const total = projContract(r);
+    const subValues = subListFor(r).map(subContract);
     return basePerspectiveOwnValue(total, subValues);
   };
   const msmmContractShown = (r) => linkedMsmmValue({
     linked: isMhzPerspectiveSub(r, rows),
     storedValue: r.msmmAmount,
-    total: r.amount,
-    subValues: subListFor(r).map(s => s.contractAmount),
+    total: projContract(r),
+    subValues: subListFor(r).map(subContract),
   });
 
   // ---- Rolling-window month accessors -------------------------------------
@@ -2769,8 +2805,8 @@ export const InvoiceTable = ({
   // the line's full contract (nothing rolled off yet). Mirrors the value shown
   // in each level's Rollforward cell.
   const msmmRollforward    = (r) => (r.remainingStart      != null && r.remainingStart      !== "") ? Number(r.remainingStart)      : msmmContractShown(r);
-  const projectRollforward = (r) => (r.totalRemainingStart != null && r.totalRemainingStart !== "") ? Number(r.totalRemainingStart) : Number(r.amount || 0);
-  const subRollforward     = (s) => (s.remainingStart      != null && s.remainingStart      !== "") ? Number(s.remainingStart)      : Number(s.contractAmount || 0);
+  const projectRollforward = (r) => (r.totalRemainingStart != null && r.totalRemainingStart !== "") ? Number(r.totalRemainingStart) : projContract(r);
+  const subRollforward     = (s) => (s.remainingStart      != null && s.remainingStart      !== "") ? Number(s.remainingStart)      : subContract(s);
   // MSMM Actuals — a month's MSMM value only when the project's total/prime cell
   // for that month has an invoice attached (primeFiles non-empty).
   const msmmBilledAttached = (r) => {
@@ -2790,8 +2826,8 @@ export const InvoiceTable = ({
   };
   // Total Billed = Contract − Rollforward + Actuals, at each scope.
   const msmmTotalBilled    = (r) => msmmContractShown(r)      - msmmRollforward(r)    + msmmBilledAttached(r);
-  const projectTotalBilled = (r) => Number(r.amount || 0)     - projectRollforward(r) + projectBilledAttached(r);
-  const subTotalBilled     = (s) => Number(s.contractAmount || 0) - subRollforward(s) + subBilledAttached(s);
+  const projectTotalBilled = (r) => projContract(r)            - projectRollforward(r) + projectBilledAttached(r);
+  const subTotalBilled     = (s) => subContract(s)             - subRollforward(s) + subBilledAttached(s);
   // Resolve the linked sibling of a given perspective. Uses the SAME
   // source-OR-number linkage as linkedInvoiceIdsFor / isMhzPerspectiveSub so
   // classification (hide the ENG row's subs) and injection (add the MHZ prime
@@ -2868,7 +2904,7 @@ export const InvoiceTable = ({
   // sub plus the synthetic, independently editable MSMM row. First-row math
   // uses this complete list so the displayed breakdown always reconciles.
   const invoiceSubRowsFor = (r) => {
-    const allEntries = subInvoices?.get(r.sourceId) || [];
+    const allEntries = subEntriesFor(r);
     const role = invoicePerspectiveRole(r, rows);
     const isPrimeRow = role === "Prime";
     const primeEntry = allEntries.find(s => s.kind === "prime");
@@ -2883,7 +2919,7 @@ export const InvoiceTable = ({
   };
 
   const firstRowContract = (r) => isHzPrimeType(r.type)
-    ? invoiceRemainderValue(r.amount, invoiceSubRowsFor(r).map(s => s.contractAmount))
+    ? invoiceRemainderValue(projContract(r), invoiceSubRowsFor(r).map(subContract))
     : msmmContractShown(r);
   const firstRowRollforward = (r) => isHzPrimeType(r.type)
     ? invoiceRemainderValue(projectRollforward(r), invoiceSubRowsFor(r).map(subRollforward))
@@ -2896,9 +2932,9 @@ export const InvoiceTable = ({
     : msmmTotalBilled(r);
   const firstRowTotalRemaining = (r) => {
     if (!isHzPrimeType(r.type)) return msmmContractShown(r) - msmmTotalBilled(r);
-    const projectRemaining = Number(r.amount || 0) - projectTotalBilled(r);
+    const projectRemaining = projContract(r) - projectTotalBilled(r);
     const subRemaining = invoiceSubRowsFor(r).map(
-      s => Number(s.contractAmount || 0) - subTotalBilled(s));
+      s => subContract(s) - subTotalBilled(s));
     return invoiceRemainderValue(projectRemaining, subRemaining);
   };
   // Index of the last visible month that is "Actual" by the global cutover —
@@ -2929,6 +2965,33 @@ export const InvoiceTable = ({
   // Egnyte linking surface. Linked rows get an action chooser; unlinked rows
   // jump straight to the folder browser.
   const [egnytePicker, setEgnytePicker] = useState(null);
+  // Contract amendments: the manage-modal target, and the Contract Value
+  // breakdown popover (anchored to the ⤢ glyph's rect — the popover is
+  // body-portalled, since the table's scroll containers would clip it).
+  const [amendModal, setAmendModal] = useState(null);
+  const [breakdownPop, setBreakdownPop] = useState(null);
+  const openBreakdown = (el, meta) =>
+    setBreakdownPop({ rect: el.getBoundingClientRect(), meta });
+  // Scope descriptors for the two amendable lines. `scope` is what gets
+  // written; `list` is what is already loaded, so the modal paints instantly.
+  const projectAmendmentMeta = (r) => ({
+    scope: { invoiceId: r.id },
+    scopeId: r.id,
+    title: r.name || "Project",
+    subtitle: `Project total${r.projectNumber ? ` · ${r.projectNumber}` : ""}`,
+    baseAmount: Number(r.amount || 0),
+    baseLabel: "Total Contract Value",
+    list: projAmendments(r),
+  });
+  const subAmendmentMeta = (r, s, kind) => ({
+    scope: { projectId: r.sourceId, companyId: s.companyId, kind: kind || "sub" },
+    scopeId: `${r.sourceId}-${s.companyId}`,
+    title: s.companyName || "Sub",
+    subtitle: `${kind === "prime" ? "Prime" : "Sub"} on ${r.name || "this project"}${s.discipline ? ` · ${s.discipline}` : ""}`,
+    baseAmount: Number(s.contractAmount || 0),
+    baseLabel: "Contract amount",
+    list: s.amendments || [],
+  });
   const [egnyteAction, setEgnyteAction] = useState(null);
   const toggleExpand = (id) => setExpandedIds(prev => {
     const next = new Set(prev);
@@ -3650,6 +3713,30 @@ export const InvoiceTable = ({
                             <Icon name="alignLeft" size={10}/>
                             <span>Description</span>
                           </button>
+                          {(() => {
+                            // Contract amendments for the project's Total
+                            // Contract Value. Sits alongside Notes and
+                            // Description because it is the same class of
+                            // thing: a per-project record opened from the row.
+                            const amList = projAmendments(r);
+                            const total  = amendmentsTotal(amList);
+                            return (
+                              <button
+                                type="button"
+                                className={"inv-meta-chip sage" + (amList.length ? " has-content" : "")}
+                                title={amList.length
+                                  ? `${amList.length} amendment${amList.length === 1 ? "" : "s"} · ${total >= 0 ? "+" : "−"}${fmtMoney(Math.abs(total))} on the contract value`
+                                  : "Add a contract amendment for this project"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAmendModal(projectAmendmentMeta(r));
+                                }}>
+                                <Icon name="file" size={10}/>
+                                <span>Amendment</span>
+                                {amList.length > 0 && <span className="inv-meta-chip-count">{amList.length}</span>}
+                              </button>
+                            );
+                          })()}
                         </div>
                       </div>
                     </td>
@@ -3897,6 +3984,30 @@ export const InvoiceTable = ({
                               </button>
                             );
                           })()}
+                          {/* Contract amendments for THIS sub line only. The
+                              two synthetic perspective lines are excluded by
+                              subIsAmendable — neither has a project_subs row
+                              to amend. */}
+                          {subIsAmendable(s) && (() => {
+                            const amList = s.amendments || [];
+                            const total  = amendmentsTotal(amList);
+                            return (
+                              <button
+                                type="button"
+                                className={"invoice-sub-amd" + (amList.length ? " has-content" : "")}
+                                title={amList.length
+                                  ? `${amList.length} amendment${amList.length === 1 ? "" : "s"} · ${total >= 0 ? "+" : "−"}${fmtMoney(Math.abs(total))} on ${s.companyName}'s contract value`
+                                  : `Add a contract amendment for ${s.companyName}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setAmendModal(subAmendmentMeta(r, s, entryKind));
+                                }}>
+                                <Icon name="file" size={9}/>
+                                <span>Amendment</span>
+                                {amList.length > 0 && <span className="inv-meta-chip-count">{amList.length}</span>}
+                              </button>
+                            );
+                          })()}
                         </span>
                         <span className="invoice-sub-discipline mono">
                           {s.discipline ? "· " : null}
@@ -3968,26 +4079,64 @@ export const InvoiceTable = ({
                           <span className="empty-cell">—</span>
                         )}
                       </td>
-                      <td className="mono">
-                        {s.syntheticMhzPrime ? (
-                          <span title="MHZ earned value = Total Contract − all subs (incl. MSMM). Auto-calculated — edit the Total or a sub to change it.">
-                            {s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>}
-                          </span>
-                        ) : s.syntheticPerspective ? (
-                          <EditableCell value={s.contractAmount} type="number"
-                            onChange={v => setMsmmContract(s.perspectiveBaseRow, v)}
-                            format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                        ) : (
-                          <EditableCell value={s.contractAmount} type="number"
-                            onChange={v => onUpdateSubMeta?.({
-                              projectId: r.sourceId,
-                              companyId: s.companyId,
-                              kind: entryKind,
-                              patch: { amount: v },
-                            })}
-                            format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                        )}
-                      </td>
+                      {(() => {
+                        // Contract Value = the sub's contract amount + its
+                        // amendments. Once a line carries amendments the cell
+                        // shows the TOTAL and stops being directly editable —
+                        // typing over a summed figure would silently rewrite
+                        // the base as if the amendments were part of it. The
+                        // base stays editable inside the amendments modal.
+                        const amList  = s.amendments || [];
+                        const amended = amList.length > 0;
+                        const cv      = subContract(s);
+                        return (
+                        <td className={"mono inv-cv-cell" + (subIsAmendable(s) ? " has-cv" : "") + (amended ? " is-amended" : "")}>
+                          {s.syntheticMhzPrime ? (
+                            <span title="MHZ earned value = Total Contract − all subs (incl. MSMM). Auto-calculated — edit the Total or a sub to change it.">
+                              {s.contractAmount ? fmtMoney(s.contractAmount) : <span className="empty-cell">—</span>}
+                            </span>
+                          ) : s.syntheticPerspective ? (
+                            <EditableCell value={s.contractAmount} type="number"
+                              onChange={v => setMsmmContract(s.perspectiveBaseRow, v)}
+                              format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                          ) : amended ? (
+                            <span title={`Contract Value = ${fmtMoney(s.contractAmount || 0)} contract ${amendmentsTotal(amList) >= 0 ? "+" : "−"} ${fmtMoney(Math.abs(amendmentsTotal(amList)))} in ${amList.length} amendment${amList.length === 1 ? "" : "s"}. Open the breakdown to edit.`}>
+                              {cv ? fmtMoney(cv) : <span className="empty-cell">—</span>}
+                            </span>
+                          ) : (
+                            <EditableCell value={s.contractAmount} type="number"
+                              onChange={v => onUpdateSubMeta?.({
+                                projectId: r.sourceId,
+                                companyId: s.companyId,
+                                kind: entryKind,
+                                patch: { amount: v },
+                              })}
+                              format={v => v ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                          )}
+                          {subIsAmendable(s) && (
+                            <span
+                              className={"inv-cv-expand" + (amended ? " has-amendments" : "")}
+                              role="button"
+                              tabIndex={0}
+                              title={amended
+                                ? `Contract Value breakdown — ${amList.length} amendment${amList.length === 1 ? "" : "s"}`
+                                : "Contract Value breakdown"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openBreakdown(e.currentTarget, subAmendmentMeta(r, s, entryKind));
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault(); e.stopPropagation();
+                                  openBreakdown(e.currentTarget, subAmendmentMeta(r, s, entryKind));
+                                }
+                              }}>
+                              <Icon name="maximize" size={9}/>
+                            </span>
+                          )}
+                        </td>
+                        );
+                      })()}
                       {/* Remaining Jan 1 (sub) — editable starting balance;
                           NULL falls back to the sub's contract amount. */}
                       <td className="mono"
@@ -3995,11 +4144,11 @@ export const InvoiceTable = ({
                         {s.syntheticMhzPrime ? (
                           <span className="empty-cell">—</span>
                         ) : s.syntheticPerspective ? (
-                          <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
+                          <EditableCell value={s.remainingStart != null ? s.remainingStart : (subContract(s) || null)} type="number"
                             onChange={v => updateMsmmFields?.(s.perspectiveBaseRow.id, { remainingStart: v })}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
-                          <EditableCell value={s.remainingStart != null ? s.remainingStart : (s.contractAmount || null)} type="number"
+                          <EditableCell value={s.remainingStart != null ? s.remainingStart : (subContract(s) || null)} type="number"
                             onChange={v => onUpdateSubMeta?.({
                               projectId: r.sourceId,
                               companyId: s.companyId,
@@ -4115,7 +4264,7 @@ export const InvoiceTable = ({
                       <td className="total-cell mono inv-pin-rem"
                           title="Auto-calculated · sub contract − Total Billed">
                         {s.syntheticMhzPrime ? <span className="empty-cell">—</span> : (() => {
-                          const c = Number(s.contractAmount || 0), b = subTotalBilled(s);
+                          const c = subContract(s), b = subTotalBilled(s);
                           return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                         })()}
                       </td>
@@ -4213,18 +4362,57 @@ export const InvoiceTable = ({
                               : <span className="empty-cell">—</span>}/>
                         )}
                       </td>
-                      <td className="mono"
-                          title={mhzPerspectiveSub ? "MSMM Portion — editable here; writes the shared total (MSMM + subs) and mirrors to the linked perspective" : undefined}>
-                        {mhzPerspectiveSub ? (
-                          <EditableCell value={msmmContractShown(r)} type="number"
-                            onChange={v => setMsmmContract(r, v)}
-                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                        ) : (
-                          <EditableCell value={r.amount} type="number"
-                            onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
-                            format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
-                        )}
-                      </td>
+                      {(() => {
+                        // Project Contract Value = Total Contract Value + the
+                        // project's amendments. Same rule as the sub lines: an
+                        // amended cell shows the total read-only, and the base
+                        // is edited in the amendments modal. The MSMM-portion
+                        // variant (hz-prime base view) keeps its own editing
+                        // path — amendments belong to the project total, which
+                        // that view doesn't show here.
+                        const amList  = projAmendments(r);
+                        const amended = amList.length > 0;
+                        const cv      = projContract(r);
+                        return (
+                        <td className={"mono inv-cv-cell" + (mhzPerspectiveSub ? "" : " has-cv") + (!mhzPerspectiveSub && amended ? " is-amended" : "")}
+                            title={mhzPerspectiveSub ? "MSMM Portion — editable here; writes the shared total (MSMM + subs) and mirrors to the linked perspective" : undefined}>
+                          {mhzPerspectiveSub ? (
+                            <EditableCell value={msmmContractShown(r)} type="number"
+                              onChange={v => setMsmmContract(r, v)}
+                              format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                          ) : amended ? (
+                            <span title={`Contract Value = ${fmtMoney(r.amount || 0)} contract ${amendmentsTotal(amList) >= 0 ? "+" : "−"} ${fmtMoney(Math.abs(amendmentsTotal(amList)))} in ${amList.length} amendment${amList.length === 1 ? "" : "s"}. Open the breakdown to edit.`}>
+                              {cv ? fmtMoney(cv) : <span className="empty-cell">—</span>}
+                            </span>
+                          ) : (
+                            <EditableCell value={r.amount} type="number"
+                              onChange={v => updateRow(r.id, { amount: (v == null || v === "") ? null : Number(v) })}
+                              format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
+                          )}
+                          {!mhzPerspectiveSub && (
+                            <span
+                              className={"inv-cv-expand" + (amended ? " has-amendments" : "")}
+                              role="button"
+                              tabIndex={0}
+                              title={amended
+                                ? `Contract Value breakdown — ${amList.length} amendment${amList.length === 1 ? "" : "s"}`
+                                : "Contract Value breakdown"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openBreakdown(e.currentTarget, projectAmendmentMeta(r));
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault(); e.stopPropagation();
+                                  openBreakdown(e.currentTarget, projectAmendmentMeta(r));
+                                }
+                              }}>
+                              <Icon name="maximize" size={9}/>
+                            </span>
+                          )}
+                        </td>
+                        );
+                      })()}
                       {/* Remaining Jan 1 (project total) — editable starting
                           balance; NULL falls back to Total Contract Value. For an
                           MHZ-prime ENG row it mirrors MSMM's Rollforward (read-only). */}
@@ -4236,7 +4424,7 @@ export const InvoiceTable = ({
                             onChange={v => updateMsmmFields?.(r.id, { remainingStart: v })}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         ) : (
-                          <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || null)} type="number"
+                          <EditableCell value={r.totalRemainingStart != null ? r.totalRemainingStart : (projContract(r) || null)} type="number"
                             onChange={v => updateRow(r.id, { totalRemainingStart: (v == null || v === "") ? null : Number(v) })}
                             format={v => v != null ? fmtMoney(v) : <span className="empty-cell">—</span>}/>
                         )}
@@ -4387,7 +4575,7 @@ export const InvoiceTable = ({
                       <td className="total-cell mono inv-pin-rem"
                           title="Auto-calculated · contract − Total Billed">
                         {(() => {
-                          const c = mhzPerspectiveSub ? msmmContractShown(r) : Number(r.amount || 0);
+                          const c = mhzPerspectiveSub ? msmmContractShown(r) : projContract(r);
                           const b = mhzPerspectiveSub ? msmmTotalBilled(r) : projectTotalBilled(r);
                           return (c || b) ? fmtMoney(c - b) : <span className="empty-cell">—</span>;
                         })()}
@@ -4486,6 +4674,27 @@ export const InvoiceTable = ({
           meta={notesThread}
           onClose={() => setNotesThread(null)}
           onChange={(log) => onNotesChanged?.(notesThread.id, log)}
+        />
+      )}
+      {/* Contract amendments — manage modal + the Contract Value breakdown. */}
+      {amendModal && (
+        <AmendmentsModal
+          meta={amendModal}
+          onClose={() => setAmendModal(null)}
+          onChanged={() => {
+            // Re-read from App so every derived figure (Contract Value, Total
+            // Billed, Total Remaining, MSMM's Total − Σ subs) recomputes off
+            // the same source the rest of the page reads.
+            onAmendmentsChanged?.();
+          }}
+        />
+      )}
+      {breakdownPop && (
+        <ContractBreakdownPopover
+          anchorRect={breakdownPop.rect}
+          meta={breakdownPop.meta}
+          onClose={() => setBreakdownPop(null)}
+          onManage={() => setAmendModal(breakdownPop.meta)}
         />
       )}
       {egnyteAction && (

@@ -985,6 +985,131 @@ export async function reloadInvoiceNotes(invoiceId) {
   return (data || []).map(adaptNote);
 }
 
+// ── Contract AMENDMENTS — adapter + CRUD ──────────────────────────────────
+// An amendment is one attachment + one dollar amount + one note, raising a
+// line's Contract Value (see invoice-amendments.js and migration
+// 20260820120000). Two scopes, discriminated by which keys are set:
+//   * PROJECT — invoiceId set; raises the project's Total Contract Value.
+//   * SUB     — (projectId, companyId, kind) set; raises that sub line only.
+// Binaries live in the existing private `invoices` Storage bucket.
+
+export function adaptAmendment(r) {
+  return {
+    id:        r.id,
+    invoiceId: r.invoice_id || null,
+    projectId: r.project_id || null,
+    companyId: r.company_id || null,
+    kind:      r.kind || null,
+    amount:    r.amount == null ? 0 : Number(r.amount),
+    notes:     r.notes || "",
+    filePath:  r.file_path || null,
+    fileName:  r.file_name || null,
+    createdBy: r.created_by || null,
+    createdAt: r.created_at || null,
+    updatedAt: r.updated_at || null,
+  };
+}
+
+// Storage path for an amendment's attachment. Scoped by the owning key so a
+// project's and a sub's attachments never collide, and stamped so re-uploading
+// the same filename doesn't 409 against `upsert: false`.
+function buildAmendmentStoragePath({ scopeId, originalName }) {
+  const safe = String(originalName || "file").replace(/[^\w.\-]+/g, "_").slice(-80);
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `amendments/${scopeId || "unscoped"}/${stamp}-${safe}`;
+}
+
+// Upload an amendment attachment. Returns { filePath, fileName } for the caller
+// to persist on the amendment row. Kept separate from the row write so a failed
+// upload never leaves a half-made amendment behind.
+export async function uploadAmendmentFile({ scopeId, file }) {
+  if (!file) throw new Error("No file selected");
+  const path = buildAmendmentStoragePath({ scopeId, originalName: file.name });
+  const up = await supabase.storage.from("invoices").upload(path, file, {
+    upsert: false,
+    cacheControl: "3600",
+  });
+  if (up.error) throw new Error(`storage upload: ${up.error.message}`);
+  return { filePath: path, fileName: file.name };
+}
+
+// Remove an amendment's binary. Best-effort: callers delete the row regardless,
+// since an orphaned blob is less harmful than a row pointing at nothing.
+export async function deleteAmendmentFile(filePath) {
+  if (!filePath) return;
+  const rm = await supabase.storage.from("invoices").remove([filePath]);
+  if (rm.error) throw new Error(`storage remove: ${rm.error.message}`);
+}
+
+export async function amendmentFileUrl(filePath, expiresInSeconds = 60) {
+  const { data, error } = await supabase.storage.from("invoices")
+    .createSignedUrl(filePath, expiresInSeconds);
+  if (error) throw new Error(`signed url: ${error.message}`);
+  return data?.signedUrl;
+}
+
+// Create an amendment. `scope` is either { invoiceId } or
+// { projectId, companyId, kind }. Returns the adapted, persisted row.
+export async function createAmendment(scope, { amount, notes, filePath, fileName }) {
+  const me = getCurrentBeaconUser();
+  const row = {
+    amount: amount == null || amount === "" ? 0 : Number(amount),
+    notes: (notes || "").trim() || null,
+    file_path: filePath || null,
+    file_name: fileName || null,
+    created_by: me?.id || null,
+  };
+  if (scope?.invoiceId) {
+    row.invoice_id = scope.invoiceId;
+  } else if (scope?.projectId && scope?.companyId) {
+    row.project_id = scope.projectId;
+    row.company_id = scope.companyId;
+    row.kind = scope.kind || "sub";
+  } else {
+    throw new Error("An amendment needs either an invoice or a sub to attach to");
+  }
+  const { data, error } = await supabase
+    .from("invoice_amendments").insert(row).select("*").single();
+  if (error) throw error;
+  return adaptAmendment(data);
+}
+
+// Patch an amendment in place. Only the three user-facing fields (plus the
+// attachment pair) are writable — the scope keys are immutable, since moving an
+// amendment between lines would silently re-price two contracts at once.
+export async function updateAmendment(id, patch) {
+  const db = {};
+  if ("amount" in patch) db.amount = patch.amount == null || patch.amount === "" ? 0 : Number(patch.amount);
+  if ("notes" in patch) db.notes = (patch.notes || "").trim() || null;
+  if ("filePath" in patch) db.file_path = patch.filePath || null;
+  if ("fileName" in patch) db.file_name = patch.fileName || null;
+  const { data, error } = await supabase
+    .from("invoice_amendments").update(db).eq("id", id).select("*").single();
+  if (error) throw error;
+  return adaptAmendment(data);
+}
+
+// Delete an amendment, binary first (same ordering rationale as
+// deleteInvoiceFile: a dead row pointing at a missing path is worse than an
+// orphan blob).
+export async function deleteAmendment(id, filePath) {
+  if (filePath) {
+    try { await deleteAmendmentFile(filePath); }
+    catch (e) { console.warn("[beacon_v2] amendment blob remove failed:", e?.message); }
+  }
+  const { error } = await supabase.from("invoice_amendments").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Re-fetch every amendment. Cheap (a handful of rows per project) and keeps the
+// two scopes in one round trip; callers re-group with groupAmendments().
+export async function reloadAmendments() {
+  const { data, error } = await supabase
+    .from("invoice_amendments").select("*").order("created_at", { ascending: true });
+  if (error) { console.warn("[beacon_v2] invoice_amendments fetch skipped:", error.message); return []; }
+  return (data || []).map(adaptAmendment);
+}
+
 // ── Project Detail — To-Dos + Notes (CRUD) ────────────────────────────────
 // Both hang off a project_items NODE (root project OR any phase/subphase), so
 // the detail page loads everything for a project by passing the tree's node
@@ -2114,6 +2239,7 @@ export async function loadBeacon() {
     users, clients, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
     openBidRows, invoiceNoteRows, invoiceLinkRows, projectItemRows,
+    amendmentRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -2225,6 +2351,17 @@ export async function loadBeacon() {
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
         if (error) { console.warn("[beacon_v2] project_items fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
+    // Contract amendments (20260820120000). Own graceful-degrade query — an
+    // un-migrated DB just reports no amendments, so every Contract Value falls
+    // back to the plain contract amount and nothing on the page breaks.
+    // Ascending by created_at so "Amendment 1/2/3" numbering is stable.
+    supabase.from("invoice_amendments")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] invoice_amendments fetch skipped:", error.message); return []; }
         return data || [];
       }),
   ]);
@@ -2493,6 +2630,8 @@ export async function loadBeacon() {
     clients:   _companies,
     users:     _users,
     subInvoices: subInvoicesMatrix,
+    // Flat list; App.jsx re-groups it by scope with groupAmendments().
+    amendments: (amendmentRows || []).map(adaptAmendment),
     appSettings: _appSettings,
   };
 }

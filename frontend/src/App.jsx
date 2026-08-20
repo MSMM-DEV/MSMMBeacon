@@ -47,6 +47,13 @@ import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import { invoiceIsOrange } from "./invoice-orange.js";
 import {
+  groupAmendments,
+  amendmentsForInvoiceIds,
+  amendmentsForSub,
+  amendmentsTotal,
+  subIsAmendable,
+} from "./invoice-amendments.js";
+import {
   HZ_INVOICE_TYPES,
   INVOICE_TYPE_OPTIONS,
   linkedInvoiceIdsFor,
@@ -63,6 +70,7 @@ import {
 } from "./invoice-perspectives.js";
 import {
   loadBeacon, fmtDate, fmtDateTime, fmtMoney, mkId,
+  reloadAmendments,
   MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, INVOICE_ACTUALS_MIN_YEAR, actualThruMonth,
   mergeInvoiceYears, adaptInvoiceRow, monthDescsForWindow, defaultWindowStartAbs, WINDOW_SIZE,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
@@ -451,16 +459,22 @@ const _approvalLabel = (r) => {
 // (project months whose prime invoice is attached, from INVOICE_ACTUALS_MIN_YEAR
 // onward — pre-2026 billing is already captured by Total CV − Rollforward).
 // NULL rollforward ⇒ the full contract still remains, so it falls back to Total CV.
+// Contract Value for a merged invoice row: the stored contract plus every
+// amendment on it (annotated onto the row as `amendmentsTotal`). Falls back to
+// the plain contract when a caller hasn't annotated, so nothing breaks.
+const invoiceProjectContractValue = (r) =>
+  Number(r?.amount || 0) + Number(r?.amendmentsTotal || 0);
+
 const invoiceProjectTotalBilled = (r) => {
   const rollf = (r.totalRemainingStart != null && r.totalRemainingStart !== "")
-    ? Number(r.totalRemainingStart) : Number(r.amount || 0);
+    ? Number(r.totalRemainingStart) : invoiceProjectContractValue(r);
   const actuals = Object.entries(r.byYear || {}).reduce((a, [y, yr]) => {
     if (Number(y) < INVOICE_ACTUALS_MIN_YEAR) return a;
     const files = yr?.primeFiles || [];
     return a + (yr?.values || []).reduce((x, v, m) =>
       x + ((files[m]?.length > 0) ? Number(v || 0) : 0), 0);
   }, 0);
-  return Number(r.amount || 0) - rollf + actuals;
+  return invoiceProjectContractValue(r) - rollf + actuals;
 };
 
 const EXPORT_COLUMNS = {
@@ -584,8 +598,8 @@ const EXPORT_COLUMNS = {
     { label: "Project",           wMm: 52, wrap: true,                 get: r => r.name },
     { label: "Type",              wMm: 14,                             get: r => r.type || "" },
     { label: "PM",                wMm: 24, wrap: true,                 get: r => (r.pmIds || []).map(id => userById(id)?.name).filter(Boolean).join(", ") },
-    { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(r.amount) },
-    { label: "Rollforward",       wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.totalRemainingStart != null ? r.totalRemainingStart : (r.amount || 0)) },
+    { label: "Contract",          wMm: 26, wrap: true, halign: "right", get: r => fmtMoney(invoiceProjectContractValue(r)) },
+    { label: "Rollforward",       wMm: 28, wrap: true, halign: "right", get: r => fmtMoney(r.totalRemainingStart != null ? r.totalRemainingStart : invoiceProjectContractValue(r)) },
     ...MONTHS.map((m, i) => ({
       label: m, wMm: 20, wrap: true, halign: "right",
       get: r => r.values[i] ? fmtMoney(r.values[i]) : "",
@@ -597,7 +611,7 @@ const EXPORT_COLUMNS = {
       get: r => fmtMoney(invoiceProjectTotalBilled(r)) },
     // Total Remaining = Total CV − Total Billed.
     { label: "Total Remaining",   wMm: 24, wrap: true, halign: "right",
-      get: r => fmtMoney(Number(r.amount || 0) - invoiceProjectTotalBilled(r)) },
+      get: r => fmtMoney(invoiceProjectContractValue(r) - invoiceProjectTotalBilled(r)) },
   ],
   events: [
     { label: "Date",              wMm: 22,  get: r => fmtDate(r.date) },
@@ -1381,6 +1395,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Sub-invoice matrix per project: Map<project_id, sub_entry[]>. Updated
   // after every subAmount upsert / file upload / file delete via reloadInvoiceArtifacts.
   const [subInvoices, setSubInvoices] = useState(initial.subInvoices || new Map());
+  // Contract amendments — a flat list, re-grouped by scope below. See
+  // invoice-amendments.js and migration 20260820120000.
+  const [amendments, setAmendments] = useState(initial.amendments || []);
   const [invoice,   setInvoice]   = useState(initial.invoices);
   const [events,    setEvents]    = useState(initial.events);
   const [hotLeads,  setHotLeads]  = useState(initial.hotLeads || []);
@@ -2108,6 +2125,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     setDeletedLeads(d.deletedLeads || []);       setDeletedOpenBids(d.deletedOpenBids || []);
     setDeletedAwaiting(d.deletedAwaiting || []); setDeletedAwarded(d.deletedAwarded || []);
     setSubInvoices(d.subInvoices || new Map());
+    setAmendments(d.amendments || []);
     setClients(getClientsOnly());
     setCompanies(getCompaniesOnly());
     setMergeModal(null);
@@ -2371,6 +2389,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       return sib ? invoiceGroupIdsFor(sib) : [id];
     });
     return Array.from(new Set([...own, ...sibGroups]));
+  };
+
+  // ---- Contract amendments (20260820120000) -------------------------------
+  // Amendments raise a line's Contract Value. Project-scoped ones are read
+  // across the merged row's whole group AND its linked perspective sibling —
+  // an amendment is a fact about the contract, and ENG/MHZ (PM/MHZ PM) are two
+  // views of one contract, so both must show it. invoiceGroupIdsWithSiblings
+  // is exactly that id set, already used for billing-state sync.
+  const amendmentIndex = useMemo(() => groupAmendments(amendments), [amendments]);
+  const projectAmendmentsFor = (row) =>
+    amendmentsForInvoiceIds(amendmentIndex.byInvoiceId, invoiceGroupIdsWithSiblings(row));
+  const subAmendmentsFor = (projectId, companyId, kind) =>
+    amendmentsForSub(amendmentIndex.bySubKey, projectId, companyId, kind);
+  // Re-read after any mutation in the amendments modal, so every derived figure
+  // on the page (Contract Value, Total Billed, Total Remaining, MSMM's
+  // Total − Σ subs) recomputes from one source.
+  const refreshAmendments = async () => {
+    try { setAmendments(await reloadAmendments()); }
+    catch (e) { showToast(`Couldn't refresh amendments: ${e.message || e}`, "x"); }
   };
 
   // Project-number uniqueness. A given project number may belong to only ONE
@@ -4970,7 +5007,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
 
     const built = buildInvoiceGridSheets({
-      variant, baseRows, allRows: invoiceMerged, subInvoices,
+      variant, baseRows, allRows: invoiceMerged, subInvoices: subInvoicesAmended,
       monthDescs, titleFor, isActualMonth: isActualInvoiceMonth, exportedAt,
       actualsMinYear: INVOICE_ACTUALS_MIN_YEAR,
     });
@@ -5477,7 +5514,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const win = manishMonthDescsBetween(w.startYear, w.startMonth, w.endYear, w.endMonth);
       if (win.length === 0) throw new Error("No dated invoice data for the selected type(s).");
       const periodText = `${win[0].label} – ${win[win.length - 1].label} · all projects`;
-      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
+      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices: subInvoicesAmended, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_all_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
@@ -5485,7 +5522,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const years = options.years || [];
       if (years.length === 0) throw new Error("Select at least one year.");
       const built = buildManishYearSheets({
-        years, baseRows, allRows: invoiceMerged, subInvoices,
+        years, baseRows, allRows: invoiceMerged, subInvoices: subInvoicesAmended,
         titleFor: (y) => titleFor(String(y)),
         isActualMonth: isActualInvoiceMonth,
       });
@@ -5496,14 +5533,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const win = manishMonthDescsBetween(options.startYear, options.startMonth, options.endYear, options.endMonth);
       if (win.length === 0) throw new Error("End date must be after the start date.");
       const periodText = `${win[0].label} – ${win[win.length - 1].label}`;
-      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
+      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices: subInvoicesAmended, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
     } else {
       const win = invWindowMonths;
       const periodText = `${win[0].label} – ${win[win.length - 1].label} (rolling window)`;
-      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
+      const data = buildManishExportData({ baseRows, allRows: invoiceMerged, subInvoices: subInvoicesAmended, monthDescs: win, title: titleFor(periodText), isActualMonth: isActualInvoiceMonth });
       payload = data;
       includedCount = data.includedCount;
       filename = `Manish_export_${label(win[0])}_to_${label(win[win.length - 1])}_type_${ts.token}_${date}.xlsx`;
@@ -5550,7 +5587,28 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Merged invoice projects (one row per (type, project number), byYear map,
   // groupIds, billingState) — computed once and split across the Invoice
   // page's sub-tabs below. Also feeds the Awarded tab's link cards.
-  const invoiceMerged = useMemo(() => mergeInvoiceYears(invoice), [invoice]);
+  // Merged rows carry their project amendment TOTAL so the module-level export
+  // helpers (invoiceProjectTotalBilled, EXPORT_COLUMNS.invoice) and the xlsx
+  // builders can compute Contract Value without needing the resolver closure.
+  const invoiceMerged = useMemo(
+    () => mergeInvoiceYears(invoice).map(r => ({
+      ...r,
+      amendmentsTotal: amendmentsTotal(projectAmendmentsFor(r)),
+    })),
+    [invoice, amendmentIndex],
+  );
+  // The sub matrix, with each real sub entry carrying its own amendments. Done
+  // once here so the table AND the exports read the same annotated entries.
+  const subInvoicesAmended = useMemo(() => {
+    const out = new Map();
+    for (const [projectId, entries] of (subInvoices || new Map())) {
+      out.set(projectId, (entries || []).map(s =>
+        subIsAmendable(s)
+          ? { ...s, amendments: subAmendmentsFor(projectId, s.companyId, s.kind || "sub") }
+          : s));
+    }
+    return out;
+  }, [subInvoices, amendmentIndex]);
 
   // Invoice project lookup by normalized project number — powers the Awarded
   // tab's link chips + project cards. On a number collision (ENG + PM rows
@@ -6407,7 +6465,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     flashId={flashId}
                     tab="closed"
                     orangeSourceIds={orangeSourceIds}
-                    subInvoices={subInvoices}
+                    subInvoices={subInvoicesAmended}
+                    projectAmendments={projectAmendmentsFor}
+                    subAmendmentsFor={subAmendmentsFor}
+                    onAmendmentsChanged={refreshAmendments}
                     onUpdateSubAmount={updateSubInvoiceCell}
                     onTogglePaid={setSubInvoicePaidStatus}
                     onTogglePrimePaid={editInvoicePrimePaidMonth}
@@ -6471,7 +6532,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 windowMonths={invWindowMonths}
                 orangeSourceIds={orangeSourceIds}
                 monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
-                subInvoices={subInvoices}
+                subInvoices={subInvoicesAmended}
               />
               <InvoiceTable rows={filtered.invoice}
                 windowMonths={invWindowMonths}
@@ -6490,7 +6551,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 flashId={flashId}
                 tab="invoice"
                 orangeSourceIds={orangeSourceIds}
-                subInvoices={subInvoices}
+                subInvoices={subInvoicesAmended}
+                projectAmendments={projectAmendmentsFor}
+                subAmendmentsFor={subAmendmentsFor}
+                onAmendmentsChanged={refreshAmendments}
                 onUpdateSubAmount={updateSubInvoiceCell}
                 onTogglePaid={setSubInvoicePaidStatus}
                 onTogglePrimePaid={editInvoicePrimePaidMonth}
@@ -6511,7 +6575,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 billingMode="active"
                 onPause={pauseInvoiceProject}/>
               <SubsReceivablesPanel
-                subInvoices={subInvoices}
+                subInvoices={subInvoicesAmended}
                 projectsById={projectsById}
                 onOpenProject={(statusKey, projectId) => {
                   // Mirror the directory-drawer routing: locate the row in
@@ -6549,7 +6613,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             flashId={flashId}
             tab="between"
             orangeSourceIds={orangeSourceIds}
-            subInvoices={subInvoices}
+            subInvoices={subInvoicesAmended}
+            projectAmendments={projectAmendmentsFor}
+            subAmendmentsFor={subAmendmentsFor}
+            onAmendmentsChanged={refreshAmendments}
             onUpdateSubAmount={updateSubInvoiceCell}
             onTogglePaid={setSubInvoicePaidStatus}
             onTogglePrimePaid={editInvoicePrimePaidMonth}

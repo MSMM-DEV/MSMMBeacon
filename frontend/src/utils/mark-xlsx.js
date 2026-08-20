@@ -155,29 +155,39 @@ function makeResolvers(allRows, subInvoices, actualsMinYear = 2026) {
       return a + t;
     }, 0);
   };
+  // ---- Contract AMENDMENTS -----------------------------------------------
+  // Contract Value = contract amount + Σ amendments, exactly as the on-screen
+  // InvoiceTable computes it. App.jsx annotates each merged row with
+  // `amendmentsTotal` and each real sub entry with `amendments` before calling
+  // in; both fall back to 0/[] so an un-annotated caller gets the old numbers.
+  const amdTotal = (list) => (list || []).reduce((a, x) => a + Number(x?.amount || 0), 0);
+  const projContract = (r) => Number(r?.amount || 0) + Number(r?.amendmentsTotal || 0);
+  const subContract  = (s) => Number(s?.contractAmount || 0) + amdTotal(s?.amendments);
+
   const msmmContract = (r) => {
     const src = msmmSourceFor(r);
     return linkedMsmmValue({
       linked: isMhzPerspectiveSub(src, allRows),
       storedValue: src.msmmAmount,
-      total: src.amount,
-      subValues: subListFor(src).map(x => x.contractAmount),
+      total: projContract(src),
+      subValues: subListFor(src).map(subContract),
     });
   };
-  const projectRollforward = (r) => (r.totalRemainingStart != null && r.totalRemainingStart !== "") ? Number(r.totalRemainingStart) : Number(r.amount || 0);
-  const subRollforward     = (s) => (s.remainingStart != null && s.remainingStart !== "") ? Number(s.remainingStart) : Number(s.contractAmount || 0);
+  const projectRollforward = (r) => (r.totalRemainingStart != null && r.totalRemainingStart !== "") ? Number(r.totalRemainingStart) : projContract(r);
+  const subRollforward     = (s) => (s.remainingStart != null && s.remainingStart !== "") ? Number(s.remainingStart) : subContract(s);
   const msmmRollforward    = (r) => {
     const src = msmmSourceFor(r);
     return (src.remainingStart != null && src.remainingStart !== "") ? Number(src.remainingStart) : msmmContract(r);
   };
-  const projectTotalBilled = (r) => Number(r.amount || 0) - projectRollforward(r) + projectBilledAttached(r);
-  const subTotalBilled     = (s) => Number(s.contractAmount || 0) - subRollforward(s) + subBilledAttached(s);
+  const projectTotalBilled = (r) => projContract(r) - projectRollforward(r) + projectBilledAttached(r);
+  const subTotalBilled     = (s) => subContract(s) - subRollforward(s) + subBilledAttached(s);
   const msmmTotalBilled    = (r) => msmmContract(r) - msmmRollforward(r) + msmmBilledAttached(r);
 
   return {
     subListFor, primeListFor, partyAmt, partyPaid, partyFile,
     msmmAt, projTotalAt, primePaidAt, primeFileAt, hzRemainderAt,
     msmmContract, projectTotalBilled, subTotalBilled, msmmTotalBilled,
+    projContract, subContract,
   };
 }
 
@@ -266,7 +276,7 @@ export function buildInvoiceGridSheets({
       // subs variant — total row + constituent lines.
       rows.push({
         proj, name, type, level: 0, bold: true, cells: projCells,
-        ...summarize(Number(r.amount || 0), R.projectTotalBilled(r)),
+        ...summarize(R.projContract(r), R.projectTotalBilled(r)),
       });
 
       // HZ prime remainder (base ENG/PM projects have none: total = MSMM + subs).
@@ -278,8 +288,8 @@ export function buildInvoiceGridSheets({
         );
         // Remainder summary mirrors the in-app HZ white first row: project-scope
         // value minus every constituent line (real subs + MSMM), per column.
-        const remContract = invoiceRemainderValue(r.amount, [
-          ...R.subListFor(r).map(s => s.contractAmount), R.msmmContract(r)]);
+        const remContract = invoiceRemainderValue(R.projContract(r), [
+          ...R.subListFor(r).map(R.subContract), R.msmmContract(r)]);
         const remBilled = invoiceRemainderValue(R.projectTotalBilled(r), [
           ...R.subListFor(r).map(R.subTotalBilled), R.msmmTotalBilled(r)]);
         if (rem.some(c => c.value)) rows.push({
@@ -293,14 +303,14 @@ export function buildInvoiceGridSheets({
         rows.push({
           proj: "", name: `Sub · ${s.companyName || "Sub"}${disc}`, type: "Sub", level: 1, bold: false,
           cells: cellsFor((i) => R.partyPaid(s, year, i), (i) => R.partyFile(s, year, i), (i) => R.partyAmt(s, year, i)),
-          ...summarize(Number(s.contractAmount || 0), R.subTotalBilled(s)),
+          ...summarize(R.subContract(s), R.subTotalBilled(s)),
         });
       }
       for (const p of R.primeListFor(r)) {
         rows.push({
           proj: "", name: `Prime · ${p.companyName || "Prime"}`, type: "Prime", level: 1, bold: false,
           cells: cellsFor((i) => R.partyPaid(p, year, i), (i) => R.partyFile(p, year, i), (i) => R.partyAmt(p, year, i)),
-          ...summarize(Number(p.contractAmount || 0), R.subTotalBilled(p)),
+          ...summarize(R.subContract(p), R.subTotalBilled(p)),
         });
       }
 

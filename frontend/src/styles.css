@@ -27875,3 +27875,346 @@ button.tsx-tl-seg { cursor: pointer; }
    FIRST cell must stay clear so the leading rule reads as one continuous band
    down the column. `.td + .td` already skips it. */
 .tablewrap[data-skin="clean"] .trow.bxt-grouphead .td + .td { box-shadow: none; }
+
+/* ============================================================================
+   CONTRACT AMENDMENTS  (20260820120000_invoice_amendments.sql)
+
+   An amendment is one attachment + one dollar amount + one note, raising a
+   line's Contract Value. Three surfaces:
+     * .inv-meta-chip.sage    — the Amendment chip (project row + sub rows)
+     * .amd-*                 — the manage-amendments modal
+     * .amd-pop / .inv-cv-*   — the Contract Value cell's ⤢ breakdown popover
+
+   Sage is the third chip tone, after accent (Notes) and blue (Description).
+   It reads as "money/contract" against the other two and reuses the existing
+   --sage tokens, so it inverts correctly in dark mode for free.
+   ========================================================================= */
+
+.inv-meta-chip.sage:hover {
+  color: #3F4D30;
+  border-color: #C9D6B7;
+  background: var(--sage-soft);
+}
+.inv-meta-chip.sage.has-content {
+  background: var(--sage-soft);
+  border-color: #C9D6B7;
+  color: #3F4D30;
+}
+[data-theme="dark"] .inv-meta-chip.sage:hover,
+[data-theme="dark"] .inv-meta-chip.sage.has-content {
+  color: #C7D6B6;
+  border-color: #3E4A35;
+}
+
+.note-modal-badge.sage { background: var(--sage-soft); color: #4E5F3D; }
+[data-theme="dark"] .note-modal-badge.sage { color: #C7D6B6; }
+
+/* ── Contract Value cell ───────────────────────────────────────────────────
+   The ⤢ glyph sits in the cell's bottom-right corner. The cell is a normal
+   table cell, so it gets position:relative only when it actually carries the
+   affordance — `.has-cv` — to avoid disturbing every other cell's stacking. */
+.inv-cv-cell.has-cv { position: relative; }
+.inv-cv-expand {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-soft);
+  opacity: .45;
+  cursor: pointer;
+  transition: opacity .15s, background .15s, color .15s;
+}
+.inv-cv-expand:hover { opacity: 1; background: var(--sage-soft); color: #4E5F3D; }
+[data-theme="dark"] .inv-cv-expand:hover { color: #C7D6B6; }
+/* A line that HAS amendments keeps the glyph visible — the value in the cell
+   is no longer just what someone typed, and that needs to be discoverable
+   without hovering every row. */
+.inv-cv-expand.has-amendments { opacity: .85; color: var(--sage); }
+/* Amended values get a subtle sage underline so the column can be scanned for
+   "which of these are amended" at a glance. */
+.inv-cv-cell.is-amended .cell-value,
+.inv-cv-cell.is-amended > .mono { text-decoration: underline dotted var(--sage) 1.5px; text-underline-offset: 3px; }
+
+/* ── Amendments modal ───────────────────────────────────────────────────── */
+.amd-modal { max-width: calc(100vw - 32px); }
+.amd-subtitle {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.amd-body { display: flex; flex-direction: column; gap: 14px; }
+
+.amd-summary {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.amd-summary-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.amd-summary-line.has-value { color: var(--sage); font-weight: 600; }
+.amd-summary-total {
+  border-top: 1px solid var(--border);
+  padding-top: 7px;
+  margin-top: 1px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.amd-list { display: flex; flex-direction: column; gap: 8px; }
+.amd-entry {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.amd-entry.editing { border-color: var(--sage); background: var(--surface); }
+.amd-entry-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.amd-entry-no {
+  font-size: 10.5px;
+  color: var(--text-soft);
+  background: var(--surface-2, var(--surface));
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.amd-entry-amount { font-size: 14px; font-weight: 700; color: var(--sage); }
+.amd-entry-meta { font-size: 11px; color: var(--text-soft); flex: 1; min-width: 0; }
+.amd-entry-actions { display: flex; gap: 2px; margin-left: auto; }
+.amd-entry-notes {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.amd-entry-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.amd-entry-file:hover { border-color: var(--accent); }
+.amd-entry-nofile { font-size: 11px; color: var(--text-soft); font-style: italic; }
+.amd-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.amd-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--rose);
+  background: color-mix(in srgb, var(--rose) 8%, var(--surface));
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+/* ── The three-field form (shared by add + edit) ────────────────────────── */
+.amd-form { display: flex; flex-direction: column; gap: 9px; }
+.amd-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 10px;
+  align-items: end;
+}
+.amd-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.amd-field-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps, .06em);
+  color: var(--text-soft);
+}
+.amd-money-input { position: relative; display: flex; align-items: center; }
+.amd-money-sign {
+  position: absolute;
+  left: 9px;
+  font-size: 12px;
+  color: var(--text-soft);
+  pointer-events: none;
+}
+.amd-money-input .input { padding-left: 20px; width: 100%; }
+.amd-notes-input { min-height: 62px; resize: vertical; line-height: 1.5; }
+.amd-file-pick { align-self: flex-start; }
+.amd-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  font-size: 11.5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 6px 4px 8px;
+  background: var(--surface);
+}
+.amd-file-x {
+  display: grid;
+  place-items: center;
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  color: var(--text-soft);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.amd-file-x:hover { background: var(--rose); color: #fff; }
+.amd-form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.amd-form-actions { display: flex; gap: 6px; margin-left: auto; }
+
+.amd-add-panel {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.amd-add-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.amd-add-btn { align-self: flex-start; }
+
+/* ── Breakdown popover ─────────────────────────────────────────────────────
+   Body-portalled (the invoice table's scroll containers would clip it) and
+   positioned from the trigger rect, so it needs its own fixed layer above the
+   table but below modals. */
+.amd-pop {
+  position: fixed;
+  z-index: 55;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  overflow: hidden;
+  font-size: 12px;
+}
+.amd-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.amd-pop-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.amd-pop-body { padding: 8px 11px; display: flex; flex-direction: column; gap: 5px; }
+.amd-pop-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+}
+.amd-pop-label { min-width: 0; display: flex; flex-direction: column; }
+.amd-pop-note {
+  font-size: 10.5px;
+  color: var(--text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 165px;
+}
+.amd-pop-amend { color: var(--sage); }
+.amd-pop-total {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 2px;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+}
+.amd-pop-empty { font-size: 11px; color: var(--text-soft); font-style: italic; }
+.amd-pop-manage {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.amd-pop-manage:hover { background: var(--sage-soft); color: #4E5F3D; }
+[data-theme="dark"] .amd-pop-manage:hover { color: #C7D6B6; }
+
+/* Sub-row Amendment chip — same tone as the project chip, sized to sit in the
+   sub name line beside the party clip rather than in its own chip row. */
+.invoice-sub-amd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 17px;
+  margin-left: 5px;
+  padding: 0 6px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px dashed var(--border);
+  color: var(--text-soft);
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.invoice-sub-amd:hover {
+  border-style: solid;
+  border-color: #C9D6B7;
+  background: var(--sage-soft);
+  color: #3F4D30;
+}
+.invoice-sub-amd.has-content {
+  border-style: solid;
+  border-color: #C9D6B7;
+  background: var(--sage-soft);
+  color: #3F4D30;
+}
+[data-theme="dark"] .invoice-sub-amd:hover,
+[data-theme="dark"] .invoice-sub-amd.has-content {
+  color: #C7D6B6;
+  border-color: #3E4A35;
+}
+
+@media (max-width: 640px) {
+  .amd-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .amd-pop { max-width: calc(100vw - 16px); }
+}
