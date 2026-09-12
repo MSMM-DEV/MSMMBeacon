@@ -13,9 +13,10 @@ const DialogOverlay = React.forwardRef(function DialogOverlay({ className, ...pr
     <DialogPrimitive.Overlay
       ref={ref}
       className={cn(
-        "fixed inset-0 z-[100] bg-[var(--scrim)] backdrop-blur-[3px]",
+        "fixed inset-0 z-[100] bg-[var(--scrim)] backdrop-blur-[6px]",
         "data-[state=open]:animate-in data-[state=open]:fade-in-0",
         "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+        "[animation-duration:var(--dur-panel)] data-[state=closed]:[animation-duration:var(--dur-exit)] [animation-timing-function:var(--ease-out)]",
         className
       )}
       {...props}
@@ -61,7 +62,7 @@ const DialogContent = React.forwardRef(function DialogContent(
           "sm:rounded-[var(--radius-xl)]",
           "sm:data-[state=open]:zoom-in-95 sm:data-[state=closed]:zoom-out-95",
           "sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=closed]:slide-out-to-bottom-0",
-          "duration-[var(--dur-normal)]",
+          "[animation-duration:var(--dur-panel)] data-[state=closed]:[animation-duration:var(--dur-exit)] [animation-timing-function:var(--ease-out)]",
           width,
           className
         )}
@@ -71,7 +72,7 @@ const DialogContent = React.forwardRef(function DialogContent(
         {showClose ? (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-3 top-3 grid size-8 place-items-center rounded-[var(--radius-sm)]",
+              "absolute right-3 top-3 grid size-10 place-items-center rounded-[var(--radius-md)]",
               "text-[var(--text-soft)] transition-colors duration-[var(--dur-fast)]",
               "hover:bg-[var(--surface-2)] hover:text-[var(--text)]",
               "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
@@ -91,7 +92,7 @@ function DialogHeader({ className, ...props }) {
     <div
       className={cn(
         "flex shrink-0 flex-col gap-1 border-b border-[var(--border)]",
-        "px-5 pb-3.5 pt-4 pr-12",
+        "bg-[var(--glass-bg-2)] px-6 pb-5 pt-6 pr-16",
         className
       )}
       {...props}
@@ -103,7 +104,7 @@ function DialogHeader({ className, ...props }) {
 function DialogBody({ className, ...props }) {
   return (
     <div
-      className={cn("min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4", className)}
+      className={cn("min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-5", className)}
       {...props}
     />
   );
@@ -114,7 +115,7 @@ function DialogFooter({ className, ...props }) {
     <div
       className={cn(
         "flex shrink-0 flex-col-reverse gap-2 border-t border-[var(--border)] bg-[var(--surface-2)]",
-        "px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]",
+        "px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]",
         "sm:flex-row sm:items-center sm:justify-end",
         className
       )}

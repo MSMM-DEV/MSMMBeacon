@@ -1,0 +1,112 @@
+/* Relationship directory: presentation-only organization over existing records. */
+.bcn-directory { min-width: 0; isolation: isolate; }
+.bcn-directory .bcn-directory-intro {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 20px; padding: 24px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.bcn-directory-intro > div:first-child { min-width: 0; flex: 1 1 300px; }
+.bcn-directory-eyebrow { color: var(--accent); font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.bcn-directory-intro h2 { margin: 7px 0; color: var(--text); font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -.025em; }
+.bcn-directory-intro p { margin: 0; max-width: 65ch; color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+.bcn-directory-view { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-2) 82%, transparent); backdrop-filter: blur(16px); }
+.bcn-directory-view button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 38px; padding: 8px 12px; border: 1px solid transparent; border-radius: 7px; color: var(--text-muted); background: transparent; font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; transition: color 140ms, background-color 140ms, box-shadow 140ms; }
+.bcn-directory-view button[aria-pressed="true"] { color: var(--accent); background: var(--surface); border-color: var(--border); box-shadow: 0 2px 5px color-mix(in srgb, var(--text) 6%, transparent); }
+.bcn-directory-view button:hover { color: var(--text); background: var(--surface); }
+.bcn-directory :is(button, summary, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.bcn-directory .bxt-toolbar { padding: 16px 24px; flex-wrap: wrap; gap: 12px; background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(16px); }
+.bcn-directory .bxt-search { flex: 1 1 250px; max-width: 390px; }
+.bcn-directory .bxt-filterstrip { flex-wrap: wrap; }
+.bcn-directory .bxt-dir-tally { white-space: normal; gap: 6px; font-size: 12px; }
+.bcn-directory .table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.bcn-directory[data-directory-view="relationships"] .table-scroll-body { min-width: 1060px; }
+.bcn-directory[data-directory-view="table"] .table-scroll-body { min-width: 1950px; }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow { min-height: 104px; background: var(--surface); box-shadow: none; transition: background-color 140ms; }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow:hover { background: var(--surface-2); }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow:is(.selected,.is-expanded) { background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface)); }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow > .td { padding: 18px 12px; min-width: 0; height: auto; max-height: none; white-space: normal; overflow-wrap: anywhere; line-height: 1.55; font-size: 13px; }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow > :is(.bxt-dir-disclose, .row-check) { padding-inline: 4px; }
+.bcn-directory .bxt-dirrow .truncate { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.bcn-directory .table-scroll-body .trow .bxt-td-identity { align-items: flex-start; gap: 7px; }
+.bcn-directory .bcn-directory-name > span { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; font-size: 14px; font-weight: 600; }
+.bcn-directory .bxt-td-sub { white-space: normal; overflow-wrap: anywhere; color: var(--text-muted); font-size: 12px; }
+.bcn-directory-classification { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-muted); font-size: 12px; font-weight: 450; }
+.bcn-directory-classification svg { flex-shrink: 0; }
+.bcn-directory-classification .cell-view { font-size: 12px; padding: 0 4px; }
+.bcn-directory .table-scroll-body .trow > .bcn-directory-contact { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
+.bcn-directory-contact-name { color: var(--text); font-weight: 550; }
+.bcn-directory-contact a, .bcn-directory-channel { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; white-space: normal; }
+.bcn-directory-contact a:hover, .bcn-directory-channel:hover { text-decoration: underline; text-underline-offset: 3px; }
+.bcn-directory .bxt-dir-related { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; overflow: visible; width: 100%; }
+.bcn-directory .bxt-dir-related > span { white-space: normal; height: auto; max-height: none; max-width: 100%; border-radius: 6px; }
+.bcn-directory-related-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.bcn-directory-related-more { width: 100%; color: var(--text-muted); font-size: 12px; }
+.bcn-directory-related-more summary { cursor: pointer; padding: 4px 0; color: var(--accent); font-weight: 550; }
+.bcn-directory-related-list { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.bcn-directory-related-list > span { display: flex; flex-direction: column; gap: 2px; color: var(--text); }
+.bcn-directory-related-list .num { color: var(--text-muted); font-size: 12px; }
+.bcn-directory .bxt-dir-projects { border-radius: 8px; min-height: 36px; padding: 8px; font-size: 12px; }
+.bcn-directory .bxt-dir-chevron { width: 32px; height: 36px; border-radius: 8px; }
+.bcn-directory .bxt-diractions { opacity: 1; gap: 4px; }
+.bcn-directory .bxt-diractions .row-btn { min-width: 34px; min-height: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.bcn-directory .table-scroll-body .trow.bxt-dirhead { background: var(--surface-2); }
+.bcn-directory .bxt-dirhead-inner { gap: 12px; flex-wrap: wrap; padding: 12px 0; }
+.bcn-directory .bxt-dirhead-inner .bxt-orghead-kicker { color: var(--text-muted); font-size: 12px; letter-spacing: 0; text-transform: none; }
+.bcn-directory .bxt-dirhead-inner .bxt-grouphead-label { font-size: 13px; }
+.bcn-directory .bxt-dirhead-inner .bxt-grouphead-count { border: none; background: transparent; font-size: 12px; }
+.bcn-directory .bxt-dirx-inner { width: min(100%, 1020px); padding: 20px 24px 24px; border-left: 0; animation: bcn-directory-reveal 200ms ease-out; }
+.bcn-directory-record-context { display: grid; grid-template-columns: minmax(160px,1fr) minmax(240px,2fr) auto; gap: 24px; align-items: start; padding-bottom: 20px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.bcn-directory-field-label { display: block; color: var(--text-muted); font-size: 12px; font-weight: 550; }
+.bcn-directory-record-context p { margin: 6px 0 0; color: var(--text); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bcn-directory .bxt-selbar { flex-wrap: wrap; padding: 16px 24px; gap: 12px; }
+.bcn-directory .bxt-selbar-hint { white-space: normal; }
+.bcn-directory .bxt-selbar-actions { flex-wrap: wrap; }
+@keyframes bcn-directory-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 700px) {
+  .bcn-directory .bcn-directory-intro, .bcn-directory .bxt-toolbar { padding: 18px 16px; }
+  .bcn-directory-intro h2 { font-size: 20px; }
+  .bcn-directory-view { width: 100%; }
+  .bcn-directory-view button { flex: 1; min-height: 44px; }
+  .bcn-directory .bxt-search { flex-basis: 100%; max-width: none; }
+  .bcn-directory .bxt-search input { font-size: 16px; }
+  .bcn-directory .bxt-filterstrip button, .bcn-directory .bxt-dir-chevron, .bcn-directory .bxt-dir-projects { min-height: 44px; }
+  .bcn-directory .bxt-dirx-inner { width: min(100%, calc(100vw - 48px)); padding: 20px 16px; }
+  .bcn-directory-record-context { grid-template-columns: minmax(0,1fr); gap: 16px; }
+  .bcn-directory-record-context button { justify-self: start; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bcn-directory *, .bcn-directory *::before, .bcn-directory *::after { animation: none !important; transition: none !important; }
+}
+/* Phone-book default; relationship and merge controls live in Manage records. */
+.bcn-directory .bcn-directory-intro { padding: 14px 18px; gap: 12px; }
+.bcn-directory-intro h2 { margin: 0; font-size: 18px; }
+.bcn-directory-intro p { font-size: 12px; margin-top: 4px; }
+.bcn-directory .bxt-toolbar { padding: 12px 18px; }
+.bcn-directory[data-directory-view="relationships"] .table-scroll-body { min-width: 820px; }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow { min-height: 64px; }
+.bcn-directory .table-scroll-body .trow.bxt-dirrow > .td { padding: 8px 12px; line-height: 1.4; }
+.bcn-directory .table-scroll-body .trow .bxt-td-identity { gap: 3px; }
+.bcn-directory-open { color: var(--text); font-size: 13px; font-weight: 600; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.bcn-directory-open:hover { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+.bcn-directory .bxt-dirhead-inner { padding: 6px 0; }
+.bcn-directory .bxt-orghead-kicker { display: none; }
+.bcn-directory[data-directory-view="relationships"] .bxt-diractions .row-btn { width: auto; gap: 4px; padding: 5px 7px; font-size: 11px; }
+@media (max-width: 900px) {
+  .bcn-directory[data-directory-view="relationships"] .table-scroll-body { min-width: 0; }
+  .bcn-directory[data-directory-view="relationships"] .thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .bcn-directory[data-directory-view="relationships"] .table-scroll-body .trow.bxt-dirrow { grid-template-columns: minmax(0,1fr) auto !important; gap: 0 12px; padding: 10px 14px; }
+  .bcn-directory[data-directory-view="relationships"] .trow.bxt-dirrow > .td { padding: 0; min-height: 0; }
+  .bcn-directory[data-directory-view="relationships"] .trow.bxt-dirrow > :is(.bxt-td-identity,[data-contact-field]) { grid-column: 1 / -1; }
+  .bcn-directory[data-directory-view="relationships"] .trow.bxt-dirrow > [data-contact-field="Phone"] { grid-column: 1; }
+  .bcn-directory[data-directory-view="relationships"] .bxt-td-actions { grid-column: 2; align-self: center; }
+  .bcn-directory[data-directory-view="relationships"] .bxt-diractions .row-btn { min-height: 44px; }
+  .bcn-directory[data-directory-view="relationships"] .trow .bcn-directory-contact { margin: 4px 0; }
+  .bcn-directory[data-directory-view="relationships"] .bcn-directory-channel { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; }
+  .bcn-directory[data-directory-view="relationships"] .bcn-directory-open { min-height: 36px; font-size: 14px; }
+  .bcn-directory[data-directory-view="relationships"] .bxt-dirhead { grid-template-columns: minmax(0,1fr) !important; }
+  .bcn-directory .bxt-filterstrip { gap: 4px; width: 100%; max-width: 100%; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .bcn-directory .bxt-filterstrip .bxt-chip { flex: none; }
+  .bcn-directory .bcn-directory-intro { padding: 10px 14px; }
+  .bcn-directory-intro p { display: none; }
+  .bcn-directory .bxt-toolbar { padding: 10px 14px; }
+}

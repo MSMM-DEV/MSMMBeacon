@@ -1,0 +1,175 @@
+/* Time Admin: oversight, decisions, enrollment, and precise day editing. */
+.tka-workspace { gap: 24px; }
+.tka-workspace .tka-tabbar { align-items: center; padding-bottom: 4px; gap: 12px 24px; }
+.tka-workspace .tka-tablist { flex-wrap: wrap; height: auto; }
+.tka-workspace .tka-tabtools { flex-wrap: wrap; padding-bottom: 0; }
+.tka-workspace .tka-toolmsg { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.tka-workspace-intro { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.tka-workspace-intro h3 { font-size: 20px; font-weight: 600; letter-spacing: -.025em; color: var(--text); margin: 0; }
+.tka-workspace-intro p { margin: 6px 0 0; color: var(--text-muted); max-width: 74ch; font-size: 14px; line-height: 1.6; }
+.tka-workspace-context { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.tka-workspace .tka-controls { align-items: flex-end; gap: 16px 24px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); }
+.tka-workspace .tka-controls-right { align-items: flex-end; gap: 12px; flex: 1 1 auto; justify-content: flex-end; }
+.tka-filter-group { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.tka-filter-label { display: block; color: var(--text-muted); font-size: 12px; font-weight: 550; line-height: 1.4; }
+.tka-workspace .tka-range { gap: 20px; }
+.tka-workspace .tka-rangehead { padding: 4px 0; }
+.tka-workspace .tka-rangetitle { font-size: 24px; line-height: 1.35; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.tka-workspace .tka-stats { gap: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.tka-workspace .tka-stat { border: 0; border-right: 1px solid var(--border); border-radius: 0; box-shadow: none; padding: 20px 24px; background: transparent; }
+.tka-workspace .tka-stat:last-child { border-right: 0; }
+.tka-workspace .tka-stat-label { font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.tka-workspace .tka-stat-value { margin-top: 10px; font-size: 28px; line-height: 1.2; flex-wrap: wrap; overflow-wrap: anywhere; }
+.tka-workspace .tka-stat-sub { font-size: 12px; margin-top: 6px; }
+.tka-workspace :is(.tka-daymx-scroll,.tka-gridscroll,.tka-tablescroll) { border-radius: 14px; box-shadow: 0 5px 20px color-mix(in srgb,var(--text) 3%,transparent); }
+.tka-workspace .tka-daymx-axis { height: 36px; }
+.tka-workspace .tka-daymx-tick { top: 11px; font-size: 12px; }
+.tka-workspace .tka-daymx-row { min-height: 76px; }
+.tka-workspace .is-compact .tka-daymx-row { min-height: 58px; }
+.tka-workspace .tka-daymx-name { padding: 16px; gap: 6px; }
+.tka-workspace .tka-daymx-name-top { flex-wrap: wrap; }
+.tka-workspace :is(.tka-daymx-name-label,.tka-daylist-name,.tka-grid-personname) { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
+.tka-workspace .tka-daymx-times { flex-wrap: wrap; font-size: 12px; }
+.tka-workspace .tka-daylist-note span { display: block; -webkit-line-clamp: unset; overflow: visible; overflow-wrap: anywhere; }
+.tka-workspace :is(.tka-table,.tka-grid) th { font-size: 12px; }
+.tka-workspace :is(.tka-table,.tka-grid) td { font-size: 13px; }
+
+/* Settings read as discrete decisions with a persistent save action. */
+.tka-settings { max-width: 1120px; gap: 20px; }
+.tka-settings .tka-sectionhead { padding: 0 0 4px; }
+.tka-settings-block { padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); gap: 20px; }
+.tka-settings > [data-orientation="horizontal"] { display: none; }
+.tka-settings-legend { font-size: 16px; font-weight: 600; letter-spacing: -.01em; text-transform: none; color: var(--text); }
+.tka-settings-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px; }
+.tka-settings .tka-toggle { padding: 12px 0; gap: 16px; align-items: flex-start; }
+.tka-settings .tka-toggle + .tka-toggle { border-top: 1px solid var(--border); padding-top: 20px; }
+.tka-settings .tka-toggle-title { font-size: 14px; }
+.tka-settings .tka-toggle-sub { font-size: 13px; line-height: 1.6; }
+.tka-settings .tka-settings-foot { position: sticky; bottom: 12px; z-index: 5; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: 12px; background: color-mix(in srgb,var(--surface) 95%,transparent); backdrop-filter: blur(16px); box-shadow: 0 8px 24px color-mix(in srgb,var(--text) 8%,transparent); }
+.tka-settings .tka-sectionhead-sub { max-width: 70ch; line-height: 1.6; }
+
+/* NFC enrollment is an explicit three-step workflow. */
+.tka-nfc { gap: 24px; }
+.tka-nfc-capture { padding: 24px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: 0 6px 24px color-mix(in srgb,var(--text) 4%,transparent); }
+.tka-nfc-guide { display: flex; gap: 16px 24px; flex-wrap: wrap; padding-bottom: 20px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.tka-nfc-guide > span { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+.tka-nfc-guide b { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12px; }
+.tka-nfc-fields { gap: 20px; max-width: 740px; }
+.tka-nfc-capture > button { align-self: flex-start; }
+.tka-nfc-result { padding: 20px; border-radius: 12px; }
+.tka-nfc-uid code,.tka-uid { overflow-wrap: anywhere; white-space: normal; }
+.tka-nfc-list .tka-queuehead { padding: 0 0 8px; }
+.tka-nfc-list .tka-queuetitle { font-size: 16px; text-transform: none; letter-spacing: -.01em; }
+.tka-nfc .tka-table-actions { flex-wrap: wrap; gap: 8px; }
+
+/* Leave decisions: readable request context above visible review actions. */
+.tka-leave-workspace { gap: 28px; }
+.tka-leave-workspace .tsx-leave-sec { padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.tka-leave-workspace .tsx-leave-sechead { align-items: flex-start; gap: 8px 16px; margin-bottom: 20px; }
+.tka-leave-workspace .tsx-leave-sechead h4 { font-size: 18px; letter-spacing: -.02em; text-transform: none; }
+.tka-leave-workspace .tsx-leave-sechead p { line-height: 1.6; font-size: 13px; max-width: 76ch; }
+.tka-leave-workspace .tsx-leavereq-list { gap: 16px; }
+.tka-leave-workspace .tsx-leavereq { padding: 20px; border-radius: 12px; background: var(--surface-2); align-items: stretch; gap: 24px; }
+.tka-leave-workspace .tsx-leavereq-main { min-width: 0; }
+.tka-leave-workspace .tsx-leavereq-who { flex-wrap: wrap; gap: 8px; }
+.tka-leave-workspace .tsx-leavereq-name { white-space: normal; overflow: visible; overflow-wrap: anywhere; font-size: 15px; }
+.tka-leave-workspace .tsx-leavereq-facts { flex-wrap: wrap; gap: 12px 24px; margin: 16px 0; }
+.tka-leave-workspace .tsx-leavereq-facts dd { white-space: normal; overflow-wrap: anywhere; }
+.tka-leave-workspace .tsx-leavereq-reason { margin: 12px 0; padding: 12px 16px; background: var(--surface); border-left: 2px solid var(--border-strong); border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.tka-leave-workspace .tsx-leavereq-note { display: flex; flex-direction: column; gap: 7px; max-width: 560px; }
+.tka-leave-workspace .tsx-leavereq-actions { align-self: flex-end; flex-wrap: wrap; gap: 8px; }
+.tka-leave-workspace .tsx-leaveadmin-name { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+
+/* People selection and shared read-only presence keep complete names/notes. */
+.tka-people-pop { border-radius: 14px; }
+.tka-people-heading { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); }
+.tka-people-row { padding: 10px 12px; min-height: 48px; }
+.tka-people-name { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.tka-people-rowbody { flex-wrap: wrap; }
+.tka-people-foot { gap: 12px; flex-wrap: wrap; padding: 14px; }
+.tka-presence-row { border-radius: 12px; border-left-width: 2px; }
+.tka-presence-main { padding: 16px; border-radius: 12px; }
+.tka-presence-rows { gap: 10px; }
+.tka-presence-name,.tka-presence-note-copy,.tka-presence-since { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.tka-presence-note { align-items: flex-start; line-height: 1.5; }
+.tka-presence-iv { flex-wrap: wrap; gap: 8px 16px; }
+.tka-presence-iv-note,.tka-presence-iv-cal { white-space: normal; overflow-wrap: anywhere; }
+
+/* Precise day editing: full-text blocks beside the existing inspector. */
+.tka-de-viewbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.tka-de-person-title { white-space: normal; overflow-wrap: anywhere; }
+.tka-blocklist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.tka-blockrow { width: 100%; display: grid; grid-template-columns: 100px minmax(0,1fr) 16px; gap: 16px; align-items: start; text-align: left; padding: 16px; border: 1px solid var(--border); border-left: 3px solid var(--sage); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.tka-blockrow.is-out { border-left-color: var(--rose); }
+.tka-blockrow:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.tka-blockrow.is-selected { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tka-blockrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tka-blockrow:disabled { opacity: .5; cursor: default; }
+.tka-blockrow-time { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; }
+.tka-blockrow-time > span { color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.tka-blockrow-content { min-width: 0; display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; }
+.tka-blockrow-title { font-size: 14px; font-weight: 600; }
+.tka-blockrow-presence { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.tka-blockrow-context { color: var(--blue-ink); font-size: 13px; line-height: 1.5; }
+.tka-blockrow-note { color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.tka-blocklist-empty { display: flex; flex-direction: column; align-items: center; padding: 40px 24px; border: 1px dashed var(--border-strong); border-radius: 12px; color: var(--text-muted); text-align: center; }
+.tka-blocklist-empty h4 { margin: 12px 0 4px; color: var(--text); font-size: 16px; }
+.tka-blocklist-empty p { margin: 0; font-size: 13px; }
+.tka-de-inspector { background: var(--surface); padding: 20px; border-radius: 12px; }
+.tka-insp { gap: 20px; }
+.tka-insp-label { font-size: 12px; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.tka-insp-outlook { overflow-wrap: anywhere; line-height: 1.6; }
+.tka-insp-head { flex-wrap: wrap; }
+.tka-insp-head > .min-w-0 { flex-basis: 160px; }
+.tka-insp .tka-chips { gap: 8px; }
+.tka-insp .tka-chip { min-height: 34px; border-radius: 7px; font-size: 12px; }
+.tka-de-foot { background: var(--surface); gap: 12px; }
+.tka-de-stats { gap: 12px; }
+.tka-de-stat { border-radius: 10px; }
+.tka-de-stat.is-dim { opacity: 1; }
+.tka-de-stat.is-dim .tka-de-stat-value { color: var(--text-muted); }
+.tka-et-legendhint { white-space: normal; }
+
+@media (max-width: 1023px) {
+  .tka-workspace .tka-controls-right { margin-left: 0; justify-content: flex-start; }
+  .tka-de-inspector.is-active { grid-row: 1; }
+}
+@media (max-width: 640px) {
+  .tka-de-id { flex: 0 0 auto; }
+  .tka-de-nav { width: 100%; }
+  .tka-de-head { gap: 16px; }
+  .tka-de-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .tka-de-stat { padding: 10px; }
+  .tka-workspace .tka-tabtools { width: 100%; justify-content: flex-end; }
+  .tka-workspace .tka-tablist { flex-basis: 100%; }
+  .tka-workspace .tka-controls { padding: 14px; gap: 16px; }
+  .tka-workspace .tka-controls-right { width: 100%; align-items: flex-end; gap: 16px 12px; }
+  .tka-filter-people { flex: 1 1 100%; }
+  .tka-workspace .tka-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .tka-workspace .tka-stat { padding: 16px; border-bottom: 1px solid var(--border); }
+  .tka-workspace .tka-stat:nth-child(2n) { border-right: 0; }
+  .tka-workspace .tka-stat:nth-child(n+3) { border-bottom: 0; }
+  .tka-workspace .tka-stat-value { font-size: 24px; }
+  .tka-workspace .tka-rangetitle { font-size: 20px; }
+  .tka-workspace .tka-rangehead-main { flex-wrap: wrap; }
+  .tka-workspace .tka-rangehead-titles { flex: 1 1 180px; }
+  .tka-settings-block,.tka-nfc-capture,.tka-leave-workspace .tsx-leave-sec { padding: 16px; }
+  .tka-settings-grid,.tka-nfc-fields { grid-template-columns: minmax(0,1fr); }
+  .tka-leave-workspace .tsx-leavereq { flex-direction: column; padding: 16px; gap: 16px; }
+  .tka-leave-workspace .tsx-leavereq-actions { width: 100%; justify-content: flex-end; }
+  .tka-settings-foot { bottom: 8px; }
+  .tka-nfc-guide { flex-direction: column; gap: 12px; }
+  .tka-blockrow { grid-template-columns: minmax(0,1fr) 16px; gap: 10px; padding: 14px; }
+  .tka-blockrow-time { flex-direction: row; flex-wrap: wrap; gap: 6px; grid-column: 1; }
+  .tka-blockrow-content { grid-column: 1; }
+  .tka-blockrow > svg { grid-column: 2; grid-row: 1; }
+  .tka-de-inspector { padding: 16px; }
+  .tka-insp .tka-chip { min-height: 44px; }
+  .tka-presence-main { padding: 12px; column-gap: 8px; }
+  .tka-workspace input,.tka-settings input,.tka-people-pop input,.tka-nfc input,.tka-insp input { font-size: 16px; }
+  .tka-workspace button:not([role="switch"]):not([role="checkbox"]),.tka-nfc button:not([role="switch"]),.tka-people-pop button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tka-blocklist,.tka-presence-detail { animation: tka-content-enter 180ms ease-out; }
+  @keyframes tka-content-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+}

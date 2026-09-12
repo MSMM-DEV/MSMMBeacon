@@ -45,7 +45,8 @@ export function LeaveBalanceCards({ balance, settings = getAppSettings(), busy =
     <section className="tsx-bal" aria-labelledby="tsx-bal-title">
       <header className="tsx-bal-head">
         <div className="tsx-bal-headline">
-          <h3 className="tsx-bal-title" id="tsx-bal-title">Leave balance</h3>
+          <span className="tsx-bal-eyebrow">Plan your time away</span>
+          <h3 className="tsx-bal-title" id="tsx-bal-title">Your leave balance</h3>
           <p className="tsx-bal-sub">
             Accrues {vacRate.toFixed(2)} vacation and {sickRate.toFixed(2)} sick hours
             {" "}each pay period. Next on {fmtDate(nextPay)}.
@@ -186,7 +187,7 @@ export function MyLeaveSection({ reloadKey = 0, onRequest = null }) {
       <section className="tsx-leave-sec" aria-labelledby="leave-requests-title">
         <header className="tsx-leave-sechead">
           <h4 id="leave-requests-title">My requests</h4>
-          <p>Pending items first, with older outcomes below.</p>
+          <p>Track approvals and manage requests that are still pending.</p>
           {busy && <span className="tsx-leave-refresh" role="status">refreshing…</span>}
         </header>
 
@@ -243,7 +244,7 @@ function LeaveRequestRow({ request: r, onCancel }) {
         <LeaveStatusChip status={r.status}/>
         {r.status === "pending" && (
           <Button variant="ghost" size="xs" onClick={() => onCancel(r.id)}>
-            Cancel
+            Cancel request
           </Button>
         )}
       </div>

@@ -86,7 +86,7 @@ export function LeavesPanel() {
   };
 
   return (
-    <div className="tsx-leaveadmin-panel">
+    <div className="tsx-leaveadmin-panel tka-leave-workspace">
       {err && (
         <p className="tsx-note tone-bad" role="alert">
           <Icon name="warn" size={13}/><span>{err}</span>
@@ -100,7 +100,7 @@ export function LeavesPanel() {
             Pending requests
             <span className="tsx-count num">{pending.length}</span>
           </h4>
-          <p>Approve or reject. Balances update the moment you decide.</p>
+          <p>Review the dates, hours and available balance before deciding. Your decision updates the balance immediately.</p>
           {busy && <span className="tsx-leave-refresh" role="status">refreshing…</span>}
         </header>
 
@@ -160,12 +160,12 @@ export function LeavesPanel() {
                     )}
 
                     <div className="tsx-leavereq-note">
-                      <label className="sr-only" htmlFor={`tsx-leave-note-${r.id}`}>
-                        Review note for {u?.name || "this request"} (optional)
+                      <label className="tka-filter-label" htmlFor={`tsx-leave-note-${r.id}`}>
+                        Review note (optional)
                       </label>
                       <Input
                         id={`tsx-leave-note-${r.id}`}
-                        placeholder="Note (optional)"
+                        placeholder="Add context for the employee"
                         value={notes[r.id] || ""}
                         onChange={e => setNotes(n => ({ ...n, [r.id]: e.target.value }))}
                       />
@@ -193,7 +193,7 @@ export function LeavesPanel() {
       <section className="tsx-leave-sec" aria-labelledby="tsx-leaveadmin-decided">
         <header className="tsx-leave-sechead">
           <h4 id="tsx-leaveadmin-decided">
-            Decided leave
+            Decision history
             <span className="tsx-count num">{decided.length}</span>
           </h4>
           <p>Every request you have ruled on. Reverting sends it back to pending — an approval also returns the hours.</p>

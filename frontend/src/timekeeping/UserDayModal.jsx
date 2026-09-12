@@ -26,6 +26,7 @@ import {
   AlertDialogTrigger,
   Badge, Button, Dialog, DialogBody, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle, Textarea, TooltipProvider,
+  Tabs, TabsList, TabsTrigger,
 } from "@/ui";
 import {
   loadDayDetail, loadWeekLock, loadCorrectionsForDay,
@@ -60,6 +61,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
   const [err, setErr] = useState(null);
 
   const [selectedId, setSelectedId] = useState(null);
+  const [dayLayout, setDayLayout] = useState("blocks");
   const [mode, setMode] = useState("idle");          // idle | edit | create
   const [createDraft, setCreateDraft] = useState(null);
   const [allowLockedEdit, setAllowLockedEdit] = useState(false);
@@ -206,7 +208,7 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
               {user && <span className={`avatar sm ${user.color}`}>{user.initials}</span>}
               <div className="min-w-0">
                 <p className="tka-eyebrow">{selfMode ? "My timesheet · Day editor" : "Time Admin · Day editor"}</p>
-                <DialogTitle className="truncate">{selfMode ? "My day" : (user?.name || "User")}</DialogTitle>
+                <DialogTitle className="tka-de-person-title">{selfMode ? "My day" : (user?.name || "User")}</DialogTitle>
               </div>
             </div>
 
@@ -323,14 +325,24 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
             {/* Canvas + inspector */}
             <div className="tka-de-main">
               <div className="tka-de-canvas">
-                <EditableDayTimeline
+                <div className="tka-de-viewbar">
+                  <span className="tka-filter-label">Explore this day</span>
+                  <Tabs value={dayLayout} onValueChange={setDayLayout}>
+                    <TabsList variant="segmented" aria-label="Day editor view">
+                      <TabsTrigger value="blocks">Blocks</TabsTrigger>
+                      <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+                {dayLayout === "timeline" ? <EditableDayTimeline
                   date={date}
                   intervals={day.intervals}
                   selectedId={selectedId}
                   disabled={editingBlocked || saving}
                   busy={saving}
                   onSelectInterval={selectInterval}
-                />
+                /> : <DayBlockList intervals={day.intervals} selectedId={selectedId}
+                  disabled={editingBlocked || saving} onSelect={selectInterval} />}
               </div>
 
               <aside className={`tka-de-inspector ${inspectorActive ? "is-active" : "is-idle"}`} aria-label="Block inspector">
@@ -384,6 +396,29 @@ export function UserDayModal({ userId, initialDate, onClose, onDirty, selfMode =
 }
 
 // ---------------------------------------------------------------------------
+function DayBlockList({ intervals, selectedId, disabled, onSelect }) {
+  if (!intervals.length) return <div className="tka-blocklist-empty"><Icon name="clock" size={24}/><h4>No time blocks recorded</h4><p>Choose Add block to enter missing time.</p></div>;
+  return (
+    <ol className="tka-blocklist" aria-label="Time blocks for this day">
+      {intervals.map(iv => (
+        <li key={iv.id}>
+          <button type="button" className={`tka-blockrow ${iv.isOut ? "is-out" : "is-in"} ${selectedId === iv.id ? "is-selected" : ""}`}
+            disabled={disabled} aria-pressed={selectedId === iv.id} onClick={() => onSelect(iv)}>
+            <span className="tka-blockrow-time num">{fmtClock(iv.startAt)}<span>to {iv.endAt ? fmtClock(iv.endAt) : "now"}</span></span>
+            <span className="tka-blockrow-content">
+              <span className="tka-blockrow-title">{TK_CATEGORY_LABEL[iv.category] || iv.category}</span>
+              <span className="tka-blockrow-presence">{iv.isOut ? "Out · does not count toward worked time" : "At desk · counts toward worked time"}</span>
+              {iv.outlookEventSubject && <span className="tka-blockrow-context">{iv.outlookEventSubject}</span>}
+              {iv.notes && <span className="tka-blockrow-note">{iv.notes}</span>}
+            </span>
+            <Icon name="chevronRight" size={16} aria-hidden="true"/>
+          </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function Stat({ label, value, tone, big, dim }) {
   return (
     <div className={`tka-de-stat tone-${tone} ${dim ? "is-dim" : ""} ${big ? "is-big" : ""}`}>

@@ -1,0 +1,45 @@
+.openbids-workspace { display: grid; gap: 16px; min-width: 0; max-width: 100%; }
+.openbids-orientation { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--glass-bg); backdrop-filter: blur(16px); animation: openbids-enter 260ms ease-out both; }
+.openbids-orientation > div { min-width: 0; flex: 1; }
+.openbids-orientation h2 { margin: 0 0 4px; color: var(--text); font-size: 16px; font-weight: 650; }
+.openbids-orientation p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.openbids-orientation-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; color: var(--accent); background: var(--accent-soft); }
+.openbids-access { display: inline-flex; align-items: center; gap: 8px; max-width: 200px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.openbids-access svg { flex: 0 0 auto; }
+.openbids-workspace > .tablewrap { min-width: 0; max-width: 100%; }
+.openbids-workspace .trow .td { padding-top: 16px; padding-bottom: 16px; align-items: flex-start; }
+.openbids-workspace .bxt-td-identity { color: var(--text); font-weight: 600; }
+.openbids-workspace .td > [data-editable] { white-space: normal; overflow-wrap: anywhere; }
+.openbids-workspace .openbids-service, .openbids-workspace .openbids-note { display: block; max-width: 100%; color: var(--text); white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
+.openbids-workspace .openbids-note { color: var(--text-muted); }
+.openbids-workspace .openbids-due { display: flex; flex-wrap: wrap; gap: 6px; white-space: normal; }
+.openbids-workspace .openbids-due .bxt-due-date { overflow: visible; white-space: normal; text-overflow: clip; line-height: 1.5; }
+.openbids-workspace .openbids-due .bxt-due-flag { flex-basis: 100%; width: fit-content; max-width: 100%; white-space: normal; font-size: 12px; line-height: 1.5; }
+.openbids-workspace .bid-approval-meta, .openbids-workspace .bid-approver { display: block; max-width: 100%; color: var(--text-muted); font-size: 12px; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.openbids-workspace .bxt-approval { width: 100%; gap: 8px; align-items: flex-start; }
+.openbids-workspace .bxt-approval-actions { display: flex; flex-wrap: wrap; gap: 6px; opacity: 1; }
+.openbids-workspace .bxt-rowbtn.openbids-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-width: 0; height: auto; min-height: 36px; padding: 7px 9px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.4; white-space: normal; transition: color 140ms ease, background 140ms ease, border-color 140ms ease; }
+.openbids-workspace .bxt-rowbtn.openbids-action svg { flex: 0 0 auto; }
+.openbids-workspace .bxt-rowbtn.openbids-action:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.openbids-workspace .bxt-rowbtn.openbids-action.forward { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: var(--accent-soft); }
+.openbids-workspace .bxt-rowbtn.openbids-action.bxt-rowbtn-danger:hover { color: var(--rose-ink); border-color: var(--rose); background: var(--rose-soft); }
+.openbids-workspace .bxt-rowbtn.openbids-action:disabled { color: var(--text-muted); background: var(--surface-2); border-color: var(--border); opacity: .65; cursor: not-allowed; }
+.openbids-workspace button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.openbids-workspace .openbids-next { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: flex-start; gap: 8px; max-width: 100%; opacity: 1; }
+.openbids-prerequisite { order: 2; flex-basis: 100%; color: var(--text-muted); font-size: 12px; line-height: 1.5; white-space: normal; }
+.openbids-workspace .bid-pdf-cell { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.openbids-workspace .bxt-filechip { max-width: 100%; min-height: 36px; height: auto; white-space: normal; }
+.openbids-workspace .bxt-filechip svg { flex: 0 0 auto; }
+.openbids-workspace .bid-pdf-name { max-width: none; min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.openbids-workspace .bid-link { max-width: 100%; white-space: normal; }
+.openbids-workspace .bid-link span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+@keyframes openbids-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 900px) { .openbids-orientation { flex-wrap: wrap; } .openbids-access { max-width: none; margin-left: 60px; flex-basis: 100%; } }
+@media (max-width: 600px) {
+  .openbids-orientation { align-items: flex-start; padding: 16px; gap: 12px; }
+  .openbids-orientation > div { flex-basis: calc(100% - 56px); }
+  .openbids-access { margin-left: 0; }
+  .openbids-workspace .bxt-rowbtn, .openbids-workspace .bxt-rowbtn.openbids-action, .openbids-workspace .bxt-filechip { min-height: 44px; }
+  .openbids-workspace .bxt-rowbtn:not(.openbids-action) { min-width: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .openbids-orientation { animation: none; } .openbids-workspace button { transition: none; } }

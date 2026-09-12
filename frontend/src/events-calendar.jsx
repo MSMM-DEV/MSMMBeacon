@@ -42,7 +42,7 @@ const TYPE_TONE = {
 };
 
 const VIEW_LABEL = { month: "Month", week: "Week", day: "Day", agenda: "Agenda" };
-const DESKTOP_VIEWS = ["month", "week", "day"];
+const DESKTOP_VIEWS = ["month", "week", "day", "agenda"];
 
 /* ----------------------------------------------------------------------
    Presentation maps. These carry no data or behaviour — they translate the
@@ -314,7 +314,7 @@ function EventBlock({ event }) {
       <div
         style={toneVars(tone)}
         className={cn(
-          "relative flex min-h-[22px] w-full min-w-0 cursor-pointer items-stretch overflow-hidden",
+          "beacon-calendar-event relative flex min-h-[30px] w-full min-w-0 cursor-pointer items-stretch overflow-hidden",
           "rounded-[var(--radius-xs)] border border-[var(--evt-edge)] bg-[var(--evt-fill)]",
           "transition-[box-shadow,translate] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
           "hover:-translate-y-px hover:shadow-[var(--shadow-sm)] active:translate-y-0",
@@ -331,7 +331,7 @@ function EventBlock({ event }) {
           )}
           <span
             className={cn(
-              "min-w-0 flex-1 truncate text-[length:var(--fs-xs)] font-medium leading-[1.35] text-[var(--text)]",
+              "beacon-calendar-event-name min-w-0 flex-1 text-[length:var(--fs-xs)] font-medium leading-[1.35] text-[var(--text)]",
               r.outlookIsCancelled && "text-[var(--text-soft)] line-through"
             )}
           >
@@ -365,7 +365,7 @@ function TimeBlockEvent({ event }) {
       <div
         style={toneVars(tone)}
         className={cn(
-          "relative mx-0.5 flex h-full cursor-pointer items-stretch overflow-hidden",
+          "beacon-calendar-time-event relative mx-0.5 flex h-full cursor-pointer items-stretch overflow-hidden",
           "rounded-[var(--radius-xs)] border border-[var(--evt-edge)] bg-[var(--evt-fill)]",
           "transition-[box-shadow,filter] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
           "hover:z-[2] hover:shadow-[var(--shadow-md)]",
@@ -388,7 +388,7 @@ function TimeBlockEvent({ event }) {
             )}
             <span
               className={cn(
-                "min-w-0 flex-1 truncate font-medium leading-[1.3] text-[var(--text)]",
+                "beacon-calendar-time-name min-w-0 flex-1 font-medium leading-[1.3] text-[var(--text)]",
                 density === "xs" ? "text-[length:var(--fs-2xs)]" : "text-[length:var(--fs-xs)]",
                 r.outlookIsCancelled && "text-[var(--text-soft)] line-through"
               )}
@@ -422,7 +422,7 @@ function AgendaEventRow({ event }) {
       <div
         style={toneVars(tone)}
         className={cn(
-          "flex min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-0.5",
+          "beacon-calendar-agenda-event flex min-w-0 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 py-0.5",
           r.outlookIsCancelled && "opacity-70"
         )}
       >
@@ -432,7 +432,7 @@ function AgendaEventRow({ event }) {
         />
         <span
           className={cn(
-            "min-w-[7rem] flex-1 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
+            "beacon-calendar-agenda-name min-w-[7rem] flex-1 text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
             r.outlookIsCancelled && "text-[var(--text-soft)] line-through"
           )}
         >
@@ -629,24 +629,24 @@ function CalendarToolbar({
 
   return (
     <>
-      <div className="mb-3 flex flex-col gap-3 border-b border-[var(--border)] pb-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+      <div className="beacon-calendar-toolbar">
         <div className="min-w-0">
           <span className="block text-[length:var(--fs-2xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
             {VIEW_LABEL[view] || "Calendar"} view
           </span>
-          <h2 className="num m-0 truncate font-[family-name:var(--font-display)] text-[length:var(--fs-xl)] font-semibold leading-[var(--lh-tight)] tracking-[var(--tracking-tight)] text-[var(--text)] sm:text-[length:var(--fs-2xl)]">
+          <h2 className="beacon-calendar-period num m-0 font-[family-name:var(--font-display)] text-[length:var(--fs-xl)] font-semibold leading-[var(--lh-tight)] tracking-[var(--tracking-tight)] text-[var(--text)] sm:text-[length:var(--fs-2xl)]">
             {label}
           </h2>
         </div>
 
-        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+        <div className="beacon-calendar-controls">
           {/* Period navigation */}
           <div className="inline-flex shrink-0 items-center gap-0.5 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface-2)] p-0.5">
-            <Tooltip label="Previous">
+            <Tooltip label="Previous period">
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Previous"
+                aria-label="Previous calendar period"
                 className={navBtn}
                 onClick={() => onNavigate("PREV")}
               >
@@ -661,11 +661,11 @@ function CalendarToolbar({
             >
               Today
             </Button>
-            <Tooltip label="Next">
+            <Tooltip label="Next period">
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label="Next"
+                aria-label="Next calendar period"
                 className={navBtn}
                 onClick={() => onNavigate("NEXT")}
               >
@@ -723,7 +723,7 @@ function CalendarToolbar({
                 className="hidden h-8 shrink-0 px-2 sm:inline-flex"
               >
                 <Icon name="info" size={15} />
-                <span className="hidden lg:inline">Key</span>
+                <span>Key</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-[290px]">
@@ -734,7 +734,7 @@ function CalendarToolbar({
           {canSync && (
             <Tooltip label="Pull the latest from Outlook">
               <Button
-                variant="default"
+                variant="outline"
                 size="sm"
                 className="hidden h-8 shrink-0 sm:inline-flex"
                 onClick={onSyncNow}
@@ -742,7 +742,7 @@ function CalendarToolbar({
                 loading={syncing}
               >
                 {!syncing && <Icon name="bolt" size={14} />}
-                <span>{syncing ? "Syncing…" : "Sync"}</span>
+                <span>{syncing ? "Syncing…" : "Sync Outlook"}</span>
               </Button>
             </Tooltip>
           )}
@@ -933,7 +933,7 @@ export function EventsCalendar({
   return (
     <div
       className={cn(
-        `cal-shell cal-view-${effectiveView}`,
+        `cal-shell beacon-events-calendar cal-view-${effectiveView}`,
         "relative min-w-0 rounded-[var(--radius-lg)] border border-[var(--border)]",
         "bg-[var(--surface)] p-3 shadow-[var(--shadow-sm)] sm:p-5",
         RBC_BRIDGE

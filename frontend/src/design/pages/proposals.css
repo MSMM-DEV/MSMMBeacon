@@ -1,0 +1,142 @@
+.proposal-workspace {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.proposal-orientation {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(16px);
+  animation: proposal-enter 260ms cubic-bezier(.2,.7,.2,1) both;
+}
+
+.proposal-orientation-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 12px;
+}
+
+.proposal-orientation-copy { min-width: 0; flex: 1; }
+.proposal-orientation h2 { margin: 0 0 4px; font-size: 16px; font-weight: 650; color: var(--text); }
+.proposal-orientation p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-muted); overflow-wrap: anywhere; }
+.proposal-orientation-note { display: flex; align-items: center; gap: 8px; max-width: 240px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.proposal-orientation-note svg { flex-shrink: 0; }
+.proposal-workspace > .tablewrap { min-width: 0; max-width: 100%; }
+.proposal-field-label { display: none; }
+.proposal-workspace .trow .td { padding-top: 16px; padding-bottom: 16px; }
+.proposal-workspace .trow .proposal-identity { display: flex; align-items: center; gap: 8px; }
+.proposal-identity-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; flex: 1; min-width: 0; }
+.proposal-workspace .proposal-identity-copy > span:first-child { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.proposal-workspace .proposal-identity .bxt-projno { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.proposal-workspace .bxt-td-note > span { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.6; }
+.proposal-details { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: var(--surface); cursor: pointer; transition: background 140ms, color 140ms, border-color 140ms; }
+.proposal-details:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.proposal-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.proposal-workspace .bxt-pipeactions { display: flex; align-items: center; gap: 8px; }
+.proposal-workspace .bxt-rowbtn.proposal-verdict { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; gap: 6px; width: auto; min-width: 76px; height: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface); font-family: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.proposal-workspace .bxt-rowbtn.proposal-verdict:hover { background: var(--surface-2); border-color: var(--text-muted); }
+.proposal-workspace .bxt-rowbtn.proposal-award { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); background: var(--accent-soft); }
+.proposal-workspace .bxt-rowbtn.proposal-award:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface)); border-color: var(--accent); }
+.proposal-workspace .bxt-rowbtn.proposal-verdict:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.proposal-workspace .bxt-rowbtn-verdict.proposal-verdict:hover { color: var(--rose-ink); background: var(--rose-soft); border-color: var(--rose); }
+
+@keyframes proposal-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 900px) { .proposal-orientation { flex-wrap: wrap; } .proposal-orientation-note { flex-basis: 100%; max-width: none; margin-left: 60px; } }
+@media (max-width: 767px) {
+  .proposal-orientation { padding: 16px; gap: 12px; align-items: flex-start; }
+  .proposal-orientation-note { margin-left: 0; }
+  .proposal-orientation-copy { flex-basis: calc(100% - 56px); }
+  .proposal-workspace .bxt-rowbtn.proposal-verdict, .proposal-workspace .bxt-rowbtn, .proposal-details { min-height: 44px; }
+  .proposal-workspace .bxt-chip, .proposal-workspace .bxt-tool { min-height: 44px; }
+  .proposal-workspace .table-scroll { overflow: visible; min-height: 0; max-height: none; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .proposal-workspace .tablewrap.is-maximized .table-scroll { overflow-x: hidden; overflow-y: auto; }
+  .proposal-workspace .table-scroll-body { width: 100%; min-width: 0; display: grid; gap: 12px; }
+  /* Sort remains available in the toolbar; removed headers have no hidden
+     keyboard controls. Actual record labels identify every visible field. */
+  .proposal-workspace .thead, .proposal-workspace .table-top-scroll,
+  .proposal-workspace .bxt-scroll-hint { display: none; }
+  .proposal-workspace .tablewrap[data-skin="clean"] .table-scroll-body .trow.proposal-record,
+  .proposal-workspace .tablewrap[data-skin="clean"] .table-scroll-body .trow.proposal-record:hover {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) !important;
+    min-width: 0;
+    padding: 8px 16px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: none;
+  }
+  .proposal-workspace .tablewrap[data-skin="clean"] .proposal-record::after { content: none; }
+  .proposal-workspace .table-scroll-body .proposal-record > .td {
+    min-width: 0;
+    min-height: 44px;
+    padding: 2px 0;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    white-space: normal;
+    overflow: visible;
+    box-shadow: none;
+  }
+  .proposal-workspace .proposal-record .proposal-field-label {
+    display: block;
+    flex: 0 0 104px;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+    text-align: left;
+  }
+  .proposal-workspace .proposal-record > .td > :not(.proposal-field-label) {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .proposal-workspace .table-scroll-body .proposal-record > .proposal-identity {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    padding-block: 0 8px;
+    gap: 8px 12px;
+  }
+  .proposal-workspace .proposal-identity > .proposal-field-label { grid-column: 1 / -1; min-height: 44px; display: flex; align-items: center; padding-right: 56px; }
+  .proposal-workspace .proposal-identity-copy { gap: 8px; font-size: 16px; }
+  .proposal-workspace .proposal-details { width: 44px; height: 44px; }
+  .proposal-workspace .proposal-record [data-editable="true"] { display: inline-flex; align-items: center; white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
+  .proposal-workspace .proposal-record input:not([type="checkbox"]),
+  .proposal-workspace .proposal-record select,
+  .proposal-workspace .proposal-record textarea { min-width: 0; max-width: 100%; font-size: 16px; }
+  .proposal-workspace .table-scroll-body .proposal-record > .row-check { position: absolute; top: 8px; right: 16px; width: 44px; height: 44px; padding: 0; justify-content: center; z-index: 1; }
+  .proposal-workspace .proposal-record .row-check input { width: 24px; height: 24px; margin: 10px; }
+  .proposal-workspace .table-scroll-body .proposal-record > .bxt-td-actions {
+    position: static;
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    background: transparent;
+  }
+  .proposal-workspace .proposal-record .bxt-pipeactions { width: 100%; flex-wrap: wrap; gap: 8px; opacity: 1; }
+  .proposal-workspace .proposal-record .bxt-rowbtn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .proposal-workspace .proposal-record .proposal-verdict { flex: 1 1 auto; }
+  .proposal-workspace .table-scroll-body .bxt-orghead { grid-template-columns: minmax(0, 1fr) !important; min-width: 0; }
+  .proposal-workspace .bxt-orghead-inner { position: static; flex-wrap: wrap; white-space: normal; }
+  .proposal-workspace .bxt-orghead-cell { min-width: 0; padding-inline: 16px; }
+}
+@media (max-width: 767px) and (hover: none) {
+  .proposal-workspace .proposal-record:hover [data-editable="true"] { border-color: transparent; }
+  .proposal-workspace .proposal-record [data-editable="true"]:active { background: var(--surface-2); }
+}
+@media (prefers-reduced-motion: reduce) { .proposal-orientation { animation: none; } .proposal-workspace button { transition: none; } }

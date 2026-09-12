@@ -18,14 +18,14 @@ import {
 // AlertsAdmin — "Dispatch Desk" for the alert system. Lives inside AdminPanel
 // as the second tab. Admin-only.
 //
-// Visual identity: warm paper base, a quiet masthead, monospace timestamps and
+// Visual identity: cool opaque data surfaces, frosted controls, timestamps and
 // status chips that pair a semantic tint with an icon and a word, so state is
 // never carried by colour alone. The live indicator flips to "Live" whenever a
 // fire has recorded in the last ~5 minutes — a quiet "the system is awake"
 // signal, not a decoration.
 //
-// Semantic tokens follow the product-wide contract: sage = delivered, clay =
-// failed, ochre/brand = needs attention, steel = paused or informational.
+// Semantic tokens follow the product-wide contract: success = delivered,
+// danger = failed, brand = attention, neutral = paused or informational.
 // ============================================================================
 
 // Map beacon_v2.alert_subject_enum → {UI tab key, friendly label}. v2
@@ -124,8 +124,9 @@ function DispatchMasthead({ lastTick }) {
   return (
     <header className="dsp-masthead">
       <div className="dsp-masthead-text">
-        <p className="dsp-eyebrow">Beacon · Dispatch</p>
-        <h3 className="dsp-title">Alert rules</h3>
+        <p className="dsp-eyebrow">Notifications</p>
+        <h3 className="dsp-title">Alert delivery</h3>
+        <p className="dsp-description">Review schedules, recipients and delivery history in one place.</p>
       </div>
       <div className="dsp-status">
         <Badge tone={live ? "success" : "neutral"} dot>
@@ -255,7 +256,7 @@ function RecipientsEditor({ initial, users, onCancel, onSave }) {
               return (
                 <li key={uid} className="dsp-recip-tag">
                   <span className={`avatar xs ${u.color}`} aria-hidden="true">{u.initials}</span>
-                  <span className="bx-truncate">{u.name}</span>
+                  <span className="dsp-person-name">{u.name}</span>
                   <button
                     type="button"
                     className="dsp-recip-remove"
@@ -288,7 +289,7 @@ function RecipientsEditor({ initial, users, onCancel, onSave }) {
                     onClick={() => { setIds([...ids, u.id]); setQ(""); }}
                   >
                     <span className={`avatar xs ${u.color}`} aria-hidden="true">{u.initials}</span>
-                    <span className="bx-truncate">{u.name}</span>
+                    <span className="dsp-person-name">{u.name}</span>
                     <Icon name="plus" size={13} className="dsp-recip-add"/>
                   </button>
                 </li>
@@ -408,7 +409,7 @@ function AlertDispatchCard({ alert: a, subjectRow, users, onChanged, flash }) {
           </span>
           <span className="dsp-row-body">
             <span className="dsp-row-subject">
-              <span className="dsp-subject-name bx-truncate">{subjName}</span>
+              <span className="dsp-subject-name">{subjName}</span>
               {subjNumber && <span className="dsp-subject-num num">#{subjNumber}</span>}
               {!a.is_active && (
                 <Badge tone="info"><Icon name="pause" size={11}/>Paused</Badge>
@@ -433,21 +434,10 @@ function AlertDispatchCard({ alert: a, subjectRow, users, onChanged, flash }) {
                 </>
               )}
             </span>
+            <span className="dsp-history-hint">{expanded ? "Hide recipients & history" : "View recipients & history"}</span>
           </span>
-          <span className="dsp-row-recip">
-            {recipients.slice(0, 4).map(u => {
-              const ux = userById(u.id);
-              return (
-                <span key={u.id}
-                      className={`avatar xs ${ux?.color || ""}`}
-                      title={u.display_name || u.first_name || u.email}>
-                  {ux?.initials || ((u.first_name || u.email || "?")[0]).toUpperCase()}
-                </span>
-              );
-            })}
-            {recipients.length > 4 && (
-              <span className="avatar xs avatar-more">+{recipients.length - 4}</span>
-            )}
+          <span className="dsp-recipient-count">
+            <Icon name="users" size={13}/>{recipients.length} {recipients.length === 1 ? "recipient" : "recipients"}
           </span>
         </button>
 
@@ -455,23 +445,23 @@ function AlertDispatchCard({ alert: a, subjectRow, users, onChanged, flash }) {
           <Tooltip label={a.is_active ? "Pause this alert" : "Resume this alert"}>
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="sm"
               onClick={doPauseResume}
               disabled={busy}
               aria-label={a.is_active ? `Pause the alert on ${subjName}` : `Resume the alert on ${subjName}`}
             >
-              <Icon name={a.is_active ? "pause" : "play"} size={14}/>
+              <Icon name={a.is_active ? "pause" : "play"} size={14}/>{a.is_active ? "Pause" : "Resume"}
             </Button>
           </Tooltip>
           <Tooltip label="Edit recipients">
             <Button
               variant="ghost"
-              size="icon-sm"
+              size="sm"
               onClick={() => setEditingRec(v => !v)}
               disabled={busy}
               aria-label={`Edit recipients for the alert on ${subjName}`}
             >
-              <Icon name="users" size={14}/>
+              <Icon name="users" size={14}/>Recipients
             </Button>
           </Tooltip>
           <Tooltip label="Delete this alert">
@@ -525,9 +515,15 @@ function AlertDispatchCard({ alert: a, subjectRow, users, onChanged, flash }) {
 
       {expanded && (
         <div className="dsp-firelog-wrap">
+          <div className="dsp-recipient-summary">
+            <h4>Recipients</h4>
+            {recipients.length ? <ul>{recipients.map(u => (
+              <li key={u.id}><span>{u.display_name || u.first_name || u.email}</span>{u.email && <span>{u.email}</span>}</li>
+            ))}</ul> : <p>No recipients assigned.</p>}
+          </div>
           <div className="dsp-firelog-head">
             <Icon name="clock" size={12}/>
-            <span className="dsp-firelog-title">Fire history</span>
+            <span className="dsp-firelog-title">Delivery history</span>
             <span className="dsp-firelog-sub">last 12</span>
             <Button variant="ghost" size="xs" onClick={pullFires} disabled={loadingFires}>
               <Icon name="refresh" size={12}/>
@@ -638,7 +634,7 @@ export function AlertsAdmin({ subjectLookup = {}, users = [], onChanged }) {
           </Tooltip>
           <Tooltip label="Run the dispatcher once as this admin session">
             <Button variant="primary" size="sm" onClick={doRunTick} loading={ticking} disabled={ticking}>
-              {ticking ? "Ticking…" : <><Icon name="bolt" size={14}/>Run tick now</>}
+              {ticking ? "Dispatching…" : <><Icon name="bolt" size={14}/>Run dispatcher</>}
             </Button>
           </Tooltip>
         </div>

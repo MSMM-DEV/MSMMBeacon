@@ -6,6 +6,7 @@ import {
   Tabs, TabsList, TabsTrigger, TabCount,
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
   Sheet, SheetContent, SheetTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody,
   Tooltip, TooltipProvider,
 } from "@/ui";
 import {
@@ -45,6 +46,7 @@ import {
 import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
+import { playPageArrival } from "./lib/page-motion.js";
 import { invoiceIsOrange } from "./invoice-orange.js";
 import {
   groupAmendments,
@@ -264,16 +266,16 @@ const PAGE_META = {
   // No desc. The tab is called Proposals and the table shows proposals; a
   // sentence restating that sat between the title and the data on every visit.
   awaiting:  { title: "Proposals", desc: "" },
-  awarded:   { title: "Awarded Projects", desc: "Won contracts. Attach invoice projects by number, track capacity, or move forward when billing starts." },
+  awarded:   { title: "Awarded Projects", desc: "Manage delivery, contract capacity and the next step toward billing." },
   closed:    { title: "Closed Out Projects", desc: "Archived work: every sub, month, attachment, and note is preserved, just like In-Between. Reopen a project to move it back to Invoices; proposals closed without billing are listed below." },
-  invoice:   { title: "Anticipated Invoice", desc: "Monthly billing, with Actual and Projection split by today's date. Cash-flow charts up top, outstanding receivables at the bottom." },
+  invoice:   { title: "Anticipated Invoice", desc: "Plan monthly billing, review actuals and keep outstanding balances in view." },
   between:   { title: "In-Between", desc: "Paused projects. Every dollar, sub, attachment, and note stays intact, so you can resume to Invoices or close out." },
-  projects:  { title: "Projects", desc: "Tree-structured work breakdown of projects, phases, and subphases. Main items are containers; Standard items are where time & expenses get logged. Child contract totals can't exceed the parent." },
-  events:    { title: "Events & Other", desc: "Partner touchpoints, conferences, and meetings. Not linked to projects." },
+  projects:  { title: "Projects", desc: "Manage your portfolio, from project scope to individual phases." },
+  events:    { title: "Events & Other", desc: "Plan meetings, partner conversations and upcoming events." },
   hotleads:  { title: "Hot Leads",      desc: "Early-stage opportunities and conversations before they become Potential Projects." },
   "leads-deleted": { title: "Deleted: Leads & Bids", desc: "Deleted Hot Leads and Open Bids. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
   "proposals-deleted": { title: "Deleted: Proposals & Awarded", desc: "Deleted Proposals and Awarded projects. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
-  directory: { title: "Directory", desc: "Clients and companies on a single roster. Click a row to see every project they're linked to." },
+  directory: { title: "Directory", desc: "Find people and firms. Contact details first, linked projects one step away." },
   // No desc. The page's own colour key and the "Expiring soon" panel state
   // the same things, in place and against real data.
   licenses:  { title: "Licenses & Certifications", desc: "" },
@@ -1268,13 +1270,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // ---- App-shell chrome state (presentation only) --------------------
   // `railCollapsed` shrinks the desktop rail to an icon strip; `navOpen`
   // drives the sub-1024px overlay drawer. Neither touches app data.
-  // Collapsed is the DEFAULT (Gmail-style): the rail rests as an icon strip and
-  // expands on hover, so the tables get the full width until you reach for the
-  // nav. An explicit toggle pins it open, and that choice is what persists —
-  // an unset key means "never chosen", not "expanded".
+  // A labeled sidebar is the first-use default. The user's explicit compact
+  // preference remains persistent; compact mode expands on hover/focus.
   const [railCollapsed, setRailCollapsed] = useState(() => {
-    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) !== "0"; }
-    catch { return true; }
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; }
+    catch { return false; }
   });
   // Persist ONLY on a real toggle. The previous version wrote from an effect
   // keyed on [railCollapsed], which fired on mount and so recorded a preference
@@ -1288,6 +1288,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     return next;
   });
   const [navOpen, setNavOpen] = useState(false);
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const [jumpQuery, setJumpQuery] = useState("");
+  useEffect(() => {
+    const openJump = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setJumpQuery("");
+        setJumpOpen(value => !value);
+      }
+    };
+    window.addEventListener("keydown", openJump);
+    return () => window.removeEventListener("keydown", openJump);
+  }, []);
   // Crossing into desktop retires the drawer. The persistent rail takes over
   // there, and leaving the Sheet mounted would keep a focus trap on a panel
   // the user can no longer see.
@@ -1343,6 +1356,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   const [pendingFocusRowId, setPendingFocusRowId] = useState(null);
 
   useEffect(() => { localStorage.setItem("beacon-tab", tab); }, [tab]);
+  const pageRef = useRef(null);
+  useEffect(() => {
+    const page = pageRef.current;
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const duration = page ? parseFloat(getComputedStyle(page).getPropertyValue("--dur-page")) : 260;
+    const cancel = playPageArrival(page, { reducedMotion: preference.matches, duration: duration || 260 });
+    const onPreference = () => { if (preference.matches) cancel(); };
+    preference.addEventListener("change", onPreference);
+    return () => { cancel(); preference.removeEventListener("change", onPreference); };
+  }, [tab]);
   // Leaving the Projects section closes any open project detail page.
   useEffect(() => { setDetailProject(null); }, [tab]);
   useEffect(() => { localStorage.setItem("beacon-tweaks", JSON.stringify(tweaks)); }, [tweaks]);
@@ -5949,7 +5972,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         <span className="bx-mark" aria-hidden="true">B</span>
         <span className="bx-wordmark">
           <b>Beacon</b>
-          <span>The MSMM Operating System</span>
+          <span>MSMM Engineering</span>
         </span>
       </div>
       <div className="bx-rail-scroll" ref={scrollRef}>
@@ -5984,7 +6007,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <Icon name={railCollapsed ? "chevronsRight" : "chevronsLeft"} size={16}/>
-          <span className="bx-navitem-label">{railCollapsed ? "Keep open" : "Collapse"}</span>
+          <span className="bx-navitem-label">{railCollapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
         </button>
       </div>
     </>
@@ -6015,6 +6038,32 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         </SheetContent>
       </Sheet>
 
+      <Dialog open={jumpOpen} onOpenChange={setJumpOpen}>
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Go to a page</DialogTitle>
+            <DialogDescription>Find your place in the workspace.</DialogDescription>
+          </DialogHeader>
+          <div className="bx-jump-search">
+            <InputGroup autoFocus type="search" aria-label="Find a page" placeholder="Search pages…"
+              value={jumpQuery} onChange={event => setJumpQuery(event.target.value)} leading={<Icon name="search" size={18}/>}/>
+          </div>
+          <DialogBody className="p-0">
+            <div className="bx-jump-list">
+              {NAV_GROUPS.filter(group => !group.hidden && (!group.adminOnly || isAdmin) && group.label.toLowerCase().includes(jumpQuery.trim().toLowerCase())).map(group => (
+                <button key={group.key} type="button" className="bx-jump-item" onClick={() => { gotoGroup(group); setJumpOpen(false); }}>
+                  <Icon name={NAV_ICONS[group.key]} size={20}/>
+                  <span><strong>{group.label}</strong><small>{group.group === "pipeline" ? "Project lifecycle" : group.group === "admin" ? "Administration" : "Workspace"}</small></span>
+                  <Icon name="forward" size={16}/>
+                </button>
+              ))}
+              {!NAV_GROUPS.some(group => !group.hidden && (!group.adminOnly || isAdmin) && group.label.toLowerCase().includes(jumpQuery.trim().toLowerCase())) && <p className="p-5 text-muted-foreground">No matching pages. Try another name.</p>}
+            </div>
+          </DialogBody>
+          <div className="bx-workspace-shortcuts">Tab to move · Enter to open · Esc to close</div>
+        </DialogContent>
+      </Dialog>
+
       <div className="bx-main">
         <header className="bx-topbar">
           <Button
@@ -6036,22 +6085,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
           <div className="bx-topbar-spacer"/>
 
-          <InputGroup
-            className="bx-search hidden max-w-[300px] md:flex"
-            inputClassName="pr-11"
-            type="search"
-            aria-label="Search"
-            placeholder="Search projects, clients, people…"
-            leading={<Icon name="search" size={14}/>}
-            trailing={<Kbd>⌘K</Kbd>}
-          />
+          <button type="button" className="bx-jump-trigger" onClick={() => { setJumpQuery(""); setJumpOpen(true); }} aria-label="Go to a page">
+            <Icon name="search" size={16}/><span>Go to a page</span><Kbd>⌘ K</Kbd>
+          </button>
 
           <div className="bx-topbar-actions">
             <PwaOfflineChip/>
             <PwaInstallChip/>
-            <Tooltip label="Notifications">
-              <Button variant="ghost" size="icon" aria-label="Notifications">
-                <Icon name="bell" size={16}/>
+            <Tooltip label={tweaks.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+              <Button variant="ghost" size="icon" aria-label={tweaks.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTweak("theme", tweaks.theme === "dark" ? "light" : "dark")}>
+                <Icon name={tweaks.theme === "dark" ? "sun" : "moon"} size={18}/>
               </Button>
             </Tooltip>
             <Tooltip label={isAdmin ? "Admin · Users & tweaks" : "Tweaks"}>
@@ -6107,7 +6150,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         </header>
 
         <div className="bx-scroll">
-        <main id="bx-content" tabIndex={-1} className="bx-page">
+        <main id="bx-content" ref={pageRef} tabIndex={-1} className="bx-page" data-page={tab}>
         {detailLive && (
           <ProjectDetailPage
             project={detailLive}
@@ -6163,6 +6206,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {!detailLive && (<>
         <div className={`bx-pagehead ${tab === "timesheet" ? "bx-pagehead-compact" : ""}`}>
           <div className="bx-pagehead-text">
+            <p className="bx-page-eyebrow">{currentGroup?.group === "pipeline" ? "Project lifecycle" : currentGroup?.group === "admin" ? "Administration" : "Your workspace"}</p>
             <h1 className="bx-pagetitle">{pageTitle}</h1>
             {/* Skipped entirely when a tab has no blurb. `.bx-pagedesc` carries
                 a 6px top margin, so an empty <p> still pushed the page down by
@@ -6202,7 +6246,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : tab.endsWith("-deleted") ? null : (
+            ) : (tab.endsWith("-deleted") || !EXPORT_COLUMNS[tab]?.length) ? null : (
               <Button variant="default" size="sm" onClick={handleExport}>
                 <Icon name="export" size={14}/>Export PDF
               </Button>
@@ -6226,7 +6270,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
         {currentGroup && currentGroup.tabs.length > 1 && (
           <Tabs value={tab} onValueChange={setTab}>
-            <TabsList aria-label={`${currentGroup.label} sections`}>
+            <TabsList className="bx-page-tabs" aria-label={`${currentGroup.label} sections`}>
               {(SUB_TABS[currentGroup.key] || []).map(st => (
                 <TabsTrigger key={st.key} value={st.key}>
                   {st.icon && <Icon name={st.icon} size={14}/>}
@@ -6241,6 +6285,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         )}
 
         {["awaiting","awarded","invoice","between","closed"].includes(tab) && (
+          <details key={`financial-snapshot-${tab}`} className="bx-portfolio-summary" open={tab === "invoice"}>
+            <summary><Icon name="chart" size={15}/><strong>Workspace financial snapshot</strong><span>Pipeline, paused work and actual billings</span><Icon name="chevronDown" size={15}/></summary>
           <section
             className="bx-metrics"
             style={{ "--bx-metrics-cols": stats.length }}
@@ -6259,6 +6305,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               </div>
             ))}
           </section>
+          </details>
         )}
 
         {tab === "openbids" && (
@@ -6282,19 +6329,31 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onYearChange={(y) => setYear("openbids", y)}/>
         )}
         {tab === "leads-deleted" && (
-          <div className="bx-stack">
+          <div className="leads-archive">
+            {(deletedLeads.length > 0 || deletedOpenBids.length > 0) && (
+              <div className="leads-archive-guide">
+                <p>Review the record, then select Restore. Its saved fields stay intact when it returns to its original tab.</p>
+                <nav className="leads-archive-index" aria-label="Deleted record types">
+                  {deletedLeads.length > 0
+                    ? <a href="#deleted-hot-leads">Hot Leads <strong>{deletedLeads.length}</strong></a>
+                    : <span>Hot Leads <strong>0</strong></span>}
+                  {deletedOpenBids.length > 0
+                    ? <a href="#deleted-open-bids">Open Bids <strong>{deletedOpenBids.length}</strong></a>
+                    : <span>Open Bids <strong>0</strong></span>}
+                </nav>
+              </div>
+            )}
             {deletedLeads.length === 0 && deletedOpenBids.length === 0 && (
               <EmptyState
-                title="Nothing deleted"
-                description="Deleted Hot Leads and Open Bids land here with every field intact. Restore any row to send it back."
+                title="No records to recover"
+                description="Deleted Hot Leads and Open Bids will appear here with their saved fields intact. You can review and restore them to their original tab."
               />
             )}
             {deletedLeads.length > 0 && (
-              <section>
-                <div className="bx-sectionhead">
-                  <h2>Deleted Hot Leads</h2>
-                  <span className="bx-sectioncount num">{deletedLeads.length}</span>
-                  <span className="bx-rule" aria-hidden="true"/>
+              <section className="leads-archive-section" id="deleted-hot-leads" aria-labelledby="deleted-hot-leads-title">
+                <div className="leads-archive-section-head">
+                  <h2 id="deleted-hot-leads-title">Hot Leads <span className="bx-sectioncount num">{deletedLeads.length}</span></h2>
+                  <p>Restores to Hot Leads</p>
                 </div>
                 <HotLeadsTable rows={deletedLeads}
                   updateRow={deletedRowReadOnly}
@@ -6307,11 +6366,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               </section>
             )}
             {deletedOpenBids.length > 0 && (
-              <section>
-                <div className="bx-sectionhead">
-                  <h2>Deleted Open Bids</h2>
-                  <span className="bx-sectioncount num">{deletedOpenBids.length}</span>
-                  <span className="bx-rule" aria-hidden="true"/>
+              <section className="leads-archive-section" id="deleted-open-bids" aria-labelledby="deleted-open-bids-title">
+                <div className="leads-archive-section-head">
+                  <h2 id="deleted-open-bids-title">Open Bids <span className="bx-sectioncount num">{deletedOpenBids.length}</span></h2>
+                  <p>Restores to Open Bids</p>
                 </div>
                 <OpenBidsTable rows={deletedOpenBids}
                   updateRow={deletedRowReadOnly}
@@ -6372,20 +6430,43 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             onOpenInvoiceProject={openInvoiceProject}/>
         )}
         {tab === "proposals-deleted" && (
-          <div className="bx-stack">
+          <div className="proposals-archive-workspace">
+            {(deletedAwaiting.length > 0 || deletedAwarded.length > 0) && (
+              <nav className="proposals-archive-guide" aria-label="Deleted project sections">
+                <div className="proposals-archive-guide-copy">
+                  <span className="proposals-archive-eyebrow">Recovery workspace</span>
+                  <p>Find the project, review its retained details, then choose Restore on its row.</p>
+                </div>
+                <div className="proposals-archive-links">
+                  {deletedAwaiting.length > 0 && (
+                    <a href="#deleted-proposals-register">
+                      <span>Proposals</span>
+                      <strong className="num">{deletedAwaiting.length}</strong>
+                      <Icon name="chevronDown" size={16}/>
+                    </a>
+                  )}
+                  {deletedAwarded.length > 0 && (
+                    <a href="#deleted-awarded-register">
+                      <span>Awarded</span>
+                      <strong className="num">{deletedAwarded.length}</strong>
+                      <Icon name="chevronDown" size={16}/>
+                    </a>
+                  )}
+                </div>
+              </nav>
+            )}
             {deletedAwaiting.length === 0 && deletedAwarded.length === 0 && (
               <EmptyState
-                title="Nothing deleted"
-                description="Deleted Proposals and Awarded projects land here with every field intact. Restore any row to send it back."
+                title="No projects to recover"
+                description="Deleted proposals and awarded projects will appear here with their fields intact. Restore a record to return it to its original list."
               />
             )}
             {deletedAwaiting.length > 0 && (
-              <section>
-                <div className="bx-sectionhead">
-                  <h2>Deleted Proposals</h2>
-                  <span className="bx-sectioncount num">{deletedAwaiting.length}</span>
-                  <span className="bx-rule" aria-hidden="true"/>
-                </div>
+              <section id="deleted-proposals-register" className="proposals-archive-section" aria-labelledby="deleted-proposals-heading">
+                <header className="proposals-archive-section-heading">
+                  <div><h2 id="deleted-proposals-heading">Proposals</h2><span className="proposals-archive-count num">{deletedAwaiting.length}</span></div>
+                  <p>Restore returns the project to Proposals. Its retained fields remain available for review below.</p>
+                </header>
                 <AwaitingTable rows={deletedAwaiting}
                   updateRow={deletedRowReadOnly}
                   onOpenDrawer={() => {}}
@@ -6397,12 +6478,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               </section>
             )}
             {deletedAwarded.length > 0 && (
-              <section>
-                <div className="bx-sectionhead">
-                  <h2>Deleted Awarded</h2>
-                  <span className="bx-sectioncount num">{deletedAwarded.length}</span>
-                  <span className="bx-rule" aria-hidden="true"/>
-                </div>
+              <section id="deleted-awarded-register" className="proposals-archive-section" aria-labelledby="deleted-awarded-heading">
+                <header className="proposals-archive-section-heading">
+                  <div><h2 id="deleted-awarded-heading">Awarded projects</h2><span className="proposals-archive-count num">{deletedAwarded.length}</span></div>
+                  <p>Restore returns the project to Awarded. Review its delivery and contract details before recovering it.</p>
+                </header>
                 <AwardedTable rows={deletedAwarded}
                   updateRow={deletedRowReadOnly}
                   onOpenDrawer={() => {}}
@@ -6439,15 +6519,33 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           // go straight to the pipeline list.
           const showInvoiceTable = closedInv.length > 0 || closedNoBilling.length === 0;
           return (
-            <>
+            <div className="closed-workspace">
+              <nav className="closed-archive-nav" aria-label="Closed out archives">
+                <div className="closed-archive-intro">
+                  <span className="closed-archive-label">Project archive</span>
+                  <p>Find the final record, review its history, or reopen a billed project.</p>
+                </div>
+                {showInvoiceTable && (
+                  <a href="#closed-billing-history" className="closed-archive-link">
+                    <span><strong>Billing history</strong><small>Months, subs, files and notes</small></span>
+                    <span className="closed-archive-count num">{closedInv.length}</span>
+                    <Icon name="chevronDown" size={16}/>
+                  </a>
+                )}
+                {closedNoBilling.length > 0 && (
+                  <a href="#closed-without-billing" className="closed-archive-link">
+                    <span><strong>Without billing</strong><small>Closure dates and reasons</small></span>
+                    <span className="closed-archive-count num">{closedNoBilling.length}</span>
+                    <Icon name="chevronDown" size={16}/>
+                  </a>
+                )}
+              </nav>
               {showInvoiceTable && (
-                <>
-                  {closedInv.length > 0 && (
-                    <Alert tone="success" title="Closed out, with billing history preserved">
-                      Every sub, month, attachment, and note is kept. Reopen a
-                      project to move it back to Invoices.
-                    </Alert>
-                  )}
+                <section id="closed-billing-history" className="closed-archive-section" aria-labelledby="closed-billing-title">
+                  <header className="closed-section-heading">
+                    <h2 id="closed-billing-title">Billing history</h2>
+                    <p>Every month, sub, attachment and note is retained. Use Reopen on a project to return it to Invoices.</p>
+                  </header>
                   <InvoiceTable rows={closedInv}
                     windowMonths={invWindowMonths}
                     onWindowBack={() => setInvWindowStart(s => s - 1)}
@@ -6487,18 +6585,17 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     setTypeFilter={setInvoiceTypeFilter}
                     billingMode="closed"
                     onResume={reopenInvoiceProject}/>
-                </>
+                </section>
               )}
               {closedNoBilling.length > 0 && (
-                <section className="bx-subsection">
+                <section id="closed-without-billing" className="closed-archive-section" aria-labelledby="closed-without-billing-title">
                   <div className="bx-sectionhead">
-                    <h2>Closed without billing</h2>
+                    <h2 id="closed-without-billing-title">Closed without billing</h2>
                     <span className="bx-sectioncount num">{closedNoBilling.length}</span>
                     <span className="bx-rule" aria-hidden="true"/>
                   </div>
                   <p className="bx-sectionnote">
-                    Proposals and projects closed out before any invoice was
-                    raised, so there are no billing rows to show.
+                    Proposals and projects that ended before billing began. Review the closure reason or open the complete record.
                   </p>
                   <ClosedTable rows={closedNoBilling}
                     updateRow={updateClosed}
@@ -6512,7 +6609,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                     onYearChange={(y) => setYear("closed", y)}/>
                 </section>
               )}
-            </>
+            </div>
           );
         })()}
         {tab === "invoice" && (() => {
@@ -6526,6 +6623,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           for (const p of closed)    projectsById.set(p.id, { name: p.name, projectNumber: p.projectNumber, year: p.year, statusKey: "closed"    });
           return (
             <>
+              <details className="bx-portfolio-summary invoice-analysis" open>
+                <summary><Icon name="chart" size={15}/><strong>Revenue outlook</strong><span>Actuals, forecasts and monthly targets</span><Icon name="chevronDown" size={15}/></summary>
               <InvoiceCharts
                 rows={filtered.invoice}
                 allRows={invoiceMerged}
@@ -6534,6 +6633,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 monthlyBenchmark={appSettings.monthlyInvoiceBenchmark}
                 subInvoices={subInvoicesAmended}
               />
+              </details>
               <InvoiceTable rows={filtered.invoice}
                 windowMonths={invWindowMonths}
                 onWindowBack={() => setInvWindowStart(s => s - 1)}
@@ -6596,6 +6696,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           // Paused projects — the same InvoiceTable surface (months, files,
           // subs, notes all live), minus the charts/receivables chrome. Rows
           // resume to Invoices or close out from here.
+          <div className="between-workspace">
+            <aside className="between-context" aria-label="About paused projects">
+              <div className="between-context-intro">
+                <span className="between-context-icon" aria-hidden="true"><Icon name="pause" size={18}/></span>
+                <div>
+                  <strong>On hold, not closed</strong>
+                  <p>Billing, files and notes remain available while work is paused.</p>
+                </div>
+              </div>
+              <details className="between-guidance">
+                <summary>Review and next steps</summary>
+                <ol>
+                  <li><strong>Review the project</strong><span>Open its breakdown to check firms, bills, payments and supporting files.</span></li>
+                  <li><strong>Ready to continue?</strong><span>Use the row’s Resume action to return it to Invoices.</span></li>
+                  <li><strong>Work is finished?</strong><span>Use Close out on the row to enter the project’s closure details.</span></li>
+                </ol>
+              </details>
+            </aside>
           <InvoiceTable rows={filtered.between}
             windowMonths={invWindowMonths}
             onWindowBack={() => setInvWindowStart(s => s - 1)}
@@ -6636,6 +6754,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             billingMode="between"
             onResume={resumeInvoiceProject}
             onCloseOutRow={r => triggerForward(r, "invoice", "closed")}/>
+          </div>
         )}
         {tab === "projects" && (
           <ProjectsTable
@@ -7269,6 +7388,19 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 // ======================================================================
 export default function App() {
   const [phase, setPhase] = useState("booting");   // "booting" | "anon" | "loading" | "ready" | "error"
+  const [entryTheme, setEntryTheme] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("beacon-tweaks") || "null")?.theme || DEFAULT_TWEAKS.theme; }
+    catch { return DEFAULT_TWEAKS.theme; }
+  });
+  const toggleEntryTheme = () => {
+    const theme = entryTheme === "dark" ? "light" : "dark";
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem("beacon-tweaks") || "null"); } catch { saved = null; }
+    const next = { ...DEFAULT_TWEAKS, ...saved, theme };
+    applyTweaks(next);
+    try { localStorage.setItem("beacon-tweaks", JSON.stringify(next)); } catch { /* Appearance still works when storage is unavailable. */ }
+    setEntryTheme(theme);
+  };
   const [error, setError] = useState(null);
   const [data, setData]   = useState(null);
   const [beaconUser, setBeaconUser] = useState(null);
@@ -7340,7 +7472,7 @@ export default function App() {
   // the audience most likely to be sitting on a stale build.
   const body =
     phase === "error"                ? <LoadingScreen error={error}/>          :
-    phase === "anon"                 ? <LoginPage onSignedIn={hydrate}/>       :
+    phase === "anon"                 ? <LoginPage onSignedIn={hydrate} theme={entryTheme} onToggleTheme={toggleEntryTheme}/> :
     (phase !== "ready" || !data)     ? <LoadingScreen/>                        :
     <BeaconApp
       initial={data}

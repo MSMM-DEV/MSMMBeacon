@@ -1,0 +1,126 @@
+/* Recovery-specific hierarchy; the live registers keep their own introductions. */
+.leads-archive {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+
+.leads-archive-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg, var(--surface));
+  backdrop-filter: blur(16px);
+}
+
+.leads-archive-guide > p {
+  flex: 1 1 260px;
+  margin: 0;
+  max-width: 65ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.leads-archive-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.leads-archive-index > :is(a, span) {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+
+.leads-archive-index > a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-softer, var(--surface-2));
+}
+
+.leads-archive-index > a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.leads-archive-index strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.leads-archive-section {
+  min-width: 0;
+  scroll-margin-top: calc(var(--topbar-h, 68px) + 24px);
+}
+
+.leads-archive-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.leads-archive-section-head h2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.leads-archive-section-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.leads-archive-section-head .bx-sectioncount {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.leads-archive :is(.beacon-leads-register-head, .openbids-orientation) {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .leads-archive { gap: 20px; }
+  .leads-archive-guide { padding: 16px; gap: 12px; }
+  .leads-archive-index { width: 100%; }
+  .leads-archive-index > :is(a, span) { flex: 1 1 120px; justify-content: space-between; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leads-archive-index > a { transition: none; }
+}

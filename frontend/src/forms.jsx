@@ -352,11 +352,23 @@ function FormRow({ id, label, required, hint, error, wide, group, labelledBy, ch
   );
 }
 
+const SECTION_HINTS = {
+  Identification: "Start with the name, reference and place in your project hierarchy.",
+  "Project details": "Identify the opportunity and the client it belongs to.",
+  "Client and team": "Connect the organizations and people responsible for this work.",
+  Contract: "Record the commercial terms and delivery dates.",
+  Location: "Add the project address when it is available.",
+  Notes: "Keep supporting context with the record.",
+};
+
 function Section({ title, children }) {
   return (
     <section className="cm-section">
       {/* DialogTitle is the h2; sections are the next level down. */}
-      <h3 className="cm-section-title">{title}</h3>
+      <div className="cm-section-heading">
+        <h3 className="cm-section-title">{title}</h3>
+        {SECTION_HINTS[title] && <p className="cm-section-hint">{SECTION_HINTS[title]}</p>}
+      </div>
       <div className="cm-grid">{children}</div>
     </section>
   );
@@ -1621,6 +1633,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent
         size="lg"
+        className="record-create"
         aria-busy={pending || undefined}
         onPointerDownOutside={keepOpenOverCombobox}
         onInteractOutside={keepOpenOverCombobox}
@@ -1634,7 +1647,7 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
             <div className="min-w-0">
               <p className="cm-eyebrow">Create</p>
               <DialogTitle>{titleCfg.title}</DialogTitle>
-              <DialogDescription>Fields marked with an asterisk are required.</DialogDescription>
+              <DialogDescription>Build the record below. Fields marked with an asterisk are required.</DialogDescription>
             </div>
           </div>
         </DialogHeader>

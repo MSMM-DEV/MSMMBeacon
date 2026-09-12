@@ -1,0 +1,156 @@
+/* Licenses: a renewal agenda, legible register and structured editor. */
+.lcx-redesign { gap: 24px; }
+.lcx-redesign .lcx-actions { gap: 12px; align-items: center; }
+.lcx-workspace-intro { display: flex; align-items: center; gap: 12px; flex: 1 1 300px; min-width: 0; }
+.lcx-workspace-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border: 1px solid var(--border); border-radius: 12px; color: var(--accent); background: var(--surface); }
+.lcx-workspace-intro strong { color: var(--text); font-size: 14px; font-weight: 600; }
+.lcx-workspace-intro p { margin: 3px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.lcx-redesign .lcx-remindmsg { flex: 1 0 100%; order: 1; padding: 12px 16px; background: var(--surface-2); border-radius: 8px; }
+.lcx-renewals { min-width: 0; border: 1px solid var(--border); border-radius: 16px; background: color-mix(in srgb, var(--surface) 92%, transparent); padding: 20px; box-shadow: 0 4px 20px color-mix(in srgb, var(--text) 3%, transparent); }
+.lcx-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; min-width: 0; }
+.lcx-section-heading > div { min-width: 0; }
+.lcx-section-heading h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; color: var(--text); font-family: var(--font-body, sans-serif); font-weight: 600; font-size: 18px; line-height: 1.4; letter-spacing: -.025em; }
+.lcx-section-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.lcx-eyebrow { display: block; font-size: 11px; line-height: 1.5; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 5px; }
+.lcx-heading-count { display: inline-grid; place-items: center; min-width: 26px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--text-muted); font-size: 12px; letter-spacing: 0; }
+.lcx-redesign .lcx-tl-empty { background: var(--surface-2); border-style: solid; border-color: var(--border); border-radius: 10px; padding: 16px; }
+.lcx-renewal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 12px; min-width: 0; }
+.lcx-renewal-card { display: flex; flex-direction: column; gap: 9px; align-items: stretch; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; font: inherit; transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease; }
+.lcx-renewal-card:hover { border-color: var(--accent); background: var(--surface-2); box-shadow: 0 4px 14px color-mix(in srgb, var(--text) 5%, transparent); }
+.lcx-renewal-card:focus-visible, .lcx-redesign .lcx-filter:focus-visible, .lcx-redesign .lcx-rowbtn:focus-visible, .lcx-editor .lcx-file-name:focus-visible, .lcx-editor .lcx-chip > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.lcx-renewal-card > strong { margin-top: 3px; font-size: 15px; line-height: 1.45; font-weight: 600; overflow-wrap: anywhere; }
+.lcx-renewal-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--lcx-c-ink); font-size: 12px; font-weight: 600; }
+.lcx-renewal-status svg { flex: none; }
+.lcx-renewal-status svg:last-child { margin-left: auto; color: var(--text-muted); }
+.lcx-renewal-kind { color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.lcx-renewal-date { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; color: var(--text-muted); font-size: 12px; }
+.lcx-renewal-date .num { color: var(--text); font-weight: 550; }
+.lcx-redesign .lcx-register { min-width: 0; }
+.lcx-redesign .lcx-count { padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 12px; }
+.lcx-redesign .lcx-filters { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 0 0 16px; overflow: visible; }
+.lcx-redesign .lcx-filter { display: grid; grid-template-columns: 18px minmax(0, 1fr); grid-template-rows: auto 1fr; align-items: center; gap: 8px; min-width: 0; min-height: 82px; padding: 12px; background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); border-radius: 10px; white-space: normal; translate: none; }
+.lcx-redesign .lcx-filter-label { min-width: 0; grid-column: 1 / -1; grid-row: 2; font-size: 12px; line-height: 1.4; text-align: left; overflow-wrap: anywhere; }
+.lcx-redesign .lcx-filter-icon { grid-column: 1; grid-row: 1; }
+.lcx-redesign .lcx-filter-count { grid-column: 2; grid-row: 1; justify-self: end; padding: 0; color: var(--text); background: transparent; font-size: 20px; line-height: 1; font-weight: 600; }
+.lcx-redesign .lcx-filter[aria-pressed="true"] { padding: 12px; border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent); }
+.lcx-redesign .lcx-filter[aria-pressed="true"]::before { display: none; }
+.lcx-redesign .lcx-filter[aria-pressed="true"] .lcx-filter-count { background: transparent; color: var(--accent-ink); }
+.lcx-redesign .lcx-filter:hover { border-color: var(--accent); }
+.lcx-redesign .lcx-toolbar { gap: 10px; margin-bottom: 16px; }
+.lcx-redesign .lcx-search { max-width: none; flex: 1 1 260px; min-width: 0; }
+.lcx-redesign .lcx-filtermenu { max-width: 260px; height: auto; min-height: 38px; }
+.lcx-redesign .lcx-filtermenu-text { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-align: left; }
+.lcx-redesign .lcx-clear { width: 28px; height: 28px; }
+.lcx-redesign .lcx-tablewrap { border-radius: 12px; box-shadow: none; }
+.lcx-redesign .lcx-table { min-width: 920px; table-layout: auto; font-size: 13px; }
+.lcx-redesign .lcx-table thead th { padding: 13px 14px; background: var(--surface-2); text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text-muted); }
+.lcx-redesign .lcx-grouprow th { padding: 10px 14px; background: var(--surface); color: var(--text-muted); font-size: 12px; text-transform: none; letter-spacing: 0; }
+.lcx-redesign .lcx-groupcount { border-radius: 5px; font-size: 12px; }
+.lcx-redesign .lcx-row > td { padding: 15px 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.lcx-redesign .lcx-row > td:first-child { box-shadow: none; }
+.lcx-redesign .lcx-cell-entity { min-width: 190px; max-width: 340px; }
+.lcx-redesign .lcx-rowbtn { max-width: none; width: 100%; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; font-size: 14px; line-height: 1.5; }
+.lcx-redesign .lcx-rowmeta { flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.lcx-redesign .lcx-metaitem, .lcx-redesign .lcx-subline { font-size: 12px; }
+.lcx-redesign .lcx-cell-no { max-width: 200px; }
+.lcx-redesign .lcx-cell-status { min-width: 136px; }
+.lcx-redesign .lcx-cell-status > *, .lcx-redesign td[data-label="Reminders"] > * { height: auto; white-space: normal; }
+.lcx-editor h2, .lcx-editor p, .lcx-editor label { overflow-wrap: anywhere; }
+.lcx-editor .lcx-form { gap: 24px; padding: 24px; }
+.lcx-editor .lcx-preview { padding: 16px; border-radius: 12px; background: var(--surface-2); border-color: var(--border); }
+.lcx-editor .lcx-preview-top { gap: 12px; flex-wrap: wrap; }
+.lcx-editor .lcx-preview-days { font-size: 22px; color: var(--text); }
+.lcx-editor .lcx-preview-sub { color: var(--text-muted); opacity: 1; font-size: 12px; }
+.lcx-editor .lcx-meter { height: 4px; background: var(--border); }
+.lcx-editor .lcx-meter > span { transition: none; }
+.lcx-editor-section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.lcx-editor-section + .lcx-editor-section { border-top: 1px solid var(--border); padding-top: 24px; }
+.lcx-editor-sectionhead { display: flex; align-items: start; gap: 12px; min-width: 0; }
+.lcx-editor-sectionhead > span { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.lcx-editor-sectionhead h3 { margin: 0; font-size: 15px; line-height: 1.5; font-weight: 600; color: var(--text); }
+.lcx-editor-sectionhead p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.lcx-editor .lcx-form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.lcx-editor .lcx-form-row > *, .lcx-editor .lcx-form-row input { min-width: 0; max-width: 100%; }
+.lcx-editor .lcx-switchrow { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); gap: 12px; }
+.lcx-editor .lcx-switchtext p { color: var(--text-muted); font-size: 12px; }
+.lcx-editor .lcx-switchstate { font-size: 12px; }
+.lcx-editor .lcx-files { width: 100%; gap: 10px; }
+.lcx-editor .lcx-file { width: 100%; min-width: 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); }
+.lcx-editor .lcx-file-name { flex: 1; min-width: 0; max-width: 100%; font-size: 13px; line-height: 1.5; text-align: left; }
+.lcx-editor .lcx-file > button:last-child { flex: none; }
+.lcx-full-text { min-width: 0; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.lcx-editor .lcx-hint { color: var(--text-muted); font-size: 12px; }
+.lcx-editor .lcx-chips { padding: 8px; gap: 8px; border-radius: 8px; }
+.lcx-editor .lcx-chip { max-width: 100%; height: auto; min-height: 30px; padding: 4px 5px 4px 9px; gap: 6px; border-radius: 6px; font-size: 12px; }
+.lcx-editor .lcx-chip > button { flex: none; width: 26px; height: 26px; }
+.lcx-editor .lcx-chip-input { min-width: min(150px, 100%); max-width: 100%; font-size: 14px; }
+.lcx-field-error { color: var(--rose-ink); font-size: 12px; margin: 4px 0 0; }
+@media (max-width: 1000px) {
+  .lcx-redesign .lcx-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .lcx-redesign .lcx-table { display: block; min-width: 0; }
+  .lcx-redesign .lcx-tablewrap { background: none; border: 0; padding: 2px; overflow: visible; }
+  .lcx-redesign .lcx-row { gap: 5px; padding: 16px; border-left: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
+  .lcx-redesign .lcx-row > td { min-width: 0; max-width: none; padding: 3px 0; font-size: 13px; }
+  .lcx-redesign .lcx-row > td::before { text-transform: none; letter-spacing: 0; font-size: 12px; }
+  .lcx-redesign .lcx-row > .lcx-cell-entity { padding: 0; max-width: none; }
+  .lcx-redesign .lcx-row > .lcx-cell-status { padding: 6px 0 12px; }
+  .lcx-redesign .lcx-row > .lcx-cell-actions { position: static; display: flex; justify-content: flex-end; margin-top: 9px; padding-top: 10px; width: 100%; border-top: 1px solid var(--border); }
+  .lcx-redesign .lcx-row > .lcx-cell-actions button { min-height: 44px; }
+  .lcx-redesign .lcx-grouprow th { margin: 8px 0 12px; padding: 10px 4px; background: transparent; }
+  .lcx-redesign .lcx-rowbtn { font-size: 16px; min-height: 44px; }
+}
+@media (max-width: 520px) {
+  .lcx-redesign { gap: 20px; }
+  .lcx-workspace-intro { flex-basis: 100%; }
+  .lcx-redesign .lcx-actions > button { min-height: 44px; }
+  .lcx-renewals { padding: 16px; }
+  .lcx-section-heading { align-items: flex-start; }
+  .lcx-section-heading > button { min-height: 44px; }
+  .lcx-renewal-grid { grid-template-columns: minmax(0, 1fr); }
+  .lcx-redesign .lcx-filter { padding: 10px; min-height: 86px; }
+  .lcx-redesign .lcx-filter[aria-pressed="true"] { padding: 10px; }
+  .lcx-redesign .lcx-filter-count { font-size: 19px; }
+  .lcx-redesign .lcx-filter-label { font-size: 12px; }
+  .lcx-redesign .lcx-toolbar > button { min-height: 44px; }
+  .lcx-redesign .lcx-filtermenu { max-width: none; }
+  .lcx-redesign .lcx-search input { font-size: 16px; }
+  .lcx-redesign .lcx-clear { width: 36px; height: 36px; }
+  .lcx-editor .lcx-form { padding: 20px 16px; }
+  .lcx-editor .lcx-form-row { grid-template-columns: minmax(0, 1fr); }
+  .lcx-editor input, .lcx-editor textarea, .lcx-editor .lcx-chip-input { font-size: 16px; }
+  .lcx-editor .lcx-chip > button { width: 36px; height: 36px; }
+  .lcx-editor .lcx-file > button:last-child { min-width: 44px; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lcx-redesign *, .lcx-editor * { animation: none !important; transition: none !important; }
+}
+/* One renewal register: no duplicated agenda or oversized filter cards. */
+.lcx-redesign { gap: 14px; }
+.lcx-register-hint { flex: 1 1 200px; color: var(--text-muted); font-size: 12px; margin: 0; }
+.lcx-redesign .lcx-section-heading { margin-bottom: 12px; }
+.lcx-redesign .lcx-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.lcx-redesign .lcx-filter, .lcx-redesign .lcx-filter[aria-pressed="true"] { display: inline-flex; min-height: 36px; gap: 6px; padding: 7px 10px; border-radius: 8px; }
+.lcx-redesign .lcx-filter-count { font-size: 12px; padding-left: 4px; }
+.lcx-redesign .lcx-filter-label { font-size: 12px; }
+.lcx-redesign .lcx-toolbar { margin-bottom: 12px; }
+.lcx-redesign .lcx-row > td { padding: 8px 12px; }
+.lcx-redesign .lcx-row > td[data-label="Type"] { min-width: 120px; overflow-wrap: normal; }
+.lcx-redesign .lcx-rowmeta { margin-top: 2px; gap: 6px; }
+.lcx-redesign .lcx-rowbtn { font-size: 13px; line-height: 1.35; }
+.lcx-redesign .lcx-grouprow th { padding: 7px 12px; background: var(--surface-2); }
+.lcx-redesign .lcx-table thead th { padding: 10px 12px; }
+@media (max-width: 767px) {
+  .lcx-redesign .lcx-filter, .lcx-redesign .lcx-filter[aria-pressed="true"] { min-height: 44px; }
+  .lcx-redesign .lcx-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 12px; padding: 12px; margin-bottom: 8px; }
+  .lcx-redesign .lcx-row > td { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; gap: 2px; padding: 0; }
+  .lcx-redesign .lcx-row > td[data-label="Type"] { min-width: 0; overflow-wrap: anywhere; }
+  .lcx-redesign .lcx-row > td::before { margin: 0; }
+  .lcx-redesign .lcx-row > .lcx-cell-entity { grid-column: 1 / -1; padding: 0; }
+  .lcx-redesign .lcx-row > .lcx-cell-status { grid-column: 1 / -1; padding: 2px 0 6px; }
+  .lcx-redesign .lcx-row > .lcx-cell-actions { border: 0; margin: 0; padding: 0; align-items: flex-end; justify-content: center; }
+  .lcx-redesign .lcx-rowbtn { font-size: 14px; min-height: 36px; }
+  .lcx-redesign .lcx-rowmeta { display: inline-flex; }
+  .lcx-redesign .lcx-actions { flex-wrap: wrap; }
+}

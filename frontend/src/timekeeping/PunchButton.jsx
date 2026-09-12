@@ -199,7 +199,7 @@ export function PunchButton({
 
       <div className="tsx-punch-card">
         <header className={`tsx-punch-state tone-${statusKind || "unknown"}`}>
-          <span className="tsx-punch-kicker">Current status</span>
+          <span className="tsx-punch-kicker">Live attendance</span>
           <p className="tsx-punch-title">
             <span className={`tsx-punch-dot tone-${statusKind || "unknown"}`} aria-hidden="true">
               <span className="tsx-punch-dot-core"/>

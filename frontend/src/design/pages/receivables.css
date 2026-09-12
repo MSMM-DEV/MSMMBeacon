@@ -1,0 +1,51 @@
+/* One scan-friendly ledger; a single dialog exposes all monthly entries. */
+.recv-card .recv-head { padding: 18px 20px; gap: 14px; }
+.recv-card .quad-title { font-size: 19px; }
+.recv-register-scroll { overflow-x: auto; max-width: 100%; }
+.recv-register { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.recv-register th { text-align: left; padding: 10px 14px; background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 550; }
+.recv-register td { padding: 10px 14px; border-top: 1px solid var(--border); vertical-align: middle; }
+.recv-register :is(th,td):nth-child(n+3):nth-child(-n+6) { text-align: right; white-space: nowrap; }
+.recv-register td:nth-child(-n+2) { min-width: 170px; max-width: 280px; overflow-wrap: anywhere; }
+.recv-register strong { font-weight: 550; }
+.recv-register small { display: block; color: var(--text-muted); margin-top: 3px; font-size: 11px; line-height: 1.45; }
+.recv-register tr:hover td { background: var(--surface-2); }
+.recv-register .recv-record-paid { color: var(--invoice-paid-ink); }
+.recv-record-action { min-width: 136px; text-align: right; }
+.recv-record-action .btn { white-space: nowrap; min-height: 36px; }
+.recv-unset { color: var(--text-muted); font-size: 12px; }
+.recv-ledger-dialog :is(h2,p) { overflow-wrap: anywhere; }
+.recv-ledger-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; padding: 14px; margin: 0 0 20px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 10px; }
+.recv-ledger-summary dt { color: var(--text-muted); font-size: 12px; }
+.recv-ledger-summary dd { margin: 4px 0 0; font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.recv-ledger-summary small { color: var(--text-muted); }
+.recv-ledger-section { margin-bottom: 20px; }
+.recv-ledger-section h3 { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+.recv-ledger-section.tone-paid h3 { color: var(--invoice-paid-ink); }
+.recv-ledger-section .recv-kpi-entries { margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; list-style: none; }
+.recv-ledger-section .recv-entry { padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.recv-ledger-section .recv-entry + .recv-entry { border-top: 1px solid var(--border); }
+.recv-ledger-section .recv-entry-month { min-width: 40px; font-size: 13px; }
+.recv-ledger-section .recv-entry-amt { margin-left: auto; font-size: 14px; }
+.recv-ledger-section .recv-entry-file-btn { min-height: 36px; padding: 6px 10px; gap: 6px; font-size: 12px; }
+.recv-ledger-project { min-height: 40px; }
+.recv-ledger-section .recv-entry-month { color: var(--text-muted); }
+.recv-ledger-section .recv-entry-amt { color: var(--text); }
+.recv-ledger-section.tone-paid .recv-entry-amt { color: var(--invoice-paid-ink); }
+.recv-ledger-section .recv-entry-file { display: flex; flex-wrap: wrap; flex: 1 1 100%; gap: 6px; }
+.recv-ledger-section .recv-entry-file-btn { display: inline-flex; align-items: center; width: auto; height: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--accent-ink); }
+.recv-ledger-section .recv-entry-file-label { display: inline; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.recv-register-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (max-width: 767px) {
+  .recv-register, .recv-register tbody { display: block; }
+  .recv-register thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .recv-register tr { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 16px; padding: 16px; border-top: 1px solid var(--border); }
+  .recv-register td { display: block; padding: 0; border: 0; min-width: 0 !important; max-width: none !important; text-align: left !important; white-space: normal !important; overflow-wrap: anywhere; }
+  .recv-register td:nth-child(-n+2), .recv-register .recv-record-action { grid-column: 1 / -1; }
+  .recv-register td:nth-child(n+3):nth-child(-n+6)::before { content: attr(data-label); display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 3px; }
+  .recv-register .recv-record-action { display: flex; align-items: center; gap: 10px; }
+  .recv-register tr:hover { background: var(--surface-2); }
+  .recv-register tr:hover td { background: transparent; }
+  .recv-record-action .btn, .recv-ledger-section .recv-entry-file-btn, .recv-ledger-project { min-height: 44px; }
+  .recv-ledger-section .recv-entry-meta { flex-basis: 100%; }
+}

@@ -490,6 +490,7 @@ function DayListIntervalCard({ iv, isToday, onClick, isSelected = false }) {
       </div>
 
       <div className="tk-day-list-card-chips">
+        <span className="tk-day-list-presence">{iv.isOut ? "Out" : "In"}</span>
         <span className="tk-day-list-card-chip tk-day-list-card-status">
           <Icon name={iconName} size={12}/>
           {label}
@@ -501,14 +502,14 @@ function DayListIntervalCard({ iv, isToday, onClick, isSelected = false }) {
         )}
         {isUntagged && (
           <span className="tk-day-list-card-chip tk-day-list-card-chip-cta">
-            <Icon name="edit" size={11}/> tag this
+            <Icon name="edit" size={11}/> Add a category
           </span>
         )}
         {/* The row is a real button, but the only thing that said so was a
             border-colour shift on hover. Reserved space, so revealing it on
             hover / focus / selection never reflows the card. */}
         <span className="tk-day-list-card-edit" aria-hidden="true">
-          <Icon name="edit" size={11}/> Edit
+          <Icon name="edit" size={11}/> Edit block
         </span>
       </div>
 

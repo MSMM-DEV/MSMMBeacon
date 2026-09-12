@@ -376,7 +376,7 @@ export function TeamRangeView({ prefs, onPrefsChange, onOpenUserDay, dataVersion
             icon={UsersGlyph}
             title={!presenceIsOnlyFilter ? "No people match this view"
                  : presence === "in"     ? "Nobody is punched in right now"
-                 : presence === "out"    ? "Everybody is punched in right now"
+                 : presence === "out"    ? "Nobody is punched out right now"
                  : "No people match this view"}
             description={presence !== "all"
               ? "Switch the In/Out filter back to All, or widen the People selection and clear the name search."

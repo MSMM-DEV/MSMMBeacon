@@ -126,7 +126,7 @@ export function PunchPromptModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose?.(); }}>
-      <DialogContent size="sm" className="tsx-dialog">
+      <DialogContent size="sm" className="tsx-dialog tsx-punch-dialog">
         <DialogHeader>
           <DialogTitle>{headline}</DialogTitle>
           <DialogDescription>{eyebrow}</DialogDescription>
@@ -134,15 +134,26 @@ export function PunchPromptModal({
 
         <DialogBody className="tsx-form">
           <div className="tsx-field">
-            <Label id="tsx-prompt-cat-label">Category</Label>
+            <Label id="tsx-prompt-cat-label">What should this time block be called?</Label>
             {/* Hero chip grid — one-tap category pick on touch */}
-            <div className="tsx-chipgrid" role="radiogroup" aria-labelledby="tsx-prompt-cat-label">
+            <div className="tsx-chipgrid" role="radiogroup" aria-labelledby="tsx-prompt-cat-label"
+              onKeyDown={(event) => {
+                const choices = choicesForKind(kind);
+                const index = choices.findIndex(choice => choice.key === category);
+                const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+                if (step == null && event.key !== "Home" && event.key !== "End") return;
+                event.preventDefault();
+                const next = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 : (index + step + choices.length) % choices.length;
+                setCategory(choices[next].key);
+                event.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus();
+              }}>
               {choicesForKind(kind).map(c => (
                 <button
                   key={c.key}
                   type="button"
                   role="radio"
                   aria-checked={category === c.key}
+                  tabIndex={category === c.key ? 0 : -1}
                   className={`tsx-chip tone-${TK_CATEGORY_TONE[c.key] || "muted"} ${category === c.key ? "is-active" : ""}`}
                   onClick={() => setCategory(c.key)}
                 >
@@ -192,9 +203,9 @@ export function PunchPromptModal({
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Skip</Button>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Skip for now</Button>
           <Button variant="primary" onClick={save} disabled={busy} loading={busy}>
-            {busy ? "Saving…" : (kind === "in" ? "Save and start" : "Save")}
+            {busy ? "Saving…" : "Save category"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,0 +1,115 @@
+/* Team Calendar: scope first, time second, details on demand. */
+.bx-teamcal { min-width: 0; gap: 20px; }
+.bxtc-page-context { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; min-width: 0; }
+.bxtc-page-context p { max-width: 70ch; margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.65; }
+.bxtc-page-context > span { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.bxtc-page-context svg { flex-shrink: 0; color: var(--accent); }
+.bx-teamcal .bxtc-people-panel { gap: 14px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 2%, transparent); }
+.bx-teamcal .bxtc-people-panel--collapsed { flex-direction: row; gap: 12px; padding: 12px 16px; }
+.bxtc-people-trigger { min-height: 38px; border-radius: 9px; }
+.bxtc-people-trigger > .num { background: color-mix(in srgb, currentColor 12%, transparent); color: inherit; font-size: 12px; }
+.bx-teamcal .bxtc-person { height: auto; min-height: 36px; padding: 5px 8px 5px 5px; border-radius: 8px; border-color: var(--border); gap: 8px; }
+.bx-teamcal .bxtc-person-name { max-width: none; white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+.bx-teamcal .bxtc-person:hover { border-color: var(--u-bold); box-shadow: 0 2px 6px color-mix(in srgb, var(--text) 5%, transparent); }
+.bxtc-people-picker { border-radius: 14px; overflow: hidden; }
+.bxtc-people-picker [role="group"] button { min-height: 52px; padding: 10px; border-radius: 8px; }
+.bxtc-people-picker [role="group"] button[aria-pressed="true"] { background: var(--surface-2); }
+.bxtc-people-picker [role="group"] button > span { overflow-wrap: anywhere; }
+.bxtc-people-picker input { min-height: 38px; }
+.bx-teamcal .bxtc-calendar-surface { border-radius: 16px; box-shadow: 0 4px 24px color-mix(in srgb, var(--text) 3%, transparent); }
+.bx-teamcal .bx-teamcal-toolbar { display: flex; align-items: center; gap: 18px 24px; padding: 20px; background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.bx-teamcal .bxtc-date-group { flex: 1 1 320px; flex-wrap: wrap; gap: 12px; }
+.bx-teamcal .bxtc-date-label { flex: 1 1 100%; order: -1; font-size: clamp(20px, 2vw, 27px); font-weight: 600; line-height: 1.25; letter-spacing: -.035em; white-space: normal; overflow-wrap: anywhere; }
+.bx-teamcal .bxtc-date-navigation { border-radius: 9px; padding: 3px; gap: 4px; box-shadow: none; }
+.bx-teamcal .bxtc-date-navigation button { min-height: 34px; }
+.bx-teamcal .bxtc-view-controls { align-items: flex-end; gap: 12px; }
+.bx-teamcal .bxtc-view-group { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.bxtc-control-label { color: var(--text-muted); font-size: 12px; font-weight: 550; line-height: 1.3; }
+.bx-teamcal .bxtc-view-group [role="tablist"] { height: auto; min-height: 40px; border: 1px solid var(--border); border-radius: 9px; }
+.bx-teamcal .bxtc-view-group [role="tab"] { min-height: 32px; gap: 6px; font-size: 12px; border-radius: 6px; }
+.bx-teamcal .rbc-header { padding: 13px 8px; font-size: 12px; letter-spacing: .045em; background: var(--surface-2); }
+.bx-teamcal .rbc-date-cell { padding: 8px 8px 5px; font-size: 12px; }
+.bx-teamcal .rbc-date-cell .rbc-button-link { min-width: 28px; min-height: 28px; border-radius: 8px; }
+.bx-teamcal .rbc-now .rbc-button-link { background: var(--accent-solid); color: var(--accent-on); }
+.bx-teamcal .rbc-show-more { min-height: 28px; padding: 5px 7px; font-size: 12px; }
+.bx-teamcal .rbc-time-gutter .rbc-label { font-size: 12px; }
+.bx-teamcal .rbc-day-slot.rbc-today { background: color-mix(in srgb, var(--accent) 3%, var(--surface)); }
+.bx-teamcal .rbc-event { transition: box-shadow 140ms ease, opacity 140ms ease; }
+.bx-teamcal .bxtc-evt--pill { border-radius: 5px; }
+.bx-teamcal .bxtc-lanes-inner { --bxtc-head: 188px; }
+.bx-teamcal .bxtc-wk { --bxtc-head: 188px; }
+.bx-teamcal .bxtc-axis-head, .bx-teamcal .bxtc-axis-tick { padding-top: 12px; padding-bottom: 12px; }
+.bx-teamcal .bxtc-axis-tick, .bx-teamcal .bxtc-colcap { font-size: 12px; }
+.bx-teamcal .bxtc-lane-name { white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.35; }
+.bx-teamcal .bxtc-lane-meta { font-size: 12px; line-height: 1.4; }
+.bx-teamcal .bxtc-wk-person { padding: 14px 12px; }
+.bx-teamcal .bxtc-wk-day { padding-top: 12px; padding-bottom: 12px; }
+.bx-teamcal .bxtc-wk-dom { font-size: 18px; }
+.bx-teamcal .bxtc-wk-fig { font-size: 12px; }
+.bx-teamcal .bxtc-mo-cell { height: 112px; }
+.bx-teamcal .bxtc-mo-day { padding: 10px 12px; gap: 10px; }
+.bx-teamcal .bxtc-mo-date { min-height: 26px; min-width: 26px; border-radius: 8px; font-size: 13px; }
+.bx-teamcal .bxtc-mo-fig, .bx-teamcal .bxtc-mo-out, .bx-teamcal .bxtc-mo-quiet { font-size: 12px; }
+.bx-teamcal .bxtc-agenda-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 3px 0; align-items: center; }
+.bx-teamcal .bxtc-agenda-owner { grid-column: 1; font-size: 12px; }
+.bx-teamcal .bxtc-agenda-title { grid-column: 1 / -1; grid-row: 2; font-size: 14px; line-height: 1.55; font-weight: 550; overflow-wrap: anywhere; }
+.bx-teamcal .bxtc-agenda-location { grid-column: 1; grid-row: 3; align-items: flex-start; font-size: 12px; line-height: 1.5; }
+.bx-teamcal .bxtc-agenda-location svg { margin-top: 3px; }
+.bx-teamcal .bxtc-agenda-row > span:last-child:not(.bxtc-agenda-title):not(.bxtc-agenda-location):not(.bxtc-agenda-owner) { grid-column: 2; grid-row: 1; }
+.bx-teamcal .rbc-agenda-view table.rbc-agenda-table thead > tr > th { padding: 12px 16px; font-size: 12px; }
+.bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td { padding: 16px; }
+.bx-teamcal .rbc-agenda-date-cell, .bx-teamcal .rbc-agenda-time-cell { font-size: 12px; line-height: 1.5; }
+.bxtc-event-dialog, .bxtc-daylist-dialog { border-radius: 16px; }
+.bxtc-event-dialog h2, .bxtc-daylist-dialog h2 { max-width: 100%; font-size: 24px; line-height: 1.3; letter-spacing: -.025em; white-space: normal; overflow-wrap: anywhere; }
+.bxtc-event-facts { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); row-gap: 16px; }
+.bxtc-event-facts dt { color: var(--text-muted); font-size: 12px; letter-spacing: .03em; }
+.bxtc-event-facts dd { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.bxtc-attendee-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 10px; }
+.bxtc-attendee-row > :first-child { grid-column: 1; grid-row: 1 / 3; }
+.bxtc-attendee-row > :nth-child(2) { grid-column: 2; overflow-wrap: anywhere; }
+.bxtc-attendee-row > .bxtc-attendee-department { grid-column: 2; grid-row: 2; font-size: 12px; }
+.bxtc-attendee-row > :last-child { grid-column: 3; grid-row: 1 / 3; max-width: 140px; white-space: normal; }
+.bxtc-daylist-row { align-items: flex-start; min-height: 76px; padding: 14px 12px; border-color: var(--border); border-radius: 10px; margin-bottom: 8px; }
+.bxtc-daylist-row > span:nth-child(2) > span:first-child { margin-bottom: 5px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.bxtc-daylist-row > span:nth-child(2) > span:last-child { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.bxtc-daylist-row > svg { margin-top: 5px; }
+@media (max-width: 1100px) {
+  .bx-teamcal .bxtc-view-controls { justify-content: flex-start; margin-left: 0; flex: 1 1 100%; }
+  .bx-teamcal .bxtc-date-group { flex: 1 1 100%; }
+  .bx-teamcal .bxtc-date-label { order: 0; flex: 1 1 200px; }
+  .bx-teamcal .bxtc-lanes-inner { --bxtc-head: 176px; }
+  .bx-teamcal .bxtc-wk { --bxtc-head: 176px; }
+}
+@media (max-width: 640px) {
+  .bx-teamcal { gap: 16px; }
+  .bxtc-page-context { gap: 10px; }
+  .bxtc-page-context p { font-size: 13px; }
+  .bx-teamcal .bxtc-people-panel { padding: 14px; gap: 12px; }
+  .bx-teamcal .bxtc-people-panel--collapsed { padding: 12px; gap: 8px; }
+  .bx-teamcal .bxtc-people-panel button { min-height: 44px; }
+  .bx-teamcal .bxtc-person { max-width: 100%; min-height: 44px; }
+  .bx-teamcal .bxtc-people-panel li { max-width: 100%; }
+  .bx-teamcal .bx-teamcal-toolbar { padding: 16px; gap: 12px; }
+  .bx-teamcal .bxtc-date-group { gap: 12px; }
+  .bx-teamcal .bxtc-date-label { order: -1; flex-basis: 100%; font-size: 22px; }
+  .bx-teamcal .bxtc-date-navigation button { min-height: 44px; }
+  .bx-teamcal .bxtc-view-controls { flex: 0 1 auto; margin-left: auto; align-self: flex-end; }
+  .bx-teamcal .bxtc-view-controls button { min-height: 44px; min-width: 44px; }
+  .bxtc-people-picker input { font-size: 16px; min-height: 44px; }
+  .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td { padding: 8px 16px; }
+  .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td:first-child { padding-top: 18px; }
+  .bx-teamcal .rbc-agenda-view table.rbc-agenda-table tbody > tr > td:last-child { padding-bottom: 18px; }
+  .bxtc-event-facts { padding: 14px; grid-template-columns: minmax(0, 1fr); row-gap: 5px; }
+  .bxtc-event-facts dd { margin-bottom: 12px; }
+  .bxtc-event-facts dd:last-child { margin-bottom: 0; }
+  .bxtc-attendee-row { grid-template-columns: 28px minmax(0, 1fr); }
+  .bxtc-attendee-row > :last-child { grid-column: 2; grid-row: auto; justify-self: start; max-width: 100%; }
+  .bxtc-event-dialog h2, .bxtc-daylist-dialog h2 { font-size: 22px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bxtc-people-panel, .bxtc-calendar-surface { animation: bxtc-surface-in 240ms cubic-bezier(.2,.75,.3,1) both; }
+  @keyframes bxtc-surface-in { from { opacity: .35; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bx-teamcal *, .bxtc-people-picker *, .bxtc-event-dialog *, .bxtc-daylist-dialog * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

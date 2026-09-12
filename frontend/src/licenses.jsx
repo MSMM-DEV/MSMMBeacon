@@ -180,10 +180,11 @@ export function LicensesTab() {
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="lcx-page">
+      <div className="lcx-page lcx-redesign">
         {/* Action bar. The page title + description come from the shared
             page header (PAGE_META), so only the actions live here. */}
         <div className="lcx-actions">
+          <p className="lcx-register-hint">Credentials, ordered by renewal urgency.</p>
           {remindMsg && <span className="lcx-remindmsg" role="status">{remindMsg}</span>}
           {admin && (
             <Button variant="default" onClick={runReminders}>
@@ -195,17 +196,9 @@ export function LicensesTab() {
           </Button>
         </div>
 
-        {/* Quick overview — what's expiring in the next 60 days */}
-        <ExpiringTimeline
-          rows={rows}
-          onOpen={(r) => setEditing(r)}
-          onShowOverdue={() => setLane("expired")}
-        />
-
         <section className="lcx-register" aria-labelledby="lcx-register-head">
-          <div className="bx-sectionhead">
-            <h2 id="lcx-register-head">All licenses</h2>
-            <span className="bx-rule" />
+          <div className="lcx-section-heading">
+            <div><h2 id="lcx-register-head">License register</h2></div>
             <p className="lcx-count">
               <span className="num">{filtered.length}</span>
               {filtered.length === rows.length ? " total" : <> of <span className="num">{rows.length}</span></>}
@@ -214,7 +207,7 @@ export function LicensesTab() {
 
           {/* Status filter strip. Each entry pairs a tint with an icon and a
               word so the band is never signalled by colour alone. */}
-          <div className="lcx-filters bx-scroll-x" role="group" aria-label="Filter by expiry status">
+          <div className="lcx-filters" role="group" aria-label="Filter by expiry status">
             <StatusFilter active={lane === "all"} onClick={() => setLane("all")} bandKey={null}
               icon="checklist" label="All" count={counts.all} />
             {LANES.map(L => (
@@ -241,6 +234,7 @@ export function LicensesTab() {
             />
             <FilterMenu label="Type"  allLabel="All types"  value={typeF}  options={types}  onChange={setTypeF} />
             <FilterMenu label="State" allLabel="All states" value={stateF} options={states} onChange={setStateF} />
+            {filtersOn && <Button variant="ghost" onClick={() => { setLane("all"); setTypeF("all"); setStateF("all"); setQ(""); }}><Icon name="x" size={14} /> Clear filters</Button>}
           </div>
 
           {err && (
@@ -283,14 +277,14 @@ export function LicensesTab() {
                   </caption>
                   <thead>
                     <tr>
-                      <th scope="col">Status</th>
                       <th scope="col">Entity</th>
+                      <th scope="col">Status</th>
                       <th scope="col">Type</th>
                       <th scope="col">State</th>
                       <th scope="col">License no</th>
                       <th scope="col">Expires</th>
                       <th scope="col">Reminders</th>
-                      <th scope="col"><span className="sr-only">Actions</span></th>
+                      <th scope="col">Details</th>
                     </tr>
                   </thead>
                   {sections.map(g => (
@@ -379,91 +373,6 @@ function FilterMenu({ label, allLabel, value, options, onChange }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Expiring-soon timeline — a today→+60d runway. Each license due in the window
-// is plotted by its exact days-until-due and alternates above/below the axis so
-// labels don't collide. Click a marker to open it; the overdue count links to
-// the Expired lane.
-// ---------------------------------------------------------------------------
-const TL_WINDOW = 60;
-function ExpiringTimeline({ rows, onOpen, onShowOverdue }) {
-  const soon = useMemo(
-    () => rows.filter(r => r.days != null && r.days >= 0 && r.days <= TL_WINDOW).sort((a, b) => a.days - b.days),
-    [rows],
-  );
-  const overdue = useMemo(() => rows.filter(r => r.days != null && r.days < 0).length, [rows]);
-
-  // Map days∈[0,60] → [6%,94%] so flags never clip the track edges.
-  const posOf = (days) => 6 + (days / TL_WINDOW) * 88;
-
-  return (
-    <section className="lcx-tl" aria-labelledby="lcx-tl-head">
-      <div className="bx-sectionhead">
-        <h2 id="lcx-tl-head">Expiring soon</h2>
-        <span className="bx-rule" />
-        <p className="lcx-tl-sub">
-          Next 60 days, <span className="num">{soon.length}</span> license{soon.length === 1 ? "" : "s"}
-        </p>
-        {overdue > 0 && (
-          <Button
-            variant="destructive-soft"
-            size="xs"
-            onClick={onShowOverdue}
-            aria-label={`Show ${overdue} overdue license${overdue === 1 ? "" : "s"}`}
-          >
-            <Icon name="danger" size={13} />
-            <span className="num">{overdue}</span> overdue
-          </Button>
-        )}
-      </div>
-
-      {soon.length === 0 ? (
-        <p className="lcx-tl-empty">
-          <Icon name="checkCircle" size={15} />
-          Nothing expiring in the next 60 days.
-        </p>
-      ) : (
-        <div className="lcx-tl-scroll bx-scroll-x">
-          <div className="lcx-tl-track">
-            <div className="lcx-tl-zone lcx-tl-zone-near" aria-hidden="true" />
-            <div className="lcx-tl-zone lcx-tl-zone-far" aria-hidden="true" />
-            <div className="lcx-tl-axis" aria-hidden="true" />
-            <div className="lcx-tl-divider" aria-hidden="true" />
-            <span className="lcx-tl-tick start">Today</span>
-            <span className="lcx-tl-tick mid num">30 days</span>
-            <span className="lcx-tl-tick end num">60 days</span>
-
-            {/* The <button> is the flag itself so the focus ring lands on a
-                real box rather than on the zero-width marker column. */}
-            {soon.map((r, i) => (
-              <div
-                key={r.id}
-                className={`lcx-tl-marker lcx-band-${r.band.key} ${i % 2 === 0 ? "is-above" : "is-below"}`}
-                style={{ left: `${posOf(r.days)}%` }}
-              >
-                <span className="lcx-tl-stem" aria-hidden="true" />
-                <span className="lcx-tl-dot" aria-hidden="true" />
-                <button
-                  type="button"
-                  className="lcx-tl-flag"
-                  onClick={() => onOpen(r)}
-                  aria-label={`${r.entity}, expires ${fmtDate(r.expirationDate)}, ${daysText(r.days)}. Open to edit.`}
-                >
-                  <span className="lcx-tl-flag-name">{r.entity}</span>
-                  <span className="lcx-tl-flag-days">
-                    <Icon name={bandUi(r.band.key).icon} size={10} />
-                    <DaysLabel days={r.days} />
-                  </span>
-                  <span className="lcx-tl-flag-date num">{fmtDate(r.expirationDate)}</span>
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Register row
@@ -473,10 +382,6 @@ function LicenseRow({ lic, onEdit }) {
   const open = (e) => { e.stopPropagation(); onEdit(); };
   return (
     <tr className={`lcx-row lcx-band-${band.key}`} onClick={onEdit}>
-      <td className="lcx-cell-status" data-label="Status">
-        <BandBadge band={band} days={days} />
-      </td>
-
       <td className="lcx-cell-entity" data-label="Entity">
         <button type="button" className="lcx-rowbtn" onClick={open}>{lic.entity}</button>
         {(lic.files.length > 0 || lic.notes) && (
@@ -495,6 +400,10 @@ function LicenseRow({ lic, onEdit }) {
         )}
       </td>
 
+      <td className="lcx-cell-status" data-label="Status">
+        <BandBadge band={band} days={days} />
+      </td>
+
       <td data-label="Type">{lic.type || <Dash />}</td>
       <td data-label="State">{lic.state || <Dash />}</td>
 
@@ -511,15 +420,15 @@ function LicenseRow({ lic, onEdit }) {
         <Badge tone={lic.emailEnabled ? "neutral" : "outline"} className={lic.emailEnabled ? "" : "opacity-70"}>
           <Icon name={lic.emailEnabled ? "bellRing" : "ban"} size={11} />
           {lic.emailEnabled
-            ? <><span className="num">{lic.notifyEmails.length}</span> on</>
+            ? <><span className="num">{lic.notifyEmails.length}</span> recipient{lic.notifyEmails.length === 1 ? "" : "s"}</>
             : "Off"}
         </Badge>
       </td>
 
       <td className="lcx-cell-actions">
         <Tooltip label={`Edit ${lic.entity}`}>
-          <Button variant="ghost" size="icon-sm" onClick={open} aria-label={`Edit ${lic.entity}`}>
-            <Icon name="edit" size={14} />
+          <Button variant="ghost" size="sm" onClick={open} aria-label={`Edit ${lic.entity}`}>
+            Edit <Icon name="forward" size={14} />
           </Button>
         </Tooltip>
       </td>
@@ -608,8 +517,9 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
   return (
     <>
       <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-        <DialogContent size="lg" aria-describedby="lcx-dialog-desc">
+        <DialogContent size="lg" className="lcx-editor" aria-describedby="lcx-dialog-desc">
           <DialogHeader>
+            <span className="lcx-eyebrow">{isNew ? "Add to register" : "License details"}</span>
             <DialogTitle>{isNew ? "New license" : (form.entity || "Untitled license")}</DialogTitle>
             <DialogDescription id="lcx-dialog-desc">
               {isNew
@@ -638,14 +548,18 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
               </p>
             </div>
 
+            <section className="lcx-editor-section" aria-labelledby="lcx-identity-heading">
+            <div className="lcx-editor-sectionhead"><span>01</span><div><h3 id="lcx-identity-heading">Credential details</h3><p>The person or company and its license identifiers.</p></div></div>
             <Field label="Entity" htmlFor="lcx-entity" required>
               <Input
                 id="lcx-entity"
                 value={form.entity}
                 onChange={e => set("entity", e.target.value)}
                 aria-invalid={entityInvalid || undefined}
+                aria-describedby={entityInvalid ? "lcx-entity-error" : undefined}
                 placeholder="MSMM Engineering, LLC / Jim Wilson"
               />
+              {entityInvalid && <p id="lcx-entity-error" className="lcx-field-error" role="alert">Enter the person or company name.</p>}
             </Field>
 
             <div className="lcx-form-row">
@@ -672,6 +586,10 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
               </Field>
             </div>
 
+            </section>
+            <section className="lcx-editor-section" aria-labelledby="lcx-validity-heading">
+            <div className="lcx-editor-sectionhead"><span>02</span><div><h3 id="lcx-validity-heading">Validity period</h3><p>Expiration drives the renewal countdown.</p></div></div>
+
             <div className="lcx-form-row">
               <Field label="First issue date" htmlFor="lcx-first">
                 <Input id="lcx-first" type="date" className="num" value={form.firstIssueDate || ""}
@@ -682,6 +600,10 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
                   onChange={e => set("expirationDate", e.target.value)} />
               </Field>
             </div>
+
+            </section>
+            <section className="lcx-editor-section" aria-labelledby="lcx-reminders-heading">
+            <div className="lcx-editor-sectionhead"><span>03</span><div><h3 id="lcx-reminders-heading">Renewal reminders</h3><p>Choose who should receive expiration emails.</p></div></div>
 
             <Field
               label="Notification emails"
@@ -704,6 +626,10 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
               <span className="lcx-switchstate">{form.emailEnabled ? "On" : "Off"}</span>
             </div>
 
+            </section>
+            <section className="lcx-editor-section" aria-labelledby="lcx-documents-heading">
+            <div className="lcx-editor-sectionhead"><span>04</span><div><h3 id="lcx-documents-heading">Notes & documents</h3><p>Keep renewal instructions and supporting files together.</p></div></div>
+
             <Field label="Notes" htmlFor="lcx-notes">
               <Textarea id="lcx-notes" rows={3} value={form.notes}
                 onChange={e => set("notes", e.target.value)} placeholder="Renewal notes, submittal status…" />
@@ -719,7 +645,7 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
                     <div key={f.id} className="lcx-file">
                       <button type="button" className="lcx-file-name" onClick={() => openFile(f)}>
                         <Icon name="attachment" size={13} />
-                        <span className="bx-truncate">{f.name}</span>
+                        <span className="lcx-full-text">{f.name}</span>
                         <span className="sr-only">, open in a new tab</span>
                       </button>
                       <Tooltip label="Remove file">
@@ -739,6 +665,7 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
                 </div>
               )}
             </Field>
+            </section>
 
             {err && <Alert tone="danger">{err}</Alert>}
           </DialogBody>
@@ -752,7 +679,7 @@ function LicenseDialog({ license, knownTypes, knownStates, today, onClose, onSav
             )}
             <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
             <Button variant="primary" onClick={save} loading={busy}>
-              {busy ? "Saving…" : isNew ? "Create license" : "Save"}
+              {busy ? "Saving…" : isNew ? "Create license" : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -793,7 +720,7 @@ function EmailChips({ value, onChange, inputId }) {
     <div className="lcx-chips">
       {value.map((e, i) => (
         <span key={`${e}-${i}`} className="lcx-chip">
-          <span className="bx-truncate">{e}</span>
+          <span className="lcx-full-text">{e}</span>
           <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i))} aria-label={`Remove ${e}`}>
             <Icon name="x" size={10} />
           </button>

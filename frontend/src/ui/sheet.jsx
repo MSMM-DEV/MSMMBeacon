@@ -15,9 +15,10 @@ const SheetOverlay = React.forwardRef(function SheetOverlay({ className, ...prop
     <DialogPrimitive.Overlay
       ref={ref}
       className={cn(
-        "fixed inset-0 z-[100] bg-[var(--scrim)] backdrop-blur-[2px]",
+        "fixed inset-0 z-[100] bg-[var(--scrim)] backdrop-blur-[6px]",
         "data-[state=open]:animate-in data-[state=open]:fade-in-0",
         "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+        "[animation-duration:var(--dur-panel)] data-[state=closed]:[animation-duration:var(--dur-exit)] [animation-timing-function:var(--ease-out)]",
         className
       )}
       {...props}
@@ -31,6 +32,7 @@ const sheetVariants = cva(
     "bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-xl)]",
     "transition ease-[var(--ease-out)] duration-[var(--dur-normal)]",
     "data-[state=open]:animate-in data-[state=closed]:animate-out",
+    "[animation-duration:var(--dur-panel)] data-[state=closed]:[animation-duration:var(--dur-exit)] [animation-timing-function:var(--ease-out)]",
   ].join(" "),
   {
     variants: {
@@ -59,7 +61,7 @@ const SheetContent = React.forwardRef(function SheetContent(
         {showClose ? (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-3 top-3 grid size-8 place-items-center rounded-[var(--radius-sm)]",
+              "absolute right-3 top-3 grid size-10 place-items-center rounded-[var(--radius-md)]",
               "text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]",
               "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
             )}

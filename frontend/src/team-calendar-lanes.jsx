@@ -812,7 +812,7 @@ function DayListRow({ event, onOpen }) {
       style={ownerIdentity(r).style}
       className={[
         IDENT,
-        "flex w-full min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 text-left",
+        "bxtc-daylist-row flex w-full min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 text-left",
         "border border-transparent",
         "transition-[background-color,border-color] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
         "hover:border-[var(--border)] hover:bg-[var(--surface-2)]",
@@ -824,13 +824,13 @@ function DayListRow({ event, onOpen }) {
       <span className="min-w-0 flex-1">
         <span
           className={[
-            "block truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
+            "block break-words text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
             r.isCancelled ? "line-through" : "",
           ].join(" ")}
         >
           {event.title}
         </span>
-        <span className="block truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
+        <span className="block break-words text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
           <span className="num">{fmtTime(event.start)} – {fmtTime(event.end)}</span>
           {` · ${ownerIdentity(r).name}`}
           {r.location ? ` · ${r.location}` : ""}
@@ -857,7 +857,7 @@ export function DayListDialog({ group, onOpenEvent, onClose }) {
   );
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent size="md" aria-describedby={undefined}>
+      <DialogContent size="md" className="bxtc-daylist-dialog" aria-describedby={undefined}>
         <DialogHeader>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="neutral" size="sm" className="num">
@@ -882,4 +882,3 @@ export function DayListDialog({ group, onOpenEvent, onClose }) {
     </Dialog>
   );
 }
-

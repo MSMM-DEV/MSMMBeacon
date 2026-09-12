@@ -26,7 +26,7 @@ import {
 
 const TABS = [
   { key: "overview",  label: "Overview",  icon: "alignLeft" },
-  { key: "structure", label: "Structure", icon: "columns" },
+  { key: "structure", label: "Work structure", icon: "columns" },
   { key: "invoices",  label: "Invoices",  icon: "trend" },
   { key: "documents", label: "Documents", icon: "copy" },
   { key: "todos",     label: "To-Dos",    icon: "check" },
@@ -45,7 +45,6 @@ const NONE = "__none__";
 // `EmptyState` takes an icon COMPONENT; the Beacon registry is keyed by name.
 // These adapters keep pages away from a direct lucide-react import.
 const glyph = (name) => function BeaconGlyph(props) { return <Icon name={name} {...props} />; };
-const GLYPH_OVERVIEW  = glyph("alignLeft");
 const GLYPH_DOCUMENTS = glyph("files");
 const GLYPH_TODOS     = glyph("checklist");
 const GLYPH_NOTES     = glyph("note");
@@ -149,8 +148,7 @@ const clientPrimeName = (id) => (id ? (companyById(id)?.name || DASH) : DASH);
 
 // ============================================================================
 // ProjectDetailPage — the per-project detail surface. Replaces the table area
-// (top bar + nav rail stay). Seven sub-tabs; Overview + Documents are
-// intentionally placeholders for now.
+// (top bar + nav rail stay). Seven task-oriented sections share one record.
 // ============================================================================
 export function ProjectDetailPage({
   project, items = [], onClose,
@@ -188,6 +186,7 @@ export function ProjectDetailPage({
                 <TypeBadge value={project.itemType}/>
                 <StatusBadge value={project.status}/>
               </div>
+              <p className="pdx-intro">Project details, phase budgets and team coordination in one workspace.</p>
             </div>
 
             <dl className="pdx-facts">
@@ -221,7 +220,7 @@ export function ProjectDetailPage({
 
           <div className="pdx-body">
             <TabsContent value="overview">
-              <OverviewTab project={project} subtree={subtree}/>
+              <OverviewTab project={project} subtree={subtree} onNavigate={setTab}/>
             </TabsContent>
             <TabsContent value="structure">
               <StructureTab subtree={subtree} project={project} updateItem={updateItem} onAddChild={onAddChild}/>
@@ -230,7 +229,7 @@ export function ProjectDetailPage({
               <InvoicesTab project={project} invoiceTableProps={invoiceTableProps}/>
             </TabsContent>
             <TabsContent value="documents">
-              <DocumentsTab/>
+              <DocumentsTab onOpenNotes={() => setTab("notes")}/>
             </TabsContent>
             <TabsContent value="todos">
               <TodosTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>
@@ -250,13 +249,16 @@ export function ProjectDetailPage({
   );
 }
 
-// ── Overview (placeholder + a light at-a-glance summary) ────────────────────
-function OverviewTab({ project, subtree }) {
+// ── Overview — existing project information and contextual section links ───
+function OverviewTab({ project, subtree, onNavigate }) {
   const phases = subtree.length - 1;
   return (
-    <div className="pdx-pane">
+    <div className="pdx-pane pdx-overview">
+      <div className="pdx-overview-main">
       <section className="pdx-section" aria-labelledby="pdx-overview-record">
-        <SectionHead title="Record" id="pdx-overview-record"/>
+        <SectionHead title="Project at a glance" id="pdx-overview-record">
+          <Button variant="ghost" size="sm" onClick={() => onNavigate("settings")}><Icon name="edit" size={14}/>Edit details</Button>
+        </SectionHead>
         <dl className="pdx-deflist">
           <div className="pdx-def">
             <dt>Project ID</dt>
@@ -284,12 +286,42 @@ function OverviewTab({ project, subtree }) {
           </div>
         </dl>
       </section>
-
-      <EmptyState
-        icon={GLYPH_OVERVIEW}
-        title="Overview is not built yet"
-        description="This section will carry the written project summary, the key dates and the rolled-up figures for the whole tree. Until then, the Structure tab holds the financial breakdown."
-      />
+      <section className="pdx-section" aria-labelledby="pdx-overview-phases">
+        <SectionHead title="Work structure" count={phases} id="pdx-overview-phases">
+          <Button variant="ghost" size="sm" onClick={() => onNavigate("structure")}>View financial breakdown<Icon name="forward" size={14}/></Button>
+        </SectionHead>
+        <p className="pdx-section-copy">Project phases and subphases, in their working hierarchy.</p>
+        <ul className="pdx-overview-tree">
+          {subtree.map(n => (
+            <li key={n.id} style={{ "--pdx-depth": Math.min(n._depth, 5) }}>
+              <Icon name={n._depth === 0 ? "briefcase" : "chevronRight"} size={16}/>
+              <div><span className="pdx-overview-nodeid num">{n.localId}</span><span className="pdx-overview-nodename">{n.name}</span></div>
+              <StatusBadge value={n.status} size="sm"/>
+            </li>
+          ))}
+        </ul>
+      </section>
+      </div>
+      <aside className="pdx-overview-side" aria-label="Project schedule and workspace">
+        <section className="pdx-section">
+          <SectionHead title="Schedule"/>
+          <dl className="pdx-schedule">
+            <div><dt>Start date</dt><dd>{fmtDate(project.startDate) || DASH}</dd></div>
+            <div><dt>Due date</dt><dd>{fmtDate(project.dueDate) || DASH}</dd></div>
+            <div><dt>Complete</dt><dd className="num">{project.percentComplete == null ? DASH : `${project.percentComplete}%`}</dd></div>
+          </dl>
+        </section>
+        <section className="pdx-section">
+          <SectionHead title="Continue working"/>
+          <div className="pdx-shortcuts">
+            {[
+              { key: "invoices", icon: "trend", title: "Project invoices", description: "Review monthly billing and projections" },
+              { key: "todos", icon: "checklist", title: "Team to-dos", description: "Assign work and track what is open" },
+              { key: "notes", icon: "note", title: "Notes & attachments", description: "Keep decisions and files with the project" },
+            ].map(link => <button key={link.key} type="button" onClick={() => onNavigate(link.key)}><Icon name={link.icon} size={18}/><span><strong>{link.title}</strong><small>{link.description}</small></span><Icon name="forward" size={14}/></button>)}
+          </div>
+        </section>
+      </aside>
     </div>
   );
 }
@@ -363,10 +395,11 @@ function StructureTab({ subtree, project, updateItem, onAddChild }) {
 
   return (
     <div className="pdx-pane">
+      <div className="pdx-section-intro"><h2>Work structure</h2><p>Manage phase allocation and edit contract, billing and cost figures in place.</p></div>
       <div className="pdx-alloc">
         <div className="pdx-alloc-figs">
           <div className="pdx-alloc-fig">
-            <span className="pdx-alloc-label">Available</span>
+            <span className="pdx-alloc-label">Available to allocate</span>
             <strong className={"num" + (available < -0.005 ? " is-over" : "")}>{fmtMoney(available, false)}</strong>
           </div>
           <Separator orientation="vertical" className="pdx-alloc-sep h-[30px] self-center"/>
@@ -387,7 +420,7 @@ function StructureTab({ subtree, project, updateItem, onAddChild }) {
         </Button>
       </div>
 
-      <div className="bx-scroll-x pdx-structwrap">
+      <div className="bx-scroll-x pdx-structwrap" role="region" aria-label="Project financial breakdown, scroll for more columns" tabIndex={0}>
         <table className="pdx-struct">
           <caption className="sr-only">
             Contract, billed and cost figures for this project and each of its phases. Money and
@@ -429,8 +462,7 @@ function StructureTab({ subtree, project, updateItem, onAddChild }) {
                         </button>
                       ) : <span className="pdx-toggle-spacer" aria-hidden="true"/>}
                       <span className={"pdx-dot " + (n.itemType === "main" ? "is-main" : "is-standard")} aria-hidden="true"/>
-                      <span className="pdx-tree-id num">{n.localId}</span>
-                      <span className="pdx-tree-name" title={n.name}>{n.name}</span>
+                      <span className="pdx-tree-identity"><span className="pdx-tree-id num">{n.localId}</span><span className="pdx-tree-name">{n.name}</span></span>
                       <Tooltip label="Add subphase">
                         <button type="button" className="pdx-addkid"
                           aria-label={`Add a subphase under ${n.name}`}
@@ -481,6 +513,7 @@ function InvoicesTab({ project, invoiceTableProps }) {
   const rows = invoiceTableProps?.rows || [];
   return (
     <div className="pdx-pane pdx-pane-flush">
+      <div className="pdx-section-intro"><h2>Project invoices</h2><p>Monthly billing, projections and attachments linked to this project.</p></div>
       {rows.length === 0 && (
         <Alert tone="warning" title="No invoice records match this project yet">
           Invoice rows link by project number. Create one for{" "}
@@ -494,13 +527,14 @@ function InvoicesTab({ project, invoiceTableProps }) {
 }
 
 // ── Documents (placeholder) ─────────────────────────────────────────────────
-function DocumentsTab() {
+function DocumentsTab({ onOpenNotes }) {
   return (
     <div className="pdx-pane">
       <EmptyState
         icon={GLYPH_DOCUMENTS}
-        title="No documents yet"
-        description="Contracts, drawings, submittals and correspondence filed against this project will be listed here. Until this section ships, attach files to a project note instead."
+        title="Keep project files with your notes"
+        description="The dedicated document library is not available yet. Use a project note to attach contracts, drawings and correspondence with the context your team needs."
+        action={<Button onClick={onOpenNotes}><Icon name="note" size={15}/>Open notes & attachments</Button>}
       />
     </div>
   );
@@ -826,6 +860,7 @@ function NotesTab({ subtreeIds, nodeOptions, rootId }) {
   return (
     <div className="pdx-pane">
       {/* Composer */}
+      <div className="pdx-section-intro"><h2>Notes & attachments</h2><p>Share decisions, updates and files with the team. Link each note to the project or a specific phase.</p></div>
       <section className="pdx-composer" aria-label="Add a note">
         <span className={`avatar sm ${meUser?.color || ""}`} aria-hidden="true">{meUser?.initials || "··"}</span>
         <div className="pdx-composer-main">
@@ -1026,6 +1061,7 @@ function SettingsTab({ subtree, items, updateItem, onAddItemSub, onUpdateItemSub
   return (
     <div className="pdx-settings">
       <nav className="pdx-settings-list" aria-label="Project items">
+        <div className="pdx-settings-listhead"><h2>Project items</h2><p>Select an item to edit its details.</p></div>
         {subtree.map(n => (
           <button key={n.id} type="button"
             className={"pdx-settings-item" + (sel?.id === n.id ? " is-active" : "")}
@@ -1111,7 +1147,7 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
         <div className="pdx-editor-actions">
           <Button variant="subtle" size="sm" onClick={() => onAddChild(item.id)}>
             <Icon name="plus" size={14}/>
-            Add child
+            Add sub-item
           </Button>
           <Button variant="destructive-soft" size="sm" onClick={() => onDeleteItem(item.id)}>
             <Icon name="trash" size={14}/>
@@ -1120,7 +1156,10 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
         </div>
       </div>
 
-      <div className="pdx-editor-grid">
+      <p className="pdx-editor-savehint"><Icon name="check" size={14}/>Text edits save when you leave the field. Selections save immediately.</p>
+      <fieldset className="pdx-editor-group">
+        <legend>Identity & ownership</legend>
+        <div className="pdx-editor-grid">
         {field(idLabel, "localId")}
         {field("Name", "name")}
 
@@ -1155,6 +1194,11 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
                 onChange={v => save("parentId", v)} allowClear placeholder="Search items…"/>}
         </Field>
 
+        </div>
+      </fieldset>
+      <fieldset className="pdx-editor-group">
+        <legend>Contract</legend>
+        <div className="pdx-editor-grid">
         <Field label="Contract Type" htmlFor="pdx-f-contractType"
           hint={item.contractType ? `Billed as ${contractTypeLabel(item.contractType).toLowerCase()}.` : "No contract structure set."}>
           <Select value={item.contractType || NONE}
@@ -1167,7 +1211,11 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
           </Select>
         </Field>
         {field("Contract Amount", "contractAmount", "number")}
-
+        </div>
+      </fieldset>
+      <fieldset className="pdx-editor-group">
+        <legend>Schedule & delivery</legend>
+        <div className="pdx-editor-grid">
         {field("Start Date", "startDate", "date")}
         {field("Due Date", "dueDate", "date")}
 
@@ -1183,12 +1231,18 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
           </Select>
         </Field>
 
+        </div>
+      </fieldset>
+      <fieldset className="pdx-editor-group">
+        <legend>Project location</legend>
+        <div className="pdx-editor-grid">
         {field("Address Line 1", "addressLine1")}
         {field("Address Line 2", "addressLine2")}
         {field("City", "city")}
         {field("State", "state")}
         {field("PIN Code", "pinCode")}
-      </div>
+        </div>
+      </fieldset>
 
       {/* Additional PMs */}
       <section className="pdx-editor-sub">

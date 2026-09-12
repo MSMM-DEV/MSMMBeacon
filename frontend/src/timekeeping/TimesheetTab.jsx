@@ -154,6 +154,7 @@ export function TimesheetTab({ focusDate = null }) {
     // away with it.
     <Tabs value={section} onValueChange={setSection} className="tsx-page">
 
+      <div className="tsx-sectionbar">
       <TabsList aria-label="Timesheet sections">
         {[
           ["time", "Time", "clock"],
@@ -165,12 +166,14 @@ export function TimesheetTab({ focusDate = null }) {
           </TabsTrigger>
         ))}
       </TabsList>
+      <p className="tsx-section-context">Your workday, in one place.</p>
+      </div>
 
       <TabsContent value="time" className="tsx-panel">
           <header className={`tsx-daybar ${isToday ? "is-today" : "is-other-day"}`}>
             <div className="tsx-daybar-copy">
-              <span className="tsx-daybar-eyebrow">{isToday ? "Timesheet" : "Viewing"}</span>
-              <h3 className="tsx-daybar-title">{isToday ? "Today" : formatDateLabel(date)}</h3>
+              <span className="tsx-daybar-eyebrow">{isToday ? "Your workday" : "Day review"}</span>
+              <h3 className="tsx-daybar-title">{formatDateLabel(date)}</h3>
             </div>
 
             <div className="tsx-daynav" role="group" aria-label="Timesheet date">
@@ -257,15 +260,15 @@ export function TimesheetTab({ focusDate = null }) {
           )}
 
           <div className="tsx-grid">
-            <main className="tsx-main">
+            <div className="tsx-main">
 
               {/* Vertical day calendar — punches as labeled markers, intervals as cards */}
               <section className="tsx-day" aria-labelledby="tsx-day-title">
                 <header className="tsx-day-head">
                   <div className="tsx-day-headline">
-                    <h3 className="tsx-day-title" id="tsx-day-title">My day</h3>
+                    <h3 className="tsx-day-title" id="tsx-day-title">Day activity</h3>
                     <p className="tsx-day-sub">
-                      <span className="num">{fmtHM(todayMinutes)}</span> total hours worked
+                      Open a time block to edit its times, category or note.
                     </p>
                   </div>
                   {/* Day-level work: add a block that was never punched, delete
@@ -347,7 +350,11 @@ export function TimesheetTab({ focusDate = null }) {
                 )}
               </section>
 
-              {/* Week summary */}
+            </div>
+
+            <aside className="tsx-side" aria-label="Weekly review and team presence">
+              {/* Week summary is adjacent to the day so reviewing another day
+                  does not require scrolling through every activity block. */}
               <WeekSummary
                 userId={userId}
                 weekStart={weekStart}
@@ -356,10 +363,13 @@ export function TimesheetTab({ focusDate = null }) {
                 onSelectDate={setDate}
                 onChanged={refresh}
               />
-            </main>
-
-            <aside className="tsx-side">
-              <TeamPresenceView date={date} onDate={setDate} embedded />
+              <details className="tsx-team-disclosure">
+                <summary>
+                  <span><Icon name="users" size={16}/> Team presence</span>
+                  <Icon name="chevronDown" size={15}/>
+                </summary>
+                <TeamPresenceView date={date} onDate={setDate} embedded />
+              </details>
             </aside>
           </div>
       </TabsContent>

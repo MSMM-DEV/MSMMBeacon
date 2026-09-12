@@ -25,6 +25,7 @@ const PopoverContent = React.forwardRef(function PopoverContent(
           "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
+          "[animation-duration:var(--dur-normal)] data-[state=closed]:[animation-duration:var(--dur-fast)] [animation-timing-function:var(--ease-out)] origin-[var(--radix-popover-content-transform-origin)]",
           className
         )}
         {...props}

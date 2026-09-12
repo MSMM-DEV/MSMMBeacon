@@ -86,7 +86,7 @@ export const UserTag = ({ userId, size = "xs", nameOnly = false }) => {
       )}
     >
       <UserAvatar user={u} size={size} />
-      <span className="min-w-0 truncate">{u.name}</span>
+      <span className="min-w-0 whitespace-normal break-words">{u.name}</span>
     </span>
   );
 };
@@ -136,8 +136,8 @@ export const RoleChip = ({ role }) => {
   // Prime carries the "we hold the contract" signal (sage); every other
   // role is informational (steel).
   return (
-    <Badge tone={role === "Prime" ? "success" : "info"} dot className="max-w-full">
-      <span className="min-w-0 truncate">{role}</span>
+    <Badge tone={role === "Prime" ? "success" : "info"} dot className="max-w-full whitespace-normal">
+      <span className="min-w-0 break-words">{role}</span>
     </Badge>
   );
 };
@@ -169,8 +169,8 @@ const BADGE_TONE = {
 export const StatusChip = ({ status }) => {
   const tone = STATUS_TONE[status] || STATUS_TONE["Potential"];
   return (
-    <Badge tone={BADGE_TONE[tone]} dot className="max-w-full">
-      <span className="min-w-0 truncate">{status || EN_DASH}</span>
+    <Badge tone={BADGE_TONE[tone]} dot className="max-w-full whitespace-normal">
+      <span className="min-w-0 break-words">{status || EN_DASH}</span>
     </Badge>
   );
 };
@@ -594,7 +594,7 @@ export const EditableCell = ({
               )}
             >
               {u && <UserAvatar user={u} size="xs" />}
-              <span className="min-w-0 truncate">{label}</span>
+              <span className="min-w-0 whitespace-normal break-words">{label}</span>
               <button
                 type="button"
                 className={cn(
@@ -674,7 +674,7 @@ export const EditableCell = ({
                   }}
                 >
                   {u && <UserAvatar user={u} size="xs" />}
-                  <span className="min-w-0 truncate">{o.label}</span>
+                  <span className="min-w-0 whitespace-normal break-words">{o.label}</span>
                 </button>
               );
             })}
@@ -1051,7 +1051,7 @@ export const SearchableSelect = ({
                 )}
                 onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
           <span className="grid w-3.5 shrink-0 place-items-center"><Icon name="x" size={12}/></span>
-          <span className="searchable-label min-w-0 flex-1 truncate">Clear selection</span>
+          <span className="searchable-label min-w-0 flex-1 whitespace-normal break-words">Clear selection</span>
         </button>
       )}
       {shownItems.length === 0 && !onCreate ? (
@@ -1086,7 +1086,7 @@ export const SearchableSelect = ({
               <span className="grid w-3.5 shrink-0 place-items-center text-[var(--accent)]">
                 {isSel ? <Icon name="check" size={12}/> : null}
               </span>
-              <span className="searchable-label min-w-0 flex-1 truncate">{o.label}</span>
+              <span className="searchable-label min-w-0 flex-1 whitespace-normal break-words">{o.label}</span>
             </button>
           );
         })
@@ -1110,7 +1110,7 @@ export const SearchableSelect = ({
           <span className="grid w-3.5 shrink-0 place-items-center text-[var(--accent)]">
             <Icon name="plus" size={12}/>
           </span>
-          <span className="searchable-label min-w-0 flex-1 truncate">
+          <span className="searchable-label min-w-0 flex-1 whitespace-normal break-words">
             {q.trim() ? `Create “${q.trim()}”` : createLabel}
           </span>
         </button>

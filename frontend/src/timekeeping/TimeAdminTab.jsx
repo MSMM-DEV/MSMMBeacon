@@ -140,7 +140,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
 
   return (
     <TooltipProvider delayDuration={280}>
-      <div className="tka">
+      <div className="tka tka-workspace">
         <Tabs value={view} onValueChange={setView} className="flex min-w-0 flex-col gap-5">
 
           {/* Section switcher + global tools, sharing one hairline. */}
@@ -154,7 +154,7 @@ export function TimeAdminTab({ onOpenUserDay }) {
               ))}
             </TabsList>
 
-            <div className="tka-tabtools">
+            {view === "settings" && <div className="tka-tabtools">
               {reMsg && (
                 <span className="tka-toolmsg" role="status">{reMsg}</span>
               )}
@@ -168,12 +168,18 @@ export function TimeAdminTab({ onOpenUserDay }) {
                 {!reBusy && <Icon name="bolt" size={14}/>}
                 {reBusy ? "Running" : "Reclassify now"}
               </Button>
-            </div>
+            </div>}
           </div>
 
           <TabsContent value="team" className="flex min-w-0 flex-col gap-4">
+            <div className="tka-workspace-intro">
+              <div><h3>Team time overview</h3><p>Review attendance and worked hours. Open a person’s day to inspect or edit their time.</p></div>
+              <span className="tka-workspace-context"><Icon name="clock" size={14}/> Central time</span>
+            </div>
             {/* Team-specific control bar — range selector, search, people filter */}
             <div className="tka-controls">
+              <div className="tka-filter-group">
+                <span className="tka-filter-label">View period</span>
               <Tabs value={prefs.range} onValueChange={setRange} className="min-w-0">
                 <TabsList variant="segmented" aria-label="Range">
                   {RANGES.map(r => (
@@ -181,21 +187,31 @@ export function TimeAdminTab({ onOpenUserDay }) {
                   ))}
                 </TabsList>
               </Tabs>
+              </div>
 
               <div className="tka-controls-right">
+                <div className="tka-filter-group">
+                  <span className="tka-filter-label">Presence right now</span>
                 <PresenceFilter
                   value={prefs.presence || "all"}
                   onChange={(v) => updatePrefs({ presence: v })}
                 />
+                </div>
+                <div className="tka-filter-group tka-filter-people">
+                  <span className="tka-filter-label">Find people</span>
                 <SearchBox
                   value={prefs.search}
                   onChange={(v) => updatePrefs({ search: v })}
                 />
+                </div>
+                <div className="tka-filter-group">
+                  <span className="tka-filter-label">Include</span>
                 <PeopleFilter
                   visibleUsers={prefs.visibleUsers}
                   onChange={(next) => updatePrefs({ visibleUsers: next })}
                   signals={signals}
                 />
+                </div>
                 <DensityToggle
                   value={prefs.density}
                   onChange={(v) => updatePrefs({ density: v })}
@@ -240,7 +256,7 @@ function SearchBox({ value, onChange }) {
       type="search"
       className="tka-search sm:w-[230px]"
       aria-label="Search people by name"
-      placeholder="Search names"
+      placeholder="Search team members"
       value={value || ""}
       onChange={e => onChange(e.target.value)}
       leading={<Icon name="search" size={14}/>}

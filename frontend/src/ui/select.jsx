@@ -20,8 +20,8 @@ const SelectTrigger = React.forwardRef(function SelectTrigger({ className, child
         "focus-visible:outline-none focus-visible:border-[var(--ring)] focus-visible:shadow-[var(--focus-ring)]",
         "disabled:cursor-not-allowed disabled:opacity-55 disabled:bg-[var(--surface-2)]",
         "data-[placeholder]:text-[var(--text-soft)]",
-        "[&>span]:min-w-0 [&>span]:truncate",
-        size === "sm" ? "h-[var(--control-h-sm)]" : "h-[var(--control-h)]",
+        "[&>span]:min-w-0 [&>span]:whitespace-normal [&>span]:break-words py-1.5",
+        size === "sm" ? "min-h-[var(--control-h-sm)]" : "min-h-[var(--control-h)]",
         className
       )}
       {...props}

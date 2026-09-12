@@ -68,7 +68,7 @@ export function WeekSummary({
     <section className="tsx-week" aria-labelledby="tsx-week-title">
       <header className="tsx-week-head">
         <div className="tsx-week-headline">
-          <span className="tsx-week-eyebrow">Week of</span>
+          <span className="tsx-week-eyebrow">Weekly overview</span>
           <h3 className="tsx-week-title" id="tsx-week-title">{fmtWeekRange(weekStart)}</h3>
         </div>
         <p className="tsx-week-total">
@@ -86,7 +86,7 @@ export function WeekSummary({
             <thead>
               <tr>
                 <th scope="col">Day</th>
-                <th scope="col" className="tsx-week-col-bar">Share of an eight hour day</th>
+                <th scope="col" className="tsx-week-col-bar"><span title="Share of an eight hour day">8h reference</span></th>
                 <th scope="col" className="tsx-week-col-h">Worked</th>
                 <th scope="col" className="tsx-week-col-flag">Needs attention</th>
               </tr>
@@ -102,8 +102,10 @@ export function WeekSummary({
                     className={`tsx-week-row ${minutes === 0 ? "is-empty" : ""} ${attention ? "has-attention" : ""}`}
                   >
                     <th scope="row" className="tsx-week-cell-day">
-                      <span className="tsx-week-dow">{s.label}</span>
-                      <span className="tsx-week-dom num">{monthDay(s.date)}</span>
+                      <button type="button" className="tsx-week-daylink" onClick={() => onSelectDate?.(s.date)} aria-label={`View ${s.label}, ${monthDay(s.date)}`}>
+                        <span className="tsx-week-dow">{s.label}</span>
+                        <span className="tsx-week-dom num">{monthDay(s.date)}</span>
+                      </button>
                     </th>
                     <td className="tsx-week-cell-bar">
                       <span className="tsx-week-bar" aria-hidden="true">

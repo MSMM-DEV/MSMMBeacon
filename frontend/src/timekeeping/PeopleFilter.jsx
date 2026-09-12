@@ -83,6 +83,7 @@ export function PeopleFilter({
 
       <PopoverContent align="end" className="tka-people-pop w-[min(320px,calc(100vw-24px))] p-0">
         <div className="tka-people-search">
+          <h4 className="tka-people-heading">Choose team members</h4>
           <InputGroup
             type="text"
             autoFocus

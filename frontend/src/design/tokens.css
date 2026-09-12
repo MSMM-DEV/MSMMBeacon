@@ -12,62 +12,60 @@
    two systems can never drift apart. Changing a ramp step here restyles
    the whole application in both themes at once.
 
-   Palette rationale — Beacon is an engineering firm's internal system of
-   record. The canvas is warm paper rather than the blue-grey every other
-   dashboard ships with, and the accent is a burnt ochre drawn from the
-   MSMM mark. Hues stay low-chroma so that money, dates and status are the
-   only things on screen that ever read as "loud".
+   Cool porcelain and graphite give dense engineering records a clear,
+   neutral foundation. Cobalt identifies actions, while status colours
+   retain their meaning in independently designed light and dark themes.
    ====================================================================== */
 
 :root {
-  /* ---- Warm neutral ramp ------------------------------------------- */
+  /* ---- Cool neutral ramp ------------------------------------------- */
   --n-0:   #FFFFFF;
-  --n-25:  #FAF8F5;
-  --n-50:  #F5F2ED;
-  --n-100: #EEEAE3;
-  --n-200: #E3DED5;
-  --n-300: #D0C9BD;
-  --n-400: #A9A196;
-  --n-500: #8B8377;
-  --n-600: #6B655B;
-  --n-700: #4E4941;
-  --n-800: #33302B;
-  --n-850: #262320;
-  --n-900: #1C1A17;
-  --n-950: #131210;
+  --n-25:  #F3F6FB;
+  --n-50:  #F7F9FC;
+  --n-100: #EAF0F7;
+  --n-200: #DCE4EF;
+  --n-300: #B7C4D5;
+  --n-400: #8595AC;
+  --n-500: #60718A;
+  --n-600: #4E6078;
+  --n-700: #35465D;
+  --n-800: #243248;
+  --n-850: #1B2638;
+  --n-900: #162238;
+  --n-950: #0B1220;
 
-  /* ---- Ochre (brand / accent) -------------------------------------- */
-  --oc-50:  #FDF7EF;
-  --oc-100: #F8E9D4;
-  --oc-200: #F0D3AB;
-  --oc-300: #E4B77C;
-  --oc-400: #D59A52;
-  --oc-500: #C4832F;
+  /* ---- Cobalt (historic oc names remain compatible aliases) -------- */
+  --oc-50:  #F0F5FF;
+  --oc-100: #E7EFFF;
+  --oc-200: #C4D6FF;
+  --oc-300: #94B7FF;
+  --oc-400: #709BFA;
+  --oc-500: #3973E6;
   /* 600 is the light-theme interactive step: it carries white button text and
      is also the accent text colour on paper. Held at 5.1:1 against #FFFFFF,
      so 14px labels on a primary button clear WCAG AA. */
-  --oc-600: #9A6120;
-  --oc-700: #85521B;
-  --oc-800: #663E17;
-  --oc-900: #4A2D12;
+  --oc-600: #2459D3;
+  --oc-700: #1C47B0;
+  --oc-800: #1D3F8E;
+  --oc-900: #19366F;
 
   /* ---- Sage (positive / awarded / approved) ------------------------ */
-  --sg-50:  #F2F5EE;
-  --sg-100: #E2EAD8;
-  --sg-200: #CBDaBB;
-  --sg-300: #A8BE92;
-  --sg-500: #6F8C55;
-  --sg-600: #5B7545;
-  --sg-700: #465B36;
+  --sg-50:  #EFFAF5;
+  --sg-100: #E0F3EB;
+  --sg-200: #ABDCC8;
+  --sg-300: #85D7B3;
+  --sg-500: #23875F;
+  --sg-600: #19734F;
+  --sg-700: #135F42;
 
   /* ---- Clay (negative / closed / overdue) -------------------------- */
-  --cl-50:  #FCF1EF;
-  --cl-100: #F7DCD8;
-  --cl-200: #EFC4BE;
-  --cl-300: #E0A29B;
-  --cl-500: #C25E54;
-  --cl-600: #A84A41;
-  --cl-700: #8A3A32;
+  --cl-50:  #FFF3F4;
+  --cl-100: #FCE6E9;
+  --cl-200: #F0B9C1;
+  --cl-300: #FDA5B4;
+  --cl-500: #C94360;
+  --cl-600: #B62E4B;
+  --cl-700: #97243D;
 
   /* ---- Slate blue (informational / in-between) --------------------- */
   --bl-50:  #F0F3F7;
@@ -137,7 +135,7 @@
   --destructive-foreground:#FFFFFF;
   --success:               var(--sg-600);
   --success-foreground:    #FFFFFF;
-  --warning:               var(--oc-600);
+  --warning:               #91600E;
   --warning-foreground:    #FFFFFF;
   --info:                  var(--bl-600);
   --info-foreground:       #FFFFFF;
@@ -145,30 +143,36 @@
   --ring:                  var(--oc-500);
 
   /* ---- Elevation ---------------------------------------------------
-     Warm-tinted shadows: a neutral black shadow over a warm canvas
-     reads as dirty grey. These carry a trace of the ochre substrate. */
-  --shadow-xs: 0 1px 1px rgba(58, 44, 22, .04);
-  --shadow-sm: 0 1px 2px rgba(58, 44, 22, .06), 0 0 0 .5px rgba(58, 44, 22, .04);
-  --shadow-md: 0 4px 14px -4px rgba(58, 44, 22, .10), 0 1px 3px rgba(58, 44, 22, .06);
-  --shadow-lg: 0 18px 40px -14px rgba(58, 44, 22, .16), 0 2px 6px rgba(58, 44, 22, .07);
-  --shadow-xl: 0 32px 64px -20px rgba(58, 44, 22, .22), 0 4px 10px rgba(58, 44, 22, .08);
+     Cool, low-opacity shadows separate opaque data and glass chrome. */
+  --shadow-xs: 0 1px 2px rgba(24, 43, 76, .04);
+  --shadow-sm: 0 2px 6px rgba(24, 43, 76, .04), 0 0 0 .5px rgba(24, 43, 76, .03);
+  --shadow-md: 0 8px 24px -8px rgba(24, 43, 76, .12), 0 1px 3px rgba(24, 43, 76, .04);
+  --shadow-lg: 0 20px 48px -14px rgba(24, 43, 76, .19), 0 2px 8px rgba(24, 43, 76, .05);
+  --shadow-xl: 0 32px 90px -20px rgba(13, 30, 60, .25), 0 8px 20px rgba(13, 30, 60, .08);
 
   /* ---- Glass -------------------------------------------------------
      Used sparingly: the sticky app bar, the sidebar rail and overlay
      scrims only. Never on content the user has to read numbers off. */
-  --glass-bg:     rgba(255, 255, 255, .72);
-  --glass-bg-2:   rgba(250, 248, 245, .80);
-  --glass-border: rgba(255, 255, 255, .55);
+  --glass-bg:     rgba(255, 255, 255, .84);
+  --glass-bg-2:   rgba(244, 248, 255, .88);
+  --glass-border: rgba(255, 255, 255, .92);
   --glass-blur:   saturate(180%) blur(20px);
-  --scrim:        rgba(28, 26, 23, .38);
+  --scrim:        rgba(10, 23, 45, .46);
+  --pin-shadow:   rgba(23, 38, 61, .10);
+  --invoice-actual-bg: #EAF2FF;
+  --invoice-actual-ink: #244A80;
+  --invoice-projection-bg: #F2EDFC;
+  --invoice-projection-ink: #65458D;
+  --invoice-paid-bg: #D9F2E2;
+  --invoice-paid-ink: #175A36;
 
   /* ---- Radius ------------------------------------------------------ */
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius:    9px;
-  --radius-md: 11px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-sm: 8px;
+  --radius:    10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
   --radius-full: 999px;
 
   /* ---- Typography -------------------------------------------------- */
@@ -177,9 +181,9 @@
   --font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* Type scale — 1.200 minor third, anchored at 14px body */
-  --fs-2xs: 10.5px;
-  --fs-xs:  11.5px;
-  --fs-sm:  12.5px;
+  --fs-2xs: 12px;
+  --fs-xs:  12px;
+  --fs-sm:  13px;
   --fs-md:  14px;
   --fs-lg:  16px;
   --fs-xl:  19px;
@@ -203,18 +207,18 @@
   --sp-12: 48px; --sp-16: 64px;
 
   /* ---- Layout ------------------------------------------------------ */
-  --sidebar-w:           248px;
-  --sidebar-w-collapsed: 60px;
-  --topbar-h:            56px;
+  --sidebar-w:           260px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h:            68px;
   --page-max:           1680px;
   --page-gutter:        clamp(14px, 2.2vw, 28px);
 
   /* ---- Density ----------------------------------------------------- */
   --row-h: 42px;
   --row-pad-y: 9px;
-  --control-h: 34px;
-  --control-h-sm: 28px;
-  --control-h-lg: 40px;
+  --control-h: 38px;
+  --control-h-sm: 30px;
+  --control-h-lg: 44px;
 
   /* ---- Motion ------------------------------------------------------
      Two curves only. `--ease-out` for anything entering or responding to
@@ -227,60 +231,70 @@
   --dur-fast:    150ms;
   --dur-normal:  220ms;
   --dur-slow:    340ms;
+  --dur-page:    260ms;
+  --dur-panel:   240ms;
+  --dur-exit:    160ms;
 
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--ring);
 }
 
 /* ====================================================================
    DARK THEME
-   Warm charcoal, not blue-black — the light theme's paper substrate
-   read in low light. Accent lifts to a 300-weight ochre so it keeps
-   4.5:1 against the elevated surfaces.
+   Layered graphite, cool borders and independent, readable accent tones.
    ==================================================================== */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg:            #161512;
-  --bg-elev:       #1C1B17;
-  --surface:       #201E1A;
-  --surface-2:     #27251F;
-  --surface-3:     #302D26;
-  --surface-hover: #302D26;
-  --border:        #35322B;
-  --border-strong: #494439;
-  --text:          #F2EFE9;
-  --text-muted:    #ADA598;
-  --text-soft:     #837B6E;
+  --bg:            #101216;
+  --bg-elev:       #14171C;
+  --surface:       #1A1E25;
+  --surface-2:     #21262F;
+  --surface-3:     #29303B;
+  --surface-hover: #303947;
+  --border:        #343C49;
+  --border-strong: #637184;
+  --text:          #EEF1F6;
+  --text-muted:    #BDC5D1;
+  --text-soft:     #A5AFBE;
 
-  --accent:        var(--oc-300);
-  --accent-hover:  var(--oc-200);
-  --accent-ink:    var(--oc-100);
-  --accent-solid:  var(--oc-400);
-  --accent-on:     #24170A;
-  --accent-soft:   #3A2A15;
-  --accent-softer: #2A1F11;
-  --accent-line:   #4E391D;
+  --accent:        #9EBCFA;
+  --accent-hover:  #3C68C6;
+  --accent-ink:    #DCE7FD;
+  --accent-solid:  #315BB5;
+  --accent-on:     #FFFFFF;
+  --accent-soft:   #243047;
+  --accent-softer: #1C2534;
+  --accent-line:   #43577A;
 
-  --sage:          var(--sg-300);
-  --sage-ink:      var(--sg-100);
-  --sage-soft:     #28301F;
-  --sage-line:     #3A4630;
-  --rose:          var(--cl-300);
-  --rose-ink:      var(--cl-100);
-  --rose-soft:     #35211E;
-  --rose-line:     #4C302B;
-  --blue:          var(--bl-300);
-  --blue-ink:      var(--bl-100);
-  --blue-soft:     #1F2833;
-  --blue-line:     #2F3D4E;
+  --sage:          #8BD4B2;
+  --sage-ink:      #BBEBD5;
+  --sage-soft:     #20352E;
+  --sage-line:     #3D6653;
+  --rose:          #F2A9B7;
+  --rose-ink:      #F9D1D9;
+  --rose-soft:     #3B2830;
+  --rose-line:     #76505D;
+  --blue:          #ABC1E2;
+  --blue-ink:      #D9E4F5;
+  --blue-soft:     #273243;
+  --blue-line:     #485D7A;
 
-  --destructive:           var(--cl-500);
+  --prob-high:     #8BD4B2;
+  --prob-high-bg:  #20352E;
+  --prob-medium:   #ABC1E2;
+  --prob-medium-bg:#273243;
+  --prob-low:      #F2A9B7;
+  --prob-low-bg:   #3B2830;
+  --prob-orange:   #E7BE82;
+  --prob-orange-bg:#382F23;
+
+  --destructive:           #B62E4B;
   --destructive-foreground:#FFF3F1;
-  --success:               var(--sg-500);
+  --success:               #19734F;
   --success-foreground:    #F3F7EE;
-  --warning:               var(--oc-400);
-  --warning-foreground:    #24170A;
-  --info:                  var(--bl-500);
+  --warning:               #F4BE65;
+  --warning-foreground:    #30220D;
+  --info:                  var(--bl-600);
   --info-foreground:       #F0F4F9;
   --ring:                  var(--oc-400);
 
@@ -290,10 +304,18 @@
   --shadow-lg: 0 20px 44px -16px rgba(0, 0, 0, .64), 0 2px 6px rgba(0, 0, 0, .40);
   --shadow-xl: 0 34px 70px -22px rgba(0, 0, 0, .72), 0 4px 10px rgba(0, 0, 0, .45);
 
-  --glass-bg:     rgba(32, 30, 26, .74);
-  --glass-bg-2:   rgba(28, 27, 23, .82);
-  --glass-border: rgba(255, 255, 255, .07);
-  --scrim:        rgba(8, 7, 6, .58);
+  --glass-bg:     rgba(20, 23, 28, .92);
+  --glass-bg-2:   rgba(26, 30, 37, .94);
+  --glass-border: rgba(200, 213, 232, .10);
+  --glass-blur:   saturate(115%) blur(20px);
+  --scrim:        rgba(4, 6, 10, .72);
+  --pin-shadow:   rgba(0, 0, 0, .22);
+  --invoice-actual-bg: #1D3048;
+  --invoice-actual-ink: #BFD9FC;
+  --invoice-projection-bg: #322842;
+  --invoice-projection-ink: #DBC6F5;
+  --invoice-paid-bg: #193D2C;
+  --invoice-paid-ink: #A7E8BF;
 }
 
 /* ====================================================================
@@ -340,6 +362,9 @@
     --dur-fast:    1ms;
     --dur-normal:  1ms;
     --dur-slow:    1ms;
+    --dur-page:    1ms;
+    --dur-panel:   1ms;
+    --dur-exit:    1ms;
   }
   *, *::before, *::after {
     animation-duration: 1ms !important;

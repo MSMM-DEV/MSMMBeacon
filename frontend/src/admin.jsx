@@ -107,33 +107,30 @@ export const AdminPanel = ({
       <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
         <SheetContent
           side="right"
-          className={
-            "adm-sheet " +
-            (tab === "alerts" ? "w-[min(96vw,1060px)]" : "w-[min(96vw,760px)]")
-          }
+          className="adm-sheet w-[min(96vw,1060px)] bg-[var(--bg)]"
         >
-          <SheetHeader>
+          <SheetHeader className="adm-sheet-head">
             <span className="adm-eyebrow">
-              <Icon name="shield" size={12} />Admin
+              <Icon name="shield" size={12} />Administration
             </span>
             <SheetTitle>Workspace settings</SheetTitle>
             <SheetDescription>
-              Roster, alert dispatch, shared targets and your own appearance settings.
+              People, notifications and the settings that keep Beacon running.
             </SheetDescription>
           </SheetHeader>
 
           <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-            <div className="shrink-0 px-5 pt-3">
-              <TabsList>
+            <div className="adm-section-nav shrink-0 px-5 pt-3">
+              <TabsList aria-label="Workspace settings sections" className="max-[520px]:grid max-[520px]:grid-cols-2">
                 <TabsTrigger value="users">
-                  <Icon name="users" size={14} />Users
+                  <Icon name="users" size={14} />People
                   <TabCount>{rows.length}</TabCount>
                 </TabsTrigger>
                 <TabsTrigger value="alerts">
                   <Icon name="bell" size={14} />Alerts
                 </TabsTrigger>
                 <TabsTrigger value="targets">
-                  <Icon name="flag" size={14} />Targets
+                  <Icon name="flag" size={14} />Billing settings
                 </TabsTrigger>
                 <TabsTrigger value="tweaks">
                   <Icon name="settings" size={14} />Appearance
@@ -143,6 +140,10 @@ export const AdminPanel = ({
 
             <div className="adm-body">
               <TabsContent value="users" className="adm-stack">
+                <div className="adm-section-heading">
+                  <div><h3>People & access</h3><p>Find a teammate, review their access or manage their account.</p></div>
+                  <span className="adm-section-count">{rows.length} people · {adminCount} admins</span>
+                </div>
                 <div className="adm-toolbar">
                   <InputGroup
                     className="adm-search"
@@ -199,15 +200,16 @@ export const AdminPanel = ({
                 )}
 
                 {filtered.length > 0 && (
-                  <div className="bx-scroll-x">
+                  <div className="adm-register bx-scroll-x">
                     <table className="adm-table" role="table">
+                      <caption className="sr-only">Workspace people, roles, access and account actions</caption>
                       <thead role="rowgroup">
                         <tr role="row">
                           <th role="columnheader" scope="col">Person</th>
                           <th role="columnheader" scope="col" className="adm-col-role">Role</th>
                           <th role="columnheader" scope="col" className="adm-col-access">Access</th>
                           <th role="columnheader" scope="col" className="adm-col-actions">
-                            <span className="sr-only">Row actions</span>
+                            Manage
                           </th>
                         </tr>
                       </thead>
@@ -245,6 +247,10 @@ export const AdminPanel = ({
               </TabsContent>
 
               <TabsContent value="targets">
+                <div className="adm-section-heading">
+                  <div><h3>Billing settings</h3><p>Shared settings for invoice actuals, performance targets and reminder delivery.</p></div>
+                  <Badge tone="outline">Workspace-wide</Badge>
+                </div>
                 <TargetsPanel
                   appSettings={appSettings}
                   onSaved={(next, msg) => {
@@ -259,6 +265,10 @@ export const AdminPanel = ({
               </TabsContent>
 
               <TabsContent value="tweaks">
+                <div className="adm-section-heading">
+                  <div><h3>Make Beacon yours</h3><p>Choose the appearance and density that work best for you.</p></div>
+                  <Badge tone="outline">Personal preferences</Badge>
+                </div>
                 <AppearanceSettings tweaks={tweaks} setTweak={setTweak} />
               </TabsContent>
             </div>
@@ -350,10 +360,10 @@ const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggl
           </Avatar>
           <span className="adm-ident">
             <span className="adm-name">
-              <span className="bx-truncate">{name}</span>
+              <span>{name}</span>
               {isSelf && <Badge tone="outline" size="sm">you</Badge>}
             </span>
-            <span className="adm-email bx-truncate">{row.email}</span>
+            <span className="adm-email">{row.email}</span>
           </span>
         </div>
       </td>
@@ -376,8 +386,8 @@ const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggl
       <td role="cell" className="adm-cell-actions">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${name}`}>
-              <Icon name="more" size={16} />
+            <Button variant="default" size="sm" aria-label={`Manage ${name}`}>
+              Manage<Icon name="chevronDown" size={14} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
@@ -451,11 +461,12 @@ const AddUserModal = ({ onClose, onSubmit }) => {
           <DialogHeader>
             <DialogTitle>Add user</DialogTitle>
             <DialogDescription>
-              Creates the Beacon roster row and the sign-in record together.
+              Add a teammate to the roster and give them access to Beacon.
             </DialogDescription>
           </DialogHeader>
 
           <DialogBody className="adm-stack">
+            <p className="adm-form-section-label">Teammate details</p>
             <div className="adm-grid-2">
               <Field label="First name" required htmlFor="adm-first">
                 <Input id="adm-first" value={first} autoFocus autoComplete="off"
@@ -473,7 +484,7 @@ const AddUserModal = ({ onClose, onSubmit }) => {
                      placeholder="person@msmmeng.com" />
             </Field>
 
-            <Field label="Role">
+            <Field label="Workspace access">
               <RadioGroup
                 value={role}
                 onValueChange={setRole}
@@ -765,7 +776,6 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
   return (
     <div className="adm-stack">
       <CutoverCard appSettings={appSettings} onSaved={onSaved} onError={onError} />
-      <BillingRemindersCard onSaved={onSaved} onError={onError} />
 
       <form className="adm-card" onSubmit={onSubmit}>
         <div className="adm-card-head">
@@ -833,6 +843,7 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
           </Alert>
         )}
       </form>
+      <BillingRemindersCard onSaved={onSaved} onError={onError} />
     </div>
   );
 };
@@ -885,7 +896,7 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
     <form className="adm-card" onSubmit={onSubmit}>
       <div className="adm-card-head">
         <p className="adm-card-eyebrow">Invoice · Actual vs Projection</p>
-        <h4 className="adm-card-title">Move to Actual on</h4>
+        <h4 className="adm-card-title">Actuals cutover</h4>
         <p className="adm-card-desc">
           Each year's month columns switch from <strong>Projection</strong> to{" "}
           <strong>Actual</strong> as the year progresses. Choose <strong>this month</strong>{" "}
@@ -928,7 +939,7 @@ const CutoverCard = ({ appSettings, onSaved, onError }) => {
         <div className="adm-card-actions">
           <Button type="submit" variant="primary" loading={pending}
                   disabled={!draftValid || !dirty || pending}>
-            {pending ? "Saving…" : "Save"}
+            {pending ? "Saving…" : "Save cutover"}
           </Button>
         </div>
       </div>

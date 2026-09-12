@@ -57,11 +57,12 @@ export const InvoiceCharts = ({ rows = [], allRows = rows, windowMonths = [], or
 
   return (
     <section className="quad-card inv-charts-card" data-accent="flow">
-      <header className="quad-head">
-        <div className="quad-eyebrow">Cash Flow</div>
-        <h2 className="quad-title">Anticipated Invoice</h2>
+      <header className="quad-head invoice-cashflow-head">
+        <div className="quad-eyebrow">Revenue outlook</div>
+        <h2 className="quad-title">Cash flow at a glance</h2>
         <div className="quad-sub-row">
-          <div className="quad-sub">{rangeLabel} · monthly MSMM billing — actual vs. projection (matches the table totals)</div>
+          <div className="quad-sub">Monthly MSMM billing, aligned with your invoice ledger.</div>
+          <span className="invoice-chart-period"><Icon name="calendar" size={14}/>{rangeLabel}</span>
         </div>
       </header>
       <div className="quad-body">
@@ -146,6 +147,17 @@ const niceChartMax = (peak) => {
 
 const InvoiceChart = ({ rows = [], allRows = rows, windowMonths = [], orangeSourceIds, monthlyBenchmark, subInvoices, eyebrow, view = "pair", onViewChange }) => {
   const N = Math.max(1, windowMonths.length);
+  const figuresRef = useRef(null);
+  useEffect(() => {
+    // Phones use the same computed monthly figures as the chart in a vertical
+    // layout. Open the native disclosure on entry to the phone layout; users
+    // can still collapse it, and desktop disclosure state is left alone.
+    const phone = window.matchMedia("(max-width: 767px)");
+    const openPhoneFigures = () => { if (phone.matches && figuresRef.current) figuresRef.current.open = true; };
+    openPhoneFigures();
+    phone.addEventListener("change", openPhoneFigures);
+    return () => phone.removeEventListener("change", openPhoneFigures);
+  }, []);
   // Per-window-month totals — each row contributes its MSMM PORTION for the
   // month, mirroring the InvoiceTable's msmmAtDesc exactly (the per-month
   // MSMM override wins; else year total − Σ that month's sub amounts). This
@@ -292,19 +304,19 @@ const InvoiceChart = ({ rows = [], allRows = rows, windowMonths = [], orangeSour
           )}
           {showViewToggle && (
             <div className="events-view-toggle chart-view-toggle"
-                 role="tablist"
+                 role="group"
                  aria-label="Chart view">
               <button
-                type="button" role="tab"
-                aria-selected={view === "pair"}
+                type="button"
+                aria-pressed={view === "pair"}
                 className={view === "pair" ? "active" : ""}
                 onClick={() => onViewChange("pair")}
                 title="Show with-Orange and without-Orange as side-by-side bars">
-                Pair
+                Compare scenarios
               </button>
               <button
-                type="button" role="tab"
-                aria-selected={view === "average"}
+                type="button"
+                aria-pressed={view === "average"}
                 className={view === "average" ? "active" : ""}
                 onClick={() => onViewChange("average")}
                 title="Show a single bar at the midpoint of with/without Orange">
@@ -358,7 +370,7 @@ const InvoiceChart = ({ rows = [], allRows = rows, windowMonths = [], orangeSour
         onMouseMove={onMove}
         onMouseLeave={() => setHoverIdx(null)}
         role="img"
-        aria-label="Monthly invoice bars vs benchmark"
+                aria-label={`${eyebrow}: monthly invoice actuals and projections. Exact values are available in the monthly figures disclosure below.`}
       >
         <defs>
           {["above", "below", "neutral"].map((v) => (
@@ -623,6 +635,22 @@ const InvoiceChart = ({ rows = [], allRows = rows, windowMonths = [], orangeSour
         <span><span className="swatch hatched"/>Projection</span>
         <span><span className="swatch today"/>Today</span>
       </div>
+      <details className="invoice-chart-data" ref={figuresRef}>
+        <summary><Icon name="columns" size={14}/>View monthly figures<span>Exact values for this outlook</span></summary>
+        <div className="invoice-chart-data-scroll" role="region" aria-label={`${eyebrow} monthly figures`} tabIndex={0}>
+          <table role="table">
+            <caption>{eyebrow} · monthly MSMM billing</caption>
+            <thead><tr><th scope="col">Month</th><th scope="col">Basis</th><th scope="col">Excluding Orange</th>{hasOrange && <th scope="col">Including Orange</th>}{hasOrange && <th scope="col">Average</th>}</tr></thead>
+            <tbody role="rowgroup">{windowMonths.map((month, index) => <tr key={month.abs} role="row">
+              <th scope="row" role="rowheader">{month.label}</th>
+              <td role="cell"><span className="invoice-chart-mobile-label">Basis</span>{isProjWi(index) ? "Projection" : "Actual"}</td>
+              <td role="cell"><span className="invoice-chart-mobile-label">Excluding Orange</span>{fmtMoney(totalsBase[index], false)}</td>
+              {hasOrange && <td role="cell"><span className="invoice-chart-mobile-label">Including Orange</span>{fmtMoney(totalsAll[index], false)}</td>}
+              {hasOrange && <td role="cell"><span className="invoice-chart-mobile-label">Average</span>{fmtMoney(totalsAvg[index], false)}</td>}
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useId } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip, StarRating } from "./primitives.jsx";
 import {
@@ -85,11 +85,11 @@ const SHEET_SIDE_TO_BOTTOM = [
  *  enough of a break on its own, and the gap between sections does the rest. */
 function PanelSection({ icon, title, count, action, children, className = "" }) {
   return (
-    <section className={"min-w-0" + (className ? " " + className : "")}>
-      <div className="mb-2 flex min-w-0 items-center gap-2">
-        <h3 className="m-0 flex min-w-0 items-center gap-1.5 text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-muted)]">
+    <section className={"record-section min-w-0" + (className ? " " + className : "")}>
+      <div className="record-section-head mb-2 flex min-w-0 flex-wrap items-center gap-2">
+        <h3 className="m-0 flex min-w-0 items-center gap-1.5 text-[length:var(--fs-sm)] font-semibold text-[var(--text)]">
           {icon ? <Icon name={icon} size={12}/> : null}
-          <span className="truncate">{title}</span>
+          <span className="break-words">{title}</span>
           {count != null && (
             <span className="num rounded-[var(--radius-full)] bg-[var(--surface-3)] px-1.5 py-px text-[length:var(--fs-2xs)] font-semibold text-[var(--text-muted)]">
               {count}
@@ -105,14 +105,17 @@ function PanelSection({ icon, title, count, action, children, className = "" }) 
 
 /** One label + control row. Stacks on phones, two columns from `sm` up. */
 function PanelField({ label, hint, required, multiline = false, children }) {
+  const fieldLabelId = useId();
   return (
-    <div className="grid grid-cols-1 gap-1.5 border-b border-dashed border-[var(--border)] py-2.5 last:border-b-0 sm:grid-cols-[minmax(0,140px)_minmax(0,1fr)] sm:gap-4">
-      <div className={"flex items-start gap-1 text-[length:var(--fs-xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]" + (multiline ? "" : " sm:pt-2")}>
+    <div className="record-field grid grid-cols-1 gap-1.5 py-2.5" role="group" aria-labelledby={fieldLabelId}>
+      <div id={fieldLabelId} className="flex items-start gap-1 text-[length:var(--fs-sm)] font-medium text-[var(--text-muted)]">
         <span className="min-w-0 break-words">{label}</span>
         {required ? <span className="text-[var(--destructive)]" aria-hidden="true">*</span> : null}
       </div>
       <div className="min-w-0">
-        {children}
+        {React.isValidElement(children) && typeof children.type === "string" && ["input", "textarea", "select"].includes(children.type)
+          ? React.cloneElement(children, { "aria-labelledby": fieldLabelId })
+          : children}
         {hint ? (
           <p className="m-0 mt-1 text-[length:var(--fs-xs)] leading-[var(--lh-snug)] text-[var(--text-soft)]">{hint}</p>
         ) : null}
@@ -270,7 +273,7 @@ export function LinkedProjectsSection({ projects, onOpenProject }) {
                     {meta.label}
                   </Badge>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+                    <span className="block break-words text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
                       {p.name}
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
@@ -278,7 +281,7 @@ export function LinkedProjectsSection({ projects, onOpenProject }) {
                       <span aria-hidden="true">·</span>
                       <span className="num">{p.projectNumber || EMPTY}</span>
                       <span aria-hidden="true">·</span>
-                      <span className="truncate">{p.role}</span>
+                      <span className="break-words">{p.role}</span>
                       {p.hasInvoice && (
                         <Badge
                           tone="info"
@@ -350,13 +353,13 @@ export function LinkedSubsSection({ subs = [], invoiceLinked, onAddSub }) {
                   key={i}
                   className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5 rounded-[var(--radius-sm)] px-2 py-2 hover:bg-[var(--surface-2)]"
                 >
-                  <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+                  <span className="min-w-0 break-words text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
                     {company?.name || EMPTY}
                   </span>
                   <span className="num shrink-0 text-[length:var(--fs-sm)] tabular-nums text-[var(--text)]">
                     {s.amt ? fmtMoney(s.amt) : <span className="text-[var(--text-soft)]">{EMPTY}</span>}
                   </span>
-                  <span className="col-span-2 min-w-0 truncate text-[length:var(--fs-xs)] text-[var(--text-soft)]">
+                  <span className="col-span-2 min-w-0 break-words text-[length:var(--fs-xs)] text-[var(--text-soft)]">
                     {s.desc || EMPTY}
                   </span>
                 </li>
@@ -852,7 +855,7 @@ export const DetailDrawer = ({
           {subs.map((s, i) => (
             <div key={s.cId || i}
                  className="grid min-w-0 grid-cols-1 gap-2 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-2)] p-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_110px_32px] sm:items-center">
-              <div className="min-w-0 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
+              <div className="min-w-0 break-words text-[length:var(--fs-sm)] font-medium text-[var(--text)]">
                 {companyById(s.cId)?.name || EMPTY}
               </div>
               <input className="input" placeholder="Discipline (e.g. Survey)"
@@ -1102,7 +1105,7 @@ export const DetailDrawer = ({
                                 className="min-w-0 flex-1 justify-start"
                                 title={row.pdfName || "Open PDF"}>
                           <Icon name="file" size={13}/>
-                          <span className="min-w-0 truncate">{row.pdfName || "PDF attached"}</span>
+                          <span className="min-w-0 break-words">{row.pdfName || "PDF attached"}</span>
                         </Button>
                         {onRemoveBidPdf && (
                           <Button type="button" size="icon-sm" variant="ghost"
@@ -1159,7 +1162,7 @@ export const DetailDrawer = ({
                         name={a.response === "declined" ? "x" : a.response === "accepted" ? "check" : "dot"}
                         size={11}
                       />
-                      <span className="min-w-0 truncate">{a.name || a.email}</span>
+                      <span className="min-w-0 break-words">{a.name || a.email}</span>
                     </Badge>
                   </li>
                 ))}
@@ -1465,7 +1468,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
         <SheetBody className="flex flex-col gap-5">
           {/* The transition itself, stated once and unmistakably. */}
           <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
-            <p className="m-0 mb-2 truncate text-[length:var(--fs-sm)] font-semibold text-[var(--text)]" title={rowLabel}>
+            <p className="m-0 mb-2 break-words text-[length:var(--fs-sm)] font-semibold text-[var(--text)]" title={rowLabel}>
               {rowLabel}
             </p>
             <div className="flex flex-wrap items-center gap-2">
@@ -1481,7 +1484,8 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
             </div>
           </div>
 
-          <PanelSection icon="lock" title="Carried forward" count={cfg.carried.length}>
+          <details className="record-carried">
+            <summary><Icon name="lock" size={14}/>Review {cfg.carried.length} carried-forward values<Icon name="chevronDown" size={14}/></summary>
             <p className="m-0 mb-2 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
               These values copy across as they are. They cannot be edited here.
             </p>
@@ -1490,7 +1494,7 @@ export const MoveForwardPanel = ({ row, from, to, onClose, onConfirm }) => {
                 <PanelDefRow key={k} term={labels[k] || k}>{formatCarried(k)}</PanelDefRow>
               ))}
             </dl>
-          </PanelSection>
+          </details>
 
           <PanelSection icon="compose" title="Fields to complete" count={cfg.newFields.length}>
             <div className="min-w-0">
@@ -2125,32 +2129,25 @@ export const InvoiceFilesModal = ({
   };
 
   return (
-    <>
-      <div
-        className="overlay"
-        onClick={onClose}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => e.preventDefault()}
-      />
-      <div
-        className="modal"
-        style={{ width: 580, maxHeight: "86vh", display: "flex", flexDirection: "column" }}
+    <Dialog open onOpenChange={closeVia(onClose)}>
+      <DialogContent
+        size="lg"
+        className="bx-panelkit record-files"
+        aria-busy={busy || undefined}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => e.preventDefault()}
       >
-        <div className="modal-head">
-          <div className="icon-badge"><Icon name="link" size={16}/></div>
-          <div style={{ flex: 1 }}>
+        <DialogHeader>
+          <div className="min-w-0">
             <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>Invoice files</div>
-            <h3 className="drawer-title" style={{ fontSize: 16 }}>{headerTitle}</h3>
-            <div style={{ fontSize: 12, color: "var(--text-soft)", marginTop: 3 }}>
+            <DialogTitle>{headerTitle}</DialogTitle>
+            <DialogDescription>
               {subhead}
-            </div>
+            </DialogDescription>
           </div>
-          <button className="drawer-close" onClick={onClose}><Icon name="x" size={16}/></button>
-        </div>
+        </DialogHeader>
 
-        <div className="modal-body" style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+        <DialogBody className="record-files-body">
           {showInvNum && (
             <div className={"invoice-invnum-field" + (invNum.trim() ? " has-value" : "")}>
               <label className="invoice-invnum-label" htmlFor="prime-invnum">
@@ -2224,6 +2221,7 @@ export const InvoiceFilesModal = ({
                     </button>
                     <button type="button" className="btn ghost sm"
                             style={{ color: "var(--rose)" }}
+                            aria-label={`Delete ${f.file_name}`}
                             onClick={() => handleDelete(f)}
                             disabled={busy}>
                       <Icon name="trash" size={12}/>
@@ -2257,6 +2255,7 @@ export const InvoiceFilesModal = ({
             <input
               ref={fileRef}
               type="file"
+              aria-label="Choose invoice files to upload"
               className="input"
               multiple
               onChange={(e) => handlePickFiles(e.target.files)}
@@ -2314,9 +2313,9 @@ export const InvoiceFilesModal = ({
               </ul>
             )}
             <div className="field" style={{ marginTop: 10, gridTemplateColumns: "1fr" }}>
-              <div className="field-label">Notes (optional)</div>
+              <label className="field-label" htmlFor="invoice-upload-notes">Notes (optional)</label>
               <div className="field-value">
-                <textarea className="textarea" rows={2}
+                <textarea id="invoice-upload-notes" className="textarea" rows={2}
                           value={notes}
                           onChange={(e) => setNotes(e.target.value)}
                           disabled={busy}
@@ -2327,32 +2326,32 @@ export const InvoiceFilesModal = ({
           )}
 
           {error && (
-            <div style={{ color: "var(--rose)", fontSize: 12 }}>
+            <div role="alert" style={{ color: "var(--rose)", fontSize: 12 }}>
               {error}
             </div>
           )}
-        </div>
+        </DialogBody>
 
-        <div className="modal-foot">
-          <div style={{ fontSize: 11, color: "var(--text-soft)" }}>
-            Bucket: <span className="mono">invoices</span>
+        <DialogFooter className="record-files-footer">
+          <div className="record-files-summary" aria-live="polite">
+            {picked.length ? `${picked.length} file${picked.length === 1 ? "" : "s"} ready to upload` : `${files.length} attached file${files.length === 1 ? "" : "s"}`}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn sm" onClick={onClose} disabled={busy}>Close</button>
+            <Button onClick={onClose} disabled={busy}>Close</Button>
             {canAttach && (
-            <button className="btn primary sm"
+            <Button variant="primary"
                     onClick={handleUpload}
                     disabled={busy || picked.length === 0}>
               <Icon name="check" size={13}/>
               {busy
                 ? (picked.length > 1 ? `Uploading ${picked.length}…` : "Uploading…")
                 : (picked.length > 1 ? `Upload ${picked.length} files` : "Upload")}
-            </button>
+            </Button>
             )}
           </div>
-        </div>
-      </div>
-    </>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -2771,14 +2770,14 @@ export const MergeModal = ({
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col gap-1">
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="min-w-0 truncate text-[length:var(--fs-sm)] font-semibold text-[var(--text)]">
+                      <span className="min-w-0 break-words text-[length:var(--fs-sm)] font-semibold text-[var(--text)]">
                         {nameOf(e)}
                       </span>
                       {e.isMsmm && <Badge tone="brand" size="sm">MSMM</Badge>}
                     </span>
                     <span className="flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--fs-xs)] text-[var(--text-muted)]">
                       {subOf(e) && <Badge tone="outline" size="sm">{subOf(e)}</Badge>}
-                      <span className="min-w-0 truncate">{summaryLine(s)}</span>
+                      <span className="min-w-0 break-words">{summaryLine(s)}</span>
                     </span>
                   </span>
                   <Badge tone={isSurv ? "success" : "danger"} className="mt-px shrink-0">

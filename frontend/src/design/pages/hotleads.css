@@ -1,0 +1,66 @@
+/* Hot leads: meeting agenda plus a relationship-first working register. */
+.beacon-leads-agenda.hlq { padding: 24px; border-radius: 16px; background: var(--glass-bg, var(--surface)); backdrop-filter: blur(16px); }
+.beacon-leads-agenda .hlq-head { padding-bottom: 16px; }
+.beacon-leads-agenda .hlq-title { font-size: 18px; }
+.beacon-leads-agenda .hlq-sub { margin: 6px 0 0; font-size: 13px; line-height: 1.55; color: var(--text-muted); }
+.beacon-leads-agenda .hlq-cols { padding-top: 20px; gap: 24px; }
+.beacon-leads-agenda .hlq-col-head { align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.beacon-leads-agenda .hlq-col-title { font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--text); }
+.beacon-leads-agenda .hlq-col-count { color: var(--text-muted); font-size: 12px; white-space: normal; }
+.beacon-leads-agenda .hlq-list { gap: 8px; }
+.beacon-leads-agenda .hlq-card { display: grid; grid-template-columns: minmax(82px, .45fr) minmax(0, 1fr) auto; align-items: start; gap: 8px 12px; min-height: 80px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.beacon-leads-agenda .hlq-card::before { display: none; }
+.beacon-leads-agenda .hlq-card:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.beacon-leads-agenda .hlq-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.beacon-leads-agenda .hlq-card-when { min-width: 0; gap: 6px; line-height: 1.5; }
+.beacon-leads-agenda .hlq-card-date { font-size: 12px; white-space: normal; }
+.beacon-leads-agenda .hlq-card-time { color: var(--text-muted); font-size: 12px; }
+.beacon-leads-agenda .hlq-card-body { gap: 5px; }
+.beacon-leads-agenda .hlq-card-title, .beacon-leads-agenda .hlq-card-client { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; line-height: 1.5; }
+.beacon-leads-agenda .hlq-card-title { font-size: 14px; font-weight: 600; }
+.beacon-leads-agenda .hlq-card-client { font-size: 12px; }
+.beacon-leads-agenda .hlq-card-stars { grid-column: 2; justify-self: start; font-size: 12px; }
+.beacon-leads-agenda .hlq-card-go { grid-column: 3; grid-row: 1; opacity: 1; margin-top: 3px; }
+.beacon-leads-agenda .hlq-empty { align-items: flex-start; padding: 18px; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.beacon-leads-agenda .hlq-empty svg { flex: 0 0 auto; margin-top: 3px; }
+.beacon-leads-agenda .hlq-more, .beacon-leads-agenda .hlq-hint { font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.beacon-leads-register { min-width: 0; }
+.beacon-leads-register-head { margin-bottom: 16px; }
+.beacon-leads-register-head h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.025em; color: var(--text); }
+.beacon-leads-register-head p { margin: 6px 0 0; max-width: 76ch; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.beacon-leads-register .trow { min-height: 76px; }
+.beacon-leads-register .table-scroll-body .trow .td { padding-block: 16px; white-space: normal; overflow-wrap: anywhere; }
+.beacon-leads-register .table-scroll-body .trow .bxt-td-identity { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 6px; }
+.beacon-leads-register .table-scroll-body .trow .cell-view { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.5; }
+.beacon-leads-register .bxt-td-identity .cell-view { font-size: 14px; font-weight: 600; }
+.beacon-lead-status { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.beacon-leads-register .bxt-rowactions { opacity: 1; display: flex; gap: 6px; flex-wrap: wrap; }
+.beacon-leads-register .bxt-rowbtn { width: auto; min-width: 34px; height: auto; min-height: 36px; padding: 8px; gap: 5px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); background: var(--surface); font-size: 12px; }
+.beacon-leads-register .bxt-rowbtn.forward { color: var(--accent); background: var(--accent-soft); }
+.beacon-leads-register .bxt-rowbtn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.beacon-leads-register :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 767px) {
+  .beacon-leads-agenda.hlq { padding: 16px; }
+  .beacon-leads-agenda .hlq-cols { grid-template-columns: minmax(0, 1fr); }
+  .beacon-leads-agenda .hlq-card { grid-template-columns: 78px minmax(0, 1fr) auto; padding: 14px 12px; }
+  .beacon-leads-register .table-top-scroll { display: none; }
+  .beacon-leads-register .table-scroll { overflow: visible; }
+  .beacon-leads-register .table-scroll-body { width: 100%; min-width: 0; }
+  .beacon-leads-register .thead { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip-path: inset(50%); }
+  .beacon-leads-register .table-scroll-body .trow:not(.stars-header) { display: grid; grid-template-columns: minmax(0, 1fr) !important; padding: 12px 16px; border-bottom: 6px solid var(--surface-2); min-width: 0; }
+  .beacon-leads-register .table-scroll-body .trow .td { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; min-height: 44px; padding: 8px 0; border: 0; overflow: visible; }
+  .beacon-leads-register .td[data-lead-field]:not([data-lead-field^="__"]):not([data-lead-field="Title"])::before { content: attr(data-lead-field); flex: 0 0 114px; color: var(--text-muted); font-size: 12px; font-family: var(--font-body); }
+  .beacon-leads-register .td > * { min-width: 0; max-width: 100%; }
+  .beacon-leads-register .table-scroll-body .trow .bxt-td-identity { align-items: flex-start; gap: 5px; padding: 8px 0 12px; }
+  .beacon-leads-register .bxt-td-identity .cell-view { font-size: 16px; }
+  .beacon-leads-register .row-check { justify-content: flex-start !important; }
+  .beacon-leads-register .row-check::after { content: "Select lead"; color: var(--text-muted); font-size: 12px; }
+  .beacon-leads-register .row-check input { width: 22px; height: 22px; margin: 11px; }
+  .beacon-leads-register .table-scroll-body .trow .bxt-td-actions { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px; }
+  .beacon-leads-register .bxt-rowactions { gap: 8px; }
+  .beacon-leads-register .bxt-rowbtn { min-width: 44px; min-height: 44px; }
+  .beacon-leads-register input, .beacon-leads-register textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .beacon-leads-agenda *, .beacon-leads-register * { animation: none !important; transition: none !important; }
+}

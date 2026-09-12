@@ -8,20 +8,20 @@ import { cn } from "@/lib/utils";
  * Beacon button.
  *
  * Deviates from stock shadcn in three deliberate ways:
- *  • surfaces are token-driven (warm palette) rather than slate;
+ *  • surfaces use shared light/dark semantic tokens;
  *  • the resting state carries a 1px inset highlight so solid buttons read
- *    as physical objects against the paper canvas instead of flat swatches;
- *  • `:active` translates 1px down — the whole app shares this press feel.
+ *    as a distinct interactive layer;
+ *  • press feedback preserves the control's layout bounds.
  */
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap",
     "font-medium select-none",
     "rounded-[var(--radius-sm)]",
-    "transition-[background-color,border-color,color,box-shadow,translate] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
+    "transition-[background-color,border-color,color,box-shadow,filter,scale] duration-[var(--dur-fast)] ease-[var(--ease-out)]",
     "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
     "disabled:pointer-events-none disabled:opacity-45",
-    "active:translate-y-px",
+    "active:brightness-95",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
   ].join(" "),
   {

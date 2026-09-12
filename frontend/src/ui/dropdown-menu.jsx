@@ -18,6 +18,7 @@ const surface = [
   "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
   "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
   "data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1",
+  "[animation-duration:var(--dur-normal)] data-[state=closed]:[animation-duration:var(--dur-fast)] [animation-timing-function:var(--ease-out)] origin-[var(--radix-dropdown-menu-content-transform-origin)]",
 ].join(" ");
 
 const item = [
@@ -77,7 +78,7 @@ const DropdownMenuItem = React.forwardRef(function DropdownMenuItem(
         item,
         inset && "pl-8",
         destructive &&
-          "text-[var(--destructive)] focus:bg-[var(--rose-soft)] focus:text-[var(--rose-ink)] [&_svg]:text-current",
+          "text-[var(--rose-ink)] focus:bg-[var(--rose-soft)] focus:text-[var(--rose-ink)] [&_svg]:text-current",
         className
       )}
       {...props}

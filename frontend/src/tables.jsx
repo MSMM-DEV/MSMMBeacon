@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { textPreview } from "./lib/text-preview.js";
+import { matchesDirectoryQuery } from "./lib/directory-search.js";
 import { Icon } from "./icons.jsx";
 import {
   EditableCell, RoleChip, StatusChip, UserTag, UserStack, SubsCell, RowActions,
@@ -22,6 +24,7 @@ import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
 import { DescriptionGeneratorModal } from "./description-generator.jsx";
 import { InvoiceLinkCell } from "./invoice-links.jsx";
 import { invoiceIsOrange, nextInvoiceOrangePatch } from "./invoice-orange.js";
+import { decorateInvoiceLedger, resolveInvoiceFocusMonth } from "./invoice-mobile-layout.js";
 import {
   INVOICE_TYPE_OPTIONS,
   invoicePerspectiveRole,
@@ -1177,6 +1180,7 @@ const TableView = ({
       >
         <div className="table-top-scroll-spacer" style={{ width: tableTopWidth }}/>
       </div>
+      {tableHasOverflow && <p className="bxt-scroll-hint"><Icon name="columns" size={13}/> Scroll across for more columns. Use Columns to choose what you see.</p>}
       {/* Table-only horizontal scroll container. Keeps the toolbar fixed-width
           while the header row + data rows scroll together when total column
           width exceeds viewport. The PAGE never gets a horizontal scrollbar.
@@ -1488,23 +1492,23 @@ export const PotentialTable = ({
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "Year", w: "64px", sortKey: "year" },
-    { label: "Project", w: "minmax(240px, 2fr)", sortKey: "name" },
-    { label: "Role", w: "100px", sortKey: "role",
+    { label: "Project", w: "minmax(260px, 2fr)", sortKey: "name" },
+    { label: "Probability", w: "130px", sortKey: "probability",
+      sortValue: r => probRank(r.probability) },
+    { label: "Dates & Comments", w: "minmax(210px, 1.4fr)" },
+    { label: "PM", w: "160px", sortKey: "pm",
+      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
+    { label: "MSMM", w: "130px", sortKey: "msmm" },
+    { label: "Contract", w: "140px", sortKey: "amount" },
+    { label: "Year", w: "80px", sortKey: "year", defaultHidden: true },
+    { label: "Role", w: "100px", sortKey: "role", defaultHidden: true,
       sortValue: r => r.role === "Prime" ? 1 : r.role === "Sub" ? 2 : 3 },
     { label: "Client", w: "minmax(160px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
-    { label: "Contract", w: "120px", sortKey: "amount" },
-    { label: "MSMM", w: "110px", sortKey: "msmm" },
-    { label: "Subs", w: "minmax(180px, 1.5fr)" },
-    { label: "PM", w: "140px", sortKey: "pm",
-      sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "100px", sortKey: "projectNumber" },
-    { label: "Probability", w: "120px", sortKey: "probability",
-      sortValue: r => probRank(r.probability) },
+    { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
+    { label: "Proj #", w: "120px", sortKey: "projectNumber", defaultHidden: true },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
-    { label: "Dates & Comments", w: "minmax(180px, 1.4fr)", defaultHidden: true },
-    { label: "__actions", w: "110px", locked: true },
+    { label: "__actions", w: "184px", locked: true },
   ];
 
   const { clientOptions, clientOrFirmOpts, userOptions, roleOptions, probOptions } = buildOptions();
@@ -1568,6 +1572,14 @@ export const PotentialTable = ({
   };
 
   return (
+    <section className="potential-workspace" aria-label="Potential opportunity register">
+      <div className="potential-orientation">
+        <div>
+          <h2>Opportunity register</h2>
+          <p>Review likelihood, ownership and the next follow-up before moving work to billing.</p>
+        </div>
+        <span className="potential-orientation-note"><Icon name="briefcase" size={16} aria-hidden="true"/>Grouped by probability · totals included</span>
+      </div>
     <TableView
       tab={tab}
       filters={filters}
@@ -1645,8 +1657,13 @@ export const PotentialTable = ({
             </div>
           ),
           "Project": (
-            <div className="td bxt-td-identity">
-              <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
+            <div className="td bxt-td-identity potential-identity">
+              <div className="potential-identity-copy">
+                <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
+                {r.projectNumber && <span className="potential-reference mono">{r.projectNumber}</span>}
+              </div>
+              <button type="button" className="potential-details" aria-label={`Open details for ${projName}`}
+                onClick={e => { e.stopPropagation(); onOpenDrawer(r); }}>Details</button>
             </div>
           ),
           "Role": (
@@ -1657,7 +1674,7 @@ export const PotentialTable = ({
             </div>
           ),
           "Client": (
-            <div className="td subtle" style={{ overflow: "hidden" }}>
+            <div className="td subtle potential-client">
               <EditableCell value={r.clientId} type="combobox" options={r.role === "Sub" ? clientOrFirmOpts : clientOptions}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
@@ -1678,14 +1695,14 @@ export const PotentialTable = ({
             </div>
           ),
           "Subs": <div className="td"><SubsCell subs={r.subs}/></div>,
-          "Project Manager": (
-            <div className="td">
+          "PM": (
+            <div className="td potential-pms">
               {(r.pmIds || []).length > 0
-                ? <UserStack ids={r.pmIds}/>
+                ? (r.pmIds || []).map(id => <span className="potential-person" key={id}>{userById(id)?.name || "Unknown user"}</span>)
                 : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Project Number": (
+          "Proj #": (
             <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
@@ -1713,14 +1730,14 @@ export const PotentialTable = ({
             <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
+                format={v => v || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Dates & Comments": (
             <div className="td subtle bxt-td-note bxt-td-stack">
               {r.nextActionDate && (
                 <span className="mono num bxt-td-nextaction">
-                  <Icon name="calendarClock" size={11} aria-hidden="true"/>
+                  <Icon name="calendarClock" size={14} aria-hidden="true"/>
                   {fmtDate(r.nextActionDate)}
                   <span className="sr-only"> next action date</span>
                 </span>
@@ -1728,7 +1745,7 @@ export const PotentialTable = ({
               <EditableCell value={r.dates}
                 onChange={v => updateRow(r.id, { dates: v })}
                 format={v => v
-                  ? truncCell(v)
+                  ? v
                   : (!r.nextActionDate ? <span className="empty-cell">–</span> : null)}/>
             </div>
           ),
@@ -1736,18 +1753,18 @@ export const PotentialTable = ({
             <div className="td bxt-td-actions">
               <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
                 <button type="button"
-                        className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                        className="row-btn bxt-rowbtn bxt-rowbtn-primary potential-forward"
                         title="Move to Invoice"
                         aria-label={`Move ${projName} to Invoice`}
                         onClick={() => onForward(r)}>
-                  <Icon name="forward" size={14}/>
+                  <Icon name="forward" size={14} aria-hidden="true"/><span>To Invoice</span>
                 </button>
                 <button type="button"
                         className="row-btn bxt-rowbtn bxt-rowbtn-alert"
                         title="Set alert"
                         aria-label={`Set an alert on ${projName}`}
                         onClick={() => onAlert(r)}>
-                  <Icon name="bell" size={14}/>
+                  <Icon name="bell" size={14} aria-hidden="true"/>
                 </button>
               </div>
             </div>
@@ -1764,6 +1781,7 @@ export const PotentialTable = ({
         );
       }}
     />
+    </section>
   );
 };
 
@@ -1840,7 +1858,7 @@ export const AwaitingTable = ({
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "Year", w: "64px", sortKey: "year" },
+    { label: "Year", w: "80px", sortKey: "year", defaultHidden: true },
     { label: "Project", w: "minmax(240px, 2fr)", sortKey: "name" },
     { label: "Client", w: "minmax(160px, 1.2fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
@@ -1853,23 +1871,23 @@ export const AwaitingTable = ({
       hint: "Date the proposal went to the client, and how long it has waited since" },
     { label: "Anticipated Result", w: "140px", sortKey: "anticipatedResultDate",
       hint: "Date a verdict is expected" },
-    { label: "Client Contract", w: "150px", sortKey: "clientContract",
+    { label: "Client Contract", w: "150px", sortKey: "clientContract", defaultHidden: true,
       hint: "The client's own contract number" },
-    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract",
+    { label: "MSMM Contract", w: "150px", sortKey: "msmmContract", defaultHidden: true,
       hint: "MSMM's internal contract number" },
     { label: "MSMM Remaining", w: "140px", sortKey: "msmmRemaining",
       hint: "MSMM contract value not yet used" },
     { label: "Project Manager", w: "170px", sortKey: "pm",
       hint: "The MSMM people managing this proposal",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Project Number", w: "150px", sortKey: "projectNumber" },
+    { label: "Project Number", w: "150px", sortKey: "projectNumber", defaultHidden: true },
     { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true,
       hint: "Subconsultants on this proposal" },
     { label: "Status", w: "150px", sortKey: "status", defaultHidden: true },
     { label: "MSMM Used", w: "120px", sortKey: "msmmUsed", defaultHidden: true,
       hint: "MSMM contract value used to date" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
-    { label: "__actions", w: "140px", locked: true },
+    { label: "__actions", w: "268px", locked: true },
   ];
 
   const { clientOptions, clientOrFirmOpts, userOptions, roleOptions } = buildOptions();
@@ -1878,6 +1896,15 @@ export const AwaitingTable = ({
   const primarySort = [{ key: "orgType", dir: "asc" }];
 
   return (
+    <section className="proposal-workspace" aria-label="Proposal decision workspace">
+      <div className="proposal-orientation">
+        <span className="proposal-orientation-icon" aria-hidden="true"><Icon name={deletedMode ? "history" : "clock"} size={20}/></span>
+        <div className="proposal-orientation-copy">
+          <h2>{deletedMode ? "Deleted proposals" : "Awaiting a decision"}</h2>
+          <p>{deletedMode ? "Restore a proposal to return it to your active workflow." : "Review submission dates and expected results, then record the client’s decision."}</p>
+        </div>
+        {!deletedMode && <span className="proposal-orientation-note"><Icon name="columns" size={15}/>Contract references and notes are in Columns</span>}
+      </div>
     <TableView
       tab={tab}
       skin="clean"
@@ -1909,13 +1936,20 @@ export const AwaitingTable = ({
             </div>
           ),
           "Project": (
-            <div className="td bxt-td-identity bxt-td-titleline">
+            <div className="td bxt-td-identity proposal-identity">
+              <div className="proposal-identity-copy">
               <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
               {r.projectNumber && (
                 <Badge tone="outline" size="sm" className="num bxt-projno" title={`Project number ${r.projectNumber}`}>
                   {r.projectNumber}
                 </Badge>
               )}
+              </div>
+              <button type="button" className="proposal-details"
+                      title="Open proposal details" aria-label={`Open details for ${proposalName}`}
+                      onClick={e => { e.stopPropagation(); onOpenDrawer(r); }}>
+                <Icon name="external" size={15}/>
+              </button>
             </div>
           ),
           "Client": (
@@ -2003,7 +2037,7 @@ export const AwaitingTable = ({
             <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
+                format={v => v || <span className="empty-cell">–</span>}/>
             </div>
           ),
           // The two verdict actions (award, close out) are the whole point
@@ -2013,25 +2047,28 @@ export const AwaitingTable = ({
             <div className="td bxt-td-actions">
               <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
                 {deletedMode ? (
-                  <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                  <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary proposal-verdict"
                           title="Restore this proposal"
                           aria-label={`Restore ${proposalName}`}
                           onClick={() => onRestore?.(r)}>
                     <Icon name="undo" size={14}/>
+                    <span>Restore</span>
                   </button>
                 ) : (
                   <>
-                    <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary"
+                    <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-primary proposal-verdict proposal-award"
                             title="Award, moves to Awarded"
                             aria-label={`Award ${proposalName}, moves it to Awarded`}
                             onClick={() => onForward(r, "Awarded")}>
                       <Icon name="check" size={14}/>
+                      <span>Award</span>
                     </button>
-                    <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-verdict"
+                    <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-verdict proposal-verdict"
                             title="Close out"
                             aria-label={`Close out ${proposalName}`}
                             onClick={() => onCloseOut(r)}>
                       <Icon name="ban" size={14}/>
+                      <span>Close out</span>
                     </button>
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
@@ -2042,6 +2079,10 @@ export const AwaitingTable = ({
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="bxt-menu">
+                        <DropdownMenuItem onSelect={() => onOpenDrawer(r)}>
+                          <Icon name="external" size={13}/>
+                          <span className="bxt-menu-text">Open proposal details</span>
+                        </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => onAlert(r)}>
                           <Icon name="bell" size={13}/>
                           <span className="bxt-menu-text">Set alert</span>
@@ -2059,9 +2100,18 @@ export const AwaitingTable = ({
             </div>
           ),
         };
+        // The same ordered cells become labeled records on phones. Keeping the
+        // original children preserves every editor, menu and update callback.
+        for (const col of cols) {
+          const cell = cells[col.label];
+          if (!cell) continue;
+          cells[col.label] = React.cloneElement(cell, {
+            "data-proposal-field": col.label,
+          }, !col.label.startsWith("__") && <span className="proposal-field-label">{col.label}</span>, cell.props.children);
+        }
         const orgKey = (companyById(r.clientId)?.orgType || "").toLowerCase() || undefined;
         return (
-          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+          <div key={r.id} className={"trow proposal-record" + (flashId === r.id ? " flash" : "")}
                data-org={orgKey}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
@@ -2070,6 +2120,7 @@ export const AwaitingTable = ({
         );
       }}
     />
+    </section>
   );
 };
 
@@ -2143,17 +2194,59 @@ export const AwardedTable = ({
   // tones. The mapping is a rename only; stageColor() is untouched.
   const stageTone = { sage: "success", accent: "brand", blue: "info", muted: "neutral" };
 
+  // Delivery review comes first; reference fields remain in the same
+  // customizable grid, with their existing editing and sorting contracts.
+  const deliveryOrder = [
+    "__select", "Project", "Client", "Stage", "Remaining", "Expiry",
+    "Project Manager", "Project Number", "Contract", "MSMM Used",
+    "Year", "Role", "Prime", "Subs", "Status", "Details", "Pool",
+    "Submitted", "Client Contract", "MSMM Contract", "Org Type", "__actions",
+  ];
+  const deliveryColumns = deliveryOrder.map(label => {
+    const column = cols.find(c => c.label === label);
+    // References remain available from Columns; the initial register fits
+    // the delivery questions users revisit throughout a contract.
+    if (["MSMM Used", "Year", "Role", "Prime", "Subs", "Status", "Details", "Pool", "Submitted", "Client Contract", "MSMM Contract", "Org Type"].includes(label)) return { ...column, defaultHidden: true };
+    if (label === "Project") return { ...column, w: "minmax(280px, 2fr)" };
+    if (label === "Stage") return { ...column, w: "190px" };
+    if (label === "Remaining") return { ...column, w: "160px" };
+    if (label === "Expiry") return { ...column, w: "145px" };
+    if (label === "__actions") return { ...column, w: "180px" };
+    return column;
+  });
+  const review = rows.reduce((summary, row) => {
+    const runway = expiryRunway(row.contractExpiry);
+    if (runway?.tone === "expiring") summary.expiring += 1;
+    if (runway?.tone === "expired") summary.expired += 1;
+    if (capacityState(row.msmmUsed, row.msmmRemaining)?.low) summary.lowCapacity += 1;
+    return summary;
+  }, { expiring: 0, expired: 0, lowCapacity: 0 });
+
   const { clientOptions, clientOrFirmOpts, userOptions, roleOptions, stageOptions } = buildOptions();
 
   // Primary sort by org-type keeps rows grouped (user sort slots in as secondary).
   const primarySort = [{ key: "orgType", dir: "asc" }];
 
   return (
-    <TableView
+    <section className="awarded-workspace" aria-label="Awarded project register">
+      <div className="awarded-review">
+        <div className="awarded-review-intro">
+          <span className="awarded-eyebrow">Delivery &amp; contract review</span>
+          <p>Keep stages current, review capacity and connect work to billing.</p>
+          <span className="awarded-review-scope">Current project set · before table search</span>
+        </div>
+        <dl className="awarded-review-metrics">
+          <div><dt>{deletedMode ? "Deleted projects" : "Awarded projects"}</dt><dd>{rows.length}</dd></div>
+          <div><dt>Expiring within 180 days</dt><dd>{review.expiring}</dd></div>
+          <div data-attention={review.expired > 0 || undefined}><dt>Expired contracts</dt><dd>{review.expired}</dd></div>
+          <div data-attention={review.lowCapacity > 0 || undefined}><dt>Under 20% capacity</dt><dd>{review.lowCapacity}</dd></div>
+        </dl>
+      </div>
+      <TableView
       tab={tab}
       skin="clean"
       filters={filters}
-      columns={cols} rows={rows}
+      columns={deliveryColumns} rows={rows}
       primarySort={primarySort}
       postProcess={injectOrgHeaders("project")}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
@@ -2172,9 +2265,9 @@ export const AwardedTable = ({
         const projName = r.name || "this project";
         const cells = {
           "__select": (
-            <div className="td row-check" onClick={e => e.stopPropagation()}>
+            <label className="td row-check" onClick={e => e.stopPropagation()}>
               <input type="checkbox" aria-label={`Select ${projName}`}/>
-            </div>
+            </label>
           ),
           "Year": (
             <div className="td mono num subtle">
@@ -2187,9 +2280,14 @@ export const AwardedTable = ({
               <span className="bxt-td-fullwidth">
                 <EditableCell value={r.name} onChange={v => updateRow(r.id, { name: v })}/>
               </span>
-              {r.projectNumber
-                ? <span className="mono num bxt-td-sub">{r.projectNumber}</span>
-                : null}
+              <div className="awarded-project-meta">
+                {r.projectNumber && <span className="mono num">{r.projectNumber}</span>}
+                <button type="button" className="awarded-open-project"
+                  aria-label={`Open details for ${projName}`}
+                  onClick={e => { e.stopPropagation(); onOpenDrawer(r); }}>
+                  Open details <Icon name="chevronRight" size={13} aria-hidden="true"/>
+                </button>
+              </div>
             </div>
           ),
           "Client": (
@@ -2222,8 +2320,8 @@ export const AwardedTable = ({
                 onChange={v => updateRow(r.id, { stage: v })}
                 render={v => v
                   ? (
-                    <Badge tone={stageTone[stageColor(v)] || "neutral"} dot className="max-w-full" title={v}>
-                      <span className="min-w-0 truncate">{v}</span>
+                    <Badge tone={stageTone[stageColor(v)] || "neutral"} dot className="awarded-stage-badge" title={v}>
+                      <span>{v}</span>
                     </Badge>
                   )
                   : <span className="empty-cell">–</span>}/>
@@ -2284,7 +2382,10 @@ export const AwardedTable = ({
           "Project Manager": (
             <div className="td">
               {(r.pmIds || []).length > 0
-                ? <UserStack ids={r.pmIds}/>
+                ? <>
+                    <span className="awarded-pm-avatars"><UserStack ids={r.pmIds}/></span>
+                    <span className="awarded-pm-names">{r.pmIds.map(id => userById(id)?.name || "Unknown person").join(", ")}</span>
+                  </>
                 : <span className="empty-cell">–</span>}
             </div>
           ),
@@ -2343,7 +2444,16 @@ export const AwardedTable = ({
             <div className="td subtle bxt-td-note">
               <EditableCell value={r.details} type="textarea"
                 onChange={v => updateRow(r.id, { details: v })}
-                format={v => truncCell(v, 100)}/>
+                format={v => textPreview(v).text
+                  ? <span className="awarded-details-preview">{textPreview(v).text}</span>
+                  : <span className="empty-cell">–</span>}/>
+              {r.details?.trim() && (
+                <button type="button" className="awarded-open-project awarded-read-details"
+                        aria-label={`Read full details for ${projName}`}
+                        onClick={e => { e.stopPropagation(); onOpenDrawer(r); }}>
+                  Read full details
+                </button>
+              )}
             </div>
           ),
           "__actions": (
@@ -2354,7 +2464,7 @@ export const AwardedTable = ({
                           title="Restore this project"
                           aria-label={`Restore ${projName}`}
                           onClick={() => onRestore?.(r)}>
-                    <Icon name="undo" size={14}/>
+                    <Icon name="undo" size={14}/><span>Restore</span>
                   </button>
                 ) : (
                   <>
@@ -2363,7 +2473,7 @@ export const AwardedTable = ({
                               title="Move to Invoice"
                               aria-label={`Move ${projName} to Invoice`}
                               onClick={() => onForward(r)}>
-                        <Icon name="forward" size={14}/>
+                        <Icon name="forward" size={14}/><span>To Invoice</span>
                       </button>
                     )}
                     <DropdownMenu modal={false}>
@@ -2392,17 +2502,32 @@ export const AwardedTable = ({
             </div>
           ),
         };
+        // Real text labels make the same editable cells readable when the
+        // register reflows on phones. Column visibility and ordering stay
+        // owned by TableView; no second collection or data processing path.
+        const labeledCells = Object.fromEntries(visibleColumns.map(({ label }) => {
+          const cell = cells[label];
+          const fieldLabel = label === "__actions" ? "Actions" : label === "__select" ? "Select" : label;
+          const mobileLabel = <span className="awarded-field-label">{fieldLabel}</span>;
+          if (typeof cell?.type === "string") {
+            return [label, React.cloneElement(cell, { "data-awarded-field": label }, mobileLabel, cell.props.children)];
+          }
+          return [label, <div className="td awarded-component-cell" data-awarded-field={label}>
+            {mobileLabel}{cell}
+          </div>];
+        }));
         const orgKey = (companyById(r.clientId)?.orgType || "").toLowerCase() || undefined;
         return (
-          <div key={r.id} className={"trow" + (flashId === r.id ? " flash" : "")}
+          <div key={r.id} className={"trow awarded-project-row" + (flashId === r.id ? " flash" : "")}
                data-org={orgKey}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
-            {renderOrderedCells(visibleColumns, cells)}
+            {renderOrderedCells(visibleColumns, labeledCells)}
           </div>
         );
       }}
     />
+    </section>
   );
 };
 
@@ -2414,24 +2539,24 @@ export const ClosedTable = ({
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "Year", w: "64px", sortKey: "year" },
     { label: "Project", w: "minmax(240px, 2fr)", sortKey: "name" },
+    { label: "Closed", w: "116px", sortKey: "dateClosed" },
+    { label: "Reason", w: "minmax(240px, 2fr)", sortKey: "reason" },
     { label: "Client", w: "minmax(160px, 1fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
-    { label: "Submitted", w: "110px", sortKey: "dateSubmitted" },
-    { label: "Closed", w: "110px", sortKey: "dateClosed" },
-    { label: "Contract", w: "120px", sortKey: "amount" },
-    { label: "Reason", w: "minmax(220px, 2fr)", sortKey: "reason" },
     { label: "PM", w: "130px", sortKey: "pm",
       sortValue: r => (r.pmIds || []).map(id => userById(id)?.name || "").join(", ") },
-    { label: "Proj #", w: "110px", sortKey: "projectNumber" },
+    { label: "Contract", w: "120px", sortKey: "amount", defaultHidden: true },
+    { label: "Year", w: "64px", sortKey: "year", defaultHidden: true },
+    { label: "Submitted", w: "110px", sortKey: "dateSubmitted", defaultHidden: true },
+    { label: "Proj #", w: "110px", sortKey: "projectNumber", defaultHidden: true },
     { label: "Role", w: "100px", sortKey: "role", defaultHidden: true },
     { label: "Subs", w: "minmax(180px, 1.5fr)", defaultHidden: true },
     { label: "Client Contract", w: "150px", sortKey: "clientContract", defaultHidden: true },
     { label: "MSMM Contract", w: "150px", sortKey: "msmmContract", defaultHidden: true },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Status", w: "120px", sortKey: "status", defaultHidden: true },
-    { label: "__actions", w: "80px", locked: true },
+    { label: "__actions", w: "190px", locked: true },
   ];
 
   const { clientOptions, clientOrFirmOpts, userOptions, roleOptions } = buildOptions();
@@ -2443,7 +2568,7 @@ export const ClosedTable = ({
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
       emptyTitle="No closed-out projects yet"
-      emptyHint="Rows appear here when a Proposal or Invoice project is closed out."
+      emptyHint="Proposals and projects closed before billing began appear here."
       emptyIcon="x"
       renderRow={(r, _i, gridCols, visibleColumns) => {
         const projName = r.name || "this project";
@@ -2523,14 +2648,14 @@ export const ClosedTable = ({
                   : <span className="empty-cell">–</span>}/>
             </div>
           ),
-          "Project Manager": (
+          "PM": (
             <div className="td">
               {(r.pmIds || []).length > 0
                 ? <UserStack ids={r.pmIds}/>
                 : <span className="empty-cell">–</span>}
             </div>
           ),
-          "Project Number": (
+          "Proj #": (
             <div className="td mono num subtle">
               <EditableCell value={r.projectNumber}
                 onChange={v => updateRow(r.id, { projectNumber: v })}/>
@@ -2560,13 +2685,18 @@ export const ClosedTable = ({
             <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
+                format={v => v || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "Status": <div className="td"><StatusChip status="Closed Out"/></div>,
           "__actions": (
             <div className="td bxt-td-actions">
               <div className="row-actions bxt-rowactions bxt-pipeactions" onClick={e => e.stopPropagation()}>
+                <button type="button" className="closed-open-record"
+                        aria-label={`Open details for ${projName}`}
+                        onClick={() => onOpenDrawer(r)}>
+                  Open details
+                </button>
                 <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-alert"
                         title="Set alert"
                         aria-label={`Set an alert on ${projName}`}
@@ -2578,9 +2708,8 @@ export const ClosedTable = ({
           ),
         };
         return (
-          // `data-archived` is what makes this table read as an archive
-          // rather than a grey copy of the live ones: a clay edge rule and a
-          // recessed wash, both drawn from the closed-out semantic tokens.
+          // Archive rows remain fully legible; closure outcomes are labelled
+          // in the reason cell rather than conveyed through a tinted row.
           <div key={r.id} className={"trow bxt-closedrow" + (flashId === r.id ? " flash" : "")}
                data-archived="true"
                data-loss={isLoss ? "true" : undefined}
@@ -3080,6 +3209,9 @@ export const InvoiceTable = ({
   // the Orange-grouping convention from the line-chart era is preserved
   // — Orange rows always sit below the rest, regardless of sort.
   const [sortBy, setSortBy] = useState({ key: null, dir: "asc" });
+  const [mobileMonthAbs, setMobileMonthAbs] = useState(null);
+  const focusedMonthAbs = resolveInvoiceFocusMonth(windowMonths, mobileMonthAbs, THIS_YEAR, TODAY_MONTH);
+  useEffect(() => { setMobileMonthAbs(focusedMonthAbs); }, [focusedMonthAbs]);
   const toggleSort = (key) => {
     setSortBy(prev => {
       if (prev.key !== key) return { key, dir: "asc" };
@@ -3253,6 +3385,14 @@ export const InvoiceTable = ({
         {...extra}
         className={(extra.className || "") + " invoice-th-sortable" + (active ? " active" : "")}
         onClick={() => toggleSort(key)}
+        tabIndex={0}
+        aria-sort={active ? (sortBy.dir === "asc" ? "ascending" : "descending") : "none"}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggleSort(key);
+          }
+        }}
         title={`Sort by ${typeof children === "string" ? children : key}`}
       >
         <span className="invoice-th-label">{children}</span>
@@ -3324,13 +3464,32 @@ export const InvoiceTable = ({
   const onInvoiceBodyScroll = () => syncInvoiceScroll("body");
 
   return (
-    <div className={"tablewrap" + (maximized ? " is-maximized" : "")}>
-      <div className="toolbar">
+    <div className={"tablewrap invoice-workspace" + (maximized ? " is-maximized" : "")}>
+      <header className="invoice-workspace-head">
+        <div>
+          <span className="invoice-workspace-eyebrow">Billing ledger</span>
+          <h2>{billingMode === "between" ? "Paused billing" : billingMode === "closed" ? "Billing archive" : "Project invoices"}</h2>
+          <p>Open a project breakdown to review firms, bills and payments. Select a value to edit it.</p>
+        </div>
+        <div className="invoice-workspace-actions">
+          <button type="button" className="btn sm" onClick={() => setMaximized(m => !m)}
+            aria-pressed={maximized} title={maximized ? "Exit full screen (Esc)" : "Expand the invoice table to full screen"}>
+            <Icon name={maximized ? "minimize" : "maximize"} size={15}/>
+            {maximized ? "Exit full screen" : "Full screen"}
+          </button>
+          {onNew && <button type="button" className="btn primary sm" onClick={() => onNew()}>
+            <Icon name="plus" size={15}/>New invoice row
+          </button>}
+        </div>
+      </header>
+      <div className="toolbar invoice-workspace-toolbar">
+        <div className="invoice-find-controls">
         <div className={"chrome-search" + (hasSearch ? " active" : "")}>
           <Icon name="search" size={13}/>
           <input
             className="chrome-search-input"
             placeholder="Search invoices…"
+            aria-label="Search invoices"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             spellCheck={false}
@@ -3347,12 +3506,22 @@ export const InvoiceTable = ({
             </button>
           )}
         </div>
+        <button
+          ref={typeBtnRef}
+          type="button"
+          className={"tool-chip" + (typeFilterActive ? " on" : "")}
+          aria-expanded={typeMenuOpen}
+          onClick={() => setTypeMenuOpen(v => !v)}
+        >
+          <Icon name="filter" size={13}/>{typeChipLabel}
+        </button>
+        </div>
         <div className="invoice-count-chip" title={`${typeCountTotal} total · ${typeCountNonOrange} excluding Orange`}>
           <span className="invoice-count-num mono">{typeCountTotal}</span>
           <span className="invoice-count-label">{typeCountTotal === 1 ? "project" : "projects"}</span>
           <span className="invoice-count-sep">·</span>
           <span className="invoice-count-num mono" style={{ color: "var(--text-soft)" }}>{typeCountNonOrange}</span>
-          <span className="invoice-count-label">w/o Orange</span>
+          <span className="invoice-count-label">excluding Orange</span>
         </div>
         <div className="invoice-window-nav" role="group" aria-label="Visible month window">
           {/* A compact "month dial" — Back / range / Forward share one
@@ -3398,16 +3567,8 @@ export const InvoiceTable = ({
             Today
           </button>
         </div>
-        <button
-          ref={typeBtnRef}
-          className={"tool-chip" + (typeFilterActive ? " on" : "")}
-          onClick={() => setTypeMenuOpen(v => !v)}
-        >
-          <Icon name="filter" size={13}/>
-          {typeChipLabel}
-        </button>
-        <button className="tool-chip"><Icon name="user" size={13}/>PM: All</button>
-        <div className="tool-sep"/>
+        <div className="invoice-breakdown-controls" role="group" aria-label="Project breakdown visibility">
+        <span className="invoice-control-label">Breakdowns</span>
         <button
           type="button"
           className="tool-chip"
@@ -3426,7 +3587,7 @@ export const InvoiceTable = ({
           title="Expand only the projects that have a sub / prime breakdown"
         >
           <Icon name="link" size={13}/>
-          Expand w/ subs
+          With firms
         </button>
         <button
           type="button"
@@ -3438,35 +3599,42 @@ export const InvoiceTable = ({
           <Icon name="chevronRight" size={13}/>
           Collapse all
         </button>
-        <div className="tool-sep"/>
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+        </div>
+        <div className="invoice-mobile-controls">
+          <label>
+            <span>Month to review</span>
+            <select aria-label="Month to review" value={focusedMonthAbs ?? ""} disabled={!windowMonths.length}
+              onChange={event => setMobileMonthAbs(Number(event.target.value))}>
+              {!windowMonths.length && <option value="">No months available</option>}
+              {windowMonths.map(month => <option key={month.abs} value={month.abs}>{month.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Sort projects</span>
+            <select aria-label="Sort projects" value={sortBy.key || ""}
+              onChange={event => setSortBy({ key: event.target.value || null, dir: "asc" })}>
+              <option value="">Default order</option>
+              <option value="projectNumber">Project number</option>
+              <option value="name">Project name</option>
+              <option value="role">Role</option>
+              <option value="pm">Project managers</option>
+            </select>
+          </label>
+          {sortBy.key && <button type="button" className="btn sm invoice-mobile-sort-direction"
+            onClick={() => setSortBy(prev => ({ ...prev, dir: prev.dir === "asc" ? "desc" : "asc" }))}
+            aria-label={`Sort ${sortBy.dir === "asc" ? "descending" : "ascending"}`}>
+            <Icon name={sortBy.dir === "asc" ? "chevronUp" : "chevronDown"} size={14}/>
+            {sortBy.dir === "asc" ? "Ascending" : "Descending"}
+          </button>}
+          <p>One month at a time. Open a breakdown to edit billing and review files. Use the period arrows to reach other months.</p>
+        </div>
+        <span className="invoice-period-explanation">
           {lastActualWi >= 0 ? (
             <>Actual through <strong style={{ color: "var(--accent-ink)" }}>{windowMonths[lastActualWi]?.label}</strong>, then Projection</>
           ) : (
             <>Showing <strong style={{ color: "var(--accent-ink)" }}>all visible months as Projection</strong></>
           )} · a month flips to Actual on the {ordinal(cutoverDay)}{cutoverNextMonth ? " of the following month" : ""}
         </span>
-        <div className="ml-auto" style={{ display: "flex", gap: 8 }}>
-          <button
-            type="button"
-            className={"btn sm" + (maximized ? " primary" : "")}
-            onClick={() => setMaximized(m => !m)}
-            title={maximized ? "Exit full screen (Esc)" : "Expand the invoice table to full screen"}
-          >
-            <Icon name={maximized ? "minimize" : "maximize"} size={13}/>
-            {maximized ? "Exit" : "Fullscreen"}
-          </button>
-          <button className="btn sm"><Icon name="export" size={13}/>Export</button>
-          {onNew && (
-            <button
-              type="button"
-              className="btn primary sm"
-              onClick={() => onNew()}
-            >
-              <Icon name="plus" size={13}/>New invoice row
-            </button>
-          )}
-        </div>
 
         {typeMenuOpen && (
           <Popover anchorRef={typeBtnRef} onClose={() => setTypeMenuOpen(false)} align="left">
@@ -3547,8 +3715,8 @@ export const InvoiceTable = ({
               style={{ width: invoiceScrollWidth }}
             />
           </div>
-          <div className="invoice-wrap" ref={invoiceWrapRef} onScroll={onInvoiceBodyScroll}>
-            <table className={`invoice-table inv-mode-${billingMode}`} ref={invoiceTableRef}>
+          <div className="invoice-wrap" ref={invoiceWrapRef} onScroll={onInvoiceBodyScroll} role="region" aria-label="Project invoice ledger" tabIndex={0}>
+            <table className={`invoice-table inv-mode-${billingMode}`} ref={invoiceTableRef} role="table">
               <thead>
                 <tr>
                   <th className="invoice-expand-col"/>
@@ -3570,8 +3738,8 @@ export const InvoiceTable = ({
                     <th key={d.abs}
                         className={(isActualInvoiceMonth(d.year, d.monthIdx) ? "month-actual" : "month-proj") + (wi === lastActualWi ? " month-today" : "")}>
                       {d.mon}
-                      <div style={{ fontSize: 9, marginTop: 2, opacity: .7 }}>
-                        {d.year}
+                      <div className="invoice-month-context">
+                        {d.year} · {isActualInvoiceMonth(d.year, d.monthIdx) ? "Actual" : "Projection"}
                       </div>
                     </th>
                   ))}
@@ -3582,7 +3750,8 @@ export const InvoiceTable = ({
                   <th className="inv-pin-act" aria-label="Actions"></th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
+                {decorateInvoiceLedger(<>
                 {searchedRows.map((r) => {
                   const isExpanded = expandedIds.has(r.id);
                   const allEntries = (subInvoices?.get(r.sourceId) || []);
@@ -3619,7 +3788,7 @@ export const InvoiceTable = ({
                   return (
                   <React.Fragment key={r.id}>
                   <tr ref={(flashId === r.id || jumpId === r.id) ? flashRowRef : null}
-                      className={((flashId === r.id || jumpId === r.id) ? "flash" : "") + (isExpanded ? " expanded" : "")}
+                      className={"invoice-project-record " + ((flashId === r.id || jumpId === r.id) ? "flash" : "") + (isExpanded ? " expanded" : "")}
                       data-prob={isOrange(r) ? "orange" : undefined}
                       onDoubleClick={() => onOpenDrawer?.(r)}
                       style={{ cursor: "default" }}>
@@ -3628,7 +3797,7 @@ export const InvoiceTable = ({
                         type="button"
                         className={"directory-expand-btn" + (isExpanded ? " open" : "")}
                         aria-expanded={isExpanded}
-                        aria-label={isExpanded ? "Collapse subs" : "Expand subs"}
+                        aria-label={`${isExpanded ? "Close" : "Open"} billing breakdown for ${shownName || shownNumber || "project"}`}
                         title={isExpanded
                           ? "Hide subs"
                           : (subList.length > 0
@@ -3636,6 +3805,7 @@ export const InvoiceTable = ({
                               : "No subs tracked yet — expand to add")}
                         onClick={() => toggleExpand(r.id)}>
                         <Icon name="chevronRight" size={12}/>
+                        <span className="invoice-mobile-action-label">{isExpanded ? "Close breakdown" : "Billing breakdown"}</span>
                       </button>
                     </td>
                     <td className="sticky-1 mono" style={{ fontSize: 12 }}>
@@ -3674,6 +3844,7 @@ export const InvoiceTable = ({
                                 onOpenFiles?.({ kind: "party-msmm", projectRow: r });
                               }}>
                               <Icon name="link" size={11}/>
+                              <span className="invoice-mobile-action-label">Project files</span>
                               {hasFiles && <span className="invoice-cell-clip-count">{msmmFiles.length}</span>}
                             </button>
                           );
@@ -3815,7 +3986,8 @@ export const InvoiceTable = ({
                       const totalFiles = primeFilesAtDesc(r, d);
                       return (
                       <td key={d.abs}
-                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell msmm-locked"}
+                          className={monthStateAtDesc(r, d) + (wi === lastActualWi ? " month-today" : "") + " invoice-cell msmm-locked" + (totalPaid ? " paid" : "")}
+                          data-paid={totalPaid ? "true" : undefined}
                           title={isMhzRow
                             ? "Auto-calculated · Project total month − all sub-row month values, including MSMM"
                             : "Earned value for this month — auto-calculated (month total − Σ subs). Edit the monthly total on the Project total row."}>
@@ -3828,6 +4000,7 @@ export const InvoiceTable = ({
                                 title="Project total is marked paid"
                                 onClick={(e) => e.stopPropagation()}>
                             <Icon name="check" size={9} stroke={2.6}/>
+                            <span>Paid</span>
                           </span>
                         )}
                         {totalFiles.length > 0 && (
@@ -3860,29 +4033,31 @@ export const InvoiceTable = ({
                     </td>
                     <td className="inv-pin-act" style={{ textAlign: "center" }} onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
                       <span className="inv-act-btns">
+                        {onOpenDrawer && <button type="button" className="row-btn invoice-mobile-details-action"
+                          onClick={() => onOpenDrawer(r)}><Icon name="file" size={14}/>Project details</button>}
                         {billingMode === "active" && onPause && (
-                          <button className="row-btn" title="Pause — move to In-Between"
+                          <button className="row-btn invoice-workflow-action" title="Pause — move to In-Between"
                                   onClick={() => onPause(r)}>
-                            <Icon name="pause" size={13}/>
+                            <Icon name="pause" size={13}/> Pause
                           </button>
                         )}
                         {billingMode === "between" && onResume && (
-                          <button className="row-btn forward" title="Resume — move back to Invoices"
+                          <button className="row-btn forward invoice-workflow-action" title="Resume — move back to Invoices"
                                   onClick={() => onResume(r)}>
-                            <Icon name="play" size={13}/>
+                            <Icon name="play" size={13}/> Resume
                           </button>
                         )}
                         {billingMode === "between" && onCloseOutRow && (
-                          <button className="row-btn" title="Close out project"
+                          <button className="row-btn invoice-workflow-action" title="Close out project"
                                   style={{ color: "var(--rose)" }}
                                   onClick={() => onCloseOutRow(r)}>
-                            <Icon name="x" size={13}/>
+                            <Icon name="x" size={13}/> Close out
                           </button>
                         )}
                         {billingMode === "closed" && onResume && (
-                          <button className="row-btn forward" title="Reopen — move back to Invoices"
+                          <button className="row-btn forward invoice-workflow-action" title="Reopen — move back to Invoices"
                                   onClick={() => onResume(r)}>
-                            <Icon name="play" size={13}/>
+                            <Icon name="play" size={13}/> Reopen
                           </button>
                         )}
                         <button
@@ -3891,9 +4066,11 @@ export const InvoiceTable = ({
                           aria-label={isOrange(r) ? "Move to Normal / White" : "Move to Orange"}
                           onClick={() => updateRow(r.id, nextInvoiceOrangePatch(r, orangeSourceIds))}>
                           <Icon name="flag" size={13}/>
+                          <span className="invoice-mobile-action-label">{isOrange(r) ? "Mark normal" : "Mark Orange"}</span>
                         </button>
-                        <button className="row-btn alert" title="Set alert" onClick={() => onAlert(r)}>
+                        <button className="row-btn alert" title="Set alert" aria-label={`Set alert for ${shownName || "project"}`} onClick={() => onAlert(r)}>
                           <Icon name="bell" size={14}/>
+                          <span className="invoice-mobile-action-label">Set alert</span>
                         </button>
                       </span>
                     </td>
@@ -3979,8 +4156,9 @@ export const InvoiceTable = ({
                                     companyName: s.companyName,
                                   });
                                 }}>
-                                <Icon name="link" size={11}/>
-                                {hasFiles && <span className="invoice-cell-clip-count">{partyBucket.length}</span>}
+                              <Icon name="link" size={11}/>
+                              <span className="invoice-mobile-action-label">Firm files</span>
+                              {hasFiles && <span className="invoice-cell-clip-count">{partyBucket.length}</span>}
                               </button>
                             );
                           })()}
@@ -4199,7 +4377,7 @@ export const InvoiceTable = ({
                                   // shared with the base's MSMM total row (two-way sync).
                                   onTogglePrimePaid?.(s.perspectiveBaseRow, d.year, d.monthIdx, !isPaid);
                                 } else {
-                                  onTogglePaid?.({
+                                onTogglePaid?.({
                                     projectId: r.sourceId,
                                     companyId: s.companyId,
                                     monthIdx: d.monthIdx,
@@ -4210,6 +4388,7 @@ export const InvoiceTable = ({
                                 }
                               }}>
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
+                              <span className="invoice-mobile-action-label">{isPaid ? "Paid" : "Mark paid"}</span>
                             </button>
                           )}
                           {!s.syntheticMhzPrime && (() => {
@@ -4245,6 +4424,7 @@ export const InvoiceTable = ({
                                 }
                               }}>
                               <Icon name="link" size={11}/>
+                              <span className="invoice-mobile-action-label">Invoice files</span>
                               {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
                             </button>
                             );
@@ -4467,6 +4647,7 @@ export const InvoiceTable = ({
                                   onTogglePrimePaid?.(r, d.year, d.monthIdx, !isPaid);
                                 }}>
                                 <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
+                                <span className="invoice-mobile-action-label">{isPaid ? "Paid" : "Mark paid"}</span>
                               </button>
                             )}
                             <button
@@ -4483,6 +4664,7 @@ export const InvoiceTable = ({
                                 onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: d.monthIdx, year: d.year });
                               }}>
                               <Icon name="link" size={11}/>
+                              <span className="invoice-mobile-action-label">Invoice files</span>
                               {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
                             </button>
                           </td>
@@ -4518,6 +4700,7 @@ export const InvoiceTable = ({
                                 onTogglePrimePaid?.(r, d.year, d.monthIdx, !isPaid);
                               }}>
                               <Icon name={isPaid && !canUntickPaid ? "lock" : "check"} size={11}/>
+                              <span className="invoice-mobile-action-label">{isPaid ? "Paid" : "Mark paid"}</span>
                             </button>
                           )}
                           {(() => {
@@ -4539,6 +4722,7 @@ export const InvoiceTable = ({
                                 onOpenFiles?.({ kind: "prime", projectRow: r, monthIdx: d.monthIdx, year: d.year });
                               }}>
                               <Icon name="link" size={11}/>
+                              <span className="invoice-mobile-action-label">Invoice files</span>
                               {hasFiles && <span className="invoice-cell-clip-count">{filesForCell.length}</span>}
                             </button>
                             );
@@ -4591,7 +4775,7 @@ export const InvoiceTable = ({
                     {/* Total excluding orange (non-orange invoice rows only).
                         Sums respect the active search filter so the totals
                         always match the visible rows. */}
-                    <tr>
+                    <tr className="invoice-summary-record">
                       <td className="invoice-expand-col total-cell"/>
                       <td className="sticky-1 total-cell"/>
                       <td className="sticky-2 total-cell" style={{ fontWeight: 600 }}>
@@ -4617,7 +4801,7 @@ export const InvoiceTable = ({
                       <td className="total-cell inv-pin-act"></td>
                     </tr>
                     {/* Total including orange (everything in the searched set) */}
-                    <tr>
+                    <tr className="invoice-summary-record">
                       <td className="invoice-expand-col total-cell"/>
                       <td className="sticky-1 total-cell"/>
                       <td className="sticky-2 total-cell" style={{ fontWeight: 700, color: "var(--prob-orange)" }}>
@@ -4644,11 +4828,13 @@ export const InvoiceTable = ({
                     </tr>
                   </>
                 )}
+                </>, windowMonths, focusedMonthAbs)}
               </tbody>
             </table>
           </div>
 
           <div className="invoice-legend">
+            <span><span className="legend-sw paid"/>Paid · confirmed payment</span>
             <span><span className="legend-sw actual"/>Actual (editable)</span>
             <span><span className="legend-sw proj"/>Projection (editable)</span>
             <span><span className="legend-sw promoted"/>Billed ahead → Actual</span>
@@ -4724,6 +4910,7 @@ export const InvoiceTable = ({
 };
 
 function EgnyteFolderModal({ row, onClose, onSave }) {
+  const dialogRef = useRef(null);
   const [currentPath, setCurrentPath] = useState(null);
   const [folders, setFolders] = useState([]);
   const [selected, setSelected] = useState(row?.egnyteFolderPath || "");
@@ -4732,6 +4919,22 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.querySelector("button")?.focus();
+    const onKey = (event) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key !== "Tab") return;
+      const controls = [...(dialog?.querySelectorAll('button:not([disabled]), input:not([disabled]), [tabindex="0"]') || [])].filter(el => el.getClientRects().length);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    dialog?.addEventListener("keydown", onKey);
+    return () => { dialog?.removeEventListener("keydown", onKey); previousFocus?.focus?.(); };
+  }, [onClose]);
 
   const load = async (path) => {
     setLoading(true);
@@ -4792,7 +4995,7 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
   return createPortal(
     <>
       <div className="overlay" onClick={onClose}/>
-      <div className="modal modal-wide egnyte-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-title">
+      <div ref={dialogRef} className="modal modal-wide egnyte-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-title">
         <div className="modal-head">
           <div className="icon-badge egnyte-badge"><EgnyteLogoMark size={20} linked={!!row?.egnyteFolderPath}/></div>
           <div>
@@ -4839,12 +5042,13 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
                   </React.Fragment>
                 ))}
               </div>
-              <div className="egnyte-view-toggle" role="tablist" aria-label="Egnyte folder view">
+              <div className="egnyte-view-toggle" role="group" aria-label="Egnyte folder view">
                 <button
                   type="button"
                   className={viewMode === "list" ? "active" : ""}
                   onClick={() => setViewMode("list")}
-                  aria-selected={viewMode === "list"}
+                  aria-pressed={viewMode === "list"}
+                  aria-label="List view"
                   title="List view">
                   <Icon name="alignLeft" size={14}/>
                 </button>
@@ -4852,7 +5056,8 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
                   type="button"
                   className={viewMode === "grid" ? "active" : ""}
                   onClick={() => setViewMode("grid")}
-                  aria-selected={viewMode === "grid"}
+                  aria-pressed={viewMode === "grid"}
+                  aria-label="Grid view"
                   title="Grid view">
                   <Icon name="columns" size={14}/>
                 </button>
@@ -4922,6 +5127,7 @@ function EgnyteFolderModal({ row, onClose, onSave }) {
 }
 
 function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
+  const dialogRef = useRef(null);
   const platform = typeof navigator !== "undefined" ? navigator.platform || "" : "";
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
   const defaultLocalRoot = defaultEgnyteLocalRoot(platform);
@@ -4934,6 +5140,22 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
     }
   });
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.querySelector("button")?.focus();
+    const onKey = (event) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+      if (event.key !== "Tab") return;
+      const controls = [...(dialog?.querySelectorAll('button:not([disabled]), input:not([disabled])') || [])].filter(el => el.getClientRects().length);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    dialog?.addEventListener("keydown", onKey);
+    return () => { dialog?.removeEventListener("keydown", onKey); previousFocus?.focus?.(); };
+  }, [onClose]);
 
   const target = useMemo(() => egnyteFolderOpenTarget({
     path: row?.egnyteFolderPath || "",
@@ -4997,7 +5219,7 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
   return createPortal(
     <>
       <div className="overlay" onClick={onClose}/>
-      <div className="modal egnyte-action-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-action-title">
+      <div ref={dialogRef} className="modal egnyte-action-modal" role="dialog" aria-modal="true" aria-labelledby="egnyte-action-title">
         <div className="modal-head">
           <div className="icon-badge egnyte-badge"><EgnyteLogoMark size={20} linked/></div>
           <div>
@@ -5056,6 +5278,7 @@ function EgnyteLinkedFolderModal({ row, onClose, onChangePath }) {
 // portaled to <body> so it escapes the scrolling/sticky invoice table.
 // Closing via overlay / X / Save / ⌘↵ commits; Cancel / Esc discards.
 function InvoiceNoteModal({ meta, onClose, onSave }) {
+  const dialogRef = useRef(null);
   const [text, setText] = useState(meta.value || "");
   // AI generator is launched from within the Description editor (description
   // field only) and stacks on top; accepting a draft drops the text into this
@@ -5066,8 +5289,10 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
   const dirty = text !== (meta.value || "");
 
   useEffect(() => {
+    const previousFocus = document.activeElement;
     const el = taRef.current;
     if (el) { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); }
+    return () => previousFocus?.focus?.();
   }, []);
 
   const commit = () => { if (dirty) onSave(meta.id, meta.field, text); onClose(); };
@@ -5076,6 +5301,12 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
   useEffect(() => {
     const onKey = (e) => {
       if (genOpen) return; // the stacked generator owns the keyboard while open
+      if (e.key === "Tab") {
+        const controls = [...(dialogRef.current?.querySelectorAll('button:not([disabled]), textarea:not([disabled])') || [])].filter(el => el.getClientRects().length);
+        const first = controls[0], last = controls[controls.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
       if (e.key === "Escape") { e.preventDefault(); cancel(); }
       else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
     };
@@ -5086,18 +5317,18 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
   return createPortal(
     <>
       <div className="overlay" onClick={commit}/>
-      <div className={"modal note-modal note-modal-" + meta.accent} style={{ width: 480 }}>
+      <div ref={dialogRef} className={"modal note-modal invoice-note-dialog note-modal-" + meta.accent} role="dialog" aria-modal="true" aria-labelledby="invoice-note-heading">
         <div className="modal-head">
           <div className={"note-modal-badge " + meta.accent}>
             <Icon name={meta.field === "notes" ? "note" : "alignLeft"} size={15}/>
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="drawer-eyebrow" style={{ marginBottom: 2 }}>{meta.label}</div>
-            <h3 className="drawer-title note-modal-name" title={meta.name}>
+            <h3 className="drawer-title note-modal-name" id="invoice-note-heading" title={meta.name}>
               {meta.name || "Project"}
             </h3>
           </div>
-          <button className="drawer-close" onClick={commit} title="Save & close">
+          <button className="drawer-close" onClick={commit} title="Save & close" aria-label="Save and close">
             <Icon name="x" size={16}/>
           </button>
         </div>
@@ -5105,6 +5336,7 @@ function InvoiceNoteModal({ meta, onClose, onSave }) {
           <textarea
             ref={taRef}
             className="input note-textarea"
+            aria-label={meta.label}
             placeholder={`Write ${meta.label.toLowerCase()} for this project…`}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -5263,6 +5495,10 @@ export const EventsTable = ({
 
   const cols = [
     { label: "__select", w: "42px", locked: true },
+    { label: "Title", w: "minmax(300px, 2.5fr)", sortKey: "title" },
+    // Date sort falls back to the all-day date; multi-day events anchor to start.
+    { label: "Date & Time", w: "200px", sortKey: "dateTime",
+      sortValue: r => r.dateTime || (r.date ? `${r.date}T00:00:00` : "") },
     // Status sorts by the derived value so "Happened" rows cluster together
     // even though the column is no longer column-editable. Stored r.status
     // would mis-sort once events age past their datetime without a manual
@@ -5271,18 +5507,11 @@ export const EventsTable = ({
       sortValue: r => derivedEventStatus(r, now) },
     { label: "Type", w: "140px", sortKey: "type",
       sortValue: r => eventTypeRank(r.type) },
-    { label: "Title", w: "minmax(260px, 2.5fr)", sortKey: "title" },
-    // Date sort falls back to r.date so all-day events (no datetime, only
-    // date) sort alongside timed events instead of sinking to "no value".
-    // Multi-day events sort by their start, matching how the Calendar
-    // anchors them in week/month views.
-    { label: "Date & Time", w: "180px", sortKey: "dateTime",
-      sortValue: r => r.dateTime || (r.date ? `${r.date}T00:00:00` : "") },
     { label: "Attendees", w: "minmax(160px, 1.2fr)" },
     { label: "Notes", w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
     { label: "Rating", w: "150px", sortKey: "stars",
       sortValue: r => starsRank(r.stars) },
-    { label: "__actions", w: "96px", locked: true },
+    { label: "__actions", w: "120px", locked: true },
   ];
 
   // Status vocabulary, shared verbatim with the Calendar view
@@ -5322,6 +5551,14 @@ export const EventsTable = ({
   // is a primary navigation aid there.
 
   return (
+    <section className="beacon-events-register" aria-label="Event register">
+      <div className="beacon-events-register-heading">
+        <div>
+          <h2>Event register</h2>
+          <p>Review the schedule, coordinate attendees, and keep the next conversation in view.</p>
+        </div>
+        <span className="beacon-events-source-hint"><Icon name="link" size={14} aria-hidden="true"/>Linked fields are managed in Outlook</span>
+      </div>
     <TableView
       tab={tab}
       skin="clean"
@@ -5383,9 +5620,9 @@ export const EventsTable = ({
           "Title": (
             <div className="td bxt-td-identity">
               {r.source === "outlook" ? (
-                <span className="td-readonly" title={r.outlookWebLink ? "Synced from Outlook · Edit in Outlook" : "Synced from Outlook"}>
+                <span className="td-readonly beacon-event-title" title={r.outlookWebLink ? "Synced from Outlook · Edit in Outlook" : "Synced from Outlook"}>
                   <span className="src-mark"><Icon name="link" size={9} stroke={2}/></span>
-                  <span className="td-readonly-text">{r.title}</span>
+                  <span className="td-readonly-text">{r.title || "Untitled event"}</span>
                 </span>
               ) : (
                 <EditableCell value={r.title}
@@ -5471,6 +5708,7 @@ export const EventsTable = ({
         );
       }}
     />
+    </section>
   );
 };
 
@@ -5570,9 +5808,12 @@ export const HotLeadsQuickView = ({ rows, onOpenDrawer }) => {
   );
 
   return (
-    <section className="hlq" aria-label="Upcoming hot leads quick view">
+    <section className="hlq beacon-leads-agenda" aria-label="Upcoming hot leads quick view">
       <header className="hlq-head">
-        <h2 className="hlq-title">Upcoming hot leads</h2>
+        <div>
+          <h2 className="hlq-title">Next conversations</h2>
+          <p className="hlq-sub">Upcoming scheduled leads. Open a conversation to review its context.</p>
+        </div>
       </header>
       <div className="hlq-cols">
         {renderColumn("AI",          "sage", ai,  undatedOf("AI"))}
@@ -5617,20 +5858,18 @@ export const HotLeadsTable = ({
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "Type",        w: "130px", sortKey: "type" },
     { label: "Title",       w: "minmax(260px, 2.2fr)", sortKey: "title" },
+    { label: "Date & Time", w: "170px", sortKey: "dateTime" },
+    { label: "Rating",      w: "150px", sortKey: "stars",
+      sortValue: r => starsRank(r.stars, HOT_LEAD_STAR_MAX) },
     { label: "Client / Firm", w: "minmax(180px, 1.5fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
-    { label: "Date & Time", w: "170px", sortKey: "dateTime" },
+    { label: "Type",        w: "130px", sortKey: "type" },
     { label: "Anticipated Amount", w: "150px", sortKey: "anticipatedAmount",
       sortValue: r => r.anticipatedAmount || 0 },
     { label: "Attendees",   w: "minmax(160px, 1.2fr)" },
     { label: "Notes",       w: "minmax(180px, 1.4fr)", sortKey: "notes", defaultHidden: true },
-    { label: "Rating",      w: "150px", sortKey: "stars",
-      sortValue: r => starsRank(r.stars, HOT_LEAD_STAR_MAX) },
-    // 100px, not 80: this skin pads cells to 16px a side, which left the
-    // now-visible "Actions" header 48px to render 51px of text.
-    { label: "__actions",   w: "100px", locked: true },
+    { label: "__actions",   w: "250px", locked: true },
   ];
 
   // Chip tone per Type. Engineering uses --blue (matches the Project total
@@ -5674,6 +5913,11 @@ export const HotLeadsTable = ({
   };
 
   return (
+    <section className="beacon-leads-register" aria-label={deletedMode ? "Deleted leads register" : "Lead follow-up register"}>
+      <header className="beacon-leads-register-head">
+        <h2>{deletedMode ? "Deleted conversations" : "Lead register"}</h2>
+        <p>{deletedMode ? "Review a lead before restoring it to your active pipeline." : "Review priority and next dates, keep relationship context current, then move ready leads to Proposals."}</p>
+      </header>
     <TableView
       tab={tab}
       skin="clean"
@@ -5727,10 +5971,11 @@ export const HotLeadsTable = ({
             <div className="td bxt-td-identity">
               <EditableCell value={r.title}
                 onChange={v => updateRow(r.id, { title: v })}/>
+              {r.status && <span className="beacon-lead-status">{r.status}</span>}
             </div>
           ),
           "Client / Firm": (
-            <div className="td subtle" style={{ overflow: "hidden" }}>
+            <div className="td subtle beacon-lead-organization">
               <EditableCell value={r.clientId} type="combobox" options={clientOrFirmOpts}
                 onChange={v => updateRow(r.id, { clientId: v })}
                 render={v => companyById(v)?.name || <span className="empty-cell">–</span>}/>
@@ -5762,17 +6007,22 @@ export const HotLeadsTable = ({
             <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
+                format={v => v || <span className="empty-cell">–</span>}/>
             </div>
           ),
           "__actions": (
             <div className="td bxt-td-actions">
               <div className="row-actions bxt-rowactions" onClick={e => e.stopPropagation()}>
+                <button type="button" className="row-btn bxt-rowbtn beacon-lead-action"
+                        aria-label={`Open details for ${r.title || "lead"}`}
+                        onClick={() => onOpenDrawer(r)}>
+                  Details <Icon name="chevronRight" size={14}/>
+                </button>
                 {deletedMode ? (
                   <button type="button" className="row-btn bxt-rowbtn forward"
                           title="Restore this lead" aria-label="Restore this lead"
                           onClick={() => onRestore?.(r)}>
-                    <Icon name="undo" size={14}/>
+                    <Icon name="undo" size={14}/><span>Restore</span>
                   </button>
                 ) : (
                   <>
@@ -5780,7 +6030,7 @@ export const HotLeadsTable = ({
                       <button type="button" className="row-btn bxt-rowbtn forward"
                               title="Move to Proposals" aria-label="Move to Proposals"
                               onClick={() => onForward(r)}>
-                        <Icon name="forward" size={14}/>
+                        <Icon name="forward" size={14}/><span>Proposals</span>
                       </button>
                     )}
                     <DropdownMenu modal={false}>
@@ -5813,11 +6063,12 @@ export const HotLeadsTable = ({
                data-stars={r.stars != null ? String(r.stars) : undefined}
                style={{ gridTemplateColumns: gridCols, cursor: "default" }}
                onDoubleClick={() => onOpenDrawer(r)}>
-            {renderOrderedCells(visibleColumns, cells)}
+            {renderOrderedCells(visibleColumns, Object.fromEntries(Object.entries(cells).map(([label, cell]) => [label, React.cloneElement(cell, { "data-lead-field": label })])))}
           </div>
         );
       }}
     />
+    </section>
   );
 };
 
@@ -5846,20 +6097,20 @@ export const OpenBidsTable = ({
 }) => {
   const cols = [
     { label: "__select", w: "42px", locked: true },
-    { label: "RFQ/RFP #", w: "minmax(120px, 1fr)", sortKey: "rfqNumber" },
+    { label: "RFQ/RFP #", w: "minmax(160px, 1fr)", sortKey: "rfqNumber" },
+    { label: "Service", w: "minmax(220px, 1.6fr)", sortKey: "serviceDescription" },
+    { label: "Due Date", w: "190px", sortKey: "dueAt" },
+    { label: "Approval", w: "230px", sortKey: "approvalStatus" },
     { label: "Client / Parish", w: "minmax(180px, 1.4fr)", sortKey: "clientName",
       sortValue: r => companyById(r.clientId)?.name || "" },
-    { label: "Service", w: "minmax(220px, 1.6fr)", sortKey: "serviceDescription" },
-    { label: "Due Date", w: "170px", sortKey: "dueAt" },
     { label: "Anticipated Amount", w: "150px", sortKey: "anticipatedAmount",
       sortValue: r => r.anticipatedAmount || 0 },
-    { label: "PDF", w: "150px" },
-    { label: "Web Link", w: "minmax(160px, 1.2fr)", sortKey: "webLink" },
-    { label: "Approval", w: "200px", sortKey: "approvalStatus" },
+    { label: "PDF", w: "200px" },
+    { label: "Web Link", w: "minmax(160px, 1.2fr)", sortKey: "webLink", defaultHidden: true },
     { label: "Approved By", w: "150px", sortKey: "approverName", defaultHidden: true,
       sortValue: r => userById(r.approvedBy)?.name || "" },
     { label: "Notes", w: "minmax(160px, 1.2fr)", sortKey: "notes", defaultHidden: true },
-    { label: "__actions", w: "150px", locked: true },
+    { label: "__actions", w: "200px", locked: true },
   ];
 
   const { clientOptions } = buildOptions();
@@ -5875,7 +6126,7 @@ export const OpenBidsTable = ({
   };
 
   // Approval state → chip class, mapped onto the product-wide semantic
-  // palette: sage = approved, clay/rose = rejected, ochre/accent = awaiting a
+  // palette: sage = approved, rose = rejected, cobalt/accent = awaiting a
   // decision. Each state also carries its own glyph below, so the state never
   // relies on colour alone.
   const approvalChipClass = (status) => ({
@@ -5915,14 +6166,23 @@ export const OpenBidsTable = ({
   };
 
   return (
-    <TableView
+    <section className="openbids-workspace" aria-label={deletedMode ? "Deleted bids" : "Bid review desk"}>
+      <div className="openbids-orientation">
+        <span className="openbids-orientation-icon" aria-hidden="true"><Icon name={deletedMode ? "undo" : "briefcase"} size={20}/></span>
+        <div>
+          <h2>{deletedMode ? "Recover a bid" : "Bid review desk"}</h2>
+          <p>{deletedMode ? "Inspect a removed opportunity, then restore it when it belongs in the pipeline." : "Review the brief and deadline, record a decision, then move approved bids to Proposals."}</p>
+        </div>
+        {!deletedMode && <span className="openbids-access"><Icon name={isAdmin ? "checkCircle" : "hourglass"} size={15}/>{isAdmin ? "Admin review enabled" : "Admin approval required"}</span>}
+      </div>
+      <TableView
       tab={tab}
       skin="clean"
       filters={filters}
       columns={cols} rows={rows}
       yearOptions={yearOptions} yearValue={yearValue} onYearChange={onYearChange}
-      emptyTitle="No open bids yet"
-      emptyHint="Add an RFQ/RFP to track it through review. Admins approve a bid before it can be moved to Proposals."
+      emptyTitle={deletedMode ? "No deleted bids" : "No open bids yet"}
+      emptyHint={deletedMode ? "Removed bids will appear here so they can be reviewed and restored." : "Add an RFQ/RFP to track it through review. Admins approve a bid before it can be moved to Proposals."}
       emptyIcon="briefcase"
       renderRow={(r, _i, gridCols, visibleColumns) => {
         const approver = r.approvedBy ? userById(r.approvedBy) : null;
@@ -5956,7 +6216,7 @@ export const OpenBidsTable = ({
               <EditableCell value={r.serviceDescription} type="select" options={serviceOptions}
                 onChange={v => updateRow(r.id, { serviceDescription: v || null })}
                 render={v => v
-                  ? <span className="chip muted bxt-chip-trunc" title={v}>{v}</span>
+                  ? <span className="openbids-service">{v}</span>
                   : <span className="empty-cell">–</span>}/>
             </div>
           ),
@@ -5966,13 +6226,12 @@ export const OpenBidsTable = ({
                 onChange={v => updateRow(r.id, { dueAt: v ? new Date(v).toISOString() : null })}
                 format={v => v
                   ? (
-                    <span className="bxt-due" title={urgency ? `${fmtDateTime(v)} · ${urgency.text}` : fmtDateTime(v)}>
+                    <span className="bxt-due openbids-due" title={urgency ? `${fmtDateTime(v)} · ${urgency.text}` : fmtDateTime(v)}>
                       {urgency && <Icon name={urgency.icon} size={12} className="bxt-due-icon"/>}
                       <span className="bxt-due-date num">{fmtDateTime(v)}</span>
                       {urgency && (
                         <span className="bxt-due-flag">
-                          {urgency.flag}
-                          <span className="sr-only"> {urgency.text}</span>
+                          {urgency.text}
                         </span>
                       )}
                     </span>
@@ -6025,7 +6284,7 @@ export const OpenBidsTable = ({
                         aria-label="Attach an RFQ or RFP PDF"
                         title="Attach an RFQ/RFP PDF (up to about 50 MB)">
                   <Icon name="attachment" size={12}/>
-                  <span>Attach</span>
+                  <span>Attach PDF</span>
                 </button>
               )}
             </div>
@@ -6064,24 +6323,24 @@ export const OpenBidsTable = ({
                 {isAdmin && (
                   <div className="bid-approval-actions bxt-approval-actions">
                     {!isApproved && (
-                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-approve"
+                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-approve openbids-action"
                               title="Approve" aria-label={`Approve ${bidName}`}
                               onClick={() => onApprove?.(r)}>
-                        <Icon name="thumbsUp" size={13}/>
+                        <Icon name="thumbsUp" size={13}/><span>Approve</span>
                       </button>
                     )}
                     {!isRejected && (
-                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-danger"
+                      <button type="button" className="row-btn bxt-rowbtn bxt-rowbtn-danger openbids-action"
                               title="Reject" aria-label={`Reject ${bidName}`}
                               onClick={() => onReject?.(r)}>
-                        <Icon name="thumbsDown" size={13}/>
+                        <Icon name="thumbsDown" size={13}/><span>Reject</span>
                       </button>
                     )}
                     {(isApproved || isRejected) && (
-                      <button type="button" className="row-btn bxt-rowbtn"
+                      <button type="button" className="row-btn bxt-rowbtn openbids-action"
                               title="Clear approval" aria-label={`Clear the approval on ${bidName}`}
                               onClick={() => onClearApproval?.(r)}>
-                        <Icon name="undo" size={12}/>
+                        <Icon name="undo" size={12}/><span>Clear</span>
                       </button>
                     )}
                   </div>
@@ -6100,23 +6359,27 @@ export const OpenBidsTable = ({
             <div className="td subtle bxt-td-note">
               <EditableCell value={r.notes} type="textarea"
                 onChange={v => updateRow(r.id, { notes: v })}
-                format={v => truncCell(v)}/>
+                format={v => v ? <span className="openbids-note">{v}</span> : <span className="empty-cell">–</span>}/>
             </div>
           ),
           "__actions": (
             <div className="td bxt-td-actions">
-              <div className="row-actions bxt-rowactions" onClick={e => e.stopPropagation()}>
+              <div className="row-actions bxt-rowactions openbids-next" onClick={e => e.stopPropagation()}>
+                <button type="button" className="row-btn bxt-rowbtn openbids-action"
+                        aria-label={`Open details for ${bidName}`} onClick={() => onOpenDrawer(r)}>
+                  <Icon name="external" size={13}/><span>Details</span>
+                </button>
                 {deletedMode ? (
-                  <button type="button" className="row-btn bxt-rowbtn forward"
+                  <button type="button" className="row-btn bxt-rowbtn forward openbids-action"
                           title="Restore this bid" aria-label="Restore this bid"
                           onClick={() => onRestore?.(r)}>
-                    <Icon name="undo" size={14}/>
+                    <Icon name="undo" size={14}/><span>Restore</span>
                   </button>
                 ) : (
                   <>
                     <button
                       type="button"
-                      className="row-btn bxt-rowbtn forward"
+                      className="row-btn bxt-rowbtn forward openbids-action"
                       title={isApproved
                         ? "Move to Proposals"
                         : "Approve this bid before moving forward"}
@@ -6125,8 +6388,9 @@ export const OpenBidsTable = ({
                         : `Move to Proposals, unavailable until ${bidName} is approved`}
                       disabled={!isApproved}
                       onClick={() => isApproved && onForward?.(r)}>
-                      <Icon name="forward" size={14}/>
+                      <Icon name="forward" size={14}/><span>To Proposals</span>
                     </button>
+                    {!isApproved && <span className="openbids-prerequisite">Approval required to move</span>}
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
                         <button type="button" className="row-btn bxt-rowbtn"
@@ -6156,7 +6420,8 @@ export const OpenBidsTable = ({
           </div>
         );
       }}
-    />
+      />
+    </section>
   );
 };
 
@@ -6195,6 +6460,8 @@ export const DirectoryTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, invoice, flashId, filters,
   onOpenProject, onMerge, mergeResetKey,
 }) => {
+  const [directoryView, setDirectoryView] = useState("relationships");
+  const isFullTable = directoryView === "table";
   // Set of entity ids currently expanded. Set so multiple can be open.
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const toggleExpand = (id) => {
@@ -6247,11 +6514,7 @@ export const DirectoryTable = ({
       const related = relatedDirectoryPartiesFor(r, projectsByType, r.type === "Client" ? "companies" : "clients")
         .map(p => p.name)
         .join(" ");
-      const haystack = [
-        r.baseName, r.name, r.type === "Client" ? "Client" : r.type, related,
-        String(projectCount),
-      ].filter(Boolean).join(" ").toLowerCase();
-      return haystack.includes(q);
+      return matchesDirectoryQuery(r, q, [related, String(projectCount)]);
     });
   }, [rows, search, projectsByType]);
 
@@ -6293,7 +6556,12 @@ export const DirectoryTable = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ]), [projectCounts]);
 
-  const dirGridCols = useMemo(() => dirColumns.map(c => c.w).join(" "), [dirColumns]);
+  const visibleDirColumns = useMemo(() => isFullTable ? dirColumns : dirColumns.filter(c =>
+    ["Name", "Contact", "Email", "Phone", "__actions"].includes(c.label)
+  ), [dirColumns, isFullTable]);
+  const dirGridCols = isFullTable
+    ? dirColumns.map(c => c.w).join(" ")
+    : "minmax(210px,1.5fr) minmax(145px,1fr) minmax(200px,1.3fr) minmax(140px,.9fr) 88px";
 
   // Interactive sort. The default is name-ascending, which is the order the
   // roster has always shipped with; cycling a column past "descending"
@@ -6374,20 +6642,18 @@ export const DirectoryTable = ({
     return (
       <span className="bxt-dir-related">
         {related.slice(0, 2).map(p => (
-          <Badge key={p.id} tone="neutral" className="min-w-0 shrink" title={`${p.name} · ${p.count} shared ${p.count === 1 ? "project" : "projects"}`}>
-            <span className="min-w-0 truncate">{p.name}</span>
+          <Badge key={p.id} tone="neutral" className="min-w-0 max-w-full shrink whitespace-normal" title={`${p.name} · ${p.count} shared ${p.count === 1 ? "project" : "projects"}`}>
+            <span className="bcn-directory-related-name">{p.name}</span>
             <span className="num shrink-0 font-normal opacity-70">{p.count}</span>
           </Badge>
         ))}
         {related.length > 2 && (
-          <Badge
-            tone="outline"
-            className="shrink-0"
-            title={related.slice(2).map(p => `${p.name} (${p.count})`).join(", ")}
-          >
-            +{related.length - 2}
-            <span className="sr-only"> more related {isClient ? "firms" : "clients"}</span>
-          </Badge>
+          <details className="bcn-directory-related-more" onClick={e => e.stopPropagation()}>
+            <summary>{related.length - 2} more {isClient ? "firms" : "clients"}</summary>
+            <span className="bcn-directory-related-list">
+              {related.slice(2).map(p => <span key={p.id}><span>{p.name}</span><span className="num">{p.count} shared {p.count === 1 ? "project" : "projects"}</span></span>)}
+            </span>
+          </details>
         )}
       </span>
     );
@@ -6427,7 +6693,7 @@ export const DirectoryTable = ({
       >
         {/* Disclosure — the primary way into an entity's linked projects,
             a real button so it is reachable and operable from the keyboard. */}
-        <div className="td bxt-dir-disclose" role="cell" onClick={e => e.stopPropagation()}>
+        {isFullTable && <><div className="td bxt-dir-disclose" role="cell" onClick={e => e.stopPropagation()}>
           <button
             type="button"
             className="bxt-dir-chevron"
@@ -6454,9 +6720,10 @@ export const DirectoryTable = ({
           />
         </div>
 
+        </>}
         <div className="td bxt-td-identity bxt-td-stack" role="cell">
-          <span className="bxt-td-fullwidth">
-            {isClient ? (
+          <span className="bxt-td-fullwidth bcn-directory-name">
+            {!isFullTable ? <button type="button" className="bcn-directory-open" onClick={() => onOpenDrawer(r)}>{r.baseName || r.name}</button> : isClient ? (
               <EditableCell value={r.baseName || r.name}
                 onChange={v => {
                   const district = r.district || "";
@@ -6478,23 +6745,28 @@ export const DirectoryTable = ({
           {isClient && r.district && (
             <span className="bxt-td-sub" title={r.district}>{r.district}</span>
           )}
+          {!isFullTable && <span className="bcn-directory-classification">
+            <Icon name={kindMeta.icon} size={13} aria-hidden="true"/>
+            <span>{kindMeta.label}</span>
+            <span>{(isClient ? r.orgType : r.type) || ""}</span>
+          </span>}
         </div>
 
-        <div className="td" role="cell">
-          <Badge tone={kindMeta.tone} className="max-w-full">
+        {isFullTable && <div className="td" role="cell">
+          <Badge tone={kindMeta.tone} className="max-w-full whitespace-normal">
             <Icon name={kindMeta.icon} size={12} aria-hidden="true"/>
-            <span className="min-w-0 truncate">{kindMeta.label}</span>
+            <span className="min-w-0">{kindMeta.label}</span>
           </Badge>
-        </div>
+        </div>}
 
         {/* Sub-attribute axis: org type for a client (read-only, set on the
             record), commercial role for a firm (inline editable, as before). */}
-        <div className="td" role="cell">
+        {isFullTable && <div className="td" role="cell">
           {isClient ? (
             r.orgType ? (
-              <Badge tone="outline" className="max-w-full" title={`Org type: ${r.orgType}`}>
+              <Badge tone="outline" className="max-w-full whitespace-normal" title={`Org type: ${r.orgType}`}>
                 <span className="bxt-dir-orgdot" data-org={orgKey} aria-hidden="true"/>
-                <span className="min-w-0 truncate">{r.orgType}</span>
+                <span className="min-w-0">{r.orgType}</span>
               </Badge>
             ) : (
               <span className="empty-cell">No org type</span>
@@ -6506,9 +6778,9 @@ export const DirectoryTable = ({
                 ? <RoleChip role={v}/>
                 : <span className="empty-cell">No role</span>}/>
           )}
-        </div>
+        </div>}
 
-        <div className="td bxt-td-note" role="cell">
+        {isFullTable && <><div className="td bxt-td-note" role="cell">
           {renderRelated(r, isClient)}
         </div>
 
@@ -6531,21 +6803,22 @@ export const DirectoryTable = ({
           </button>
         </div>
 
-        <div className="td subtle" role="cell">
-          {r.contact ? truncCell(r.contact, 40) : <span className="empty-cell">–</span>}
+        </>}
+        <div className="td subtle bcn-directory-contact" role="cell" data-contact-field="Contact">
+          <span className="bcn-directory-contact-name">{r.contact || <span className="empty-cell">No contact listed</span>}</span>
+        </div>
+        <div className="td subtle bxt-td-note" role="cell" data-contact-field="Email">
+          {r.email ? <a className="bcn-directory-channel" href={`mailto:${r.email}`} onClick={e => e.stopPropagation()}>{r.email}</a> : <span className="empty-cell">–</span>}
+        </div>
+        <div className="td subtle num" role="cell" data-contact-field="Phone">
+          {r.phone ? <a className="bcn-directory-channel" href={`tel:${r.phone}`} onClick={e => e.stopPropagation()}>{r.phone}</a> : <span className="empty-cell">–</span>}
+        </div>
+        {isFullTable && <><div className="td subtle bxt-td-note" role="cell">
+          {r.address || <span className="empty-cell">–</span>}
         </div>
         <div className="td subtle bxt-td-note" role="cell">
-          {r.email ? truncCell(r.email, 48) : <span className="empty-cell">–</span>}
-        </div>
-        <div className="td subtle num" role="cell">
-          {r.phone ? truncCell(r.phone, 24) : <span className="empty-cell">–</span>}
-        </div>
-        <div className="td subtle bxt-td-note" role="cell">
-          {r.address ? truncCell(r.address, 60) : <span className="empty-cell">–</span>}
-        </div>
-        <div className="td subtle bxt-td-note" role="cell">
-          {r.notes ? truncCell(r.notes, 80) : <span className="empty-cell">–</span>}
-        </div>
+          {r.notes || <span className="empty-cell">–</span>}
+        </div></>}
 
         <div className="td bxt-td-actions" role="cell">
           <div className="bxt-rowactions bxt-diractions" onClick={e => e.stopPropagation()}>
@@ -6557,8 +6830,9 @@ export const DirectoryTable = ({
               onClick={() => onOpenDrawer(r)}
             >
               <Icon name="maximize" size={14}/>
+              {!isFullTable && <span>Details</span>}
             </button>
-            <DropdownMenu modal={false}>
+            {isFullTable && <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -6592,13 +6866,13 @@ export const DirectoryTable = ({
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
+            </DropdownMenu>}
           </div>
         </div>
       </div>
     );
 
-    if (!isExpanded) return row;
+    if (!isExpanded || !isFullTable) return row;
 
     return (
       <React.Fragment key={r.id}>
@@ -6609,7 +6883,7 @@ export const DirectoryTable = ({
           data-kind={isClient ? "client" : "company"}
           style={{ gridTemplateColumns: dirGridCols }}
         >
-          <div className="td bxt-dirx-cell" role="cell" aria-colspan={dirColumns.length}>
+          <div className="td bxt-dirx-cell" role="cell" aria-colspan={visibleDirColumns.length}>
             {/* Pinned to the viewport's left edge: the row spans a grid far
                 wider than the screen, so an unpinned panel would scroll out
                 of sight the moment the roster is scrolled sideways. */}
@@ -6619,6 +6893,11 @@ export const DirectoryTable = ({
               role="region"
               aria-label={`Linked projects for ${label}`}
             >
+              <div className="bcn-directory-record-context">
+                <div><span className="bcn-directory-field-label">Location</span><p>{r.address || "No address added"}</p></div>
+                <div><span className="bcn-directory-field-label">Relationship notes</span><p>{r.notes || "No notes added"}</p></div>
+                <Button variant="secondary" size="sm" onClick={() => onOpenDrawer(r)}><Icon name="edit" size={14}/>Edit details</Button>
+              </div>
               <LinkedProjectsSection
                 projects={linked}
                 onOpenProject={onOpenProject}
@@ -6639,10 +6918,10 @@ export const DirectoryTable = ({
       data-kind={kind}
       style={{ gridTemplateColumns: dirGridCols }}
     >
-      <div className="td bxt-grouphead-cell bxt-dirhead-cell" role="cell" aria-colspan={dirColumns.length}>
+      <div className="td bxt-grouphead-cell bxt-dirhead-cell" role="cell" aria-colspan={visibleDirColumns.length}>
         <span className="bxt-dirhead-inner">
           <span className="bxt-dirhead-dot" aria-hidden="true"/>
-          <span className="bxt-orghead-kicker">Kind</span>
+          <span className="bxt-orghead-kicker">{kind === "client" ? "Who we work for" : "Who we work with"}</span>
           <span className="bxt-grouphead-label bxt-truncate">
             {kind === "client" ? "Clients" : "Companies"}
           </span>
@@ -6663,7 +6942,14 @@ export const DirectoryTable = ({
     // (toolbar, thead, rows) instead of going through TableView, but it uses
     // the same .tablewrap / .bxt-toolbar / .thead / .trow / .td primitives, so
     // stamping the attribute on the wrapper is all the skin needs to reach it.
-    <div className="tablewrap bxt-dir" data-skin="clean">
+    <div className="tablewrap bxt-dir bcn-directory" data-skin="clean" data-directory-view={directoryView}>
+      <div className="bcn-directory-intro">
+        <div><h2>Contacts</h2><p>Find a person or firm. Call, email or open their details.</p></div>
+        <div className="bcn-directory-view" role="group" aria-label="Directory layout">
+          <button type="button" aria-pressed={!isFullTable} onClick={() => setDirectoryView("relationships")}><Icon name="users" size={15}/>Contacts</button>
+          <button type="button" aria-pressed={isFullTable} onClick={() => setDirectoryView("table")}><Icon name="table" size={15}/>Manage records</button>
+        </div>
+      </div>
       {/* Same chrome vocabulary as every other Beacon table. */}
       <div className="bxt-toolbar">
         <InputGroup
@@ -6672,7 +6958,7 @@ export const DirectoryTable = ({
             ? "border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
             : undefined}
           type="text"
-          placeholder="Search directory"
+          placeholder="Name, contact, email or phone…"
           aria-label="Search the directory"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -6715,7 +7001,7 @@ export const DirectoryTable = ({
             <span className="num">{shownRows}</span>
             <span className="bxt-dir-tally-sep">/</span>
             <span className="num">{totalRows}</span>
-            <span className="sr-only"> entries shown</span>
+            <span> entries</span>
           </span>
         </div>
       </div>
@@ -6779,7 +7065,7 @@ export const DirectoryTable = ({
             table structure back for assistive technology. */}
         <div className="table-scroll-body" role="table" aria-label={`${tableAccessibleName(tab)} table`}>
           <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: dirGridCols }}>
-            {dirColumns.map((c) => {
+            {visibleDirColumns.map((c) => {
               const internal   = isInternalLabel(c.label);
               const accessible = internal ? internalColumnName(c.label) : c.label;
               const sortable   = !!c.sortKey;
@@ -6945,6 +7231,7 @@ export const ProjectsTable = ({
 }) => {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const [registerView, setRegisterView] = useState("overview");
 
   // parent uuid → sorted children (a dangling/missing parent is treated as a
   // root). Keyed on the surrogate `id`; display order is by the scoped local_id.
@@ -7056,7 +7343,7 @@ export const ProjectsTable = ({
 
   if (items.length === 0) {
     return (
-      <div className="tablewrap bxt-ptree" data-skin="clean">
+      <div className="tablewrap bxt-ptree projects-register" data-skin="clean">
         <EmptyState
           title="No projects yet"
           hint='Use "New project" to create a top-level project, then add phases and subphases under it.'
@@ -7096,21 +7383,37 @@ export const ProjectsTable = ({
   };
 
   const hasQuery = !!query.trim();
+  const registerColumns = registerView === "full"
+    ? PTREE_COLS.replace(/116px$/, "152px")
+    : "minmax(260px,2fr) 116px minmax(160px,1fr) 132px 124px 152px 130px 136px";
+  const secondaryColumns = new Set(["Type", "Subs", "Contract Type", "+PMs"]);
 
   return (
     // Same reasoning as Directory: the projects tree hand-rolls its chrome
     // but on the shared primitives, so the attribute is enough.
-    <div className="tablewrap bxt-ptree" data-skin="clean">
+    <div className="tablewrap bxt-ptree projects-register" data-skin="clean" data-view={registerView}>
+      <div className="projects-register-heading">
+        <div>
+          <h2>Portfolio register</h2>
+        </div>
+        <div className="projects-register-counts" aria-label="Register size">
+          <span><strong className="num">{(byParent.get(null) || []).length}</strong> root projects</span>
+          <span><strong className="num">{items.length}</strong> total records</span>
+        </div>
+      </div>
       {/* Same toolbar vocabulary as every other Beacon table: search first,
           then a scrolling filter strip, then the tools pushed right. */}
-      <div className="bxt-toolbar">
+      <div className="bxt-toolbar projects-register-controls">
+        <div className="projects-register-search">
+          <label htmlFor="projects-register-search">Find a project</label>
         <InputGroup
+          id="projects-register-search"
           className="bxt-search"
           inputClassName={hasQuery
             ? "border-[var(--accent)] bg-[var(--accent-softer)] text-[var(--accent-ink)]"
             : undefined}
           type="text"
-          placeholder="Search projects"
+          placeholder="Name, project ID, client or manager"
           aria-label="Search projects, IDs, clients and managers"
           value={query}
           onChange={e => setQuery(e.target.value)}
@@ -7129,9 +7432,20 @@ export const ProjectsTable = ({
             </button>
           ) : null}
         />
+        </div>
+        <div className="projects-register-view" role="group" aria-label="Register columns">
+          <button type="button" aria-pressed={registerView === "overview"} onClick={() => setRegisterView("overview")}>
+            <Icon name="grid" size={15}/><span>Overview</span>
+          </button>
+          <button type="button" aria-pressed={registerView === "full"} onClick={() => setRegisterView("full")}>
+            <Icon name="table" size={15}/><span>Full register</span>
+          </button>
+        </div>
+      </div>
 
+      <div className="projects-register-filterrow">
         {filterChips.length > 0 && (
-          <div className="bxt-filterstrip" role="group" aria-label="Filters">
+          <div className="bxt-filterstrip" role="group" aria-label="Project filters">
             {filterChips.map(chip => (
               <button
                 key={chip.key}
@@ -7150,12 +7464,12 @@ export const ProjectsTable = ({
 
         <div className="bxt-toolbar-actions">
           <button type="button" className="bxt-tool" onClick={expandAll}
-                  title="Expand every project">
+                  disabled={isFiltering} title={isFiltering ? "Matching hierarchies are expanded while filtering" : "Expand every project"}>
             <Icon name="chevronDown" size={13}/>
             <span className="bxt-tool-label">Expand all</span>
           </button>
           <button type="button" className="bxt-tool" onClick={collapseAll}
-                  title="Collapse to top level">
+                  disabled={isFiltering} title={isFiltering ? "Matching hierarchies are expanded while filtering" : "Collapse to top level"}>
             <Icon name="chevronRight" size={13}/>
             <span className="bxt-tool-label">Collapse all</span>
           </button>
@@ -7189,20 +7503,25 @@ export const ProjectsTable = ({
         </div>
       </div>
 
+      <div className="projects-register-guide">
+        <span><Icon name="folder" size={14}/>{isFiltering ? "Matching records include their parent projects." : "Expand a project to explore its phases and subphases."}</span>
+        <span>{registerView === "overview" ? "Switch to Full register for all editable fields." : "Select a value to edit it inline."}</span>
+      </div>
       <div className="table-scroll">
         {/* The outline is a CSS grid, not a <table>: rows carry their own
             depth padding and the tree collapses in place. The ARIA roles
             put the structure back for assistive tech. */}
         <div className="table-scroll-body" role="table" aria-label="Projects table">
-          <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: PTREE_COLS }}>
+          <div className="thead bxt-thead" role="row" style={{ gridTemplateColumns: registerColumns }}>
             {PTREE_HEADS.map((h) => (
               <div
                 key={h.label}
                 className={"th bxt-th" + (h.align === "right" ? " bxt-th-right" : "")}
                 role="columnheader"
+                data-secondary={secondaryColumns.has(h.label) || undefined}
               >
                 <span className="bxt-th-label">
-                  {h.silent ? <span className="sr-only">{h.label}</span> : h.label}
+                  {h.label}
                 </span>
               </div>
             ))}
@@ -7220,7 +7539,7 @@ export const ProjectsTable = ({
                 role="row"
                 data-itemtype={it.itemType === "main" ? "main" : "standard"}
                 data-depth={it._depth}
-                style={{ gridTemplateColumns: PTREE_COLS, cursor: "default" }}
+                style={{ gridTemplateColumns: registerColumns, cursor: "default" }}
                 onDoubleClick={() => it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it)}
               >
                 {/* Name — indented by depth, with expand chevron. A ROOT project's
@@ -7229,7 +7548,7 @@ export const ProjectsTable = ({
                 <div
                   className="td bxt-pt-name"
                   role="cell"
-                  style={{ paddingLeft: 12 + it._depth * 20 }}
+                  style={{ "--project-depth": it._depth, paddingLeft: 16 + it._depth * 20 }}
                 >
                   {it._hasKids ? (
                     <button
@@ -7249,9 +7568,7 @@ export const ProjectsTable = ({
                   <span className="bxt-pt-nametext">
                     {/* Indentation alone carries the hierarchy visually, so
                         the depth is also written out for screen readers. */}
-                    {it._depth > 0 && (
-                      <span className="sr-only">Level {it._depth + 1}, </span>
-                    )}
+                    <span className="projects-register-level">{it._depth === 0 ? "Project" : it._depth === 1 ? "Phase" : `Subphase · level ${it._depth + 1}`}</span>
                     {it._depth === 0 ? (
                       <button
                         type="button"
@@ -7259,7 +7576,7 @@ export const ProjectsTable = ({
                         title="Open project detail"
                         onClick={(e) => { e.stopPropagation(); onOpenProject?.(it); }}
                       >
-                        {it.name}
+                        {it.name || it.localId || "Untitled project"}
                       </button>
                     ) : (
                       <EditableCell value={it.name} type="text"
@@ -7268,32 +7585,32 @@ export const ProjectsTable = ({
                   </span>
                 </div>
 
-                <div className="td mono bxt-td-ref" role="cell">
+                <div className="td mono bxt-td-ref" role="cell" data-label="Project ID">
                   <EditableCell value={it.localId} type="text"
                     onChange={(v) => updateRow(it.id, { localId: v })}/>
                 </div>
-                <div className="td" role="cell">
+                <div className="td" role="cell" data-label="Type" data-secondary="true">
                   <EditableCell value={it.itemType} type="select" options={PROJECT_ITEM_TYPE_OPTIONS}
                     render={() => typeBadge(it)}
                     onChange={(v) => updateRow(it.id, { itemType: v })}/>
                 </div>
-                <div className="td subtle" role="cell">
+                <div className="td subtle" role="cell" data-label="Client / Prime">
                   {companyById(it.clientId)?.name || <span className="empty-cell">–</span>}
                 </div>
-                <div className="td" role="cell">
+                <div className="td" role="cell" data-label="Subs" data-secondary="true">
                   <SubsCell subs={it.subs}/>
                 </div>
-                <div className="td subtle" role="cell">
+                <div className="td subtle" role="cell" data-label="Contract type" data-secondary="true">
                   <EditableCell value={it.contractType} type="select" options={CONTRACT_TYPE_OPTIONS}
                     render={(v) => v ? contractTypeLabel(v) : <span className="empty-cell">–</span>}
                     onChange={(v) => updateRow(it.id, { contractType: v })}/>
                 </div>
-                <div className="td mono num bxt-td-money" role="cell">
+                <div className="td mono num bxt-td-money" role="cell" data-label="Contract">
                   <EditableCell value={it.contractAmount} type="number" align="right"
                     render={(v) => v == null ? <span className="empty-cell">–</span> : fmtMoney(v, false)}
                     onChange={(v) => updateRow(it.id, { contractAmount: v })}/>
                 </div>
-                <div className="td bxt-td-pct" role="cell">
+                <div className="td bxt-td-pct" role="cell" data-label="Complete">
                   <EditableCell value={it.percentComplete} type="number" align="right"
                     render={() => (
                       <span className="bxt-pct" title={pct == null ? "No progress recorded" : `${pct}% complete`}>
@@ -7310,17 +7627,17 @@ export const ProjectsTable = ({
                     )}
                     onChange={(v) => updateRow(it.id, { percentComplete: v })}/>
                 </div>
-                <div className="td" role="cell">
+                <div className="td" role="cell" data-label="Manager">
                   {it.managerId
                     ? <UserTag userId={it.managerId} size="xs"/>
                     : <span className="empty-cell">–</span>}
                 </div>
-                <div className="td" role="cell">
+                <div className="td" role="cell" data-label="Additional PMs" data-secondary="true">
                   {(it.pmIds && it.pmIds.length)
                     ? <UserStack ids={it.pmIds} max={3}/>
                     : <span className="empty-cell">–</span>}
                 </div>
-                <div className="td" role="cell">
+                <div className="td" role="cell" data-label="Status">
                   <EditableCell value={it.status} type="select" options={PROJECT_ITEM_STATUS_OPTIONS}
                     render={() => statusBadge(it)}
                     onChange={(v) => updateRow(it.id, { status: v })}/>
@@ -7346,6 +7663,7 @@ export const ProjectsTable = ({
                       onClick={(e) => { e.stopPropagation(); it._depth === 0 ? onOpenProject?.(it) : onOpenDrawer?.(it); }}
                     >
                       <Icon name={it._depth === 0 ? "maximize" : "eye"} size={13}/>
+                      <span>Open</span>
                     </button>
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>

@@ -1,0 +1,74 @@
+/* Record editors: solid work surfaces, contextual glass chrome, full labels. */
+.record-create .cm-body { gap: 28px; scroll-padding-block: 24px; }
+.record-create .cm-section { gap: 18px; }
+.record-create .cm-section + .cm-section { padding-top: 24px; }
+.record-create .cm-section-title { font-size: 15px; font-weight: 650; text-transform: none; letter-spacing: -.01em; color: var(--text); }
+.cm-section-hint { margin: 5px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.record-create .cm-grid { gap: 18px 20px; }
+.record-create .cm-tag-name { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+.record-create .cm-tag { border-radius: 8px; padding: 4px 6px; gap: 6px; }
+.record-create .cm-tag > button { width: 26px; height: 26px; }
+.record-create .cm-tag > button:active { transform: none; }
+.record-create .cm-subrow { padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.record-create .cm-subfoot { margin-top: 8px; }
+.record-create .cm-radio { min-height: 38px; padding: 4px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.record-create .cm-radio:has([data-state="checked"]) { border-color: var(--accent-line); background: var(--accent-soft); }
+.record-create .cm-usermenu { max-height: 230px; overflow-y: auto; box-shadow: var(--shadow-lg); }
+
+.bx-panelkit { overflow-wrap: anywhere; }
+.bx-panelkit .record-section { padding-block: 4px; }
+.bx-panelkit .record-section + .record-section { border-top: 1px solid var(--border); padding-top: 22px; }
+.bx-panelkit .record-section-head { margin-bottom: 12px; }
+.bx-panelkit .record-field { padding-block: 9px; gap: 7px; }
+.bx-panelkit .record-field:first-child { padding-top: 0; }
+.bx-panelkit .record-field .field-readonly { min-height: 38px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); line-height: 1.5; }
+.bx-panelkit :is(.input,.select,.textarea,.tag-input) { min-width: 0; max-width: 100%; font-size: 14px; }
+.bx-panelkit .textarea { min-height: 104px; line-height: 1.6; resize: vertical; }
+.bx-panelkit .tag-input { padding: 6px 8px; gap: 6px; }
+.bx-panelkit .tag { height: auto; min-height: 30px; max-width: 100%; white-space: normal; border-radius: 8px; line-height: 1.5; }
+.bx-panelkit .tag > button { flex: 0 0 26px; min-width: 26px; min-height: 26px; }
+.bx-panelkit .menu-item { white-space: normal; min-height: 38px; }
+.bx-panelkit .menu { max-height: 230px; overflow-y: auto; }
+.bx-panelkit .overflow-y-auto { scroll-padding-block: 24px; }
+.record-carried { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 14px; }
+.record-carried summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.record-carried summary::-webkit-details-marker { display: none; }
+.record-carried summary > svg { flex-shrink: 0; }
+.record-carried summary > svg:last-child { margin-left: auto; transition: transform var(--dur-fast) var(--ease-out); }
+.record-carried[open] summary { margin-bottom: 14px; color: var(--text); }
+.record-carried[open] summary > svg:last-child { transform: rotate(180deg); }
+.record-carried summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 4px; }
+
+.record-files-body { display: flex; flex-direction: column; gap: 24px; }
+.record-files .section-title { font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--text); margin: 0 0 12px; }
+.record-files .invoice-files-modal-list { display: flex; flex-direction: column; gap: 10px; padding: 0; }
+.record-files .invoice-files-modal-list > li { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); align-items: center; }
+.record-files .invoice-file-name { grid-column: 1 / -1; font-size: 14px; font-family: var(--font-body); font-weight: 550; }
+.record-files :is(.invoice-file-name,.invoice-file-note,.invoice-file-note span,.invoice-staged-name) { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.record-files .invoice-file-note { grid-column: 1 / -1; padding-top: 8px; border-top: 1px solid var(--border); line-height: 1.5; font-size: 13px; }
+.record-files .invoice-file-date { font-size: 12px; }
+.record-files .invoice-staged-list > li { min-width: 0; gap: 10px; padding: 10px; }
+.record-files .invoice-staged-remove { flex-shrink: 0; min-width: 32px; min-height: 32px; }
+.record-files .invoice-dropzone { min-height: 92px; padding: 20px; border-radius: 12px; background: var(--surface-2); }
+.record-files .invoice-invnum-field { padding: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; }
+.record-files .invoice-invnum-hint { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.record-files-summary { flex: 1; min-width: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.record-files .invoice-paid-toggle-row { min-height: 64px; border-radius: 12px; }
+
+@media (max-width: 639px) {
+  .record-create .cm-body { gap: 22px; }
+  .record-create .cm-grid { gap: 16px; }
+  .record-create :is(input,textarea,select), .bx-panelkit :is(.input,.select,.textarea,.tag-input input) { font-size: 16px; }
+  .record-create :is(input:not([type="checkbox"]):not([type="radio"]),select), .bx-panelkit :is(.input,.select) { min-height: 44px; }
+  .record-create .cm-radio { min-height: 44px; }
+  .record-create .cm-subrm, .bx-panelkit .record-section button:not([role="switch"]):not([role="checkbox"]), .record-files button:not([role="switch"]):not([role="checkbox"]) { min-height: 44px; }
+  .record-files-footer > div:last-child { width: 100%; flex-wrap: wrap; }
+  .record-files-footer > div:last-child > button { flex: 1; }
+  .record-files .invoice-staged-list > li { flex-wrap: wrap; }
+  .record-files .invoice-staged-name { flex-basis: calc(100% - 30px); }
+  .record-files .invoice-staged-remove { margin-left: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record-carried summary > svg:last-child { transition: none; }
+}

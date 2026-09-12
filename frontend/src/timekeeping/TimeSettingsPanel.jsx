@@ -66,13 +66,14 @@ export function TimeSettingsPanel() {
         <div className="tka-sectionhead-titles">
           <h3 className="tka-sectionhead-title">Timekeeping settings</h3>
           <p className="tka-sectionhead-sub">
-            These values drive the punch endpoint, the rule classifier, and the alerts admins receive.
+            Manage working hours, automatic time labels and reminders for the team.
           </p>
         </div>
       </header>
 
       {/* ---- switches ---- */}
       <section className="tka-settings-block">
+        <h4 className="tka-settings-legend">Timekeeping access</h4>
         <div className="tka-toggle">
           <Switch
             id={`${id}-enabled`}
@@ -82,7 +83,7 @@ export function TimeSettingsPanel() {
           <label className="tka-toggle-text" htmlFor={`${id}-enabled`}>
             <span className="tka-toggle-title">Timekeeping enabled</span>
             <span className="tka-toggle-sub">
-              Turning this off pauses the punch endpoint and hides the personal Timesheet tab.
+              Turning this off pauses clocking in and out and hides the personal Timesheet tab.
             </span>
           </label>
         </div>
@@ -141,12 +142,12 @@ export function TimeSettingsPanel() {
 
       {/* ---- classifier windows ---- */}
       <section className="tka-settings-block">
-        <h4 className="tka-settings-legend">Classifier windows</h4>
+        <h4 className="tka-settings-legend">Automatic time labels</h4>
         <div className="tka-settings-grid">
           <Field
-            label="EOD window start (CT)"
+            label="End-of-day window starts (CT)"
             htmlFor={`${id}-eods`}
-            hint="Closed gaps starting at or after this hour are tagged as eod."
+            hint="Completed away periods starting at or after this time are labeled done for the day."
           >
             <Input
               id={`${id}-eods`}
@@ -155,7 +156,7 @@ export function TimeSettingsPanel() {
               onChange={e => set("tk_eod_window_start", e.target.value)}
             />
           </Field>
-          <Field label="EOD window end (CT)" htmlFor={`${id}-eode`}>
+          <Field label="End-of-day window ends (CT)" htmlFor={`${id}-eode`}>
             <Input
               id={`${id}-eode`}
               type="time" className="num"
@@ -186,7 +187,7 @@ export function TimeSettingsPanel() {
 
       {/* ---- alerts + buffers ---- */}
       <section className="tka-settings-block">
-        <h4 className="tka-settings-legend">Alerts and buffers</h4>
+        <h4 className="tka-settings-legend">Reminders and calendar</h4>
         <div className="tka-settings-grid">
           <Field label="Untagged-meeting alert delay (min)" htmlFor={`${id}-untagged`}>
             <Input
@@ -237,11 +238,10 @@ export function TimeSettingsPanel() {
 
       {err && <Alert tone="danger" title="Could not save">{err}</Alert>}
 
-      <Alert tone="info" title="Timezone changes stop at the trigger layer">
-        The DB trigger functions (fn_classify_interval, fn_recompute_day) still hardcode
-        "America/Chicago". Changing the business timezone here updates the UI and the Edge
-        Function classifier only. Open a migration when a different timezone has to apply
-        at the trigger layer.
+      <Alert tone="info" title="Time calculations use Central time">
+        Changing the timezone here updates the display and automatic labels. Recorded-day
+        calculations still use America/Chicago. Contact your system administrator before
+        changing this setting for an office in another timezone.
       </Alert>
     </div>
   );

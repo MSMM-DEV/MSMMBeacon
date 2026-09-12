@@ -38,6 +38,16 @@ const BASIS_CHOICES = [
   { key: "custom", label: "Custom",    meta: "total hours" },
 ];
 
+function navigateLeaveChoices(event, choices, selected, onSelect) {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+  if (step == null && event.key !== "Home" && event.key !== "End") return;
+  event.preventDefault();
+  const index = choices.findIndex(choice => choice.key === selected);
+  const next = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 : (index + step + choices.length) % choices.length;
+  onSelect(choices[next].key);
+  event.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus();
+}
+
 export function LeaveRequestModal({ onClose, onSubmitted }) {
   const me       = getCurrentBeaconUser();
   const settings = getAppSettings();
@@ -121,7 +131,7 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose?.(); }}>
-      <DialogContent size="sm" className="tsx-dialog">
+      <DialogContent size="sm" className="tsx-dialog tsx-leave-dialog">
         <DialogHeader>
           <DialogTitle>Request leave</DialogTitle>
           <DialogDescription>
@@ -132,14 +142,16 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
         <DialogBody className="tsx-form">
           {/* Type */}
           <div className="tsx-field">
-            <Label id="tsx-leave-type-label">Type</Label>
-            <div className="tsx-seg" role="radiogroup" aria-labelledby="tsx-leave-type-label">
+            <Label id="tsx-leave-type-label">Leave type</Label>
+            <div className="tsx-seg" role="radiogroup" aria-labelledby="tsx-leave-type-label"
+              onKeyDown={event => navigateLeaveChoices(event, TYPE_CHOICES, leaveType, setLeaveType)}>
               {TYPE_CHOICES.map(t => (
                 <button
                   key={t.key}
                   type="button"
                   role="radio"
                   aria-checked={leaveType === t.key}
+                  tabIndex={leaveType === t.key ? 0 : -1}
                   className={`tsx-seg-btn tone-${t.tone} ${leaveType === t.key ? "is-active" : ""}`}
                   onClick={() => setLeaveType(t.key)}
                 >
@@ -153,12 +165,12 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
           {/* Dates */}
           <div className="tsx-field-row">
             <div className="tsx-field">
-              <Label htmlFor="tsx-leave-from">From</Label>
+              <Label htmlFor="tsx-leave-from">First day</Label>
               <Input id="tsx-leave-from" type="date" value={start}
                 onChange={e => onStart(e.target.value)}/>
             </div>
             <div className="tsx-field">
-              <Label htmlFor="tsx-leave-to">To</Label>
+              <Label htmlFor="tsx-leave-to">Last day</Label>
               <Input id="tsx-leave-to" type="date" value={end} min={start}
                 onChange={e => setEnd(e.target.value || start)}/>
             </div>
@@ -167,13 +179,15 @@ export function LeaveRequestModal({ onClose, onSubmitted }) {
           {/* Basis */}
           <div className="tsx-field">
             <Label id="tsx-leave-basis-label">How much time</Label>
-            <div className="tsx-seg tsx-seg-stack" role="radiogroup" aria-labelledby="tsx-leave-basis-label">
+            <div className="tsx-seg tsx-seg-stack" role="radiogroup" aria-labelledby="tsx-leave-basis-label"
+              onKeyDown={event => navigateLeaveChoices(event, BASIS_CHOICES, basis, setBasis)}>
               {BASIS_CHOICES.map(b => (
                 <button
                   key={b.key}
                   type="button"
                   role="radio"
                   aria-checked={basis === b.key}
+                  tabIndex={basis === b.key ? 0 : -1}
                   className={`tsx-seg-btn ${basis === b.key ? "is-active" : ""}`}
                   onClick={() => setBasis(b.key)}
                 >

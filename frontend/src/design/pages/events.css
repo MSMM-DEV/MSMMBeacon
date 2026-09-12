@@ -1,0 +1,93 @@
+/* Events: a readable register and a calm calendar, using shared theme tokens. */
+.beacon-events-register { min-width: 0; }
+.beacon-events-register-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.beacon-events-register-heading h2 { margin: 0; color: var(--text); font-size: 18px; font-weight: 600; letter-spacing: -.025em; }
+.beacon-events-register-heading p { max-width: 65ch; margin: 5px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.beacon-events-source-hint { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.beacon-events-source-hint svg { flex: 0 0 auto; color: var(--accent); }
+.beacon-events-register .tablewrap[data-skin="clean"] { border-radius: 14px; background: var(--surface); }
+.beacon-events-register .tablewrap .trow { min-height: 78px; align-items: stretch; }
+.beacon-events-register .tablewrap .trow .td { padding-top: 15px; padding-bottom: 15px; }
+.beacon-events-register .tablewrap .trow .bxt-td-identity,
+.beacon-events-register .tablewrap .trow .bxt-td-identity .cell-view,
+.beacon-events-register .tablewrap .trow .bxt-td-identity .td-readonly,
+.beacon-events-register .tablewrap .trow .bxt-td-identity .td-readonly-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--text);
+}
+.beacon-event-title { display: flex; min-width: 0; align-items: flex-start; gap: 8px; }
+.beacon-event-title .src-mark { display: inline-flex; flex: 0 0 20px; align-items: center; justify-content: center; width: 20px; height: 20px; margin-top: 1px; border-radius: 5px; background: var(--surface-2); color: var(--accent); }
+.beacon-events-register .bxt-when { gap: 5px; }
+.beacon-events-register .bxt-when-primary { font-size: 13px; font-weight: 550; white-space: normal; overflow-wrap: anywhere; }
+.beacon-events-register .bxt-when-secondary { font-size: 12px; color: var(--text-muted); white-space: normal; }
+.beacon-events-register .bxt-rowactions { opacity: 1; gap: 6px; }
+.beacon-events-register .bxt-rowbtn { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-muted); }
+.beacon-events-register .bxt-rowbtn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.beacon-events-register .bxt-td-note .cell-view { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+
+.beacon-events-calendar.cal-shell { padding: 24px; border-radius: 16px; background: var(--surface); box-shadow: 0 4px 24px color-mix(in srgb, var(--text) 3%, transparent); }
+.beacon-calendar-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px 24px; margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.beacon-calendar-period { margin-top: 6px; max-width: 100%; font-size: clamp(21px, 2.1vw, 28px); line-height: 1.2; overflow-wrap: anywhere; letter-spacing: -.035em; }
+.beacon-calendar-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.beacon-events-calendar .rbc-header { padding: 14px 6px; border-bottom-color: var(--border); background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: .055em; }
+.beacon-events-calendar .rbc-month-view,
+.beacon-events-calendar .rbc-time-view { border-radius: 12px; overflow: hidden; }
+.beacon-events-calendar .rbc-month-row { min-height: 104px; }
+.beacon-events-calendar .rbc-date-cell { padding: 8px 10px 5px; color: var(--text-muted); font-size: 12px; font-weight: 550; }
+.beacon-events-calendar .rbc-date-cell.rbc-now .rbc-button-link { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; border-radius: 8px; background: var(--accent); color: var(--surface); }
+.beacon-events-calendar .rbc-off-range-bg { background: var(--surface-2); }
+.beacon-events-calendar .rbc-event-content { white-space: normal; }
+.beacon-events-calendar .beacon-calendar-event { border-radius: 6px; box-shadow: none; }
+.beacon-calendar-event-name { white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.beacon-events-calendar .rbc-month-view .rbc-row-segment { padding: 0 3px 4px; }
+.beacon-events-calendar .rbc-month-view .rbc-event { margin: 0; }
+.beacon-events-calendar .rbc-month-row { overflow: hidden; }
+.beacon-events-calendar .rbc-show-more { min-height: 28px; padding: 5px 6px; font-size: 12px; font-weight: 550; }
+.beacon-calendar-time-event { border-radius: 8px; }
+.beacon-calendar-time-name { white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.beacon-events-calendar .rbc-day-slot.rbc-today { background: var(--accent-softer); }
+.beacon-events-calendar .rbc-timeslot-group { min-height: 58px; }
+.beacon-events-calendar .rbc-time-gutter .rbc-label { padding: 0 12px; font-size: 12px; color: var(--text-muted); }
+.beacon-calendar-agenda-event { gap: 10px; padding: 8px 0; align-items: center; }
+.beacon-calendar-agenda-name { flex-basis: 240px; white-space: normal; overflow-wrap: anywhere; font-size: 14px; line-height: 1.55; }
+.beacon-events-calendar .rbc-agenda-view table.rbc-agenda-table { border: 1px solid var(--border); border-radius: 12px; }
+.beacon-events-calendar .rbc-agenda-view table.rbc-agenda-table thead > tr > th { padding: 12px 16px; background: var(--surface-2); font-size: 12px; color: var(--text-muted); }
+.beacon-events-calendar .rbc-agenda-view table.rbc-agenda-table tbody > tr > td { padding: 14px 16px; vertical-align: top; font-size: 13px; border-color: var(--border); }
+.beacon-events-calendar .rbc-agenda-date-cell { font-weight: 600; color: var(--text); }
+.beacon-events-calendar .rbc-agenda-time-cell { color: var(--text-muted); }
+.beacon-events-calendar :is(button, [role="button"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+@media (max-width: 1000px) {
+  .beacon-events-calendar.cal-shell { padding: 18px; }
+  .beacon-calendar-toolbar { align-items: flex-start; }
+  .beacon-calendar-controls { width: 100%; }
+}
+@media (max-width: 640px) {
+  .beacon-events-register-heading { gap: 10px; }
+  .beacon-events-register .bxt-rowbtn { min-width: 44px; min-height: 44px; }
+  .beacon-events-calendar.cal-shell { padding: 14px; }
+  .beacon-calendar-toolbar { gap: 14px; margin-bottom: 14px; padding-bottom: 14px; }
+  .beacon-calendar-controls { gap: 8px; }
+  .beacon-calendar-controls button { min-width: 44px; min-height: 44px; }
+  .beacon-calendar-period { font-size: 23px; }
+  .beacon-calendar-agenda-event { align-items: flex-start; gap: 8px; padding: 8px 0; }
+  .beacon-calendar-agenda-name { flex-basis: calc(100% - 24px); min-width: 0; font-size: 15px; }
+  .beacon-events-calendar .rbc-agenda-view { overflow-x: hidden; }
+  .beacon-events-calendar .rbc-agenda-view table.rbc-agenda-table tbody > tr { padding: 12px 0; border-bottom: 1px solid var(--border); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .beacon-events-calendar *, .beacon-events-register * { animation: none !important; transition: none !important; }
+}

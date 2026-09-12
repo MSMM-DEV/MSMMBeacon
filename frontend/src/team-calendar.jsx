@@ -580,9 +580,9 @@ function PeopleBar({
   const pickerButton = (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="default" size="sm" className="shrink-0">
+        <Button variant="primary" size="sm" className="bxtc-people-trigger shrink-0">
           <Icon name="users" size={15} stroke={1.9} />
-          <span>People</span>
+          <span>Choose people</span>
           <span className="num rounded-[var(--radius-full)] bg-[var(--surface-3)] px-1.5 py-px text-[length:var(--fs-2xs)] font-semibold text-[var(--text-muted)]">
             {totalSelected}/{users.length}
           </span>
@@ -592,7 +592,7 @@ function PeopleBar({
 
       <PopoverContent
         align="start"
-        className="w-[min(400px,calc(100vw-24px))] p-0"
+        className="bxtc-people-picker w-[min(400px,calc(100vw-24px))] p-0"
       >
         <div className="flex max-h-[min(70dvh,520px)] min-h-0 flex-col">
           <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2.5">
@@ -767,13 +767,13 @@ function PeopleBar({
                           calendar, so their colour means nothing yet. */}
                       <span
                         className={[
-                          "block truncate text-[length:var(--fs-sm)] font-semibold",
+                          "block break-words text-[length:var(--fs-sm)] font-semibold",
                           isSel ? "bxtc-person-name" : "text-[var(--text)]",
                         ].join(" ")}
                       >
                         {u.name}
                       </span>
-                      <span className="block truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
+                      <span className="block break-words text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
                         {meta || EMPTY}
                       </span>
                     </span>
@@ -809,7 +809,7 @@ function PeopleBar({
   if (!open) {
     return (
       <section
-        className="flex min-w-0 flex-nowrap items-center gap-x-2 gap-y-2"
+        className="bxtc-people-panel bxtc-people-panel--collapsed flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2"
         aria-label="Colleagues on the calendar"
       >
         {pickerButton}
@@ -835,7 +835,7 @@ function PeopleBar({
           <Icon name="chevronDown" size={14} stroke={2} />
           {/* One text node so the accessible name never changes with the
               breakpoint — only how much of it is drawn. */}
-          <span>Show<span className="sr-only sm:not-sr-only"> who is on the calendar</span></span>
+          <span>Show roster</span>
         </Button>
       </section>
     );
@@ -845,7 +845,7 @@ function PeopleBar({
   return (
     <section
       id={PEOPLE_PANEL_ID}
-      className="flex min-w-0 flex-col gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2 sm:gap-2.5 sm:px-3 sm:py-2.5"
+      className="bxtc-people-panel flex min-w-0 flex-col gap-2 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2 sm:gap-2.5 sm:px-3 sm:py-2.5"
       aria-label="Colleagues on the calendar"
     >
       {/* The caption is `sr-only` below `sm`. It is a nicety on a laptop and a
@@ -854,7 +854,7 @@ function PeopleBar({
           this is. `sr-only` takes the element out of flow, so it costs no gap
           either. */}
       <h2 className="sr-only sm:not-sr-only sm:m-0 sm:min-w-0 sm:text-[length:var(--fs-2xs)] sm:font-semibold sm:uppercase sm:tracking-[var(--tracking-caps)] sm:text-[var(--text-soft)]">
-        Who is on the calendar
+        Calendars in view
       </h2>
 
       {/* The picker, its bulk control, and the people it put on the calendar.
@@ -930,10 +930,9 @@ function PeopleBar({
                   initials={u.initials}
                   className="bxtc-swatch--avatar size-5 shrink-0 text-[9.5px]"
                 />
-                {/* Tighter cap on a phone so two chips still fit a 375px row —
-                    a truncated "Christopher M…" beside its swatch is more
-                    legible than one chip per line. */}
-                <span className="bxtc-person-name min-w-0 max-w-[12ch] truncate text-[length:var(--fs-xs)] font-semibold sm:max-w-[16ch]">
+                {/* Names stay complete; the roster wraps onto another line
+                    before a colleague's identity is truncated. */}
+                <span className="bxtc-person-name min-w-0 break-words text-[length:var(--fs-xs)] font-semibold">
                   {u.name}
                 </span>
                 <span
@@ -1127,29 +1126,29 @@ function AgendaRow({ event }) {
     <div
       className={[
         IDENT,
-        "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1",
+        "bxtc-agenda-row flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1",
         r.isCancelled ? "opacity-60" : "",
       ].join(" ")}
       style={identityVars(r.userId)}
     >
-      <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+      <span className="bxtc-agenda-owner flex min-w-0 items-center gap-1.5">
         <Swatch initials={r._user?.initials} className="size-5 text-[9.5px]" />
-        <span className="max-w-[16ch] truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
+        <span className="break-words text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
           {r._user?.name}
         </span>
       </span>
       <span
         className={[
-          "min-w-0 flex-1 truncate text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
+          "bxtc-agenda-title min-w-0 break-words text-[length:var(--fs-sm)] font-medium text-[var(--text)]",
           r.isCancelled ? "line-through" : "",
         ].join(" ")}
       >
         {event.title}
       </span>
       {r.location && (
-        <span className="flex min-w-0 max-w-[22ch] shrink-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
+        <span className="bxtc-agenda-location flex min-w-0 items-center gap-1 text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
           <Icon name="pin" size={11} stroke={2} className="shrink-0" />
-          <span className="truncate">{r.location}</span>
+          <span className="break-words">{r.location}</span>
         </span>
       )}
       {n > 1 && (
@@ -1205,7 +1204,7 @@ function ResponseBadge({ name, response, source }) {
   );
 }
 
-const ATT_ROW = "flex min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-1.5";
+const ATT_ROW = "bxtc-attendee-row flex min-w-0 items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-1.5";
 
 function InternalAttendeeRow({ attendee, rosterUser }) {
   const initials = rosterUser?.initials || initialsFrom(attendee.name || attendee.email);
@@ -1215,11 +1214,11 @@ function InternalAttendeeRow({ attendee, rosterUser }) {
   return (
     <div className={`${IDENT} ${ATT_ROW}`} style={style}>
       <Swatch initials={initials} className="size-6 text-[10px]" />
-      <span className="min-w-0 flex-1 truncate text-[length:var(--fs-sm)] text-[var(--text)]">
+      <span className="min-w-0 flex-1 break-words text-[length:var(--fs-sm)] text-[var(--text)]">
         {rosterUser?.name || attendee.name || attendee.email.split("@")[0]}
       </span>
       {rosterUser?.department && (
-        <span className="hidden shrink-0 truncate text-[length:var(--fs-2xs)] text-[var(--text-muted)] xs:block">
+        <span className="bxtc-attendee-department break-words text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
           {rosterUser.department}
         </span>
       )}
@@ -1245,9 +1244,9 @@ function ExternalAttendeeRow({ attendee }) {
         {initials}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[length:var(--fs-sm)] text-[var(--text)]">{name}</span>
+        <span className="block break-words text-[length:var(--fs-sm)] text-[var(--text)]">{name}</span>
         {email && (
-          <span className="block truncate font-[family-name:var(--font-mono)] text-[length:var(--fs-2xs)] text-[var(--text-soft)]">
+          <span className="block break-words text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
             {email}
           </span>
         )}
@@ -1369,7 +1368,7 @@ function EventPopover({ event, onClose }) {
           single sentence, so a description would just repeat the title. */}
       <DialogContent
         size="md"
-        className={IDENT}
+        className={`${IDENT} bxtc-event-dialog`}
         style={ownerStyle}
         aria-describedby={undefined}
       >
@@ -1402,7 +1401,7 @@ function EventPopover({ event, onClose }) {
             <Alert tone="danger">This meeting was cancelled in Outlook.</Alert>
           )}
 
-          <dl className="m-0 grid grid-cols-[minmax(0,68px)_minmax(0,1fr)] gap-x-3 gap-y-2.5">
+          <dl className="bxtc-event-facts m-0 grid grid-cols-[minmax(0,68px)_minmax(0,1fr)] gap-x-3 gap-y-2.5">
             <dt className="m-0 pt-px text-[length:var(--fs-2xs)] font-semibold uppercase tracking-[var(--tracking-caps)] text-[var(--text-soft)]">
               When
             </dt>
@@ -1431,7 +1430,7 @@ function EventPopover({ event, onClose }) {
             </dt>
             <dd className="m-0 flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--fs-sm)] text-[var(--text)]">
               <Swatch initials={r._user?.initials} className="size-6 text-[10px]" />
-              <span className="min-w-0 truncate font-medium">{r._user?.name || "Unknown"}</span>
+              <span className="min-w-0 break-words font-medium">{r._user?.name || "Unknown"}</span>
               {r._user?._department && (
                 <span className="text-[length:var(--fs-2xs)] text-[var(--text-muted)]">
                   {r._user._department}
@@ -1572,8 +1571,8 @@ function CalToolbar({
       {/* WHERE AM I — the nav cluster and the date are ONE unit. The buttons
           sit against the thing they move, so a chevron and its result are the
           same glance rather than opposite ends of the bar. */}
-      <div className="flex min-w-0 flex-1 basis-[min(100%,300px)] items-center gap-2.5">
-        <div className="flex shrink-0 items-center gap-0.5 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-xs)]">
+      <div className="bxtc-date-group flex min-w-0 flex-1 basis-[min(100%,300px)] items-center gap-2.5">
+        <div className="bxtc-date-navigation flex shrink-0 items-center gap-0.5 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-xs)]">
           <Tooltip label={`Previous ${step}`}>
             <Button
               variant="ghost"
@@ -1616,7 +1615,7 @@ function CalToolbar({
         </div>
 
         <h2
-          className="m-0 min-w-0 truncate font-[family-name:var(--font-display)] text-[length:var(--fs-lg)] font-semibold leading-[var(--lh-tight)] tracking-[var(--tracking-tight)] text-[var(--text)]"
+          className="bxtc-date-label m-0 min-w-0 break-words font-[family-name:var(--font-display)] text-[length:var(--fs-lg)] font-semibold leading-[var(--lh-tight)] tracking-[var(--tracking-tight)] text-[var(--text)]"
           // The one place the visible range is named, and the one line in the
           // bar that changes when you navigate. Announced on change so a
           // screen-reader user hears where a chevron landed them.
@@ -1633,9 +1632,10 @@ function CalToolbar({
       {/* `ml-auto`: when this group wraps to its own line (phones, where the
           view switch is gone and it is just the refresh button) it lands at
           the right edge rather than orphaned under the date. */}
-      <div className="ml-auto flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
+      <div className="bxtc-view-controls ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
         {viewsAvailable.length > 1 && (
-          <Tabs value={view} onValueChange={(v) => onView(v)}>
+          <Tabs className="bxtc-view-group" value={view} onValueChange={(v) => onView(v)}>
+            <span className="bxtc-control-label" aria-hidden="true">Period</span>
             <TabsList variant="segmented" aria-label="Calendar view">
               {viewsAvailable.map(v => (
                 <TabsTrigger key={v} value={v}>{VIEW_LABEL[v]}</TabsTrigger>
@@ -1644,20 +1644,17 @@ function CalToolbar({
           </Tabs>
         )}
 
-        {/* Layout switch. Sits after the view switch because it is the
-            coarser of the two and changes far less often, and it is hidden
-            on the mobile agenda, which has only one layout. The label drops
-            below `lg` so the two switches plus the date still fit a laptop. */}
+        {/* Layout stays separate from the period selection. Labels remain
+            visible; the groups wrap when needed. Mobile agenda has one layout. */}
         {layoutAvailable && (
-          <Tabs value={layout} onValueChange={(v) => onLayout(v)}>
+          <Tabs className="bxtc-view-group" value={layout} onValueChange={(v) => onLayout(v)}>
+            <span className="bxtc-control-label" aria-hidden="true">Layout</span>
             <TabsList variant="segmented" aria-label="Calendar layout">
               {CAL_LAYOUTS.map(l => (
                 <TabsTrigger key={l.id} value={l.id} title={l.hint}>
                   <Icon name={l.icon} size={14} />
-                  {/* One text node, not two: below `lg` it is read but not
-                      drawn, so the control narrows to its icons without the
-                      label disappearing from the accessibility tree. */}
-                  <span className="sr-only lg:not-sr-only">{l.label}</span>
+                  {/* Keep the name beside the icon at every supported size. */}
+                  <span>{l.label}</span>
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -2081,6 +2078,10 @@ export function TeamCalendarTab() {
         data-view={effectiveView}
         data-layout={effectiveLayout}
       >
+        <div className="bxtc-page-context">
+          <p>Compare schedules across your team. Choose colleagues, then open an event for its details.</p>
+          <span><Icon name="calendarDays" size={14} aria-hidden="true" /> Outlook calendars · Read only</span>
+        </div>
         <PeopleBar
           users={roster}
           selected={selected}
@@ -2111,7 +2112,7 @@ export function TeamCalendarTab() {
           />
         ) : (
           <div
-            className="min-w-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-xs)]"
+            className="bxtc-calendar-surface min-w-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-xs)]"
             aria-busy={loading || undefined}
           >
             {/* OUTSIDE the scroller below, deliberately: the header, the

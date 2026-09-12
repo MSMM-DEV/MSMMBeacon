@@ -27,9 +27,9 @@ import {
 // values mirror the [data-theme="dark"] defaults in styles.css.
 export const ACCENTS = [
   {
-    key: "#C8823B", name: "amber",    label: "Amber",  accent: "#C8823B",
-    light: { ink: "#6B3F10", soft: "#F2E2CB", softer: "#F8ECD6" },
-    dark:  { ink: "#FBE8CE", soft: "#3D2B18", softer: "#2E2116" },
+    key: "#C8823B", name: "cobalt", label: "Cobalt", accent: "#2459D3",
+    light: { accent: "#2459D3", ink: "#19366F", soft: "#E7EFFF", softer: "#F0F5FF", solid: "#2459D3", hover: "#1C47B0" },
+    dark:  { accent: "#9EBCFA", ink: "#DCE7FD", soft: "#243047", softer: "#1C2534", solid: "#315BB5", hover: "#3C68C6" },
   },
   {
     key: "#7E8F6F", name: "sage",     label: "Sage",   accent: "#7E8F6F",
@@ -280,8 +280,13 @@ export const applyTweaks = (tweaks) => {
   const a = ACCENTS.find(x => x.key === tweaks.accent) || ACCENTS[0];
   const variant = theme === "dark" ? a.dark : a.light;
   const r = document.documentElement.style;
-  r.setProperty("--accent", a.accent);
+  r.setProperty("--accent", variant.accent || a.accent);
   r.setProperty("--accent-ink", variant.ink);
   r.setProperty("--accent-soft", variant.soft);
   r.setProperty("--accent-softer", variant.softer);
+  // Solid buttons keep a separately contrasted fill in each theme.
+  if (variant.solid) r.setProperty("--accent-solid", variant.solid);
+  else r.removeProperty("--accent-solid");
+  if (variant.hover) r.setProperty("--accent-hover", variant.hover);
+  else r.removeProperty("--accent-hover");
 };

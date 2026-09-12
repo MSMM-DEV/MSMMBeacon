@@ -140,15 +140,20 @@ export function NfcEnrollPanel() {
       <div className="tka-nfc">
         <header className="tka-sectionhead">
           <div className="tka-sectionhead-titles">
-            <h3 className="tka-sectionhead-title">NFC fobs</h3>
+            <h3 className="tka-sectionhead-title">Fobs & enrollment</h3>
             <p className="tka-sectionhead-sub">
-              Bind a fob's hardware UID to a person, check who a fob belongs to, or take one out of service.
+              Connect a fob to a team member for clocking in and out. Verify, reassign or retire existing fobs below.
             </p>
           </div>
         </header>
 
         {/* ---- capture card ---- */}
         <div className="tka-nfc-capture">
+          {mode === "enroll" && <div className="tka-nfc-guide" aria-label="Enrollment steps">
+            <span><b>1</b> Choose a person</span>
+            <span><b>2</b> Capture their tap</span>
+            <span><b>3</b> Confirm the binding</span>
+          </div>}
           {!session ? (
             <>
               <Tabs
@@ -169,7 +174,7 @@ export function NfcEnrollPanel() {
               {mode === "enroll" ? (
                 <>
                   <div className="tka-nfc-fields">
-                    <Field label="User" htmlFor="tka-nfc-user">
+                    <Field label="Team member" htmlFor="tka-nfc-user">
                       <Select
                         value={target || NO_USER}
                         onValueChange={(v) => setTarget(v === NO_USER ? "" : v)}

@@ -1,407 +1,128 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Icon } from "./icons.jsx";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogBody } from "./ui/dialog.jsx";
 import { fmtMoney, fmtDate, MONTHS, companyById, getCompanies, getInvoiceFileSignedUrl } from "./data.js";
 
-// ============================================================================
-// Subs Receivables — sub-centric inversion of the project-centric Invoice tab.
-// ----------------------------------------------------------------------------
-// Three-level drill-down — names first, numbers on demand:
-//
-//   L1  Sub firm name  (+ sort-metric chip on the right)
-//   L2  Project names this sub is on
-//   L3  Three numbers — Contract · Billed To Date · Pending
-//
-// Inclusion criterion: a sub appears only when at least one billing entry
-// (any month, any project) is attached to it. Sub firms with a contract
-// amount but no billing activity are hidden — execs care about active
-// receivables, not idle relationships.
-//
-// Two flavors of entry land in the same list:
-//
-//   kind='sub'   — MSMM is Prime; the sub firm bills MSMM (money MSMM owes
-//                  out). Bucket per sub firm.
-//   kind='prime' — MSMM is Sub; MSMM bills the upstream prime firm (money
-//                  owed TO MSMM). All such entries roll up under MSMM with
-//                  the upstream prime carried as project context. The MSMM
-//                  bucket gets an "AS SUB" badge so viewers know the
-//                  pending-money direction is reversed.
-// ============================================================================
-
+// One visible record per firm/project; the existing pivot remains the source
+// of all financial values. A single dialog exposes the monthly ledger.
 export const SubsReceivablesPanel = ({ subInvoices, projectsById, onOpenProject }) => {
-  const subs = useMemo(
-    () => pivotSubsReceivables(subInvoices, projectsById),
-    [subInvoices, projectsById]
-  );
-
+  const subs = useMemo(() => pivotSubsReceivables(subInvoices, projectsById), [subInvoices, projectsById]);
   const [sortKey, setSortKey] = useState("pending");
-  const [expandedSubs, setExpandedSubs] = useState(() => new Set());
-  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
   const [query, setQuery] = useState("");
-
-  const toggleSub = (id) => setExpandedSubs(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-  const toggleProject = (key) => setExpandedProjects(prev => {
-    const next = new Set(prev);
-    next.has(key) ? next.delete(key) : next.add(key);
-    return next;
-  });
-
+  const [selected, setSelected] = useState(null);
+  const returnFocus = useRef(null);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return subs;
-    return subs.filter(s => s.companyName.toLowerCase().includes(q));
-  }, [subs, query]);
-
-  const sorted = useMemo(() => {
-    const arr = filtered.slice();
-    arr.sort((a, b) => {
-      const ka = sortKey === "pending" ? a.totalPending : a.totalBilled;
-      const kb = sortKey === "pending" ? b.totalPending : b.totalBilled;
-      if (kb !== ka) return kb - ka;
-      return a.companyName.localeCompare(b.companyName);
+    return subs.flatMap(sub => {
+      if (sub.companyName.toLowerCase().includes(q)) return [sub];
+      const projects = sub.projects.filter(p => [p.projectName, p.projectNumber, p.primeFirmName].some(v => String(v || "").toLowerCase().includes(q)));
+      // Keep firm totals intact; search only changes the records displayed.
+      return projects.length ? [{ ...sub, projects }] : [];
     });
-    return arr;
-  }, [filtered, sortKey]);
-
-  const headlineNumber = sorted.reduce(
-    (acc, s) => acc + (sortKey === "pending" ? s.totalPending : s.totalBilled),
-    0
-  );
-
+  }, [subs, query]);
+  const sorted = useMemo(() => filtered.slice().sort((a, b) => {
+    const ka = sortKey === "pending" ? a.totalPending : a.totalBilled;
+    const kb = sortKey === "pending" ? b.totalPending : b.totalBilled;
+    return kb - ka || a.companyName.localeCompare(b.companyName);
+  }), [filtered, sortKey]);
+  const headlineNumber = sorted.reduce((acc, s) => acc + (sortKey === "pending" ? s.totalPending : s.totalBilled), 0);
   return (
     <section className="quad-card recv-card recv-v2" data-accent="recv">
       <header className="quad-head recv-head">
         <div className="recv-head-l">
-          <div className="quad-eyebrow">05 · Receivables</div>
           <h2 className="quad-title">Outstanding Invoices</h2>
-          <div className="quad-sub">
-            {sorted.length === 0
-              ? "No active sub receivables yet"
-              : <>
-                  {sorted.length} {sorted.length === 1 ? "sub" : "subs"}
-                  {" · "}
-                  <span className="recv-headline-num">{fmtMoney(headlineNumber, false)}</span>
-                  {" "}{sortKey === "pending" ? "pending" : "billed"} across the book
-                </>}
-          </div>
+          <div className="quad-sub">{sorted.length} firms · {fmtMoney(headlineNumber, false)} {sortKey === "pending" ? "pending" : "paid"} across matching firms</div>
+          <p className="recv-navigation-hint">Amounts at a glance. Open a record to see every paid and pending invoice.</p>
         </div>
         <div className="recv-head-r">
-          <input
-            className="recv-search"
-            type="search"
-            placeholder="Filter by sub name…"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            aria-label="Filter receivables by sub name"
-          />
-          <div className="events-view-toggle recv-toggle" role="tablist" aria-label="Sort receivables">
-            <button
-              type="button" role="tab"
-              aria-selected={sortKey === "pending"}
-              className={sortKey === "pending" ? "active" : ""}
-              onClick={() => setSortKey("pending")}>
-              Pending
-            </button>
-            <button
-              type="button" role="tab"
-              aria-selected={sortKey === "paid"}
-              className={sortKey === "paid" ? "active" : ""}
-              onClick={() => setSortKey("paid")}>
-              Paid
-            </button>
+          <input className="recv-search" type="search" placeholder="Find a firm or project…" value={query} onChange={e => setQuery(e.target.value)} aria-label="Find receivables by firm or project"/>
+          <div className="events-view-toggle recv-toggle" role="group" aria-label="Sort receivables by amount">
+            <button type="button" aria-pressed={sortKey === "pending"} className={sortKey === "pending" ? "active" : ""} onClick={() => setSortKey("pending")}>Pending</button>
+            <button type="button" aria-pressed={sortKey === "paid"} className={sortKey === "paid" ? "active" : ""} onClick={() => setSortKey("paid")}>Paid</button>
           </div>
         </div>
       </header>
-
-      <div className="recv-body">
-        {sorted.length === 0 ? (
-          <div className="recv-empty">
-            {query
-              ? <>No subs match "<strong>{query}</strong>".</>
-              : "Once subs have invoice amounts entered against them, they'll appear here."}
-          </div>
-        ) : (
-          <ul className="recv-subs">
-            {sorted.map((sub, idx) => {
-              const isOpen = expandedSubs.has(sub.companyId);
-              const sortVal = sortKey === "pending" ? sub.totalPending : sub.totalBilled;
-              return (
-                <li key={sub.companyId}
-                    className={"recv-sub" + (isOpen ? " open" : "") + (sub.isMsmm ? " is-msmm" : "")}
-                    style={{ "--rank": idx + 1 }}>
-                  <button
-                    type="button"
-                    className="recv-sub-row"
-                    onClick={() => toggleSub(sub.companyId)}
-                    aria-expanded={isOpen}>
-                    <span className="recv-rank mono">{String(idx + 1).padStart(2, "0")}</span>
-                    <span className={"recv-chev" + (isOpen ? " open" : "")} aria-hidden="true">
-                      <Icon name="chevronRight" size={11}/>
-                    </span>
-                    <span className="recv-name-text">{sub.companyName}</span>
-                    {sub.isMsmm && (
-                      <span className="recv-msmm-badge"
-                            title="MSMM is the sub on these projects — pending = money owed TO us">
-                        As Sub
-                      </span>
-                    )}
-                    <span className="recv-projects-pill">
-                      {sub.projects.length} {sub.projects.length === 1 ? "project" : "projects"}
-                    </span>
-                    <span className="recv-spacer"/>
-                    {sub.totalBilled === 0 && sub.totalPending === 0 ? (
-                      // Contract-only sub: no invoices issued yet. Cleaner
-                      // to flag this state than to show "$0 pending".
-                      <span className="recv-metric is-empty">
-                        <span className="recv-metric-num mono">{fmtMoney(sub.totalContract, false)}</span>
-                        <span className="recv-metric-label">contract · no invoices</span>
-                      </span>
-                    ) : (
-                      <span className={"recv-metric" + (sortVal > 0 ? ` is-${sortKey}` : " is-zero")}>
-                        <span className="recv-metric-num mono">{fmtMoney(sortVal, false)}</span>
-                        <span className="recv-metric-label">{sortKey}</span>
-                      </span>
-                    )}
-                  </button>
-
-                  {isOpen && (
-                    <ul className="recv-projects">
-                      {sub.projects.map(p => {
-                        const pkey = `${sub.companyId}:${p.projectId}`;
-                        const pOpen = expandedProjects.has(pkey);
-                        return (
-                          <li key={pkey} className={"recv-project" + (pOpen ? " open" : "")}>
-                            <button
-                              type="button"
-                              className="recv-project-row"
-                              onClick={() => toggleProject(pkey)}
-                              aria-expanded={pOpen}>
-                              <span className={"recv-chev recv-chev-sm" + (pOpen ? " open" : "")} aria-hidden="true">
-                                <Icon name="chevronRight" size={10}/>
-                              </span>
-                              <span className="recv-project-title">
-                                {p.projectName || "Untitled project"}
-                              </span>
-                              <span className="recv-project-meta">
-                                {p.projectNumber && (
-                                  <span className="recv-project-pn mono">#{p.projectNumber}</span>
-                                )}
-                                {p.year && (
-                                  <span className="recv-project-year">{p.year}</span>
-                                )}
-                                {p.statusKey && (
-                                  <span className={`recv-status-chip status-${p.statusKey}`}>
-                                    {labelForStatus(p.statusKey)}
-                                  </span>
-                                )}
-                                {p.primeFirmName && (
-                                  <span className="recv-prime-chip"
-                                        title={`MSMM is sub under ${p.primeFirmName}`}>
-                                    Prime · {p.primeFirmName}
-                                  </span>
-                                )}
-                              </span>
-                              <span className="recv-project-pulse" aria-hidden="true">
-                                {p.pending > 0 && (
-                                  <span className="pulse-dot pending"
-                                        title={`${fmtMoney(p.pending, false)} pending`}/>
-                                )}
-                                {p.billedToDate > 0 && (
-                                  <span className="pulse-dot paid"
-                                        title={`${fmtMoney(p.billedToDate, false)} billed`}/>
-                                )}
-                              </span>
-                            </button>
-
-                            {pOpen && (
-                              <ProjectDetail
-                                project={p}
-                                isMsmm={sub.isMsmm}
-                                onOpen={() => onOpenProject?.(p.statusKey, p.projectId)}
-                              />
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+      {sorted.length ? <ReceivableRecords subs={sorted} onView={(sub, project, event) => {
+        returnFocus.current = event.currentTarget;
+        setSelected({ sub, project });
+      }}/> : <div className="recv-empty">{query ? "No matching firms or projects." : "No receivables yet."}</div>}
+      <Dialog open={!!selected} onOpenChange={open => { if (!open) setSelected(null); }}>
+        <DialogContent size="lg" className="recv-ledger-dialog" onCloseAutoFocus={event => {
+          event.preventDefault();
+          returnFocus.current?.focus();
+        }}>
+          <DialogHeader>
+            <DialogTitle>{selected?.project.projectName || "Invoice details"}</DialogTitle>
+            <DialogDescription>{selected?.sub.companyName} · {selected?.project.year}{selected?.sub.isMsmm ? " · Owed to MSMM" : " · Payable to firm"}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            {selected && <ProjectDetail project={selected.project} isMsmm={selected.sub.isMsmm} onOpen={onOpenProject ? () => {
+              const p = selected.project;
+              setSelected(null);
+              onOpenProject(p.statusKey, p.projectId);
+            } : undefined}/>}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 };
 
-// ----------------------------------------------------------------------------
-// L3 — Project detail strip (Contract · Billed · Pending)
-// ----------------------------------------------------------------------------
-// The drill-down payoff. Three numbers, generously spaced, in mono-display
-// type. For MSMM-as-sub the verbal labels shift slightly to reflect that
-// the money flows the other way (Pending here = money the prime owes MSMM).
-//
-// L4 — Per-invoice ledger: Billed and Pending are click-to-expand. Each
-// expansion reveals the underlying monthly invoices that compose the total
-// (month label · amount · file link), sorted Jan→Dec. Both can be open
-// simultaneously; Contract isn't expandable since there's no list to show.
-// ----------------------------------------------------------------------------
+export const ReceivableRecords = ({ subs, onView }) => (
+  <div className="recv-register-scroll" role="region" aria-label="Receivables by firm and project" tabIndex={0}>
+    <table className="recv-register">
+      <thead><tr><th scope="col">Firm / direction</th><th scope="col">Project</th><th scope="col">Contract</th><th scope="col">Paid</th><th scope="col">Pending</th><th scope="col">Remaining</th><th scope="col"><span className="sr-only">Invoice details</span></th></tr></thead>
+      <tbody>{subs.flatMap(sub => sub.projects.map(p => (
+        <tr key={JSON.stringify([sub.companyId, p.projectId, p.year, p.primeFirmName])}>
+          <td data-label="Firm"><strong>{sub.companyName}</strong><small>{sub.isMsmm ? "Owed to MSMM" : "Payable to firm"}</small></td>
+          <td data-label="Project"><strong>{p.projectName || "Untitled project"}</strong><small>{[p.projectNumber, p.year, labelForStatus(p.statusKey)].filter(Boolean).join(" · ")}</small>{p.primeFirmName && <small>Prime · {p.primeFirmName}</small>}</td>
+          <td data-label="Contract">{p.contractAmount ? fmtMoney(p.contractAmount, false) : <span className="recv-unset">Not set</span>}</td>
+          <td data-label="Paid" className="recv-record-paid">{fmtMoney(p.billedToDate, false)}</td>
+          <td data-label="Pending">{fmtMoney(p.pending, false)}</td>
+          <td data-label="Remaining">{p.contractAmount ? fmtMoney(p.contractAmount - p.billedToDate, false) : <span className="recv-unset">Not set</span>}</td>
+          <td className="recv-record-action"><button type="button" className="btn" aria-label={"View invoices for " + sub.companyName + " · " + (p.projectName || "Untitled project") + (p.primeFirmName ? " · Prime " + p.primeFirmName : "")} onClick={event => onView?.(sub, p, event)}>View invoices</button>{p.billingEntries.length === 0 && <small>No invoices yet</small>}</td>
+        </tr>
+      )))}</tbody>
+    </table>
+  </div>
+);
+
 const ProjectDetail = ({ project, isMsmm, onOpen }) => {
-  const pendingLabel = isMsmm ? "Pending Receipt" : "Pending";
-  const billedLabel  = isMsmm ? "Received To Date" : "Billed To Date";
-
-  const paidEntries    = useMemo(
-    () => project.billingEntries.filter(b => b.paid).sort((a, b) => a.monthIdx - b.monthIdx),
-    [project.billingEntries]
-  );
-  const pendingEntries = useMemo(
-    () => project.billingEntries.filter(b => !b.paid).sort((a, b) => a.monthIdx - b.monthIdx),
-    [project.billingEntries]
-  );
-
-  // Independent expansion state — Billed and Pending toggle separately.
-  const [paidOpen,    setPaidOpen]    = useState(false);
-  const [pendingOpen, setPendingOpen] = useState(false);
-
+  const paidEntries = useMemo(() => project.billingEntries.filter(b => b.paid).sort((a, b) => a.monthIdx - b.monthIdx), [project.billingEntries]);
+  const pendingEntries = useMemo(() => project.billingEntries.filter(b => !b.paid).sort((a, b) => a.monthIdx - b.monthIdx), [project.billingEntries]);
+  // Retain the existing displayed definition: pending is NOT subtracted.
+  const remaining = project.contractAmount - project.billedToDate;
   return (
-    <div className="recv-detail">
-      <div className="recv-detail-strip">
-        <div className="recv-kpi">
-          <div className="recv-kpi-label">Contract</div>
-          <div className={"recv-kpi-val mono" + (project.contractAmount === 0 ? " is-zero" : "")}>
-            {project.contractAmount === 0
-              ? <span className="recv-kpi-empty">— not set —</span>
-              : fmtMoney(project.contractAmount, false)}
-          </div>
-        </div>
-        <div className="recv-kpi-rule" aria-hidden="true"/>
-
-        <KpiExpandable
-          label={billedLabel}
-          value={project.billedToDate}
-          tone="paid"
-          entries={paidEntries}
-          isOpen={paidOpen}
-          onToggle={() => setPaidOpen(v => !v)}
-        />
-        <div className="recv-kpi-rule" aria-hidden="true"/>
-
-        <KpiExpandable
-          label={pendingLabel}
-          value={project.pending}
-          tone="pending"
-          entries={pendingEntries}
-          isOpen={pendingOpen}
-          onToggle={() => setPendingOpen(v => !v)}
-        />
-        <div className="recv-kpi-rule" aria-hidden="true"/>
-
-        {/* Remaining = Contract − Billed To Date (per user spec). Pending
-            is intentionally NOT subtracted — it's still in flight, not yet
-            realized as paid revenue. Negative values surface in rose to
-            flag over-billing (paid amount has exceeded the contract). */}
-        {(() => {
-          const remaining = project.contractAmount - project.billedToDate;
-          const overrun = remaining < 0;
-          const noContract = project.contractAmount === 0;
-          return (
-            <div className="recv-kpi">
-              <div className="recv-kpi-label">Remaining</div>
-              <div className={"recv-kpi-val mono"
-                  + (noContract ? " is-zero" : "")
-                  + (overrun ? " is-overrun" : "")}>
-                {noContract
-                  ? <span className="recv-kpi-empty">— set contract —</span>
-                  : fmtMoney(remaining, false)}
-              </div>
-              {!noContract && (
-                <div className="recv-kpi-sub">
-                  {overrun
-                    ? "over contract"
-                    : project.contractAmount > 0
-                      ? `${Math.round((project.billedToDate / project.contractAmount) * 100)}% billed`
-                      : ""}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      </div>
-      {onOpen && (
-        <div className="recv-detail-actions">
-          <button type="button" className="recv-open-link" onClick={(e) => { e.stopPropagation(); onOpen(); }}>
-            Open project<Icon name="forward" size={10}/>
-          </button>
-        </div>
-      )}
+    <div className="recv-ledger">
+      <dl className="recv-ledger-summary">
+        <div><dt>Contract</dt><dd>{project.contractAmount ? fmtMoney(project.contractAmount, false) : "Not set"}</dd></div>
+        <div><dt>Remaining</dt><dd>{project.contractAmount ? fmtMoney(remaining, false) : "Set contract"}</dd>{project.contractAmount > 0 && <small>{remaining < 0 ? "Over contract" : Math.round(project.billedToDate / project.contractAmount * 100) + "% billed"}</small>}</div>
+      </dl>
+      <InvoiceEntries label={isMsmm ? "Pending receipt" : "Pending payment"} value={project.pending} entries={pendingEntries} tone="pending"/>
+      <InvoiceEntries label={isMsmm ? "Received to date" : "Paid invoices"} value={project.billedToDate} entries={paidEntries} tone="paid"/>
+      {onOpen && <button type="button" className="btn recv-ledger-project" onClick={onOpen}>Open project<Icon name="forward" size={14}/></button>}
     </div>
   );
 };
 
-// ----------------------------------------------------------------------------
-// KpiExpandable — one of the two clickable KPIs (Billed / Pending). Renders
-// the value + caption normally; on click, reveals an inline per-invoice
-// ledger underneath. Disabled when there are no entries to show.
-// ----------------------------------------------------------------------------
-const KpiExpandable = ({ label, value, tone, entries, isOpen, onToggle }) => {
-  const canExpand = entries.length > 0;
-  const verbForm = tone === "paid" ? "paid" : "unpaid";
-  const verbLabel = `${verbForm} invoice${entries.length === 1 ? "" : "s"}`;
-
-  return (
-    <div className={"recv-kpi recv-kpi-x" + (canExpand ? " is-clickable" : "") + (isOpen ? " open" : "")}>
-      <button
-        type="button"
-        className="recv-kpi-trigger"
-        onClick={canExpand ? onToggle : undefined}
-        disabled={!canExpand}
-        aria-expanded={canExpand ? isOpen : undefined}
-        aria-controls={canExpand ? `kpi-list-${tone}` : undefined}>
-        <div className="recv-kpi-label">
-          <span>{label}</span>
-          {canExpand && (
-            <span className={"recv-kpi-chev" + (isOpen ? " open" : "")} aria-hidden="true">
-              <Icon name="chevronRight" size={9}/>
-            </span>
-          )}
-        </div>
-        <div className={"recv-kpi-val mono" + (value > 0 ? ` is-${tone}` : "")}>
-          {fmtMoney(value, false)}
-        </div>
-        {canExpand && (
-          <div className="recv-kpi-sub">
-            {entries.length} {verbLabel}
-          </div>
-        )}
-      </button>
-
-      {isOpen && canExpand && (
-        <ul className={`recv-kpi-entries tone-${tone}`} id={`kpi-list-${tone}`}>
-          {entries.map(e => (
-            <InvoiceEntryRow key={e.monthIdx} entry={e} tone={tone}/>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-};
+const InvoiceEntries = ({ label, value, entries, tone }) => (
+  <section className={"recv-ledger-section tone-" + tone}>
+    <h3>{label}<span>{fmtMoney(value, false)}</span></h3>
+    {entries.length ? <ul className={"recv-kpi-entries tone-" + tone}>{entries.map(e => <InvoiceEntryRow key={e.monthIdx} entry={e} tone={tone}/>)}</ul> : <p className="recv-unset">No invoices in this group.</p>}
+  </section>
+);
 
 // ----------------------------------------------------------------------------
 // InvoiceEntryRow — one month's invoice entry: month chip · amount · file
-// link. Multiple files surface as a "+N" superscript on the link icon; the
-// button opens the most recently uploaded file in a new tab via a signed URL.
+// links. Every existing attachment opens directly through the same signed URL reader.
 // ----------------------------------------------------------------------------
-const InvoiceEntryRow = ({ entry, tone }) => {
+export const InvoiceEntryRow = ({ entry, tone }) => {
   const fileCount = entry.files?.length || 0;
-  const primaryFile = fileCount > 0 ? entry.files[0] : null;
-  const handleOpen = async () => {
-    if (!primaryFile) return;
+  const handleOpen = async (file) => {
+    if (!file) return;
     try {
-      const url = await getInvoiceFileSignedUrl(primaryFile.file_path, 60);
+      const url = await getInvoiceFileSignedUrl(file.file_path, 60);
       if (url) window.open(url, "_blank", "noopener,noreferrer");
     } catch { /* signed URL flake — silent; user can retry */ }
   };
@@ -410,20 +131,19 @@ const InvoiceEntryRow = ({ entry, tone }) => {
       <span className="recv-entry-month">{entry.monthLabel}</span>
       <span className="recv-entry-amt mono">{fmtMoney(entry.amount, false)}</span>
       <span className="recv-entry-file">
-        {fileCount > 0 ? (
+        {fileCount > 0 ? entry.files.map((file, index) => (
           <button
+            key={file.id || file.file_path || index}
             type="button"
             className="recv-entry-file-btn"
-            title={fileCount === 1
-              ? `Open ${primaryFile.file_name || "invoice"}`
-              : `Open ${primaryFile.file_name || "most recent invoice"} (+${fileCount - 1} more attached)`}
-            onClick={handleOpen}>
+            title={`Open ${file.file_name || "invoice"}`}
+            onClick={() => handleOpen(file)}>
             <Icon name="link" size={10}/>
             <span className="recv-entry-file-label">
-              {fileCount === 1 ? "View" : `View · +${fileCount - 1}`}
+              {file.file_name || `View invoice ${index + 1}`}
             </span>
           </button>
-        ) : (
+        )) : (
           <span className="recv-entry-no-file" title="No file uploaded for this invoice">
             <Icon name="link" size={10}/>
             <span>No file</span>

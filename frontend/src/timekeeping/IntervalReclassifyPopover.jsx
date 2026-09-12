@@ -137,7 +137,7 @@ export function IntervalReclassifyPopover({
         side="bottom"
         sideOffset={0}
         aria-label="Edit time block"
-        className="tka-reclass w-[min(420px,calc(100vw-24px))] p-0"
+        className="tka-reclass beacon-time-block-editor w-[min(460px,calc(100vw-24px))] p-0"
         // Land on the tag, not the start time: retagging is by far the most
         // frequent edit on this page. The times stay in first position because
         // that position is what sets the expectation we're fixing.
@@ -170,7 +170,7 @@ export function IntervalReclassifyPopover({
           )}
 
           <div className="tka-insp-field">
-            <span className="tka-insp-label" id="tka-reclass-timeslabel">Times</span>
+            <span className="tka-insp-label" id="tka-reclass-timeslabel">Time range · Central time</span>
             <div className="tka-insp-times" role="group" aria-labelledby="tka-reclass-timeslabel">
               <input
                 type="time"
@@ -237,7 +237,7 @@ export function IntervalReclassifyPopover({
         <footer className="tka-reclass-foot">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button variant="primary" onClick={save} disabled={busy || locked || tooShort} loading={busy}>
-            {busy ? "Saving" : "Save"}
+            {busy ? "Saving" : "Save changes"}
           </Button>
         </footer>
       </PopoverContent>
