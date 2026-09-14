@@ -297,57 +297,20 @@ body {
 }
 
 /* ---- collapsed rail — desktop only ----------------------------------
-   Gmail's desktop pattern. Collapsed is the resting state: a 60px icon
-   strip that expands to full width on hover or keyboard focus, then
-   snaps back when the pointer leaves. Pressing the foot toggle pins it
-   open instead (data-collapsed="false").
+   Collapse is an explicit, persistent state: the rail remains a compact
+   icon strip until the user presses Expand sidebar. Navigation labels stay
+   in the DOM for accessibility and fade behind the clipped edge; App.jsx
+   supplies pointer- and keyboard-accessible tooltips for the compact state.
 
-   The expansion is an OVERLAY, not a layout change: the grid column stays
-   at the collapsed width and only the rail's own `width` grows, so a
-   40-column invoice table never reflows out from under the cursor on the
-   way to the nav. The rail stays a normal in-flow grid item and simply
-   OVERFLOWS its 60px track — an explicit width overrides the default
-   `justify-self: stretch`, the item paints from the track's start edge,
-   and grid track sizes are unaffected by an item overflowing them.
+   The inner column keeps its expanded width so icons never jump while the
+   grid track animates. Do not set `flex-shrink: 0` on `.bx-rail-scroll` here:
+   this is a vertical flex container, so that declaration prevents the scroll
+   region from shrinking and pushes the footer toggle below short desktop
+   viewports. The head and footer already opt out of vertical shrinking while
+   the scroll region intentionally retains `flex: 1 1 auto; min-height: 0`.
 
-   It deliberately does NOT use `position: fixed` for this. Taking the rail
-   out of flow also takes it out of grid auto-placement, which drops
-   `.bx-main` into column 1 — the 60px one — and crushes the entire page to
-   a sliver. That is a spectacular failure for a hover affordance, and it
-   is only avoidable by pinning `.bx-main` with an explicit `grid-column`,
-   i.e. by adding a second rule that has to stay in sync with this one.
-   Overflowing in flow needs no such counterpart.
-
-   THE INNER COLUMN NEVER REFLOWS. `.bx-rail-head/-scroll/-foot` are pinned
-   to the full `--sidebar-w` in both states and the rail clips them, so
-   expanding only changes the rail's width and the clip rect — the icons,
-   labels and pills keep the exact same geometry throughout. The earlier
-   version instead restyled the contents at the collapsed width (icons
-   centred, padding and gap zeroed, labels `display: none`), which meant
-   every one of those jumped discontinuously at t=0 while the width was
-   still tweening: the icons snapped from centre to left-aligned and the
-   labels popped in at full size inside a 60px box. That was the stutter.
-   Only `width` and `opacity` animate now, and text fades instead of
-   flipping `display` (which cannot tween at all).
-
-   The trade is that icons sit ~2px left of the 60px strip's centre rather
-   than dead centre — `.bx-rail-scroll` padding (8px) + `.bx-navitem`
-   padding (12px) puts a 16px icon's centre at 28px instead of 30px. Two
-   pixels of asymmetry is a fair price for never reflowing.
-
-   Resting-state rules are scoped to an unarmed hover or to
-   `:not(:hover):not(:has(:focus-visible))`.
-   App.jsx disarms hover for the pointer that pressed the Collapse control;
-   otherwise that pointer would keep the newly collapsed rail expanded and
-   make the toggle appear broken. Pointer-leave re-arms the preview.
-   `:has(:focus-visible)` rather than `:focus-within` is deliberate: clicking
-   a nav item leaves DOM focus on that button, so `:focus-within` held the
-   rail open after the pointer left and the user had to click elsewhere to
-   dismiss it. `:focus-visible` only matches keyboard focus, so the keyboard
-   path still expands the rail while a mouse click does not.
-
-   Wrapped in a desktop media query because below `lg` the rail is a
-   drawer that always shows its labels (see the block after this one).
+   Wrapped in a desktop media query because below `lg` the rail is a drawer
+   that always shows its labels (see the block after this one).
    ------------------------------------------------------------------ */
 @media (min-width: 1024px) {
   .bx-shell[data-collapsed="true"] .bx-rail {
@@ -360,29 +323,13 @@ body {
        the icons at x = -75: a completely blank sidebar on every page load.
        `overflow: clip` cannot be scrolled, programmatically or otherwise. */
     overflow: clip;
-    /* Above the topbar (40) so the expanded panel paints over the page,
-       below the record drawers / modals (50–60) whose scrim must still
-       dim it. `.bx-rail` is already `position: relative`, so this applies. */
-    z-index: 45;
-    /* Only the rail box resizes — its contents are a fixed width — so this
-       is a cheap layout + a clip per frame. --ease-out (a strong decelerate)
-       reads as a reveal; --ease-spring would overshoot the width and wobble
-       the clip edge, which is the opposite of smooth on a hover. */
-    transition:
-      width var(--dur-normal) var(--ease-out),
-      box-shadow var(--dur-normal) var(--ease-out);
-  }
-  .bx-shell[data-collapsed="true"] .bx-rail[data-hover-armed="true"]:hover,
-  .bx-shell[data-collapsed="true"] .bx-rail:has(:focus-visible) {
-    width: var(--sidebar-w);
-    box-shadow: var(--shadow-xl);
+    transition: width var(--dur-normal) var(--ease-out);
   }
 
-  /* Lay the column out at the expanded width in BOTH states. This is what
-     makes the animation smooth; everything else here is just cosmetics. */
+  /* Lay the column out at the expanded width in both states. Width is a
+     cross-axis size here; the scroll region must remain vertically shrinkable. */
   .bx-shell[data-collapsed="true"] :is(.bx-rail-head, .bx-rail-scroll, .bx-rail-foot) {
     width: var(--sidebar-w);
-    flex-shrink: 0;
   }
 
   /* Text fades with the width instead of popping. Slightly slower on the
@@ -396,10 +343,15 @@ body {
   ) {
     transition: opacity var(--dur-normal) var(--ease-out) 60ms;
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:has(:focus-visible)):is(
-    [data-hover-armed="false"],
-    :not(:hover)
-  ) :is(
+  .bx-shell[data-collapsed="false"] :is(
+    .bx-wordmark,
+    .bx-navitem-label,
+    .bx-navcount,
+    .bx-navlabel > span
+  ) {
+    transition: opacity var(--dur-normal) var(--ease-out) 60ms;
+  }
+  .bx-shell[data-collapsed="true"] .bx-rail :is(
     .bx-wordmark,
     .bx-navitem-label,
     .bx-navcount,
@@ -423,27 +375,16 @@ body {
     opacity: 0;
     transition: opacity var(--dur-fast) var(--ease-out);
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:has(:focus-visible)):is(
-    [data-hover-armed="false"],
-    :not(:hover)
-  )
-    .bx-navlabel::after {
+  .bx-shell[data-collapsed="true"] .bx-rail .bx-navlabel::after {
     opacity: 1;
   }
 
   /* The count pill sits out at the far edge and is clipped away, so a
-     non-zero count reads as a dot tucked against the icon instead.
-     Declared ONLY in the resting state, never unconditionally: `::after` on
-     `.bx-navitem` is shared with the pipeline flow connector
-     (`[data-flow="pipeline"] .bx-navitem + .bx-navitem::after`), and this
-     selector outranks it — claiming the pseudo-element in both states would
-     silently delete the connector whenever the rail was hover-expanded.
-     The cost is that the dot pops rather than fades, which at 5px against
-     fading text is not something you can see. */
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:has(:focus-visible)):is(
-    [data-hover-armed="false"],
-    :not(:hover)
-  )
+     non-zero count reads as a dot tucked against the icon instead. `::after`
+     is also used by the pipeline connector; this more specific compact-state
+     rule intentionally replaces that three-pixel connector with the count
+     dot only while the rail is collapsed. */
+  .bx-shell[data-collapsed="true"] .bx-rail
     .bx-navitem[data-count]:not([data-count="0"])::after {
     content: "";
     position: absolute;
@@ -456,8 +397,7 @@ body {
 }
 
 /* No prefers-reduced-motion override needed here: tokens.css already
-   collapses --dur-fast / --dur-normal to 1ms under that query, so the
-   rail snaps open instead of sweeping. */
+   collapses --dur-fast / --dur-normal to 1ms under that query. */
 
 /* ---- mobile / tablet drawer ---------------------------------------- */
 @media (max-width: 1023px) {

@@ -1271,28 +1271,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // `railCollapsed` shrinks the desktop rail to an icon strip; `navOpen`
   // drives the sub-1024px overlay drawer. Neither touches app data.
   // A labeled sidebar is the first-use default. The user's explicit compact
-  // preference remains persistent; compact mode expands on hover/focus.
+  // preference remains persistent until they use the toggle again.
   const [railCollapsed, setRailCollapsed] = useState(() => {
     try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; }
     catch { return false; }
   });
-  // Suppress hover expansion for the pointer that just pressed "Collapse".
-  // Without this guard, the rail immediately re-opens under that same pointer
-  // and makes a successful toggle look broken. Leaving the rail re-arms the
-  // preview; keyboard focus can always expand it independently.
-  const [railHoverArmed, setRailHoverArmed] = useState(true);
   // Persist ONLY on a real toggle. The previous version wrote from an effect
   // keyed on [railCollapsed], which fired on mount and so recorded a preference
   // nobody had expressed — that is what silently pinned the rail open for
   // everyone. An effect cannot tell "the user chose this" from "this is the
   // default", so the write belongs on the click.
-  const toggleRail = () => {
-    const next = !railCollapsed;
-    setRailCollapsed(next);
-    setRailHoverArmed(!next);
+  const toggleRail = () => setRailCollapsed(previous => {
+    const next = !previous;
     try { localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0"); }
     catch { /* storage disabled — the choice just won't survive a reload */ }
-  };
+    return next;
+  });
   const [navOpen, setNavOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpQuery, setJumpQuery] = useState("");
@@ -5945,18 +5939,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // Escape and scrim dismissal come for free). Only one of the two is
   // ever visible/focusable at a given viewport width.
   // ------------------------------------------------------------------
-  const navItem = (g) => {
+  const navItem = (g, compactHints = false) => {
     const active = g.tabs.includes(tab);
     const count = groupCount(g);
-    // No tooltip on the collapsed rail: hovering it now expands the whole
-    // sidebar and reveals every real label, so a floating duplicate of the one
-    // label under the cursor would fire at the same moment and just add noise.
-    // The collapsed styles `display: none` the label span, which takes it out
-    // of the accessibility tree too — hence the explicit aria-label, so the
-    // button is still named for screen readers at the collapsed width.
-    return (
+    const button = (
       <button
-        key={g.key}
         type="button"
         aria-label={g.label}
         className="bx-navitem"
@@ -5970,9 +5957,22 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         {count != null && <span className="bx-navcount">{count}</span>}
       </button>
     );
+
+    // A true collapsed state stays collapsed until the user explicitly opens
+    // it. Tooltips keep icon-only desktop navigation discoverable for pointer
+    // and keyboard users without changing the rail's layout or width.
+    return (
+      <React.Fragment key={g.key}>
+        {railCollapsed && compactHints ? (
+          <Tooltip label={g.label} side="right" align="center">
+            {button}
+          </Tooltip>
+        ) : button}
+      </React.Fragment>
+    );
   };
 
-  const navBody = (scrollRef) => (
+  const navBody = (scrollRef, compactHints = false) => (
     <>
       <div className="bx-rail-head">
         <span className="bx-mark" aria-hidden="true">B</span>
@@ -5999,22 +5999,37 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               aria-label={section.label}
             >
               <p className="bx-navlabel"><span>{section.label}</span></p>
-              {items.map(navItem)}
+              {items.map(item => navItem(item, compactHints))}
             </div>
           );
         })}
       </div>
       <div className="bx-rail-foot hidden lg:flex">
-        <button
-          type="button"
-          className="bx-navitem bx-railtoggle"
-          onClick={toggleRail}
-          aria-pressed={railCollapsed}
-          aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <Icon name={railCollapsed ? "chevronsRight" : "chevronsLeft"} size={16}/>
-          <span className="bx-navitem-label">{railCollapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
-        </button>
+        {railCollapsed && compactHints ? (
+          <Tooltip label="Expand sidebar" side="right" align="center">
+            <button
+              type="button"
+              className="bx-navitem bx-railtoggle"
+              onClick={toggleRail}
+              aria-expanded="false"
+              aria-label="Expand sidebar"
+            >
+              <Icon name="chevronsRight" size={16}/>
+              <span className="bx-navitem-label">Expand sidebar</span>
+            </button>
+          </Tooltip>
+        ) : (
+          <button
+            type="button"
+            className="bx-navitem bx-railtoggle"
+            onClick={toggleRail}
+            aria-expanded={!railCollapsed}
+            aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <Icon name={railCollapsed ? "chevronsRight" : "chevronsLeft"} size={16}/>
+            <span className="bx-navitem-label">{railCollapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
+          </button>
+        )}
       </div>
     </>
   );
@@ -6027,16 +6042,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {/* Persistent desktop rail. Below 1024px beacon.css parks it off-canvas
           with visibility:hidden, so it leaves the tab order entirely and the
           <Sheet> below is the only reachable navigation. */}
-      <nav
-        className="bx-rail"
-        aria-label="Primary"
-        data-hover-armed={railHoverArmed ? "true" : "false"}
-        onPointerLeave={() => setRailHoverArmed(true)}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) setRailHoverArmed(true);
-        }}
-      >
-        {navBody(pipelineRef)}
+      <nav className="bx-rail" aria-label="Primary">
+        {navBody(pipelineRef, true)}
       </nav>
 
       {/* Tablet / phone drawer. Radix handles the focus trap, Escape and the
