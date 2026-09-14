@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef, useId } from "react";
 import { Icon } from "./icons.jsx";
-import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf, dedupeSubsByCompanyKind,
+import { supabase, THIS_YEAR, MONTHS, fmtMoney, BID_SERVICE_OPTIONS, uploadOpenBidPdf, dedupeSubsByCompanyKind, adaptContact,
   createProjectItem, addProjectItemSub, validateProjectItemContract,
   CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS } from "./data.js";
 import { SearchableSelect, StarRating } from "./primitives.jsx";
 import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
 import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
+import { DraftContactsField } from "./contacts.jsx";
 import { cn } from "@/lib/utils";
 import {
   Alert, Button, Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter,
@@ -102,12 +103,13 @@ const DB_COLUMNS = {
   hotleads: [
     "title", "type", "client_id", "date_time", "anticipated_amount", "notes", "stars",
   ],
+  // Contact people are NOT parent columns any more — they land in
+  // beacon_v2.contacts (one row per person) in the step-2 insert below.
   clients: [
-    "name", "district", "org_type",
-    "contact_person", "email", "phone", "address", "notes",
+    "name", "district", "org_type", "address", "notes",
   ],
   companies: [
-    "name", "contact_person", "email", "phone", "address", "notes",
+    "name", "address", "notes",
   ],
   // anticipated_invoice — manual entry. source_project_id stays null on
   // this path; Move Forward handles linked-invoice creation. Standalone
@@ -211,17 +213,13 @@ const INITIAL = {
     name: "",
     district: "",
     org_type: "",
-    contact_person: "",
-    email: "",
-    phone: "",
+    contacts: [],      // draft people → beacon_v2.contacts after the parent inserts
     address: "",
     notes: "",
   },
   companies: {
     name: "",
-    contact_person: "",
-    email: "",
-    phone: "",
+    contacts: [],
     address: "",
     notes: "",
   },
@@ -868,6 +866,29 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
           if (eIP) throw eIP;
           extras.pmIds = pmIds;
         }
+      } else if (table === "clients" || table === "companies") {
+        // Draft contact people → one beacon_v2.contacts row each, hung off
+        // the new parent. Exactly one draft is flagged primary (the
+        // DraftContactsField keeps that invariant); ord = list position.
+        const drafts = (form.contacts || []).filter(c => (c.name || "").trim());
+        if (drafts.length > 0) {
+          const parentCol = table === "clients" ? "client_id" : "company_id";
+          const hasPrimary = drafts.some(c => c.isPrimary);
+          const payload = drafts.map((c, i) => ({
+            [parentCol]: row.id,
+            name:  c.name.trim(),
+            title: (c.title || "").trim() || null,
+            email: (c.email || "").trim() || null,
+            phone: (c.phone || "").trim() || null,
+            notes: (c.notes || "").trim() || null,
+            is_primary: hasPrimary ? !!c.isPrimary : i === 0,
+            ord: i,
+          }));
+          const { data: inserted, error: eC } = await supabase
+            .from("contacts").insert(payload).select("*");
+          if (eC) throw eC;
+          extras.contacts = (inserted || []).map(adaptContact);
+        }
       } else if (table === "openbids") {
         // PDF upload is a separate write to storage + an update on the bid
         // row. The bid row already exists, so a failed PDF upload only
@@ -1400,17 +1421,12 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
             </FormRow>
           </Section>
 
-          <Section title="Contact">
-            <FormRow id={fid("contact_person")} label="Contact person">
-              {(p) => <Input {...p} autoComplete="name" {...bind("contact_person")}/>}
+          <Section title="Contacts">
+            <FormRow id={fid("contacts")} label="People" wide group
+                     hint="Add everyone you deal with here — the first one becomes the primary contact.">
+              {() => <DraftContactsField value={form.contacts || []} onChange={v => set("contacts", v)}/>}
             </FormRow>
-            <FormRow id={fid("email")} label="Email">
-              {(p) => <Input {...p} type="email" inputMode="email" autoComplete="email" {...bind("email")}/>}
-            </FormRow>
-            <FormRow id={fid("phone")} label="Phone">
-              {(p) => <Input {...p} type="tel" inputMode="tel" autoComplete="tel" className="num" {...bind("phone")}/>}
-            </FormRow>
-            <FormRow id={fid("address")} label="Address">
+            <FormRow id={fid("address")} label="Address" wide>
               {(p) => <Input {...p} {...bind("address")}/>}
             </FormRow>
           </Section>
@@ -1431,17 +1447,12 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
             </FormRow>
           </Section>
 
-          <Section title="Contact">
-            <FormRow id={fid("contact_person")} label="Contact person">
-              {(p) => <Input {...p} autoComplete="name" {...bind("contact_person")}/>}
+          <Section title="Contacts">
+            <FormRow id={fid("contacts")} label="People" wide group
+                     hint="Add everyone you deal with here — the first one becomes the primary contact.">
+              {() => <DraftContactsField value={form.contacts || []} onChange={v => set("contacts", v)}/>}
             </FormRow>
-            <FormRow id={fid("email")} label="Email">
-              {(p) => <Input {...p} type="email" inputMode="email" autoComplete="email" {...bind("email")}/>}
-            </FormRow>
-            <FormRow id={fid("phone")} label="Phone">
-              {(p) => <Input {...p} type="tel" inputMode="tel" autoComplete="tel" className="num" {...bind("phone")}/>}
-            </FormRow>
-            <FormRow id={fid("address")} label="Address">
+            <FormRow id={fid("address")} label="Address" wide>
               {(p) => <Input {...p} {...bind("address")}/>}
             </FormRow>
           </Section>

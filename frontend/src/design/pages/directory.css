@@ -37,6 +37,17 @@
 .bcn-directory-contact-name { color: var(--text); font-weight: 550; }
 .bcn-directory-contact a, .bcn-directory-channel { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; white-space: normal; }
 .bcn-directory-contact a:hover, .bcn-directory-channel:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* Contact people (beacon_v2.contacts): one line per person in each of the
+   Contact / Email / Phone columns, fixed line height so the rows align. */
+.bcn-contact-stack { width: 100%; }
+.bcn-contact-stack-line { display: block; min-height: 20px; line-height: 20px; max-width: 100%; }
+.bcn-contact-stack-line.bcn-directory-channel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bcn-contact-stack-title { color: var(--text-soft); font-weight: 450; }
+.bcn-contact-stack-more { background: none; border: 0; padding: 0; cursor: pointer; line-height: 20px; }
+.bcn-contact-cards { display: none; }
+.bcn-directory-contact-list { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.bcn-directory-contact-list li { display: flex; flex-direction: column; gap: 1px; font-size: 13px; line-height: 1.45; }
+.bcn-directory-contact-title { color: var(--text-muted); font-size: 12px; }
 .bcn-directory .bxt-dir-related { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; overflow: visible; width: 100%; }
 .bcn-directory .bxt-dir-related > span { white-space: normal; height: auto; max-height: none; max-width: 100%; border-radius: 6px; }
 .bcn-directory-related-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
@@ -101,6 +112,13 @@
   .bcn-directory[data-directory-view="relationships"] .bxt-td-actions { grid-column: 2; align-self: center; }
   .bcn-directory[data-directory-view="relationships"] .bxt-diractions .row-btn { min-height: 44px; }
   .bcn-directory[data-directory-view="relationships"] .trow .bcn-directory-contact { margin: 4px 0; }
+  /* Phone: one block per person instead of three parallel columns. */
+  .bcn-directory[data-directory-view="relationships"] .trow.bxt-dirrow > [data-contact-field="Email"],
+  .bcn-directory[data-directory-view="relationships"] .trow.bxt-dirrow > [data-contact-field="Phone"],
+  .bcn-directory[data-directory-view="relationships"] .bcn-directory-contact > .bcn-contact-stack { display: none; }
+  .bcn-directory[data-directory-view="relationships"] .bcn-contact-cards { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+  .bcn-contact-cards-item { display: flex; flex-direction: column; gap: 2px; }
+  .bcn-contact-cards-item .bcn-directory-contact-name { display: inline-flex; align-items: center; gap: 4px; }
   .bcn-directory[data-directory-view="relationships"] .bcn-directory-channel { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; }
   .bcn-directory[data-directory-view="relationships"] .bcn-directory-open { min-height: 36px; font-size: 14px; }
   .bcn-directory[data-directory-view="relationships"] .bxt-dirhead { grid-template-columns: minmax(0,1fr) !important; }

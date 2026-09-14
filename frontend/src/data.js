@@ -662,7 +662,80 @@ function adaptUser(u, i) {
   };
 }
 
-function adaptClient(c) {
+// ---- Directory contacts (beacon_v2.contacts, 20260914120000) ----------------
+// A client / company carries MANY contact people. Each is its own row hung off
+// exactly one parent; one may be flagged primary. The parent's legacy scalar
+// columns (contact_person / email / phone) are trigger-mirrored from the
+// primary and are only read here as a FALLBACK for a DB where the contacts
+// table isn't applied yet.
+export function adaptContact(c) {
+  return {
+    id: c.id,
+    clientId:  c.client_id  || null,
+    companyId: c.company_id || null,
+    name:  c.name  || "",
+    title: c.title || "",
+    email: c.email || "",
+    phone: c.phone || "",
+    notes: c.notes || "",
+    isPrimary: !!c.is_primary,
+    ord: c.ord ?? 0,
+    createdAt: c.created_at || null,
+  };
+}
+
+// Display order: primary first, then explicit ord, then oldest first.
+export function sortContacts(list) {
+  return (list || []).slice().sort((a, b) =>
+    (b.isPrimary - a.isPrimary) ||
+    ((a.ord ?? 0) - (b.ord ?? 0)) ||
+    String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+}
+
+export const primaryContact = (row) => sortContacts(row?.contacts)[0] || null;
+
+// Contacts to DISPLAY for a row. On a DB without the contacts migration the
+// rows still carry the legacy summary trio, so synthesize one read-only
+// entry (`legacy: true`, no real id) from it rather than showing nothing.
+export function displayContacts(row) {
+  const list = sortContacts(row?.contacts);
+  if (list.length > 0) return list;
+  if (row?.contact || row?.email || row?.phone) {
+    return [{ id: `legacy-${row.id}`, legacy: true, name: row.contact || row.email || "Main contact",
+              title: "", email: row.email || "", phone: row.phone || "", notes: "", isPrimary: true, ord: 0 }];
+  }
+  return [];
+}
+
+// The summary trio every legacy consumer (table cells, search, exports, sort
+// keys) reads off a Directory row. Derived from the primary contact; falls
+// back to the parent's own scalars only when there are no contact rows.
+function contactSummary(dbRow, contacts) {
+  const p = sortContacts(contacts)[0];
+  if (p) return { contact: p.name || "", email: p.email || "", phone: p.phone || "" };
+  return {
+    contact: dbRow.contact_person || "",
+    email: dbRow.email || "",
+    phone: dbRow.phone || "",
+  };
+}
+
+// Re-derive the summary trio on a UI row after its `contacts` array changed
+// (App.jsx applies this after every contact add / edit / delete so the table
+// cells + search stay in step without a reload).
+export function withContactSummary(row, contacts) {
+  const list = sortContacts(contacts);
+  const p = list[0];
+  return {
+    ...row,
+    contacts: list,
+    contact: p?.name  || "",
+    email:   p?.email || "",
+    phone:   p?.phone || "",
+  };
+}
+
+function adaptClient(c, contacts = []) {
   return {
     id: c.id,
     // `name` keeps the merged form so existing consumers (project rows' Client column,
@@ -671,24 +744,22 @@ function adaptClient(c) {
     baseName: c.name,
     district: c.district || "",
     type: "Client",
-    contact: c.contact_person || "",
-    email: c.email || "",
-    phone: c.phone || "",
+    ...contactSummary(c, contacts),
+    contacts: sortContacts(contacts),
     address: c.address || "",
     notes: c.notes || "",
     orgType: c.org_type || "",
   };
 }
 
-function adaptCompany(c, typeMap) {
+function adaptCompany(c, typeMap, contacts = []) {
   return {
     id: c.id,
     name: c.name,
     isMsmm: !!c.is_msmm,
     type: c.is_msmm ? "Multiple" : (typeMap.get(c.id) || "Prime"),
-    contact: c.contact_person || "",
-    email: c.email || "",
-    phone: c.phone || "",
+    ...contactSummary(c, contacts),
+    contacts: sortContacts(contacts),
     address: c.address || "",
     notes: c.notes || "",
   };
@@ -2239,7 +2310,7 @@ export async function loadBeacon() {
     users, clients, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
     openBidRows, invoiceNoteRows, invoiceLinkRows, projectItemRows,
-    amendmentRows,
+    amendmentRows, contactRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
     pget(supabase.from("clients").select("*").order("name"), "clients"),
@@ -2364,6 +2435,17 @@ export async function loadBeacon() {
         if (error) { console.warn("[beacon_v2] invoice_amendments fetch skipped:", error.message); return []; }
         return data || [];
       }),
+    // Directory contacts (20260914120000) — many people per client / company.
+    // Own graceful-degrade query: an un-migrated DB falls back to the parent
+    // rows' legacy contact_person / email / phone scalars (see contactSummary).
+    supabase.from("contacts")
+      .select("*")
+      .order("ord", { ascending: true })
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) { console.warn("[beacon_v2] contacts fetch skipped:", error.message); return []; }
+        return data || [];
+      }),
   ]);
 
   _appSettings = adaptAppSettings(appSettingsRows?.[0] || null);
@@ -2404,9 +2486,21 @@ export async function loadBeacon() {
     typeMap.set(c.id, (isP && isS) ? "Multiple" : isP ? "Prime" : isS ? "Sub" : "Prime");
   });
 
+  // Group contact rows by parent so each Directory row carries its people.
+  const contactsByClient = new Map();
+  const contactsByCompany = new Map();
+  for (const raw of (contactRows || [])) {
+    const ct = adaptContact(raw);
+    const m = ct.clientId ? contactsByClient : ct.companyId ? contactsByCompany : null;
+    if (!m) continue;
+    const key = ct.clientId || ct.companyId;
+    if (!m.has(key)) m.set(key, []);
+    m.get(key).push(ct);
+  }
+
   _companies = [
-    ...clients.map(adaptClient),
-    ...companies.map(c => adaptCompany(c, typeMap)),
+    ...clients.map(c => adaptClient(c, contactsByClient.get(c.id) || [])),
+    ...companies.map(c => adaptCompany(c, typeMap, contactsByCompany.get(c.id) || [])),
   ];
 
   // DISABLED: the automatic Orange-Invoice reconciliation previously ran
@@ -2989,9 +3083,6 @@ export async function addCompany({ name, contact, email, phone, address, notes }
   if (!clean) throw new Error("Company name is required");
   const payload = {
     name: clean,
-    contact_person: (contact || "").trim() || null,
-    email: (email || "").trim() || null,
-    phone: (phone || "").trim() || null,
     address: (address || "").trim() || null,
     notes: (notes || "").trim() || null,
   };
@@ -3005,10 +3096,87 @@ export async function addCompany({ name, contact, email, phone, address, notes }
     }
     throw new Error(`add company: ${error.message}`);
   }
+  // The contact person (if any) becomes the firm's first, primary contact row.
+  // Fail-soft: the firm exists either way; a contacts-table hiccup shouldn't
+  // block picking it as a sub.
+  let contacts = [];
+  const cName = (contact || "").trim(), cEmail = (email || "").trim(), cPhone = (phone || "").trim();
+  if (cName || cEmail || cPhone) {
+    try {
+      const ct = await addContact({ companyId: data.id, name: cName || cEmail || "Main contact",
+                                    email: cEmail, phone: cPhone, isPrimary: true });
+      contacts = [ct];
+    } catch (e) {
+      console.warn("[beacon_v2] addCompany: contact insert skipped:", e?.message || e);
+    }
+  }
   // A fresh company has no observed project usage yet, so adaptCompany's
   // empty-typeMap fallback ("Prime", i.e. non-Client) is exactly right — it
   // passes the sub-picker's `type !== "Client"` filter immediately.
-  return adaptCompany(data, new Map());
+  return adaptCompany(data, new Map(), contacts);
+}
+
+// ---- Directory contacts CRUD -------------------------------------------------
+// One of clientId / companyId is required (exactly one — the DB CHECKs it).
+export async function addContact({ clientId = null, companyId = null, name, title, email, phone, notes, isPrimary = false, ord = 0 } = {}) {
+  const clean = (name || "").trim();
+  if (!clean) throw new Error("Contact name is required");
+  if (!!clientId === !!companyId) throw new Error("A contact belongs to exactly one client or company");
+  const payload = {
+    client_id: clientId || null,
+    company_id: companyId || null,
+    name: clean,
+    title: (title || "").trim() || null,
+    email: (email || "").trim() || null,
+    phone: (phone || "").trim() || null,
+    notes: (notes || "").trim() || null,
+    is_primary: !!isPrimary,
+    ord: Number(ord) || 0,
+  };
+  const { data, error } = await supabase.from("contacts").insert(payload).select("*").single();
+  if (error) throw new Error(`add contact: ${error.message}`);
+  return adaptContact(data);
+}
+
+const CONTACT_COL_MAP = { name: "name", title: "title", email: "email", phone: "phone", notes: "notes", ord: "ord" };
+
+export async function updateContact(id, patch = {}) {
+  const dbPatch = {};
+  for (const [k, col] of Object.entries(CONTACT_COL_MAP)) {
+    if (!(k in patch)) continue;
+    let v = patch[k];
+    if (k === "ord") v = Number(v) || 0;
+    else if (typeof v === "string") { v = v.trim(); if (k !== "name" && v === "") v = null; }
+    if (k === "name" && !v) throw new Error("Contact name is required");
+    dbPatch[col] = v;
+  }
+  if (Object.keys(dbPatch).length === 0) return null;
+  const { data, error } = await supabase.from("contacts").update(dbPatch).eq("id", id).select("*").single();
+  if (error) throw new Error(`update contact: ${error.message}`);
+  return adaptContact(data);
+}
+
+export async function deleteContact(id) {
+  const { error } = await supabase.from("contacts").delete().eq("id", id);
+  if (error) throw new Error(`delete contact: ${error.message}`);
+}
+
+// Atomic primary flip via the set_primary_contact RPC (unsets the parent's
+// current primary + sets this one in one statement, so the partial-unique
+// index can't be tripped by a two-step update).
+export async function setPrimaryContact(id) {
+  const { error } = await supabase.rpc("set_primary_contact", { p_id: id });
+  if (error) throw new Error(`set primary contact: ${error.message}`);
+}
+
+// Fresh pull of one parent's contacts (multi-user freshness on drawer open).
+export async function reloadContactsFor({ clientId = null, companyId = null } = {}) {
+  let q = supabase.from("contacts").select("*")
+    .order("ord", { ascending: true }).order("created_at", { ascending: true });
+  q = clientId ? q.eq("client_id", clientId) : q.eq("company_id", companyId);
+  const { data, error } = await q;
+  if (error) throw new Error(`load contacts: ${error.message}`);
+  return sortContacts((data || []).map(adaptContact));
 }
 
 // Update an existing project_subs row. Identifies the row by the natural
@@ -5109,6 +5277,18 @@ export async function mergeEntities({ kind, survivorId, loserIds }) {
   if (!survivorId) throw new Error("Pick a record to keep before merging.");
   if (!losers.length) throw new Error("Select at least one other record to merge in.");
   const fn = kind === "Client" ? "merge_clients" : "merge_companies";
+  // Contacts (20260914120000) hang off the parent with ON DELETE CASCADE, and
+  // the merge RPCs predate the table — so move the losers' people onto the
+  // survivor FIRST, or the RPC's final delete would drop them. Demote them
+  // from primary so the survivor's own primary (if any) keeps that flag
+  // (the partial-unique index allows one per parent).
+  const parentCol = kind === "Client" ? "client_id" : "company_id";
+  const { error: cErr } = await supabase.from("contacts")
+    .update({ [parentCol]: survivorId, is_primary: false })
+    .in(parentCol, losers);
+  if (cErr && cErr.code !== "42P01" && !/relation .* does not exist/i.test(cErr.message || "")) {
+    throw new Error(`move contacts: ${cErr.message}`);
+  }
   const { data, error } = await supabase.rpc(fn, {
     p_survivor: survivorId,
     p_losers: losers,

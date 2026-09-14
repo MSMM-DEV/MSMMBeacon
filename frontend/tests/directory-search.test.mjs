@@ -13,3 +13,18 @@ test("existing relationship and linked-project searches remain available", () =>
   assert.equal(matchesDirectoryQuery({}, ""), true);
   assert.equal(matchesDirectoryQuery({}, "Jamie"), false);
 });
+
+test("matches any contact person on the record, not just the primary summary", () => {
+  const record = {
+    name: "Acme", contact: "Ann Prime", email: "ann@acme.com", phone: "504-555-0100",
+    contacts: [
+      { name: "Ann Prime", email: "ann@acme.com", phone: "504-555-0100", isPrimary: true },
+      { name: "Bob Second", title: "Accounts Payable", email: "bob@acme.com", phone: "(985) 555-0199" },
+    ],
+  };
+  assert.equal(matchesDirectoryQuery(record, "bob"), true);
+  assert.equal(matchesDirectoryQuery(record, "accounts payable"), true);
+  assert.equal(matchesDirectoryQuery(record, "985 555"), true);
+  assert.equal(matchesDirectoryQuery(record, "5550199"), true);
+  assert.equal(matchesDirectoryQuery(record, "zed"), false);
+});

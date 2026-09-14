@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "re
 import { createPortal } from "react-dom";
 import { textPreview } from "./lib/text-preview.js";
 import { matchesDirectoryQuery } from "./lib/directory-search.js";
+import { ContactStack, ContactCards } from "./contacts.jsx";
 import { Icon } from "./icons.jsx";
 import {
   EditableCell, RoleChip, StatusChip, UserTag, UserStack, SubsCell, RowActions,
@@ -18,6 +19,7 @@ import {
   BID_SERVICE_OPTIONS,
   CONTRACT_TYPE_OPTIONS, PROJECT_ITEM_TYPE_OPTIONS, PROJECT_ITEM_STATUS_OPTIONS,
   contractTypeLabel, projectItemTypeLabel, projectItemStatusLabel,
+  displayContacts,
 } from "./data.js";
 import { LinkedProjectsSection } from "./panels.jsx";
 import { InvoiceNotesThread } from "./invoice-notes-thread.jsx";
@@ -6804,14 +6806,19 @@ export const DirectoryTable = ({
         </div>
 
         </>}
+        {/* Contact people (beacon_v2.contacts) — one line per person across
+            the three columns, primary first, so a row reads straight across.
+            "+N more" hands off to the drawer's full editor. */}
         <div className="td subtle bcn-directory-contact" role="cell" data-contact-field="Contact">
-          <span className="bcn-directory-contact-name">{r.contact || <span className="empty-cell">No contact listed</span>}</span>
+          <ContactStack row={r} field="name" emptyText="No contact listed"
+                        onMore={() => onOpenDrawer(r)}/>
+          <ContactCards row={r} onMore={() => onOpenDrawer(r)}/>
         </div>
         <div className="td subtle bxt-td-note" role="cell" data-contact-field="Email">
-          {r.email ? <a className="bcn-directory-channel" href={`mailto:${r.email}`} onClick={e => e.stopPropagation()}>{r.email}</a> : <span className="empty-cell">–</span>}
+          <ContactStack row={r} field="email"/>
         </div>
         <div className="td subtle num" role="cell" data-contact-field="Phone">
-          {r.phone ? <a className="bcn-directory-channel" href={`tel:${r.phone}`} onClick={e => e.stopPropagation()}>{r.phone}</a> : <span className="empty-cell">–</span>}
+          <ContactStack row={r} field="phone"/>
         </div>
         {isFullTable && <><div className="td subtle bxt-td-note" role="cell">
           {r.address || <span className="empty-cell">–</span>}
@@ -6894,6 +6901,23 @@ export const DirectoryTable = ({
               aria-label={`Linked projects for ${label}`}
             >
               <div className="bcn-directory-record-context">
+                <div>
+                  <span className="bcn-directory-field-label">Contacts</span>
+                  {displayContacts(r).length === 0 ? (
+                    <p>No contacts added</p>
+                  ) : (
+                    <ul className="bcn-directory-contact-list">
+                      {displayContacts(r).map(c => (
+                        <li key={c.id}>
+                          <span className="bcn-directory-contact-name">{c.name}{c.isPrimary && (displayContacts(r).length > 1) ? " ★" : ""}</span>
+                          {c.title && <span className="bcn-directory-contact-title">{c.title}</span>}
+                          {c.email && <a className="bcn-directory-channel" href={`mailto:${c.email}`}>{c.email}</a>}
+                          {c.phone && <a className="bcn-directory-channel num" href={`tel:${c.phone}`}>{c.phone}</a>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
                 <div><span className="bcn-directory-field-label">Location</span><p>{r.address || "No address added"}</p></div>
                 <div><span className="bcn-directory-field-label">Relationship notes</span><p>{r.notes || "No notes added"}</p></div>
                 <Button variant="secondary" size="sm" onClick={() => onOpenDrawer(r)}><Icon name="edit" size={14}/>Edit details</Button>

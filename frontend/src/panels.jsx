@@ -16,6 +16,7 @@ import {
 import { SearchableSelect } from "./primitives.jsx";
 import { HOT_LEAD_STAR_MAX } from "./star-rating.js";
 import { INVOICE_TYPE_OPTIONS } from "./invoice-perspectives.js";
+import { ContactsSection } from "./contacts.jsx";
 import {
   Sheet, SheetContent, SheetHeader, SheetBody, SheetFooter, SheetTitle, SheetDescription,
   Dialog, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle, DialogDescription,
@@ -419,6 +420,9 @@ export const DetailDrawer = ({
   onUploadBidPdf, onRemoveBidPdf, onOpenBidPdf,
   // Projects (tree item) extras — only the `projects` table passes them.
   projectItems = [], onAddProjectSub, onUpdateProjectSub, onRemoveProjectSub, onAddChild,
+  // Directory extras — contact people (beacon_v2.contacts). `onContactsChanged`
+  // receives (rowId, contacts[]) after every add / edit / delete / primary flip.
+  onContactsChanged, onToast,
 }) => {
   if (!row) return null;
 
@@ -559,18 +563,15 @@ export const DetailDrawer = ({
       { k: "baseName",       label: "Client Name" },
       { k: "district",       label: "District / State" },
       { k: "orgType",        label: "Org Type",                type: "select", options: ["City","State","Federal","Local","Parish","Regional","Other"] },
-      { k: "contact",        label: "Contact Person" },
-      { k: "email",          label: "Email" },
-      { k: "phone",          label: "Phone" },
+      // Contact people live in beacon_v2.contacts (many per client) and are
+      // edited in the dedicated <ContactsSection> below — not as row fields.
       { k: "address",        label: "Address" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
     companies: [
       { k: "name",           label: "Company Name" },
       { k: "type",           label: "Type",                    type: "select", options: ["Prime","Sub","Multiple"] },
-      { k: "contact",        label: "Contact Person" },
-      { k: "email",          label: "Email" },
-      { k: "phone",          label: "Phone" },
+      // Contact people → <ContactsSection> (beacon_v2.contacts).
       { k: "address",        label: "Address" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
@@ -1030,21 +1031,31 @@ export const DetailDrawer = ({
             </PanelSection>
           )}
 
-          {grouped.map(g => (
-            <PanelSection key={g.id} icon={g.icon} title={g.title}>
-              <div className="min-w-0">
-                {g.items.map(f => (
-                  <PanelField
-                    key={f.k}
-                    label={f.label}
-                    multiline={f.type === "textarea" || f.type === "subs" || f.type === "projectSubs"}
-                  >
-                    {renderInput(f)}
-                  </PanelField>
-                ))}
-              </div>
-            </PanelSection>
+          {grouped.map((g, gi) => (
+            <React.Fragment key={g.id}>
+              <PanelSection icon={g.icon} title={g.title}>
+                <div className="min-w-0">
+                  {g.items.map(f => (
+                    <PanelField
+                      key={f.k}
+                      label={f.label}
+                      multiline={f.type === "textarea" || f.type === "subs" || f.type === "projectSubs"}
+                    >
+                      {renderInput(f)}
+                    </PanelField>
+                  ))}
+                </div>
+              </PanelSection>
+              {/* Directory records: the people at this client / firm sit right
+                  under the identity block, ahead of address + notes. */}
+              {table === "directory" && (g.id === "overview" || (gi === 0 && !grouped.some(x => x.id === "overview"))) && (
+                <ContactsSection row={row} onChanged={onContactsChanged} onToast={onToast}/>
+              )}
+            </React.Fragment>
           ))}
+          {table === "directory" && grouped.length === 0 && (
+            <ContactsSection row={row} onChanged={onContactsChanged} onToast={onToast}/>
+          )}
 
           {table === "openbids" && (() => {
             const approver = row.approvedBy ? userById(row.approvedBy) : null;
@@ -2811,7 +2822,7 @@ export const MergeModal = ({
 
         <DialogFooter className="max-sm:flex-col sm:justify-between">
           <p className="m-0 min-w-0 text-[length:var(--fs-xs)] text-[var(--text-soft)]">
-            Profile fields (contact, email…) aren't merged; only references move.
+            Contact people move to the kept record; other profile fields (address, notes) aren’t merged.
           </p>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <Button type="button" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>

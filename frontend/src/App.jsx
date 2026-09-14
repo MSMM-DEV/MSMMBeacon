@@ -93,6 +93,7 @@ import {
   addProjectItemSub, updateProjectItemSub, removeProjectItemSub,
   validateProjectItemContract, projectItemDescendantIds,
   contractTypeLabel, projectItemTypeLabel, projectItemStatusLabel,
+  withContactSummary, displayContacts,
 } from "./data.js";
 
 // A ref-count helper shared by both Clients and Companies export columns.
@@ -657,9 +658,11 @@ const EXPORT_COLUMNS = {
     { label: "District",                    get: r => r.district || "" },
     { label: "Org Type",          wMm: 22,  get: r => r.orgType || "" },
     { label: "Type",              wMm: 22,  get: r => r.type === "Client" ? "" : (r.type || "") },
-    { label: "Contact",                     get: r => r.contact || "" },
-    { label: "Email",                       get: r => r.email || "" },
-    { label: "Phone",             wMm: 28,  get: r => r.phone || "" },
+    // Every contact person, one per line (primary first), so the PDF / CSV
+    // carries the whole roster rather than just the summary trio.
+    { label: "Contact",                     get: r => contactLines(r, c => [c.name, c.title].filter(Boolean).join(" · ")) },
+    { label: "Email",                       get: r => contactLines(r, c => c.email) },
+    { label: "Phone",             wMm: 28,  get: r => contactLines(r, c => c.phone) },
     { label: "Location",                    get: r => r.address || "" },
     { label: "Notes",                       get: r => r.notes || "" },
     { label: "Projects",          wMm: 20,  get: r => countRefs(r.id) },
@@ -688,6 +691,13 @@ const EXPORT_COLUMNS = {
 EXPORT_COLUMNS.between = EXPORT_COLUMNS.invoice;
 
 // DB row → UI row adapter for newly-inserted rows from CreateModal
+// Directory export helper: join one attribute across a row's contact people
+// (primary first). Falls back to the legacy summary field when the row has
+// no contact rows (un-migrated DB).
+function contactLines(row, pick) {
+  return displayContacts(row).map(pick).filter(Boolean).join("\n");
+}
+
 function adaptInsertedRow(table, dbRow, extras = {}) {
   if (table === "potential") {
     return {
@@ -791,31 +801,25 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
     };
   }
   if (table === "clients" || table === "directory-client") {
-    return {
+    return withContactSummary({
       id: dbRow.id,
       name: dbRow.district ? `${dbRow.name} – ${dbRow.district}` : dbRow.name,
       baseName: dbRow.name,
       district: dbRow.district || "",
       type: "Client",
-      contact: dbRow.contact_person || "",
-      email: dbRow.email || "",
-      phone: dbRow.phone || "",
       address: dbRow.address || "",
       notes: dbRow.notes || "",
       orgType: dbRow.org_type || "",
-    };
+    }, extras.contacts || []);
   }
   if (table === "companies" || table === "directory-company") {
-    return {
+    return withContactSummary({
       id: dbRow.id,
       name: dbRow.name,
       type: "Prime",
-      contact: dbRow.contact_person || "",
-      email: dbRow.email || "",
-      phone: dbRow.phone || "",
       address: dbRow.address || "",
       notes: dbRow.notes || "",
-    };
+    }, extras.contacts || []);
   }
   if (table === "invoice") {
     return {
@@ -1605,14 +1609,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     notes: "notes",
     stars: "stars",
   };
+  // contact / email / phone are NOT here on purpose: contact people live in
+  // beacon_v2.contacts (see applyContacts) and the parent's legacy scalars are
+  // trigger-mirrored from the primary contact.
   const CLIENTS_COLS = {
     baseName: "name", district: "district", orgType: "org_type",
-    contact: "contact_person", email: "email", phone: "phone",
     address: "address", notes: "notes",
   };
   const COMPANIES_COLS = {
-    name: "name", contact: "contact_person", email: "email",
-    phone: "phone", address: "address", notes: "notes",
+    name: "name", address: "address", notes: "notes",
     // `type` on companies is derived at load time from observed Prime/Sub
     // usage across rows — not a column on `beacon.companies`. Intentionally
     // skipped so drawer edits don't error.
@@ -2118,6 +2123,16 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     }
     setClients(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
     patchTable("clients", id, buildDbPatch(patch, CLIENTS_COLS));
+  };
+
+  // Contact people changed (ContactsSection in the drawer). Fold the fresh
+  // list into whichever slice owns the row and re-derive its summary trio
+  // (contact / email / phone = the primary) so table cells, search and
+  // exports follow without a reload. Local-only — the CRUD already landed.
+  const applyContacts = (id, contacts) => {
+    const fold = rs => rs.map(r => r.id === id ? withContactSummary(r, contacts) : r);
+    if (clients.some(c => c.id === id)) setClients(fold);
+    else setCompanies(fold);
   };
 
   const updateCompanies = (id, patch) => {
@@ -6985,6 +7000,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             null
           }
           onAlert={(drawer.table === "openbids" || drawer.table === "projects") ? null : () => { setAlertObj({ row: liveRow, tab: drawer.table }); setDrawer(null); }}
+          onContactsChanged={drawer.table === "directory" ? applyContacts : undefined}
+          onToast={showToast}
           isAdmin={isAdmin}
           onApproveBid={
             drawer.table === "openbids" && isAdmin
