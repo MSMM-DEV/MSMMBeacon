@@ -335,7 +335,11 @@ body {
    padding (12px) puts a 16px icon's centre at 28px instead of 30px. Two
    pixels of asymmetry is a fair price for never reflowing.
 
-   Resting-state rules are scoped to `:not(:hover):not(:has(:focus-visible))`.
+   Resting-state rules are scoped to an unarmed hover or to
+   `:not(:hover):not(:has(:focus-visible))`.
+   App.jsx disarms hover for the pointer that pressed the Collapse control;
+   otherwise that pointer would keep the newly collapsed rail expanded and
+   make the toggle appear broken. Pointer-leave re-arms the preview.
    `:has(:focus-visible)` rather than `:focus-within` is deliberate: clicking
    a nav item leaves DOM focus on that button, so `:focus-within` held the
    rail open after the pointer left and the user had to click elsewhere to
@@ -368,7 +372,7 @@ body {
       width var(--dur-normal) var(--ease-out),
       box-shadow var(--dur-normal) var(--ease-out);
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:hover,
+  .bx-shell[data-collapsed="true"] .bx-rail[data-hover-armed="true"]:hover,
   .bx-shell[data-collapsed="true"] .bx-rail:has(:focus-visible) {
     width: var(--sidebar-w);
     box-shadow: var(--shadow-xl);
@@ -392,7 +396,10 @@ body {
   ) {
     transition: opacity var(--dur-normal) var(--ease-out) 60ms;
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:has(:focus-visible)) :is(
+  .bx-shell[data-collapsed="true"] .bx-rail:not(:has(:focus-visible)):is(
+    [data-hover-armed="false"],
+    :not(:hover)
+  ) :is(
     .bx-wordmark,
     .bx-navitem-label,
     .bx-navcount,
@@ -416,7 +423,10 @@ body {
     opacity: 0;
     transition: opacity var(--dur-fast) var(--ease-out);
   }
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:has(:focus-visible))
+  .bx-shell[data-collapsed="true"] .bx-rail:not(:has(:focus-visible)):is(
+    [data-hover-armed="false"],
+    :not(:hover)
+  )
     .bx-navlabel::after {
     opacity: 1;
   }
@@ -430,7 +440,10 @@ body {
      silently delete the connector whenever the rail was hover-expanded.
      The cost is that the dot pops rather than fades, which at 5px against
      fading text is not something you can see. */
-  .bx-shell[data-collapsed="true"] .bx-rail:not(:hover):not(:has(:focus-visible))
+  .bx-shell[data-collapsed="true"] .bx-rail:not(:has(:focus-visible)):is(
+    [data-hover-armed="false"],
+    :not(:hover)
+  )
     .bx-navitem[data-count]:not([data-count="0"])::after {
     content: "";
     position: absolute;

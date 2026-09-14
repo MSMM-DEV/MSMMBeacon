@@ -1276,17 +1276,23 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; }
     catch { return false; }
   });
+  // Suppress hover expansion for the pointer that just pressed "Collapse".
+  // Without this guard, the rail immediately re-opens under that same pointer
+  // and makes a successful toggle look broken. Leaving the rail re-arms the
+  // preview; keyboard focus can always expand it independently.
+  const [railHoverArmed, setRailHoverArmed] = useState(true);
   // Persist ONLY on a real toggle. The previous version wrote from an effect
   // keyed on [railCollapsed], which fired on mount and so recorded a preference
   // nobody had expressed — that is what silently pinned the rail open for
   // everyone. An effect cannot tell "the user chose this" from "this is the
   // default", so the write belongs on the click.
-  const toggleRail = () => setRailCollapsed(prev => {
-    const next = !prev;
+  const toggleRail = () => {
+    const next = !railCollapsed;
+    setRailCollapsed(next);
+    setRailHoverArmed(!next);
     try { localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0"); }
     catch { /* storage disabled — the choice just won't survive a reload */ }
-    return next;
-  });
+  };
   const [navOpen, setNavOpen] = useState(false);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpQuery, setJumpQuery] = useState("");
@@ -6021,7 +6027,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       {/* Persistent desktop rail. Below 1024px beacon.css parks it off-canvas
           with visibility:hidden, so it leaves the tab order entirely and the
           <Sheet> below is the only reachable navigation. */}
-      <nav className="bx-rail" aria-label="Primary">
+      <nav
+        className="bx-rail"
+        aria-label="Primary"
+        data-hover-armed={railHoverArmed ? "true" : "false"}
+        onPointerLeave={() => setRailHoverArmed(true)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setRailHoverArmed(true);
+        }}
+      >
         {navBody(pipelineRef)}
       </nav>
 

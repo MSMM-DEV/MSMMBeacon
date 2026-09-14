@@ -119,10 +119,6 @@ button:disabled { cursor: not-allowed; }
     content: ""; position: absolute; inset-block: 0; right: 100%; width: 18px; pointer-events: none;
     background: linear-gradient(to right, transparent, var(--pin-shadow));
   }
-  .bx-shell[data-collapsed="true"] .bx-rail { width: var(--sidebar-w); clip-path: inset(0 calc(var(--sidebar-w) - var(--sidebar-w-collapsed)) 0 0); transition: clip-path var(--dur-normal) var(--ease-out); }
-  .bx-shell[data-collapsed="true"] .bx-rail:hover,
-  .bx-shell[data-collapsed="true"] .bx-rail:has(:focus-visible) { clip-path: inset(0); }
-  .bx-shell[data-collapsed="true"] .bx-rail-foot { width: calc(var(--sidebar-w) - 24px); }
 }
 @media (max-width: 1023px) {
   .bx-main { grid-column: 1; }
