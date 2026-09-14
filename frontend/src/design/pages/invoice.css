@@ -25,11 +25,28 @@
 .invoice-period-explanation { flex: 1 1 360px; align-self: center; padding-top: 12px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
 .invoice-workspace .invoice-top-scroll { background: var(--surface-2); height: 14px; scrollbar-color: var(--border-strong) var(--surface-2); }
 .invoice-workspace .invoice-wrap { width: 100%; max-width: 100%; overscroll-behavior-x: contain; scrollbar-color: var(--border-strong) var(--surface-2); }
-.invoice-workspace .invoice-table { font-size: 13px; font-variant-numeric: tabular-nums; --inv-rem-w: 156px; }
-.invoice-workspace .invoice-table :is(th,td).inv-pin-ytd { min-width: 156px; }
-.invoice-workspace .invoice-table:is(.inv-mode-active, .inv-mode-between, .inv-mode-closed) { --inv-act-w: 120px; }
+.invoice-workspace .invoice-table { font-size: 13px; font-variant-numeric: tabular-nums; --inv-rem-w: 124px; }
+.invoice-workspace .invoice-table :is(th,td).inv-pin-ytd { width: 124px; min-width: 124px; max-width: 124px; }
+.invoice-workspace .invoice-table.inv-mode-active,
+.invoice-workspace .invoice-table.inv-mode-closed { --inv-act-w: 84px; }
+.invoice-workspace .invoice-table.inv-mode-between { --inv-act-w: 108px; }
+.invoice-workspace .invoice-table :is(th,td):is(.inv-pin-ytd,.inv-pin-rem) { padding-inline: 6px; }
+.invoice-workspace .invoice-table :is(th,td).inv-pin-act { padding-inline: 4px; }
 .invoice-workspace .inv-act-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
 .invoice-workspace .inv-act-btns .invoice-workflow-action { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 32px; height: auto; padding: 6px; gap: 6px; font: 500 12px var(--font-body); border: 1px solid var(--border); background: var(--surface); }
+@media (min-width: 901px) {
+  .invoice-workspace .inv-act-btns { gap: 2px; }
+  .invoice-workspace .inv-act-btns .invoice-workflow-action {
+    width: 22px;
+    min-height: 22px;
+    height: 22px;
+    padding: 0;
+    gap: 0;
+    border: 0;
+    background: transparent;
+    font-size: 0;
+  }
+}
 .invoice-workspace .invoice-table thead th { background: var(--surface-2); color: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; line-height: 1.45; padding-top: 14px; padding-bottom: 14px; }
 .invoice-workspace .invoice-table td { padding-top: 12px; padding-bottom: 12px; border-bottom-color: var(--border); color: var(--text); }
 .invoice-workspace .invoice-table td.sticky-1, .invoice-workspace .invoice-table td.sticky-2 { background: var(--surface); }
