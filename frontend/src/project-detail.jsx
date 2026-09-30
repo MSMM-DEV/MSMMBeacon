@@ -156,8 +156,16 @@ export function ProjectDetailPage({
   updateItem,                                          // (id, patch) => void   (App's updateProjectItemRow)
   onAddItemSub, onUpdateItemSub, onRemoveItemSub,      // sub handlers keyed on item id
   onDeleteItem, onAddChild,                            // (id) => void / (parentId) => void
+  sections = null,                                     // allowed section keys (access.js); null = all
 }) {
-  const [tab, setTab] = useState("overview");
+  // Sections this person may open. Unknown / hidden keys never render, and
+  // every in-page jump (Overview shortcuts, "open notes") routes through
+  // `goTo`, so a hidden section can't be reached sideways.
+  const visibleTabs = sections ? TABS.filter(t => sections.includes(t.key)) : TABS;
+  const [tabRaw, setTabRaw] = useState(() => visibleTabs[0]?.key || "overview");
+  const tab = visibleTabs.some(t => t.key === tabRaw) ? tabRaw : (visibleTabs[0]?.key || "overview");
+  const setTab = (key) => { if (visibleTabs.some(t => t.key === key)) setTabRaw(key); };
+  const canSee = (key) => visibleTabs.some(t => t.key === key);
   const subtree = useMemo(() => buildSubtree(items, project.id), [items, project.id]);
   const subtreeIds = useMemo(() => subtree.map(n => n.id), [subtree]);
   const nodeOptions = useMemo(
@@ -210,7 +218,7 @@ export function ProjectDetailPage({
 
         <Tabs value={tab} onValueChange={setTab} className="pdx-tabs">
           <TabsList variant="underline" aria-label="Project sections">
-            {TABS.map(t => (
+            {visibleTabs.map(t => (
               <TabsTrigger key={t.key} value={t.key}>
                 <Icon name={t.icon} size={14}/>
                 <span>{t.label}</span>
@@ -220,7 +228,7 @@ export function ProjectDetailPage({
 
           <div className="pdx-body">
             <TabsContent value="overview">
-              <OverviewTab project={project} subtree={subtree} onNavigate={setTab}/>
+              <OverviewTab project={project} subtree={subtree} onNavigate={setTab} canSee={canSee}/>
             </TabsContent>
             <TabsContent value="structure">
               <StructureTab subtree={subtree} project={project} updateItem={updateItem} onAddChild={onAddChild}/>
@@ -229,7 +237,7 @@ export function ProjectDetailPage({
               <InvoicesTab project={project} invoiceTableProps={invoiceTableProps}/>
             </TabsContent>
             <TabsContent value="documents">
-              <DocumentsTab onOpenNotes={() => setTab("notes")}/>
+              <DocumentsTab onOpenNotes={canSee("notes") ? () => setTab("notes") : null}/>
             </TabsContent>
             <TabsContent value="todos">
               <TodosTab subtreeIds={subtreeIds} nodeOptions={nodeOptions} rootId={project.id}/>
@@ -250,14 +258,19 @@ export function ProjectDetailPage({
 }
 
 // ── Overview — existing project information and contextual section links ───
-function OverviewTab({ project, subtree, onNavigate }) {
+function OverviewTab({ project, subtree, onNavigate, canSee = () => true }) {
+  const shortcuts = [
+    { key: "invoices", icon: "trend", title: "Project invoices", description: "Review monthly billing and projections" },
+    { key: "todos", icon: "checklist", title: "Team to-dos", description: "Assign work and track what is open" },
+    { key: "notes", icon: "note", title: "Notes & attachments", description: "Keep decisions and files with the project" },
+  ].filter(link => canSee(link.key));
   const phases = subtree.length - 1;
   return (
     <div className="pdx-pane pdx-overview">
       <div className="pdx-overview-main">
       <section className="pdx-section" aria-labelledby="pdx-overview-record">
         <SectionHead title="Project at a glance" id="pdx-overview-record">
-          <Button variant="ghost" size="sm" onClick={() => onNavigate("settings")}><Icon name="edit" size={14}/>Edit details</Button>
+          {canSee("settings") && <Button variant="ghost" size="sm" onClick={() => onNavigate("settings")}><Icon name="edit" size={14}/>Edit details</Button>}
         </SectionHead>
         <dl className="pdx-deflist">
           <div className="pdx-def">
@@ -288,7 +301,7 @@ function OverviewTab({ project, subtree, onNavigate }) {
       </section>
       <section className="pdx-section" aria-labelledby="pdx-overview-phases">
         <SectionHead title="Work structure" count={phases} id="pdx-overview-phases">
-          <Button variant="ghost" size="sm" onClick={() => onNavigate("structure")}>View financial breakdown<Icon name="forward" size={14}/></Button>
+          {canSee("structure") && <Button variant="ghost" size="sm" onClick={() => onNavigate("structure")}>View financial breakdown<Icon name="forward" size={14}/></Button>}
         </SectionHead>
         <p className="pdx-section-copy">Project phases and subphases, in their working hierarchy.</p>
         <ul className="pdx-overview-tree">
@@ -311,16 +324,14 @@ function OverviewTab({ project, subtree, onNavigate }) {
             <div><dt>Complete</dt><dd className="num">{project.percentComplete == null ? DASH : `${project.percentComplete}%`}</dd></div>
           </dl>
         </section>
+        {shortcuts.length > 0 && (
         <section className="pdx-section">
           <SectionHead title="Continue working"/>
           <div className="pdx-shortcuts">
-            {[
-              { key: "invoices", icon: "trend", title: "Project invoices", description: "Review monthly billing and projections" },
-              { key: "todos", icon: "checklist", title: "Team to-dos", description: "Assign work and track what is open" },
-              { key: "notes", icon: "note", title: "Notes & attachments", description: "Keep decisions and files with the project" },
-            ].map(link => <button key={link.key} type="button" onClick={() => onNavigate(link.key)}><Icon name={link.icon} size={18}/><span><strong>{link.title}</strong><small>{link.description}</small></span><Icon name="forward" size={14}/></button>)}
+            {shortcuts.map(link => <button key={link.key} type="button" onClick={() => onNavigate(link.key)}><Icon name={link.icon} size={18}/><span><strong>{link.title}</strong><small>{link.description}</small></span><Icon name="forward" size={14}/></button>)}
           </div>
         </section>
+        )}
       </aside>
     </div>
   );
@@ -534,7 +545,7 @@ function DocumentsTab({ onOpenNotes }) {
         icon={GLYPH_DOCUMENTS}
         title="Keep project files with your notes"
         description="The dedicated document library is not available yet. Use a project note to attach contracts, drawings and correspondence with the context your team needs."
-        action={<Button onClick={onOpenNotes}><Icon name="note" size={15}/>Open notes & attachments</Button>}
+        action={onOpenNotes ? <Button onClick={onOpenNotes}><Icon name="note" size={15}/>Open notes & attachments</Button> : null}
       />
     </div>
   );

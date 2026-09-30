@@ -29,6 +29,8 @@ import { TimeAdminTab } from "./timekeeping/TimeAdminTab.jsx";
 import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { ProjectDetailPage } from "./project-detail.jsx";
+import { UserAccessPage } from "./user-access.jsx";
+import { createAccess, normalizeAccessConfig } from "./access.js";
 import { exportPDF, drawStar } from "./utils/pdf.js";
 import { isChunkLoadError } from "./utils/lazy-chunk.js";
 import {
@@ -77,7 +79,7 @@ import {
   mergeInvoiceYears, adaptInvoiceRow, monthDescsForWindow, defaultWindowStartAbs, WINDOW_SIZE,
   getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
   routeClientPick, routePrimePick, linkedProjectsFor,
-  supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword,
+  supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword, loadMyAccess,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
   upsertSubInvoiceAmount, reloadInvoiceArtifacts, reloadInvoicePartyFiles, addProjectSub, updateProjectSub, removeProjectSub,
@@ -151,6 +153,7 @@ const TAB_META = [
   { key: "timesheet", label: "Time & Leave",  stage: "stage-events"    },
   { key: "time-admin",label: "Time Admin",    stage: "stage-events", adminOnly: true },
   { key: "team-cal",  label: "Team Calendar", stage: "stage-events"    },
+  { key: "user-access", label: "User Management", stage: "stage-events", adminOnly: true },
 ];
 
 // One entry per navbar pill. `tabs` lists the member tab keys in sub-tab
@@ -170,28 +173,45 @@ const NAV_GROUPS = [
   // alert emails and the Dispatch Desk still render the page (and its sub-tab
   // strip) — it is just not navigable. Nothing was removed from the DB.
   // Drop `hidden` to put the pill back.
-  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "pipeline", tabs: ["hotleads", "openbids", "leads-deleted"], hidden: true },
-  { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "pipeline", tabs: ["awaiting", "awarded", "proposals-deleted"] },
-  { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "pipeline", tabs: ["invoice", "between", "closed"] },
-  { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "side", tabs: ["projects"] },
-  { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "side", tabs: ["events"] },
-  { key: "directory", label: "Directory",           stage: "stage-clients",   group: "side", tabs: ["directory"] },
-  { key: "licenses",  label: "Licenses",            stage: "stage-events",    group: "side", tabs: ["licenses"] },
-  { key: "timesheet", label: "Time & Leave",        stage: "stage-events",    group: "side", tabs: ["timesheet"] },
-  { key: "team-cal",  label: "Team Calendar",       stage: "stage-events",    group: "side", tabs: ["team-cal"] },
+  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "engineering", tabs: ["hotleads", "openbids", "leads-deleted"], hidden: true },
+  { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "engineering", tabs: ["awaiting", "awarded", "proposals-deleted"] },
+  { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "engineering", tabs: ["invoice", "between", "closed"] },
+  { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "workspace", tabs: ["projects"] },
+  { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "workspace", tabs: ["events"] },
+  { key: "directory", label: "Directory",           stage: "stage-clients",   group: "workspace", tabs: ["directory"] },
+  { key: "licenses",  label: "Licenses",            stage: "stage-events",    group: "operations", tabs: ["licenses"] },
+  { key: "timesheet", label: "Time & Leave",        stage: "stage-events",    group: "time", tabs: ["timesheet"] },
+  { key: "team-cal",  label: "Team Calendar",       stage: "stage-events",    group: "admin", tabs: ["team-cal"] },
   { key: "time-admin",label: "Time Admin",          stage: "stage-events",    group: "admin", tabs: ["time-admin"], adminOnly: true },
+  { key: "user-access", label: "User Management",   stage: "stage-events",    group: "admin", tabs: ["user-access"], adminOnly: true },
 ];
 const navGroupOf = (tabKey) => NAV_GROUPS.find(g => g.tabs.includes(tabKey));
 
+// Where to land someone whose saved / requested tab they can't see: the
+// usual default (Invoice) first, then sidebar order, then the link-only
+// pages. access.firstTab() falls back to Time & Leave, which everyone has.
+const TAB_FALLBACK_ORDER = [
+  "invoice",
+  ...NAV_GROUPS.filter(g => !g.hidden).flatMap(g => g.tabs),
+  ...NAV_GROUPS.filter(g => g.hidden).flatMap(g => g.tabs),
+  ...TAB_META.map(t => t.key),
+];
+
 // Rail sections, in render order. `group` matches NAV_GROUPS[].group and
 // `flow` opts the section into the pipeline connector hairlines. A section
-// whose visible-item list comes back empty (Admin, for a non-admin) is not
+// whose visible-item list comes back empty (e.g. a workflow outside someone's
+// access, see access.js) is not
 // rendered at all, heading included.
+// Sections mirror the access workflows in access.js (ACCESS_TREE), so the
+// sidebar reads the same as Admin → User Management.
 const RAIL_SECTIONS = [
-  { group: "pipeline", label: "Pipeline",  flow: "pipeline" },
-  { group: "side",     label: "Workspace" },
-  { group: "admin",    label: "Admin"     },
+  { group: "engineering", label: "Engineering", flow: "pipeline" },
+  { group: "workspace",   label: "Workspace" },
+  { group: "operations",  label: "Management & Operations" },
+  { group: "admin",       label: "Admin" },
+  { group: "time",        label: "Time & Leave" },
 ];
+const railSectionLabel = (group) => RAIL_SECTIONS.find(sec => sec.group === group)?.label || "Workspace";
 
 // Rail glyphs, keyed by NAV_GROUPS.key. Presentation only: the collapsed rail
 // is icon-first, so every navigable group needs one. Names resolve against the
@@ -229,6 +249,8 @@ const NAV_ICONS = {
   timesheet:   "timer",
   "time-admin":"sliders",
   "team-cal":  "userCheck",
+  // `key`: an outline nothing else on the rail shares, and it reads as access.
+  "user-access": "key",
 };
 
 // localStorage key for the desktop rail's collapsed state. This is a per-device
@@ -291,6 +313,7 @@ const PAGE_META = {
   // event dialog says "Read only" on its face. The blurb was onboarding copy
   // sitting above the thing it described.
   "team-cal":  { title: "Team Calendar", desc: "" },
+  "user-access": { title: "User Management", desc: "Choose what each person sees in Beacon, down to the workflow, page, tab and sub-tab. Time & Leave is always available." },
 };
 
 const DEFAULT_TWEAKS = {
@@ -1249,8 +1272,39 @@ const InvoiceExportModal = ({
 // ======================================================================
 // Main App
 // ======================================================================
-function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
+function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCurrentUser }) {
   const isAdmin = currentUser?.role === "Admin";
+  // ---- Interface access (who sees which workflow / page / tab / sub-tab).
+  // Rules live in access.js; this is only the enforcement wiring. Re-read on
+  // focus so an Admin's change reaches a signed-in person without a reload.
+  const [accessState, setAccessState] = useState(initialAccess || { row: null, failed: false });
+  const access = useMemo(
+    () => createAccess({ isAdmin, config: normalizeAccessConfig(accessState.row), failed: accessState.failed }),
+    [isAdmin, accessState]
+  );
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let busy = false;
+    const refresh = async () => {
+      if (busy || document.visibilityState === "hidden") return;
+      busy = true;
+      try {
+        const next = await loadMyAccess(currentUser.id);
+        // A transient failure never downgrades a view that already loaded.
+        if (!next.failed) {
+          setAccessState(prev =>
+            JSON.stringify(prev.row) === JSON.stringify(next.row) && !prev.failed ? prev : next);
+        }
+      } catch { /* offline — keep the access already in hand */ }
+      finally { busy = false; }
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [currentUser?.id]);
   const userDisplayName =
     currentUser?.display_name
     || [currentUser?.first_name, currentUser?.last_name].filter(Boolean).join(" ").trim()
@@ -1328,7 +1382,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // after the admin panel mutates the roster. The value is read via a data
   // attribute below so unused-var lint stays happy; re-render is the goal.
   const [rosterTick, setRosterTick] = useState(0);
-  const [tab, setTab] = useState(() => {
+  const [tab, setTabRaw] = useState(() => {
+    const pick = (() => {
     // Mobile-first: when a user opens Beacon on a phone, the most common
     // intent is "punch in / out" — so we override the persisted desktop
     // tab and land them on Timesheet. URL ?tab=X deep links (handled in
@@ -1352,7 +1407,29 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     // handled in the effect below, after this initializer.
     if (saved === "hotleads" || saved === "openbids" || saved === "leads-deleted") return "invoice";
     return saved;
+    })();
+    // Never open onto a page this person can't see.
+    return access.canTab(pick) ? pick : access.firstTab(TAB_FALLBACK_ORDER);
   });
+  // Every navigation goes through here, so no path (rail, sub-tab strip,
+  // move-forward jumps, "Open in Invoice", Directory jumps, deep links) can
+  // land someone on a tab they don't have access to.
+  // Returns true when it navigated, so callers that also open a drawer for
+  // that page can skip it when the page isn't theirs to see.
+  const setTab = (next) => {
+    if (!access.canTab(next)) {
+      const label = TAB_META.find(t => t.key === next)?.label || "That page";
+      showToast(`${label} isn't part of your Beacon access.`, "lock");
+      return false;
+    }
+    setTabRaw(next);
+    return true;
+  };
+  // If access narrows while they're on a page (an Admin just changed it),
+  // move them to the first page they can still see.
+  useEffect(() => {
+    if (!access.canTab(tab)) setTabRaw(access.firstTab(TAB_FALLBACK_ORDER));
+  }, [access, tab]);
   // Deep-link landing: if the URL carries ?tab=X&rowId=Y (from an alert email),
   // record the row id until the target tab's rows are available, then auto-open
   // the detail drawer on it. Cleared after consumption so tab-switches don't
@@ -1398,8 +1475,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       const tabParam  = params.get("tab");
       const rowParam  = params.get("rowId");
       const dateParam = params.get("date");
-      if (tabParam && TAB_META.some(t => t.key === tabParam)) setTab(tabParam);
-      if (rowParam)  setPendingFocusRowId(rowParam);
+      const tabKnown = !!tabParam && TAB_META.some(t => t.key === tabParam);
+      if (tabKnown) setTab(tabParam);   // access-checked; toasts when not allowed
+      // Only chase the row when its tab is reachable for this person.
+      if (rowParam && (!tabParam || (tabKnown && access.canTab(tabParam)))) setPendingFocusRowId(rowParam);
       // Timesheet deep link uses ?tab=timesheet&date=YYYY-MM-DD (the
       // "tag your meeting" alert email goes here).
       if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
@@ -3373,8 +3452,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       // even for a project that has since been paused).
       if ((tab === "invoice" || tab === "between")) {
         const wantTab = match.billingState === "between" ? "between" : "invoice";
-        if (wantTab !== tab) setTab(wantTab);
-        openDrawer(match, "invoice");
+        if (!access.canTab(wantTab)) setTab(wantTab);   // refuses + explains
+        else {
+          if (wantTab !== tab) setTab(wantTab);
+          openDrawer(match, "invoice");
+        }
       } else {
         openDrawer(match, tab);
       }
@@ -3665,8 +3747,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const state = inv.billingState || "active";
     if (state === "closed") {
       const proj = inv.sourceId ? closed.find(p => p.id === inv.sourceId) : null;
-      setTab("closed");
-      if (proj) setDrawer({ row: proj, table: "closed" });
+      if (setTab("closed") && proj) setDrawer({ row: proj, table: "closed" });
       else showToast("This project is closed out; its billing rows are archived.", "check");
       return;
     }
@@ -5674,9 +5755,25 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // to anticipated_invoice), so match the root's local_id to invoice
   // projectNumber — the same merge key the Invoice tab uses. All billing states
   // are shown (the detail view is the project's complete billing).
+  const canOpenProjectDetail = access.can("tab.project-detail");
   const detailLive = useMemo(
-    () => detailProject ? projectItems.find(p => p.id === detailProject.id) || null : null,
-    [detailProject, projectItems]);
+    () => (detailProject && canOpenProjectDetail) ? projectItems.find(p => p.id === detailProject.id) || null : null,
+    [detailProject, projectItems, canOpenProjectDetail]);
+  // Project-detail sections this person may see (null = all).
+  const projectDetailSections = access.isRestricted
+    ? access.visibleChildren("tab.project-detail").map(c => c.section)
+    : null;
+  // Events List / Calendar views this person may see; falls back to the
+  // first allowed one when their saved view isn't.
+  const eventViews = access.visibleChildren("page.events").map(c => c.view);
+  const activeEventsView = eventViews.includes(eventsViewMode) ? eventsViewMode : (eventViews[0] || "list");
+  // Settled for the WHOLE render: a tab this person can't see renders
+  // nothing for the instant before the redirect effect moves them.
+  const tabAllowed = access.canTab(tab);
+  // Admin → User Management can be opened for a specific person from the
+  // People drawer's "Manage page access".
+  const [accessEditUserId, setAccessEditUserId] = useState(null);
+  useEffect(() => { if (tab !== "user-access") setAccessEditUserId(null); }, [tab]);
   const detailInvoiceRows = useMemo(() => {
     if (!detailLive) return [];
     const key = normInvoiceNumber(detailLive.localId);
@@ -5839,11 +5936,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
       .filter(r => (r.billingState || "active") !== "closed")
       .reduce((a,r) => a + r.values.slice(0, actualThru + 1).reduce((x,y) => x + (y||0), 0), 0);
     return [
-      { label: "Total Proposal/Awarded", val: awd, sub: `${awarded.length} awarded`, spark: [5,5,6,7,6,7,8,9,10,11] },
-      { label: "In-Between",          val: btw, sub: `${paused.length} paused`,       spark: [4,4,3,4,3,3,4,3,3,4] },
-      { label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
+      // `tab` = the page whose data the card summarises; a card is only shown
+      // to people who can see that page (see visibleStats below).
+      { tab: "awarded", label: "Total Proposal/Awarded", val: awd, sub: `${awarded.length} awarded`, spark: [5,5,6,7,6,7,8,9,10,11] },
+      { tab: "between", label: "In-Between",          val: btw, sub: `${paused.length} paused`,       spark: [4,4,3,4,3,3,4,3,3,4] },
+      { tab: "invoice", label: "YTD billed (actual)", val: ytd, sub: actualThru >= 0 ? `Jan–${MONTHS[actualThru]} ${THIS_YEAR}` : `Pre-cutover · ${THIS_YEAR}`, spark: [1,2,3,3,4,5,6,7,8,9] },
     ];
   }, [awarded, invoice, invoiceMerged, actualThru]);
+  const visibleStats = stats.filter(s => !s.tab || access.canTab(s.tab));
 
   // Type-filter predicate for the Invoice sub-tab counts (mirrors InvoiceTable's
   // matchesType). Inactive when all types are selected → counts everything.
@@ -5900,18 +6000,24 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
   // as the H1 (the sub-tab strip below it names the section) and sum member
   // counts on the rail pill.
   const currentGroup = navGroupOf(tab) || null;
+  // Access-filtered views of the nav registry. A group (rail pill) shows when
+  // at least one of its tabs is visible to this person; its sub-tab strip
+  // lists only those tabs.
+  const visibleGroupTabs = (g) => g.tabs.filter(t => access.canTab(t));
+  const navGroupVisible = (g) => !g.hidden && (!g.adminOnly || isAdmin) && visibleGroupTabs(g).length > 0;
+  const currentGroupTabs = currentGroup ? visibleGroupTabs(currentGroup) : [];
   const groupCount = (g) => {
     // The rail pill counts only LIVE items — a page's "Deleted" sub-tab is an
     // archive, so it's excluded from the pill sum (it still shows its own count
     // on the sub-tab strip).
-    const vals = g.tabs
+    const vals = visibleGroupTabs(g)
       .filter(k => !k.endsWith("-deleted"))
       .map(k => tabCounts[k])
       .filter(v => v != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
   };
   const currentMeta = PAGE_META[tab];
-  const pageTitle = currentGroup && currentGroup.tabs.length > 1
+  const pageTitle = currentGroup && currentGroupTabs.length > 1
     ? currentGroup.label
     : (currentMeta?.title || "");
 
@@ -5922,11 +6028,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
     const g = navGroupOf(tab);
     if (g) lastSubTabRef.current[g.key] = tab;
   }, [tab]);
-  const gotoGroup = (g) => setTab(
-    (lastSubTabRef.current[g.key] && g.tabs.includes(lastSubTabRef.current[g.key]))
-      ? lastSubTabRef.current[g.key]
-      : g.tabs[0]
-  );
+  const gotoGroup = (g) => {
+    const allowed = visibleGroupTabs(g);
+    const last = lastSubTabRef.current[g.key];
+    setTab(last && allowed.includes(last) ? last : (allowed[0] || g.tabs[0]));
+  };
 
   // Does the current tab support "New X"? Proposals (awaiting) is a
   // first-class entry point (projects can start here without a prior
@@ -6001,9 +6107,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           // Same visibility rule every section had before: adminOnly pills are
           // filtered out for non-admins. A section left with nothing to show
           // renders nothing, so no empty labelled block is left behind.
-          const items = NAV_GROUPS.filter(
-            g => g.group === section.group && !g.hidden && (!g.adminOnly || isAdmin)
-          );
+          const items = NAV_GROUPS.filter(g => g.group === section.group && navGroupVisible(g));
           if (!items.length) return null;
           return (
             <div
@@ -6086,14 +6190,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </div>
           <DialogBody className="p-0">
             <div className="bx-jump-list">
-              {NAV_GROUPS.filter(group => !group.hidden && (!group.adminOnly || isAdmin) && group.label.toLowerCase().includes(jumpQuery.trim().toLowerCase())).map(group => (
+              {NAV_GROUPS.filter(group => navGroupVisible(group) && group.label.toLowerCase().includes(jumpQuery.trim().toLowerCase())).map(group => (
                 <button key={group.key} type="button" className="bx-jump-item" onClick={() => { gotoGroup(group); setJumpOpen(false); }}>
                   <Icon name={NAV_ICONS[group.key]} size={20}/>
-                  <span><strong>{group.label}</strong><small>{group.group === "pipeline" ? "Project lifecycle" : group.group === "admin" ? "Administration" : "Workspace"}</small></span>
+                  <span><strong>{group.label}</strong><small>{railSectionLabel(group.group)}</small></span>
                   <Icon name="forward" size={16}/>
                 </button>
               ))}
-              {!NAV_GROUPS.some(group => !group.hidden && (!group.adminOnly || isAdmin) && group.label.toLowerCase().includes(jumpQuery.trim().toLowerCase())) && <p className="p-5 text-muted-foreground">No matching pages. Try another name.</p>}
+              {!NAV_GROUPS.some(group => navGroupVisible(group) && group.label.toLowerCase().includes(jumpQuery.trim().toLowerCase())) && <p className="p-5 text-muted-foreground">No matching pages. Try another name.</p>}
             </div>
           </DialogBody>
           <div className="bx-workspace-shortcuts">Tab to move · Enter to open · Esc to close</div>
@@ -6192,6 +6296,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             project={detailLive}
             items={projectItems}
             onClose={() => setDetailProject(null)}
+            sections={projectDetailSections}
             updateItem={updateProjectItemRow}
             onAddItemSub={addProjectItemSubRow}
             onUpdateItemSub={updateProjectItemSubRow}
@@ -6239,10 +6344,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
             }}
           />
         )}
-        {!detailLive && (<>
+        {!detailLive && tabAllowed && (<>
         <div className={`bx-pagehead ${tab === "timesheet" ? "bx-pagehead-compact" : ""}`}>
           <div className="bx-pagehead-text">
-            <p className="bx-page-eyebrow">{currentGroup?.group === "pipeline" ? "Project lifecycle" : currentGroup?.group === "admin" ? "Administration" : "Your workspace"}</p>
+            <p className="bx-page-eyebrow">{railSectionLabel(currentGroup?.group)}</p>
             <h1 className="bx-pagetitle">{pageTitle}</h1>
             {/* Skipped entirely when a tab has no blurb. `.bx-pagedesc` carries
                 a 6px top margin, so an empty <p> still pushed the page down by
@@ -6304,10 +6409,10 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </div>
         </div>
 
-        {currentGroup && currentGroup.tabs.length > 1 && (
+        {currentGroup && currentGroupTabs.length > 1 && (
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="bx-page-tabs" aria-label={`${currentGroup.label} sections`}>
-              {(SUB_TABS[currentGroup.key] || []).map(st => (
+              {(SUB_TABS[currentGroup.key] || []).filter(st => access.canTab(st.key)).map(st => (
                 <TabsTrigger key={st.key} value={st.key}>
                   {st.icon && <Icon name={st.icon} size={14}/>}
                   {st.label}
@@ -6320,15 +6425,15 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           </Tabs>
         )}
 
-        {["awaiting","awarded","invoice","between","closed"].includes(tab) && (
+        {["awaiting","awarded","invoice","between","closed"].includes(tab) && visibleStats.length > 0 && (
           <details key={`financial-snapshot-${tab}`} className="bx-portfolio-summary" open={tab === "invoice"}>
             <summary><Icon name="chart" size={15}/><strong>Workspace financial snapshot</strong><span>Pipeline, paused work and actual billings</span><Icon name="chevronDown" size={15}/></summary>
           <section
             className="bx-metrics"
-            style={{ "--bx-metrics-cols": stats.length }}
+            style={{ "--bx-metrics-cols": visibleStats.length }}
             aria-label="Pipeline summary"
           >
-            {stats.map((s, i) => (
+            {visibleStats.map((s, i) => (
               <div key={i} className="bx-metric">
                 <h2 className="bx-metric-label">{s.label}</h2>
                 <p className="bx-metric-value num">{fmtMoney(s.val, false)}</p>
@@ -6796,7 +6901,13 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
           <ProjectsTable
             items={projectItems}
             updateRow={updateProjectItemRow}
-            onOpenProject={(row) => setDetailProject(row)}
+            onOpenProject={(row) => {
+              if (!canOpenProjectDetail) {
+                showToast("Project details aren't part of your Beacon access.", "lock");
+                return;
+              }
+              setDetailProject(row);
+            }}
             onOpenDrawer={r => openDrawer(r, "projects")}
             onAddChild={(parentId) => openNewProject(parentId)}
             onDelete={deleteProjectItemRow}
@@ -6810,8 +6921,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
         )}
         {tab === "events" && (
           <>
+            {eventViews.length > 1 && (
             <div className="bx-viewswitch">
-              <Tabs value={eventsViewMode} onValueChange={setEventsViewMode}>
+              <Tabs value={activeEventsView} onValueChange={setEventsViewMode}>
                 <TabsList variant="segmented" aria-label="Events view">
                   <TabsTrigger value="list">
                     <Icon name="columns" size={14}/> List
@@ -6822,7 +6934,8 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 </TabsList>
               </Tabs>
             </div>
-            {eventsViewMode === "list" ? (
+            )}
+            {activeEventsView === "list" ? (
               <EventsTable rows={filtered.events}
                 updateRow={updateEvents}
                 onOpenDrawer={r => openDrawer(r, "events")}
@@ -6897,8 +7010,9 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
                 statusKey === "closed"    ? closed    : [];
               const target = slice.find(p => p.id === projectId);
               if (!target) return;
-              setTab(statusKey);
-              setDrawer({ row: target, table: statusKey });
+              // setTab toasts + refuses when the stage isn't in their access;
+              // don't open that stage's drawer over the Directory either.
+              if (setTab(statusKey)) setDrawer({ row: target, table: statusKey });
             }}
             flashId={flashId}
             filters={chipsFor("directory")}
@@ -6923,6 +7037,14 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
         {tab === "team-cal" && (
           <TeamCalendarTab />
+        )}
+
+        {tab === "user-access" && isAdmin && (
+          <UserAccessPage
+            currentUser={currentUser}
+            initialUserId={accessEditUserId}
+            onToast={showToast}
+          />
         )}
         </>)}
         </main>
@@ -7102,8 +7224,7 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
               statusKey === "closed"    ? closed    : [];
             const target = slice.find(p => p.id === projectId);
             if (!target) return;
-            setTab(statusKey);
-            setDrawer({ row: target, table: statusKey });
+            if (setTab(statusKey)) setDrawer({ row: target, table: statusKey });
           }}
         />
         );
@@ -7373,6 +7494,11 @@ function BeaconApp({ initial, currentUser, onSignOut, onRefreshCurrentUser }) {
 
       {adminOpen && isAdmin && (
         <AdminPanel
+          onManageAccess={(row) => {
+            setAdminOpen(false);
+            setAccessEditUserId(row.id);
+            setTab("user-access");
+          }}
           tweaks={tweaks}
           setTweak={setTweak}
           currentUser={currentUser}
@@ -7442,14 +7568,23 @@ export default function App() {
   const [error, setError] = useState(null);
   const [data, setData]   = useState(null);
   const [beaconUser, setBeaconUser] = useState(null);
+  // The signed-in user's interface access ({ row, failed } from loadMyAccess).
+  // Loaded BEFORE BeaconApp mounts so the first page rendered is already one
+  // they're allowed to see — no flash of a hidden page.
+  const [myAccess, setMyAccess] = useState(null);
 
   // Load the beacon workspace once we have a confirmed session + user row.
   const hydrate = async (bu) => {
     setBeaconUser(bu);
     setPhase("loading");
     try {
-      const d = await loadBeacon();
+      const [d, acc] = await Promise.all([
+        loadBeacon(),
+        // A thrown fetch fails closed (Time & Leave only) instead of blocking boot.
+        loadMyAccess(bu?.id).catch(() => ({ row: null, failed: true })),
+      ]);
       setData(d);
+      setMyAccess(acc);
       setPhase("ready");
     } catch (err) {
       setError(err);
@@ -7514,6 +7649,7 @@ export default function App() {
     (phase !== "ready" || !data)     ? <LoadingScreen/>                        :
     <BeaconApp
       initial={data}
+      initialAccess={myAccess}
       currentUser={beaconUser}
       onSignOut={handleSignOut}
       onRefreshCurrentUser={refreshCurrentUser}

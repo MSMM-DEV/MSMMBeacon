@@ -52,6 +52,7 @@
 @import "./pages/hotleads.css"      layer(beacon);
 @import "./pages/openbids.css"      layer(beacon);
 @import "./pages/admin.css"         layer(beacon);
+@import "./pages/user-access.css"   layer(beacon);
 @import "./pages/record-editors.css" layer(beacon);
 @import "./pages/between.css"       layer(beacon);
 @import "./pages/closed.css"        layer(beacon);

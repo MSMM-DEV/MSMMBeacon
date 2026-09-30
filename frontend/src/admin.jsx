@@ -47,6 +47,7 @@ export const AdminPanel = ({
   appSettings,
   onAppSettingsChange,
   alertSubjectLookup = {},
+  onManageAccess,          // (row) => void — opens Admin → User Management for that person
 }) => {
   const [tab, setTab] = useState("users");
   const [rows, setRows] = useState([]);
@@ -221,6 +222,7 @@ export const AdminPanel = ({
                             isSelf={r.id === currentUser?.id}
                             isLastAdmin={r.role === "Admin" && adminCount <= 1}
                             onChangePassword={() => setModal({ kind: "password", row: r })}
+                            onManageAccess={onManageAccess ? () => onManageAccess(r) : null}
                             onDelete={() => setModal({ kind: "delete", row: r })}
                             onToggleBan={() =>
                               runAction("set_ban", { beacon_user_id: r.id, banned: r.is_enabled },
@@ -340,7 +342,7 @@ export const AdminPanel = ({
 // creates a stacking context that trapped the old menu under every later row,
 // and rows near the sheet's bottom edge were clipped by its scroll container.
 // ----------------------------------------------------------------------------
-const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggleBan, onToggleRole }) => {
+const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onManageAccess, onDelete, onToggleBan, onToggleRole }) => {
   const banned = !row.is_enabled;
   const initials =
     (row.first_name?.[0] || "") + (row.last_name?.[0] || "")
@@ -397,6 +399,11 @@ const UserRow = ({ row, isSelf, isLastAdmin, onChangePassword, onDelete, onToggl
             <DropdownMenuItem onSelect={onChangePassword}>
               <Icon name="lock" size={14} /><span>Change password</span>
             </DropdownMenuItem>
+            {onManageAccess && (
+              <DropdownMenuItem onSelect={onManageAccess}>
+                <Icon name="key" size={14} /><span>Manage page access</span>
+              </DropdownMenuItem>
+            )}
 
             <DropdownMenuItem onSelect={onToggleRole} disabled={roleLocked}>
               <Icon name="shield" size={14} />

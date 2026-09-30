@@ -183,6 +183,71 @@ export async function fetchCurrentBeaconUser() {
 }
 
 // ----------------------------------------------------------------------
+// Per-user interface access (beacon_v2.user_access, migration
+// 20260930120000). The rules live in access.js; these only move rows.
+// No row = full access, so an un-migrated DB behaves exactly as before.
+// ----------------------------------------------------------------------
+const isMissingTableError = (error) =>
+  !!error && (
+    error.code === "42P01" || error.code === "PGRST205" || error.code === "PGRST106"
+    || /does not exist|schema cache/i.test(error.message || "")
+  );
+
+// The signed-in user's own row. Returns { row, failed }:
+//   row    — the stored { mode, grants, seen } or null (no row / no table)
+//   failed — true when the read failed for any OTHER reason; the app then
+//            fails closed (Time & Leave only) rather than guessing.
+export async function loadMyAccess(userId) {
+  if (!userId) return { row: null, failed: false };
+  const read = () => supabase
+    .from("user_access")
+    .select("user_id, mode, grants, seen, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  let { data, error } = await read();
+  // One retry before failing closed, so a single network blip at sign-in
+  // doesn't lock someone down to Time & Leave.
+  if (error && !isMissingTableError(error)) ({ data, error } = await read());
+  if (error) {
+    if (isMissingTableError(error)) return { row: null, failed: false };
+    console.error("[access] could not load user access", error);
+    return { row: null, failed: true };
+  }
+  return { row: data || null, failed: false };
+}
+
+// Admin: every user's row, keyed by user id. `available=false` means the
+// migration hasn't been applied yet (the editor then explains that).
+export async function loadAllUserAccess() {
+  const { data, error } = await supabase
+    .from("user_access")
+    .select("user_id, mode, grants, seen, updated_at, updated_by");
+  if (error) {
+    if (isMissingTableError(error)) return { byUser: {}, available: false };
+    throw new Error(error.message);
+  }
+  return { byUser: Object.fromEntries((data || []).map(r => [r.user_id, r])), available: true };
+}
+
+// Admin: upsert one user's access. `config` = { mode, grants, seen }.
+export async function saveUserAccess(userId, config) {
+  const payload = {
+    user_id: userId,
+    mode: config.mode === "custom" ? "custom" : "full",
+    grants: config.mode === "custom" ? (config.grants || []) : [],
+    seen: config.mode === "custom" ? (config.seen || []) : [],
+    updated_by: _currentBeaconUser?.id || null,
+  };
+  const { data, error } = await supabase
+    .from("user_access")
+    .upsert(payload, { onConflict: "user_id" })
+    .select("user_id, mode, grants, seen, updated_at, updated_by")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// ----------------------------------------------------------------------
 // Module-level caches — populated by loadBeacon(). Static for the session.
 // Consumers read via companyById() / userById() / getCompanies() / getUsers().
 // ----------------------------------------------------------------------
