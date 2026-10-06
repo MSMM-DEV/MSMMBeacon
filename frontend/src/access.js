@@ -80,7 +80,7 @@ export const ACCESS_TREE = [
         ],
       },
       {
-        key: "page.leads", kind: "page", label: "Leads & Bids", requiresChild: true, hiddenFromNav: true,
+        key: "page.leads", kind: "page", label: "Leads & Bids", requiresChild: true,
         children: [
           { key: "tab.hotleads",      kind: "tab", label: "Hot Leads", tab: "hotleads" },
           { key: "tab.openbids",      kind: "tab", label: "Open Bids", tab: "openbids" },

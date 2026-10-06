@@ -168,12 +168,7 @@ const NAV_GROUPS = [
   // Leads & Bids → Proposals → Awarded → Invoice ⇄ In-Between → Closed Out.
   // The "potential" TAB KEY stays valid (deep links + Directory project
   // jumps still render the hidden page); it's just not navigable from here.
-  // Leads & Bids is HIDDEN from the rail (2026-08). Same treatment Potential
-  // got: the tab keys stay valid so `?tab=hotleads&rowId=` deep links from
-  // alert emails and the Dispatch Desk still render the page (and its sub-tab
-  // strip) — it is just not navigable. Nothing was removed from the DB.
-  // Drop `hidden` to put the pill back.
-  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "engineering", tabs: ["hotleads", "openbids", "leads-deleted"], hidden: true },
+  { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "engineering", tabs: ["hotleads", "openbids", "leads-deleted"] },
   { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "engineering", tabs: ["awaiting", "awarded", "proposals-deleted"] },
   { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "engineering", tabs: ["invoice", "between", "closed"] },
   { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "workspace", tabs: ["projects"] },
@@ -1401,11 +1396,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     // remap to "invoice".
     if (saved === "clients" || saved === "companies") return "directory";
     if (saved === "soq" || saved === "quad") return "invoice";
-    // Leads & Bids was hidden from the rail (2026-08). A user whose last
-    // session ended there would otherwise reopen onto a page they can no
-    // longer navigate back to. Explicit ?tab= deep links still win — they are
-    // handled in the effect below, after this initializer.
-    if (saved === "hotleads" || saved === "openbids" || saved === "leads-deleted") return "invoice";
     return saved;
     })();
     // Never open onto a page this person can't see.
@@ -5922,9 +5912,8 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   }));
 
   const stats = useMemo(() => {
-    // No Hot Leads card: Leads & Bids is hidden from the app (2026-08), so a
-    // summary of it has nowhere to lead. The lead rows themselves are
-    // untouched in the DB.
+    // The Pipeline summary remains focused on proposal, paused-contract and
+    // billing totals; Leads & Bids has its own quick view on the Hot Leads tab.
     const awd = awarded.reduce((a,r) => a + (r.msmmRemaining || 0), 0);
     // In-Between: paused projects (merged) — contract value sitting on hold.
     const paused = invoiceMerged.filter(r => r.billingState === "between");

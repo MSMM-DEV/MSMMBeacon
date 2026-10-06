@@ -22,6 +22,14 @@ test("every App tab key maps to an access node", () => {
   for (const t of APP_TABS) assert.ok(accessNodeForTab(t), `missing node for tab ${t}`);
 });
 
+test("Leads & Bids is a visible page, not a link-only destination", () => {
+  const page = ACCESS_TREE
+    .flatMap(workflow => workflow.children || [])
+    .find(node => node.key === "page.leads");
+  assert.ok(page, "missing Leads & Bids access page");
+  assert.notEqual(page.hiddenFromNav, true);
+});
+
 test("no config = today's behaviour: everything but admin-only pages", () => {
   const a = createAccess({ isAdmin: false, config: null });
   assert.equal(a.mode, "full");
