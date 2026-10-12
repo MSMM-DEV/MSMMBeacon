@@ -11,13 +11,12 @@ test("cutover retargets every client-role table to companies", () => {
     assert.match(sql, new RegExp(`alter table beacon_v2\\.${table}[\\s\\S]+references beacon_v2\\.companies\\(id\\)`, "i"));
   }
   assert.match(sql, /alter table beacon_v2\.contacts[\s\S]+drop column[\s\S]+client_id/i);
-  assert.match(sql, /drop column[\s\S]+prime_client_id/i);
+  assert.doesNotMatch(sql, /prime_client_id/i);
 });
 
-test("preflight calls out district collisions and conflicting primes", () => {
+test("preflight matches the actual v2 projects shape", () => {
   assert.match(preflight, /district/i);
-  assert.match(preflight, /prime_client_id/i);
-  assert.match(preflight, /prime_company_id/i);
+  assert.doesNotMatch(preflight, /prime_client_id/i);
   assert.match(preflight, /profile_conflict/i);
   assert.match(preflight, /candidate_count/i);
 });

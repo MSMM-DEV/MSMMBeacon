@@ -12,7 +12,6 @@ select 'counts' as report, jsonb_build_object(
   'client_contacts',  (select count(*) from beacon_v2.contacts where client_id is not null),
   'company_contacts', (select count(*) from beacon_v2.contacts where company_id is not null),
   'project_clients',  (select count(*) from beacon_v2.projects where client_id is not null),
-  'project_primes_from_clients', (select count(*) from beacon_v2.projects where prime_client_id is not null),
   'lead_clients',     (select count(*) from beacon_v2.leads where client_id is not null),
   'bid_clients',      (select count(*) from beacon_v2.open_bids where client_id is not null),
   'item_clients',     (select count(*) from beacon_v2.project_items where client_id is not null)
@@ -179,15 +178,6 @@ select 'profile_conflict_between_clients' as report,
 having count(distinct d.client_value) > 1
  order by f.name, d.field_name;
 
--- Both prime columns populated is legal under old data only when they resolve
--- to the same organization. The migration refuses differing values.
-select 'conflicting_prime_columns' as report,
-       id, project_name, prime_client_id, prime_company_id
-  from beacon_v2.projects
- where prime_client_id is not null
-   and prime_company_id is not null
- order by project_name;
-
 -- Contact-primary convergence: these destinations need deterministic primary
 -- selection after client contacts move onto an existing company.
 with exact_map as (
@@ -214,7 +204,6 @@ having count(*) > 1;
 -- Existing orphan checks should all return zero. Non-zero values block cutover.
 select 'orphan_counts' as report, jsonb_build_object(
   'project_clients', (select count(*) from beacon_v2.projects p left join beacon_v2.clients c on c.id = p.client_id where p.client_id is not null and c.id is null),
-  'project_prime_clients', (select count(*) from beacon_v2.projects p left join beacon_v2.clients c on c.id = p.prime_client_id where p.prime_client_id is not null and c.id is null),
   'lead_clients', (select count(*) from beacon_v2.leads l left join beacon_v2.clients c on c.id = l.client_id where l.client_id is not null and c.id is null),
   'bid_clients', (select count(*) from beacon_v2.open_bids b left join beacon_v2.clients c on c.id = b.client_id where b.client_id is not null and c.id is null),
   'item_clients', (select count(*) from beacon_v2.project_items i left join beacon_v2.clients c on c.id = i.client_id where i.client_id is not null and c.id is null),

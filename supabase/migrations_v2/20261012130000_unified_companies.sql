@@ -205,19 +205,7 @@ begin
     from profile p
    where f.id = p.company_id;
 
-  -- Conflicting dual-prime rows require an operator decision; do not guess.
-  if exists (
-    select 1
-      from beacon_v2.projects p
-      join tmp_company_map m on m.client_id = p.prime_client_id
-     where p.prime_company_id is not null
-       and p.prime_company_id <> m.company_id
-  ) then
-    raise exception 'company cutover: conflicting prime_client_id and prime_company_id; resolve the preflight report first';
-  end if;
-
   alter table beacon_v2.projects drop constraint if exists projects_client_id_fkey;
-  alter table beacon_v2.projects drop constraint if exists projects_prime_client_id_fkey;
   alter table beacon_v2.leads drop constraint if exists leads_client_id_fkey;
   alter table beacon_v2.open_bids drop constraint if exists open_bids_client_id_fkey;
   alter table beacon_v2.project_items drop constraint if exists project_items_client_id_fkey;
@@ -231,12 +219,6 @@ begin
     from tmp_company_map m where b.client_id = m.client_id;
   update beacon_v2.project_items i set client_id = m.company_id
     from tmp_company_map m where i.client_id = m.client_id;
-
-  update beacon_v2.projects p
-     set prime_company_id = coalesce(p.prime_company_id, m.company_id),
-         prime_client_id = null
-    from tmp_company_map m
-   where p.prime_client_id = m.client_id;
 
   -- Move contacts without violating the one-primary-per-company index. Retain
   -- an existing company primary; otherwise prefer an incoming primary, then ord.
@@ -280,10 +262,6 @@ begin
   drop index if exists beacon_v2.contacts_client_primary_uniq;
   alter table beacon_v2.contacts drop column if exists client_id;
   alter table beacon_v2.contacts alter column company_id set not null;
-
-  alter table beacon_v2.projects drop constraint if exists projects_prime_at_most_one;
-  drop index if exists beacon_v2.projects_prime_client_idx;
-  alter table beacon_v2.projects drop column if exists prime_client_id;
 
   alter table beacon_v2.projects
     add constraint projects_client_id_fkey foreign key (client_id)
