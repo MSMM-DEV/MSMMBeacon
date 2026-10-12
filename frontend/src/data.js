@@ -5524,7 +5524,14 @@ export async function addMarketingContact(input = {}) {
 export async function updateMarketingContact(opportunityId, contactId, patch = {}) {
   const dbPatch = {};
   if ("role" in patch) dbPatch.role = patch.role || "Other";
-  if ("isPrimary" in patch) dbPatch.is_primary = !!patch.isPrimary;
+  if ("isPrimary" in patch) {
+    dbPatch.is_primary = !!patch.isPrimary;
+    if (patch.isPrimary) {
+      const { error: clearError } = await supabase.from("marketing_opportunity_contacts")
+        .update({ is_primary: false }).eq("opportunity_id", opportunityId).neq("contact_id", contactId);
+      throwMarketingError(clearError, "update primary Marketing contact");
+    }
+  }
   if ("notes" in patch) dbPatch.notes = String(patch.notes || "").trim() || null;
   const { data, error } = await supabase.from("marketing_opportunity_contacts")
     .update(dbPatch).eq("opportunity_id", opportunityId).eq("contact_id", contactId)

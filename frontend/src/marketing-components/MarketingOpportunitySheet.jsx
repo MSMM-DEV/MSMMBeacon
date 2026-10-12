@@ -7,13 +7,19 @@ import {
 } from "@/ui";
 import { Icon } from "../icons.jsx";
 import {
+  addContact,
+  addMarketingContact,
   archiveMarketingOpportunity,
   loadMarketingOpportunityFresh,
+  removeMarketingContact,
   restoreMarketingOpportunity,
+  updateMarketingContact,
   updateMarketingOpportunity,
 } from "../data.js";
-import { MarketingConflictError } from "../marketing-model.js";
+import { MARKETING_CONTACT_ROLES, MarketingConflictError } from "../marketing-model.js";
 import { attemptMarketingSectionSave, changedMarketingFields } from "./marketing-sheet-model.js";
+import { MarketingActivityPanel } from "./MarketingActivityPanel.jsx";
+import { MarketingTaskPanel } from "./MarketingTaskPanel.jsx";
 
 const SECTIONS = [
   { key: "overview", label: "Overview" },
@@ -56,6 +62,40 @@ function ConflictPanel({ conflict, draft, onReview, onKeep, reviewing }) {
   );
 }
 
+function MarketingContactsPanel({ opportunity, contacts, clients, onChanged }) {
+  const company = clients.find(client => client.id === opportunity.clientId);
+  const available = (company?.contacts || []).filter(contact => !contacts.some(link => link.contactId === contact.id));
+  const [form, setForm] = useState({ contactId: "", role: "Champion", isPrimary: false, notes: "", newName: "", newEmail: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async event => {
+    event.preventDefault(); setSaving(true); setError("");
+    try {
+      let contactId = form.contactId;
+      if (!contactId && form.newName.trim()) {
+        const created = await addContact({ companyId: opportunity.clientId, name: form.newName, email: form.newEmail });
+        contactId = created.id;
+      }
+      if (!contactId) throw new Error("Choose or create a Directory contact.");
+      const linked = await addMarketingContact({ opportunityId: opportunity.id, contactId, role: form.role, isPrimary: form.isPrimary, notes: form.notes });
+      onChanged([...contacts, linked]);
+      setForm({ contactId: "", role: "Champion", isPrimary: false, notes: "", newName: "", newEmail: "" });
+    } catch (saveError) { setError(saveError.message || "The contact could not be linked."); }
+    finally { setSaving(false); }
+  };
+  const update = async (link, patch) => {
+    try {
+      const saved = await updateMarketingContact(opportunity.id, link.contactId, patch);
+      onChanged(contacts.map(item => item.contactId === saved.contactId ? saved : item));
+    } catch (saveError) { setError(saveError.message || "The stakeholder could not be updated."); }
+  };
+  const unlink = async link => {
+    try { await removeMarketingContact(opportunity.id, link.contactId); onChanged(contacts.filter(item => item.contactId !== link.contactId)); }
+    catch (saveError) { setError(saveError.message || "The stakeholder could not be unlinked."); }
+  };
+  return <section className="marketing-stakeholders"><h3>Stakeholders</h3>{error && <Alert role="alert" tone="danger">{error}</Alert>}<div className="marketing-contact-list">{contacts.map(link => <article key={link.contactId}><div><strong>{link.name}</strong><span>{link.email || "No email"}</span></div><select aria-label={`Role for ${link.name}`} value={link.role} onChange={event => update(link, { role: event.target.value })}>{MARKETING_CONTACT_ROLES.map(role => <option key={role}>{role}</option>)}</select><label><input type="checkbox" checked={link.isPrimary} onChange={event => update(link, { isPrimary: event.target.checked })}/> Primary</label><Input aria-label={`Notes for ${link.name}`} defaultValue={link.notes || ""} onBlur={event => update(link, { notes: event.target.value })}/><Button size="sm" variant="ghost" onClick={() => unlink(link)}>Unlink</Button></article>)}</div><form onSubmit={submit} className="marketing-contact-add"><Field label="Directory contact" htmlFor="marketing-link-contact"><select id="marketing-link-contact" value={form.contactId} onChange={event => setForm(current => ({ ...current, contactId: event.target.value }))}><option value="">Choose contact</option>{available.map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></Field><Field label="Role" htmlFor="marketing-contact-role"><select id="marketing-contact-role" value={form.role} onChange={event => setForm(current => ({ ...current, role: event.target.value }))}>{MARKETING_CONTACT_ROLES.map(role => <option key={role}>{role}</option>)}</select></Field><Field label="Or create contact" htmlFor="marketing-new-contact"><Input id="marketing-new-contact" placeholder="Full name" value={form.newName} onChange={event => setForm(current => ({ ...current, newName: event.target.value }))}/></Field><Field label="Email" htmlFor="marketing-new-contact-email"><Input id="marketing-new-contact-email" type="email" value={form.newEmail} onChange={event => setForm(current => ({ ...current, newEmail: event.target.value }))}/></Field><label><input type="checkbox" checked={form.isPrimary} onChange={event => setForm(current => ({ ...current, isPrimary: event.target.checked }))}/> Primary contact</label><Button type="submit" variant="default" loading={saving}>Link stakeholder</Button></form></section>;
+}
+
 export function MarketingOpportunitySheet({
   opportunity,
   contacts = [], activities = [], tasks = [], documents = [], history = [],
@@ -77,6 +117,9 @@ export function MarketingOpportunitySheet({
   const [reviewing, setReviewing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [localContacts, setLocalContacts] = useState(contacts);
+  const [localActivities, setLocalActivities] = useState(activities);
+  const [localTasks, setLocalTasks] = useState(tasks);
   const errorRef = useRef(null);
 
   useEffect(() => {
@@ -86,6 +129,9 @@ export function MarketingOpportunitySheet({
     setSnapshotVersion(opportunity?.version || 1);
     setError(""); setConflict(null);
   }, [opportunity?.id, opportunity?.version]);
+  useEffect(() => { setLocalContacts(contacts); }, [contacts]);
+  useEffect(() => { setLocalActivities(activities); }, [activities]);
+  useEffect(() => { setLocalTasks(tasks); }, [tasks]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
   const baselineOverview = useMemo(() => valuesFor(current, OVERVIEW_FIELDS), [current]);
@@ -159,6 +205,21 @@ export function MarketingOpportunitySheet({
     finally { setBusySection(null); }
   };
 
+  const activityCreated = async row => {
+    setLocalActivities(list => [row, ...list]);
+    try {
+      const latest = await freshApi(current.id);
+      if (latest) {
+        setCurrent(latest); setSnapshotVersion(latest.version);
+        onSaved?.(latest);
+      }
+    } catch { /* Activity is safely stored; a later detail refresh catches up. */ }
+  };
+
+  const taskChanged = (row, action) => {
+    setLocalTasks(list => action === "created" ? [row, ...list] : list.map(item => item.id === row.id ? row : item));
+  };
+
   if (!current) return null;
   const field = (label, key, props = {}) => <Field label={label} htmlFor={`marketing-${key}`} className={props.wide ? "marketing-field-wide" : undefined}><Input id={`marketing-${key}`} value={activeDraft[key] ?? ""} onChange={event => setField(key, event.target.value)} {...props.input}/></Field>;
   const area = (label, key) => <Field label={label} htmlFor={`marketing-${key}`} className="marketing-field-wide"><Textarea id={`marketing-${key}`} value={activeDraft[key] ?? ""} onChange={event => setField(key, event.target.value)}/></Field>;
@@ -185,6 +246,7 @@ export function MarketingOpportunitySheet({
               {field("Next action due", "nextActionDueAt", { input: { type: "datetime-local" } })}{field("Expected close date", "expectedCloseDate", { input: { type: "date" } })}
               {field("Estimated value", "estimatedValue", { input: { type: "number", min: 0, step: "0.01" } })}{field("Probability", "probability", { input: { type: "number", min: 0, max: 100 } })}
               <Field label="Products" htmlFor="marketing-productTags" className="marketing-field-wide"><Input id="marketing-productTags" value={Array.isArray(overview.productTags) ? overview.productTags.join(", ") : overview.productTags} onChange={event => setField("productTags", event.target.value)}/></Field>
+              <div className="marketing-field-wide"><MarketingContactsPanel opportunity={current} contacts={localContacts} clients={clients} onChanged={setLocalContacts}/></div>
             </div>}
 
             {section === "qualification" && <div className="marketing-qualification">
@@ -196,8 +258,8 @@ export function MarketingOpportunitySheet({
               <fieldset><legend>Legal and contract</legend><div className="marketing-form-grid">{field("MSA status", "msaStatus")}{field("SOW status", "sowStatus")}{field("Legal owner", "legalOwnerId")}{field("Customer legal contact", "customerLegalContactId")}{field("Redline status", "redlineStatus")}{field("Latest document version", "latestDocumentVersion")}{area("Legal issues", "legalIssues")}</div></fieldset>
             </div>}
 
-            {section === "activity" && <section className="marketing-detail-list"><h3>Activity</h3>{activities.length ? activities.map(item => <article key={item.id}><strong>{item.activityType}</strong><time>{displayDate(item.occurredAt)}</time><p>{item.summary}</p>{item.outcome && <p>Outcome: {item.outcome}</p>}</article>) : <p>No activity logged yet.</p>}</section>}
-            {section === "tasks" && <section className="marketing-detail-list"><h3>Tasks</h3>{tasks.length ? tasks.map(item => <article key={item.id}><strong>{item.title}</strong><Badge tone={item.status === "completed" ? "success" : "neutral"}>{item.status}</Badge><p>{item.dueAt ? displayDate(item.dueAt) : "No due date"}</p></article>) : <p>No tasks yet.</p>}</section>}
+            {section === "activity" && <MarketingActivityPanel opportunityId={current.id} activities={localActivities} users={users} contacts={localContacts} onCreated={activityCreated}/>}
+            {section === "tasks" && <MarketingTaskPanel opportunityId={current.id} tasks={localTasks} users={users} onChanged={taskChanged}/>}
             {section === "documents" && <section className="marketing-detail-list"><h3>Documents</h3>{documents.length ? documents.map(item => <article key={item.id}><Icon name="file"/><strong>{item.fileName}</strong><span>{item.documentType}</span></article>) : <p>No documents uploaded yet.</p>}</section>}
             {section === "history" && <section className="marketing-detail-list"><h3>History</h3>{history.length ? history.map(item => <article key={item.id}><strong>{item.fromStage || "Created"} → {item.toStage}</strong><span>{userName(item.changedBy)} · {displayDate(item.changedAt)}</span>{item.transitionNote && <p>{item.transitionNote}</p>}</article>) : <p>No stage changes yet.</p>}</section>}
           </SheetBody>

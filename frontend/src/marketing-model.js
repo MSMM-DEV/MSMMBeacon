@@ -1,5 +1,35 @@
 import { MARKETING_LOSS_REASONS, MARKETING_STAGE_NAMES, stageDefinition } from "./marketing-rules.js";
 
+export const MARKETING_CONTACT_ROLES = Object.freeze([
+  "Champion", "Decision-maker", "Budget owner", "Legal contact", "Technical evaluator", "Other",
+]);
+
+const TASK_PRIORITY = { urgent: 0, high: 1, normal: 2, low: 3 };
+
+export function sortMarketingActivities(rows = []) {
+  return [...rows].sort((a, b) => new Date(b.occurredAt || 0).getTime() - new Date(a.occurredAt || 0).getTime());
+}
+
+export function sortMarketingTasks(rows = [], now = new Date()) {
+  const time = now instanceof Date ? now.getTime() : new Date(now).getTime();
+  return [...rows].sort((a, b) => {
+    const aOpen = a.status !== "completed";
+    const bOpen = b.status !== "completed";
+    if (aOpen !== bOpen) return aOpen ? -1 : 1;
+    const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+    const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+    const aOverdue = aOpen && aDue < time;
+    const bOverdue = bOpen && bDue < time;
+    if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+    if (aDue !== bDue) return aDue - bDue;
+    return (TASK_PRIORITY[a.priority] ?? 2) - (TASK_PRIORITY[b.priority] ?? 2);
+  });
+}
+
+export function nextMarketingAction(tasks = [], fallback = "") {
+  return sortMarketingTasks(tasks).find(task => task.status !== "completed") || fallback;
+}
+
 const OPPORTUNITY_FIELDS = Object.freeze({
   title: "title",
   clientId: "client_id",

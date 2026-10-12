@@ -6,6 +6,7 @@ import {
   marketingHealth,
   weightedMarketingValue,
 } from "../marketing-rules.js";
+import { nextMarketingAction } from "../marketing-model.js";
 
 const money = value => new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumFractionDigits: 0,
@@ -31,6 +32,9 @@ const HEALTH_META = {
 function OpportunityCard({ opportunity, tasks, onOpen, onMoveIntent }) {
   const healthKey = marketingHealth(opportunity, tasks);
   const health = HEALTH_META[healthKey] || HEALTH_META.on_track;
+  const next = nextMarketingAction(tasks, opportunity.nextAction || "");
+  const nextLabel = typeof next === "string" ? next : next?.title;
+  const nextDue = typeof next === "object" ? next?.dueAt : opportunity.nextActionDueAt;
   const label = `Open ${opportunity.title} opportunity`;
   return (
     <article
@@ -68,8 +72,8 @@ function OpportunityCard({ opportunity, tasks, onOpen, onMoveIntent }) {
       )}
       <div className="marketing-card-next">
         <strong>Next</strong>
-        <span>{opportunity.nextAction || "Add a next action"}</span>
-        {opportunity.nextActionDueAt && <time dateTime={opportunity.nextActionDueAt}>{shortDate(opportunity.nextActionDueAt)}</time>}
+        <span>{nextLabel || "Add a next action"}</span>
+        {nextDue && <time dateTime={nextDue}>{shortDate(nextDue)}</time>}
       </div>
       <label className="marketing-card-move">
         <span className="sr-only">Move {opportunity.title}</span>
