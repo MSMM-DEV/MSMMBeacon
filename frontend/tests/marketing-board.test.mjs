@@ -5,7 +5,7 @@ import vm from "node:vm";
 import React from "react";
 import { transform } from "esbuild";
 import * as rules from "../src/marketing-rules.js";
-import { marketingOpportunityInsert } from "../src/marketing-model.js";
+import * as model from "../src/marketing-model.js";
 
 const passthrough = ({ children, ...props }) => React.createElement("div", props, children);
 const ui = new Proxy({}, { get: () => passthrough });
@@ -22,7 +22,7 @@ if (!boardCompiled.error) {
   vm.runInNewContext(boardCompiled.code, {
     module: boardModule,
     exports: boardModule.exports,
-    require: name => name === "react" ? React : name.includes("marketing-rules") ? rules : name === "@/ui" ? ui : icon,
+    require: name => name === "react" ? React : name.includes("marketing-rules") ? rules : name.includes("marketing-model") ? model : name === "@/ui" ? ui : icon,
     console,
     Date,
     Intl,
@@ -92,7 +92,7 @@ test("transition coordinator changes rows only after authoritative success", asy
 });
 
 test("create and terminal transitions enforce the marketing rules", () => {
-  assert.throws(() => marketingOpportunityInsert({ title: "  " }), /required/);
+  assert.throws(() => model.marketingOpportunityInsert({ title: "  " }), /required/);
   const invalid = rules.validateMarketingTransition({ toStage: rules.MARKETING_STAGE_NAMES[6], outcome: "won" });
   assert.ok(invalid.errors.length > 0);
   const valid = rules.validateMarketingTransition({

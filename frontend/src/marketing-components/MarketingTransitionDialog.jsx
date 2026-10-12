@@ -39,7 +39,7 @@ export function MarketingTransitionDialog({ opportunity, toStage, onCancel, onCo
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="marketing-transition-body">
-            {error && <Alert ref={errorRef} tabIndex={-1} role="alert" tone="danger" title="The opportunity was not moved">{error}</Alert>}
+            {error && <div ref={errorRef} tabIndex={-1}><Alert role="alert" tone="danger" title="The opportunity was not moved">{error}</Alert></div>}
             {!!form.missingFields?.length && (
               <Alert tone="warning" title="Recommended information is still missing" icon={<Icon name="warn"/>}>
                 {form.missingFields.join(", ")}. You can continue, but completing it will make the handoff stronger.

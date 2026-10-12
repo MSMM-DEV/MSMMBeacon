@@ -24,6 +24,22 @@ import { MarketingInsights } from "./marketing-components/MarketingInsights.jsx"
 
 const VIEW_LABELS = { pipeline: "Pipeline", list: "Opportunity list", insights: "Insights" };
 const money = value => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value || 0));
+const MARKETING_VIEW_KEY = "beacon.marketing.view";
+const MARKETING_STAGE_KEY = "beacon.marketing.stage";
+
+function storedMarketingValue(key) {
+  try { return window.localStorage.getItem(key); }
+  catch { return null; }
+}
+
+function initialMarketingView(fallback, allowed) {
+  try {
+    const routeView = new URLSearchParams(window.location.search).get("view");
+    if (allowed.includes(routeView)) return routeView;
+  } catch { /* Use the saved choice or the permitted fallback. */ }
+  const saved = storedMarketingValue(MARKETING_VIEW_KEY);
+  return allowed.includes(saved) ? saved : (allowed.includes(fallback) ? fallback : (allowed[0] || "pipeline"));
+}
 
 export function applyAuthoritativeOpportunity(rows, returned) {
   if (!returned?.id) return [...(rows || [])];
@@ -170,7 +186,7 @@ function MarketingKpis({ insights }) {
 export function MarketingPage({ access, users = [], clients = [], currentUser = null, initialView = "pipeline", initialOpportunityId = null }) {
   const visibleViews = useMemo(() => access.visibleChildren("page.marketing").filter(node => node.view), [access]);
   const allowedNames = useMemo(() => visibleViews.map(node => node.view), [visibleViews]);
-  const [view, setView] = useState(allowedNames.includes(initialView) ? initialView : (allowedNames[0] || "pipeline"));
+  const [view, setView] = useState(() => initialMarketingView(initialView, allowedNames));
   const [workspace, setWorkspace] = useState(null);
   const [selectedId, setSelectedId] = useState(initialOpportunityId);
   const [status, setStatus] = useState("loading");
@@ -180,8 +196,13 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
   const [moveIntent, setMoveIntent] = useState(null);
   const [moveSaving, setMoveSaving] = useState(false);
   const [moveError, setMoveError] = useState("");
-  const [mobileStage, setMobileStage] = useState(MARKETING_STAGE_NAMES[0]);
+  const [mobileStage, setMobileStage] = useState(() => {
+    const saved = storedMarketingValue(MARKETING_STAGE_KEY);
+    return MARKETING_STAGE_NAMES.includes(saved) ? saved : MARKETING_STAGE_NAMES[0];
+  });
   const [filters, setFilters] = useState({ search: "", ownerId: "all", clientId: "all", stage: "all", product: "all", health: "all", closePeriod: "all", outcome: "all", archiveMode: "active" });
+  const launchControlRef = useRef(null);
+  const previousViewRef = useRef(view);
 
   const load = useCallback(async () => {
     setStatus("loading"); setError(null);
@@ -190,7 +211,29 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
   }, []);
   useEffect(() => { load(); }, [load, reloadKey]);
   useEffect(() => { if (allowedNames.length && !allowedNames.includes(view)) setView(allowedNames[0]); }, [allowedNames, view]);
-  useEffect(() => { if (allowedNames.includes(view)) updateMarketingUrl(view, selectedId); }, [allowedNames, selectedId, view]);
+  useEffect(() => {
+    if (!allowedNames.includes(view)) return;
+    updateMarketingUrl(view, selectedId);
+    try { window.localStorage.setItem(MARKETING_VIEW_KEY, view); } catch { /* Persistence is optional. */ }
+    if (previousViewRef.current !== view) {
+      const heading = document.querySelector(".bx-pagetitle");
+      if (heading) { heading.setAttribute("tabindex", "-1"); heading.focus({ preventScroll: true }); }
+      previousViewRef.current = view;
+    }
+  }, [allowedNames, selectedId, view]);
+  useEffect(() => {
+    try { window.localStorage.setItem(MARKETING_STAGE_KEY, mobileStage); } catch { /* Persistence is optional. */ }
+  }, [mobileStage]);
+  useEffect(() => {
+    const restoreRoute = () => {
+      const params = new URLSearchParams(window.location.search);
+      const routeView = params.get("view");
+      if (allowedNames.includes(routeView)) setView(routeView);
+      setSelectedId(params.get("opportunity"));
+    };
+    window.addEventListener("popstate", restoreRoute);
+    return () => window.removeEventListener("popstate", restoreRoute);
+  }, [allowedNames]);
   useEffect(() => {
     const applySettings = event => setWorkspace(current => current ? {
       ...current,
@@ -218,6 +261,18 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
     usersById,
     clientsById,
   });
+  const openOpportunity = (row, event) => {
+    launchControlRef.current = event?.currentTarget || document.activeElement;
+    setSelectedId(row.id);
+  };
+  const closeOpportunity = () => {
+    setSelectedId(null);
+    const origin = launchControlRef.current;
+    window.requestAnimationFrame(() => {
+      if (origin?.isConnected) origin.focus();
+      else document.querySelector(".bx-pagetitle")?.focus({ preventScroll: true });
+    });
+  };
 
   const confirmMove = async transition => {
     setMoveSaving(true); setMoveError("");
@@ -238,11 +293,11 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
       {!allOpportunities.length ? (
         <EmptyState iconName="marketing" title="Build your first Marketing opportunity" hint="Track the relationship from introduction through a signed or lost contract." action={<Button variant="primary" onClick={() => setCreateOpen(true)}>New opportunity</Button>}/>
       ) : view === "pipeline" ? (
-        <MarketingBoard opportunities={filtered} tasks={workspace.tasks} clientsById={clientsById} usersById={usersById} selectedMobileStage={mobileStage} onSelectedMobileStage={setMobileStage} onOpen={row => setSelectedId(row.id)} onMoveIntent={(opportunity, toStage) => { setMoveError(""); setMoveIntent({ opportunity, toStage }); }}/>
+        <MarketingBoard opportunities={filtered} tasks={workspace.tasks} stalledAfterDays={workspace.stalledAfterDays} clientsById={clientsById} usersById={usersById} selectedMobileStage={mobileStage} onSelectedMobileStage={setMobileStage} onOpen={openOpportunity} onMoveIntent={(opportunity, toStage) => { setMoveError(""); setMoveIntent({ opportunity, toStage }); }}/>
       ) : view === "list" ? (
-        <MarketingList rows={filtered} tasks={workspace.tasks} usersById={usersById} clientsById={clientsById} stalledAfterDays={workspace.stalledAfterDays} onOpen={row => setSelectedId(row.id)}/>
+        <MarketingList rows={filtered} tasks={workspace.tasks} usersById={usersById} clientsById={clientsById} stalledAfterDays={workspace.stalledAfterDays} onOpen={openOpportunity}/>
       ) : (
-        <MarketingInsights insights={insights} onOpen={row => setSelectedId(row.id)}/>
+        <MarketingInsights insights={insights} onOpen={openOpportunity}/>
       )}
       {selected && <MarketingOpportunitySheet
         opportunity={selected}
@@ -252,9 +307,9 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
         documents={selected.documents || workspace.documents.filter(item => item.opportunityId === selected.id)}
         history={selected.history || workspace.history.filter(item => item.opportunityId === selected.id)}
         lookups={{ users, clients, usersById, clientsById }}
-        onClose={() => setSelectedId(null)}
+        onClose={closeOpportunity}
         onSaved={row => setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row) }))}
-        onArchived={row => { setWorkspace(current => ({ ...current, opportunities: current.opportunities.filter(item => item.id !== row.id), archivedOpportunities: applyAuthoritativeOpportunity(current.archivedOpportunities, row) })); setSelectedId(null); }}
+        onArchived={row => { setWorkspace(current => ({ ...current, opportunities: current.opportunities.filter(item => item.id !== row.id), archivedOpportunities: applyAuthoritativeOpportunity(current.archivedOpportunities, row) })); closeOpportunity(); }}
         onRestored={row => setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row), archivedOpportunities: current.archivedOpportunities.filter(item => item.id !== row.id) }))}
       />}
       <MarketingCreateDialog open={createOpen} clients={clients} users={users} currentUser={currentUser} onCancel={() => setCreateOpen(false)} onCreated={row => { setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row) })); setCreateOpen(false); setSelectedId(row.id); }}/>

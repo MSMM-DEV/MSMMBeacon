@@ -29,8 +29,8 @@ const HEALTH_META = {
   lost: { label: "Lost", icon: "x", tone: "danger" },
 };
 
-function OpportunityCard({ opportunity, tasks, onOpen, onMoveIntent }) {
-  const healthKey = marketingHealth(opportunity, tasks);
+function OpportunityCard({ opportunity, tasks, stalledAfterDays, onOpen, onMoveIntent }) {
+  const healthKey = marketingHealth(opportunity, tasks, { stalledAfterDays });
   const health = HEALTH_META[healthKey] || HEALTH_META.on_track;
   const next = nextMarketingAction(tasks, opportunity.nextAction || "");
   const nextLabel = typeof next === "string" ? next : next?.title;
@@ -47,7 +47,7 @@ function OpportunityCard({ opportunity, tasks, onOpen, onMoveIntent }) {
         event.dataTransfer.setData("text/marketing-opportunity", opportunity.id);
       }}
     >
-      <button type="button" className="marketing-card-open" aria-label={label} onClick={() => onOpen?.(opportunity)}>
+      <button type="button" className="marketing-card-open" aria-label={label} onClick={event => onOpen?.(opportunity, event)}>
         <span className="marketing-card-title">{opportunity.title}</span>
         <span className="marketing-card-org">{opportunity.organizationName || opportunity.client?.name || "Organization not set"}</span>
       </button>
@@ -97,34 +97,36 @@ function OpportunityCard({ opportunity, tasks, onOpen, onMoveIntent }) {
 export function MarketingBoard({
   opportunities = [],
   tasks = [],
+  stalledAfterDays = 14,
   selectedMobileStage = null,
   onSelectedMobileStage,
   onOpen,
   onMoveIntent,
 }) {
   const active = opportunities.filter(row => !row.archivedAt);
-  const visibleStages = selectedMobileStage
-    ? MARKETING_STAGES.filter(stage => stage.name === selectedMobileStage)
-    : MARKETING_STAGES;
   const byId = new Map(active.map(row => [row.id, row]));
 
   return (
     <div className="marketing-board-wrap">
       <label className="marketing-mobile-stage">
         <span>Stage</span>
-        <select value={selectedMobileStage || MARKETING_STAGES[0].name}
+        <select aria-label="Choose pipeline stage" value={selectedMobileStage || MARKETING_STAGES[0].name}
           onChange={event => onSelectedMobileStage?.(event.target.value)}>
           {MARKETING_STAGES.map(stage => <option key={stage.name} value={stage.name}>{stage.name}</option>)}
         </select>
       </label>
       <div className="marketing-board" aria-label="Marketing opportunity pipeline">
-        {visibleStages.map(stage => {
+        {MARKETING_STAGES.map((stage, index) => {
           const rows = active.filter(row => row.stage === stage.name);
+          const headingId = `marketing-stage-${index}`;
           return (
             <section
               key={stage.name}
               className="marketing-lane"
               data-stage={stage.name}
+              data-mobile-active={stage.name === selectedMobileStage ? "true" : "false"}
+              role="region"
+              aria-labelledby={headingId}
               onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
               onDrop={event => {
                 event.preventDefault();
@@ -133,13 +135,14 @@ export function MarketingBoard({
               }}
             >
               <header className="marketing-lane-head">
-                <div><h3>{stage.name}</h3><span>{stage.min === stage.max ? `${stage.min}%` : `${stage.min}–${stage.max}%`}</span></div>
+                <div><h3 id={headingId}>{stage.name}</h3><span>{stage.min === stage.max ? `${stage.min}%` : `${stage.min}–${stage.max}%`}</span></div>
                 <Badge tone="neutral">{rows.length}</Badge>
               </header>
               <div className="marketing-lane-cards">
                 {rows.map(row => (
                   <OpportunityCard key={row.id} opportunity={row}
                     tasks={tasks.filter(task => task.opportunityId === row.id)}
+                    stalledAfterDays={stalledAfterDays}
                     onOpen={onOpen} onMoveIntent={onMoveIntent}/>
                 ))}
                 {!rows.length && <p className="marketing-lane-empty">No opportunities</p>}

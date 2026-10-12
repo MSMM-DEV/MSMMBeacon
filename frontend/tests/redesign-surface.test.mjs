@@ -42,7 +42,7 @@ for (const [theme, tokens] of [["light", base], ["dark", {...base, ...declaratio
 
 test("each redesigned page stylesheet is integrated and exists", () => {
   const index = readFileSync(new URL("index.css", design), "utf8");
-  const pages = ["proposals", "awarded", "projects", "events", "invoice", "directory", "team-calendar", "timesheet", "time-admin", "licenses", "project-detail", "login", "potential", "hotleads", "openbids", "admin", "record-editors", "between", "closed", "leads-archive", "proposals-archive"];
+  const pages = ["proposals", "awarded", "projects", "events", "invoice", "directory", "marketing", "team-calendar", "timesheet", "time-admin", "licenses", "project-detail", "login", "potential", "hotleads", "openbids", "admin", "record-editors", "between", "closed", "leads-archive", "proposals-archive"];
   for (const page of pages) {
     assert.ok(index.includes(`./pages/${page}.css`), `Missing import for ${page}`);
     assert.ok(existsSync(new URL(`pages/${page}.css`, design)), `Missing CSS for ${page}`);
