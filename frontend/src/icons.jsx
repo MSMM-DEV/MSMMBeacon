@@ -7,7 +7,7 @@ import {
   Columns3, Copy, CreditCard, Download, Ellipsis, ExternalLink, Eye, EyeOff, File, FileText,
   Files, Filter, Flag, FolderOpen, Gauge, GitMerge, Hash, History, Hourglass, Inbox, Info,
   KeyRound, LayoutGrid, Link2, ListChecks, Loader2, Lock, LogOut, Mail, Maximize2, Menu,
-  Minimize2, Minus, Moon, MoreHorizontal, MoreVertical, Nfc, OctagonAlert, Paperclip, Pause,
+  Megaphone, Minimize2, Minus, Moon, MoreHorizontal, MoreVertical, Nfc, OctagonAlert, Paperclip, Pause,
   PencilLine, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Send, Settings, Shield,
   ShieldCheck, SlidersHorizontal, Sparkles, Square, SquarePen, Star, Sun, Table2, Tag,
   ThumbsDown, ThumbsUp, Timer, Trash2, TrendingUp, TriangleAlert, Undo2, Upload, User,
@@ -114,6 +114,7 @@ const REGISTRY = {
   blocks: Blocks,
   inbox: Inbox,
   star: Star,
+  marketing: Megaphone,
 
   // ---- time
   calendar: Calendar,

@@ -13,7 +13,7 @@ import {
 const APP_TABS = [
   "hotleads", "openbids", "leads-deleted", "awaiting", "awarded", "proposals-deleted",
   "potential", "invoice", "between", "closed", "projects", "events", "directory",
-  "licenses", "timesheet", "time-admin", "team-cal", "user-access",
+  "marketing", "licenses", "timesheet", "time-admin", "team-cal", "user-access",
 ];
 
 const custom = (keys) => buildCustomConfig(new Set(keys));
@@ -139,6 +139,31 @@ test("a brand-new workflow stays hidden for restricted users", () => {
   const seenBefore = ALL_ACCESS_KEYS.filter(k => !k.startsWith("workflow.operations") && k !== "page.licenses");
   const cfg = { mode: "custom", grants: GRANTABLE_KEYS.filter(k => seenBefore.includes(k)), seen: seenBefore };
   assert.equal(createAccess({ config: cfg }).canTab("licenses"), false);
+});
+
+test("Marketing access is view-aware and new-workflow safe", () => {
+  const full = createAccess({ config: null });
+  const admin = createAccess({ isAdmin: true, config: custom([]) });
+  assert.equal(full.canTab("marketing"), true);
+  assert.equal(admin.canTab("marketing"), true);
+
+  const seenBeforeMarketing = ALL_ACCESS_KEYS.filter(key => !key.includes("marketing"));
+  const legacy = {
+    mode: "custom",
+    grants: GRANTABLE_KEYS.filter(key => seenBeforeMarketing.includes(key)),
+    seen: seenBeforeMarketing,
+  };
+  assert.equal(createAccess({ config: legacy }).canTab("marketing"), false);
+
+  let grants = setNodeGranted(new Set(), "view.marketing.pipeline", true);
+  let access = createAccess({ config: buildCustomConfig(grants) });
+  assert.equal(access.canTab("marketing"), true);
+  assert.deepEqual(access.visibleChildren("page.marketing").map(node => node.view), ["pipeline"]);
+  assert.equal(access.can("view.marketing.insights"), false);
+
+  grants = setNodeGranted(grants, "view.marketing.pipeline", false);
+  access = createAccess({ config: buildCustomConfig(grants) });
+  assert.equal(access.canTab("marketing"), false);
 });
 
 test("normalize + summary", () => {

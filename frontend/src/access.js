@@ -91,6 +91,18 @@ export const ACCESS_TREE = [
     ],
   },
   {
+    key: "workflow.marketing", kind: "workflow", label: "Marketing & Sales", requiresChild: true,
+    description: "SaaS and AI opportunities from first introduction through signed or lost.",
+    children: [{
+      key: "page.marketing", kind: "page", label: "Marketing", tab: "marketing", requiresChild: true,
+      children: [
+        { key: "view.marketing.pipeline", kind: "subtab", label: "Pipeline", view: "pipeline" },
+        { key: "view.marketing.list", kind: "subtab", label: "Opportunity list", view: "list" },
+        { key: "view.marketing.insights", kind: "subtab", label: "Insights", view: "insights" },
+      ],
+    }],
+  },
+  {
     key: "workflow.workspace", kind: "workflow", label: "Workspace",
     description: "Projects, events and the client / firm directory.",
     requiresChild: true,
