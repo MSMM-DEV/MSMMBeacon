@@ -127,3 +127,12 @@ test("create and terminal transitions enforce the marketing rules", () => {
   });
   assert.equal(valid.errors.length, 0);
 });
+
+test("cards expose delivery progress and original sales context", async () => {
+  const source = await readFile(new URL("../src/marketing-components/MarketingBoard.jsx", import.meta.url), "utf8");
+  assert.match(source, /projectProgress/);
+  assert.match(source, /deliveryStatus/);
+  assert.match(source, /sourceSalesPhase/);
+  assert.match(source, /Internal \/ non-sales/);
+  assert.match(source, /<progress/);
+});

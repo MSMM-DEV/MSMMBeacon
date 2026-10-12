@@ -14,6 +14,7 @@ test("opportunity sheet exposes the complete six-section workspace", async () =>
     "Next action", "Expected close date", "Estimated value", "Products", "Probability",
     "Problem statement", "Desired outcome", "Solution fit", "Clarifying questions",
     "Budget", "Authority", "Need", "Time", "Proposal", "Verbal approval", "Legal and contract",
+    "Assigned team", "Task order", "Phases / Current Status", "Project %", "Original sales phase",
   ]) assert.match(source, new RegExp(label, "i"), label);
   assert.match(source, /changedBy/);
   assert.match(source, /changedAt/);

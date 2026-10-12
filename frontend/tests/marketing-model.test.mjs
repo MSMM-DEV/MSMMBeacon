@@ -38,3 +38,40 @@ test("patch whitelists fields and carries an explicit expected version", () => {
     expectedVersion: 7,
   });
 });
+
+test("portfolio fields adapt and persist without losing zero progress", () => {
+  const row = adaptMarketingOpportunity({
+    id: "portfolio-1",
+    title: "HSDRRS",
+    assigned_to_summary: "RAJ / KASH",
+    task_order: "TO-1",
+    delivery_status: "Waiting for Contract",
+    project_progress: 0,
+    source_sales_phase: "Verified BANT and Economic Buyer Approval",
+    source_record_key: "parish-intelligence-hsdrrs-usace",
+  });
+  assert.equal(row.assignedTeam, "RAJ / KASH");
+  assert.equal(row.taskOrder, "TO-1");
+  assert.equal(row.deliveryStatus, "Waiting for Contract");
+  assert.equal(row.projectProgress, 0);
+  assert.equal(row.sourceSalesPhase, "Verified BANT and Economic Buyer Approval");
+  assert.equal(row.sourceRecordKey, "parish-intelligence-hsdrrs-usace");
+
+  assert.deepEqual(marketingOpportunityPatch({
+    assignedTeam: "RAJ",
+    taskOrder: "-",
+    deliveryStatus: "Initial Kickoff",
+    projectProgress: 40,
+    sourceSalesPhase: "IQM - Prospect",
+    sourceRecordKey: "must-not-change",
+  }, 2), {
+    patch: {
+      assigned_to_summary: "RAJ",
+      task_order: "-",
+      delivery_status: "Initial Kickoff",
+      project_progress: 40,
+      source_sales_phase: "IQM - Prospect",
+    },
+    expectedVersion: 2,
+  });
+});

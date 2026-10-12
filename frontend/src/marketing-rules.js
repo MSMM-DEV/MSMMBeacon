@@ -322,6 +322,17 @@ export function buildMarketingInsights(rows = [], tasks = [], activities = [], o
 export function marketingCsvRows(rows = [], { usersById = {}, clientsById = {} } = {}, options = {}) {
   const taskList = options.tasks || [];
   return rows.map(row => ({
+    product: (row.productTags || []).join("; "),
+    project: row.title || "",
+    leadSource: row.source || "",
+    client: clientsById[row.clientId]?.name || row.organizationName || "",
+    poc: (row.contacts || []).map(contact => contact.name).filter(Boolean).join("; "),
+    assignedTo: row.assignedTeam || usersById[row.ownerId]?.name || row.ownerName || "",
+    taskOrder: row.taskOrder || "",
+    currentStatus: row.deliveryStatus || "",
+    projectPercent: row.projectProgress ?? "",
+    salesPhase: row.sourceSalesPhase || "",
+    salesPercent: row.probability ?? "",
     opportunity: row.title || "",
     organization: clientsById[row.clientId]?.name || row.organizationName || "",
     stage: row.stage || "",

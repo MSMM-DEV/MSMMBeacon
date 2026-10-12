@@ -43,6 +43,26 @@ test("filtered CSV retains exact stages and excludes hidden rows", () => {
   assert.doesNotMatch(csv, /Archived|Lost one|December SaaS/);
 });
 
+test("portfolio context is retained in current-view CSV rows", () => {
+  const [shaped] = marketingCsvRows([{
+    id: "portfolio", title: "HSDRRS", stage: "Verbal Approval to Proceed",
+    productTags: ["Parish Intelligence"], source: "LCECS", probability: 90,
+    assignedTeam: "RAJ / KASH", taskOrder: "TO-7", deliveryStatus: "Waiting for Contract",
+    projectProgress: 20, sourceSalesPhase: "Verified BANT and Economic Buyer Approval",
+    contacts: [{ name: "Durand Elzey" }, { name: "Vic Landry" }],
+  }], {}, { now });
+  assert.equal(shaped.product, "Parish Intelligence");
+  assert.equal(shaped.project, "HSDRRS");
+  assert.equal(shaped.leadSource, "LCECS");
+  assert.equal(shaped.poc, "Durand Elzey; Vic Landry");
+  assert.equal(shaped.assignedTo, "RAJ / KASH");
+  assert.equal(shaped.taskOrder, "TO-7");
+  assert.equal(shaped.currentStatus, "Waiting for Contract");
+  assert.equal(shaped.projectPercent, 20);
+  assert.equal(shaped.salesPhase, "Verified BANT and Economic Buyer Approval");
+  assert.equal(shaped.salesPercent, 90);
+});
+
 test("filtered insights scope supporting records and ignore same-stage history for velocity", () => {
   const focused = [{
     id: "focus", title: "Focused", stage: "BANT - Budget Authority Need Time",

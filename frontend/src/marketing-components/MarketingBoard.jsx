@@ -53,6 +53,7 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, onOpen, onMoveI
       </button>
       <div className="marketing-card-badges">
         {opportunity.outcome && <Badge tone={opportunity.outcome === "won" ? "success" : "danger"}>{opportunity.outcome === "won" ? "Won" : "Lost"}</Badge>}
+        {opportunity.sourceSalesPhase === "NOT A SALES CONTRACT" && <Badge tone="neutral">Internal / non-sales</Badge>}
         <Badge tone={health.tone}><Icon name={health.icon} size={12}/>{health.label}</Badge>
         <Badge tone="neutral">{Number(opportunity.probability || 0)}%</Badge>
       </div>
@@ -61,7 +62,7 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, onOpen, onMoveI
         <div><dt>Weighted</dt><dd>{money(weightedMarketingValue(opportunity))}</dd></div>
       </dl>
       <div className="marketing-card-meta">
-        <span><Icon name="user" size={13}/>{opportunity.ownerName || opportunity.owner?.display_name || "Unassigned"}</span>
+        <span><Icon name="user" size={13}/>{opportunity.assignedTeam || opportunity.ownerName || opportunity.owner?.display_name || "Unassigned"}</span>
         <span><Icon name="calendar" size={13}/>{shortDate(opportunity.expectedCloseDate)}</span>
         <span><Icon name="clock" size={13}/>{daysInStage(opportunity.stageEnteredAt)}d in stage</span>
       </div>
@@ -69,6 +70,13 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, onOpen, onMoveI
         <div className="marketing-card-tags" aria-label="Products">
           {opportunity.productTags.map(tag => <span key={tag}>{tag}</span>)}
         </div>
+      )}
+      {(opportunity.deliveryStatus || opportunity.projectProgress !== null && opportunity.projectProgress !== undefined || opportunity.sourceSalesPhase) && (
+        <section className="marketing-card-portfolio" aria-label="Portfolio context">
+          {opportunity.deliveryStatus && <p><strong>Current status</strong><span>{opportunity.deliveryStatus}</span></p>}
+          {opportunity.projectProgress !== null && opportunity.projectProgress !== undefined && <div className="marketing-card-progress"><span><strong>Project progress</strong><b>{Number(opportunity.projectProgress)}%</b></span><progress max="100" value={Number(opportunity.projectProgress)} aria-label={`Project progress ${Number(opportunity.projectProgress)} percent`}/></div>}
+          {opportunity.sourceSalesPhase && <p><strong>Original sales phase</strong><span>{opportunity.sourceSalesPhase}</span></p>}
+        </section>
       )}
       <div className="marketing-card-next">
         <strong>Next</strong>

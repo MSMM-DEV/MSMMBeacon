@@ -53,6 +53,12 @@ create table if not exists beacon_v2.marketing_opportunities (
   currency                    text not null default 'USD' check (currency ~ '^[A-Z]{3}$'),
   product_tags                text[] not null default '{}',
   source                      text,
+  source_record_key           text,
+  assigned_to_summary         text,
+  task_order                  text,
+  delivery_status             text,
+  project_progress            numeric(5,2),
+  source_sales_phase          text,
   introducer                  text,
   summary                     text,
   next_action                 text,
@@ -120,6 +126,7 @@ create table if not exists beacon_v2.marketing_opportunities (
   updated_at                  timestamptz not null default now(),
 
   constraint marketing_probability_range check (probability between 0 and 100),
+  constraint marketing_project_progress_range check (project_progress is null or project_progress between 0 and 100),
   constraint marketing_estimated_value_nonnegative check (estimated_value is null or estimated_value >= 0),
   constraint marketing_budget_nonnegative check (budget_amount is null or budget_amount >= 0),
   constraint marketing_proposal_nonnegative check (proposal_value is null or proposal_value >= 0),
@@ -131,12 +138,29 @@ create table if not exists beacon_v2.marketing_opportunities (
   )
 );
 
+-- Keep the migration re-runnable as an upgrade for databases where the first
+-- Marketing release was already applied before portfolio context was added.
+alter table beacon_v2.marketing_opportunities add column if not exists source_record_key text;
+alter table beacon_v2.marketing_opportunities add column if not exists assigned_to_summary text;
+alter table beacon_v2.marketing_opportunities add column if not exists task_order text;
+alter table beacon_v2.marketing_opportunities add column if not exists delivery_status text;
+alter table beacon_v2.marketing_opportunities add column if not exists project_progress numeric(5,2);
+alter table beacon_v2.marketing_opportunities add column if not exists source_sales_phase text;
+do $$ begin
+  alter table beacon_v2.marketing_opportunities
+    add constraint marketing_project_progress_range
+    check (project_progress is null or project_progress between 0 and 100);
+exception when duplicate_object then null;
+end $$;
+
 create index if not exists marketing_opportunities_stage_idx on beacon_v2.marketing_opportunities(stage) where archived_at is null;
 create index if not exists marketing_opportunities_owner_idx on beacon_v2.marketing_opportunities(owner_id) where archived_at is null;
 create index if not exists marketing_opportunities_client_idx on beacon_v2.marketing_opportunities(client_id);
 create index if not exists marketing_opportunities_close_idx on beacon_v2.marketing_opportunities(expected_close_date) where archived_at is null;
 create index if not exists marketing_opportunities_action_idx on beacon_v2.marketing_opportunities(next_action_due_at) where archived_at is null;
 create index if not exists marketing_opportunities_activity_idx on beacon_v2.marketing_opportunities(last_activity_at) where archived_at is null;
+create unique index if not exists marketing_opportunities_source_record_key_uniq
+  on beacon_v2.marketing_opportunities(source_record_key);
 
 --------------------------------------------------------------------------------
 -- 3. Contacts, activities and participants
@@ -423,7 +447,8 @@ declare
   v_unknown text[];
   v_allowed constant text[] := array[
     'title','client_id','owner_id','probability','expected_close_date','estimated_value','currency',
-    'product_tags','source','introducer','summary','next_action','next_action_due_at',
+    'product_tags','source','assigned_to_summary','task_order','delivery_status','project_progress','source_sales_phase',
+    'introducer','summary','next_action','next_action_due_at',
     'showcase_meeting_at','showcase_location','showcase_products','showcase_attendees_summary','showcase_fit','showcase_outcome',
     'problem_statement','desired_outcome','solution_fit','clarifying_questions','clarifying_owner_id','clarifying_due_at','clarifying_answers_status','draft_sow_status',
     'budget_amount','budget_status','budget_notes','authority_contact_id','authority_notes','need_summary','timing_summary','decision_process',
@@ -458,7 +483,10 @@ begin
     title = v_patch.title, client_id = v_patch.client_id, owner_id = v_patch.owner_id,
     probability = v_patch.probability, expected_close_date = v_patch.expected_close_date,
     estimated_value = v_patch.estimated_value, currency = v_patch.currency,
-    product_tags = v_patch.product_tags, source = v_patch.source, introducer = v_patch.introducer,
+    product_tags = v_patch.product_tags, source = v_patch.source,
+    assigned_to_summary = v_patch.assigned_to_summary, task_order = v_patch.task_order,
+    delivery_status = v_patch.delivery_status, project_progress = v_patch.project_progress,
+    source_sales_phase = v_patch.source_sales_phase, introducer = v_patch.introducer,
     summary = v_patch.summary, next_action = v_patch.next_action, next_action_due_at = v_patch.next_action_due_at,
     showcase_meeting_at = v_patch.showcase_meeting_at, showcase_location = v_patch.showcase_location,
     showcase_products = v_patch.showcase_products, showcase_attendees_summary = v_patch.showcase_attendees_summary,

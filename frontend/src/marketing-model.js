@@ -52,6 +52,12 @@ const OPPORTUNITY_FIELDS = Object.freeze({
   currency: "currency",
   productTags: "product_tags",
   source: "source",
+  assignedTeam: "assigned_to_summary",
+  taskOrder: "task_order",
+  deliveryStatus: "delivery_status",
+  projectProgress: "project_progress",
+  sourceSalesPhase: "source_sales_phase",
+  sourceRecordKey: "source_record_key",
   introducer: "introducer",
   summary: "summary",
   nextAction: "next_action",
@@ -110,9 +116,9 @@ const OPPORTUNITY_FIELDS = Object.freeze({
 });
 
 const ARRAY_FIELDS = new Set(["productTags", "showcaseProducts"]);
-const NUMBER_FIELDS = new Set(["probability", "estimatedValue", "budgetAmount", "proposalValue", "finalContractValue"]);
+const NUMBER_FIELDS = new Set(["probability", "estimatedValue", "budgetAmount", "proposalValue", "finalContractValue", "projectProgress"]);
 const REQUIRED_STRINGS = new Set(["title"]);
-const IMMUTABLE_PATCH_FIELDS = new Set(["createdBy", "stageEnteredAt", "lastActivityAt", "archivedAt", "archivedBy"]);
+const IMMUTABLE_PATCH_FIELDS = new Set(["createdBy", "stageEnteredAt", "lastActivityAt", "archivedAt", "archivedBy", "sourceRecordKey"]);
 
 const cleanText = value => {
   if (value === null || value === undefined) return null;
@@ -141,6 +147,9 @@ function validateDomain(payload) {
   }
   if (payload.probability !== undefined && payload.probability !== null && (payload.probability < 0 || payload.probability > 100)) {
     throw new Error("Probability must be between 0 and 100");
+  }
+  if (payload.project_progress !== undefined && payload.project_progress !== null && (payload.project_progress < 0 || payload.project_progress > 100)) {
+    throw new Error("Project progress must be between 0 and 100");
   }
   return payload;
 }

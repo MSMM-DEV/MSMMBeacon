@@ -40,6 +40,7 @@ const SECTIONS = [
 const OVERVIEW_FIELDS = [
   "title", "clientId", "ownerId", "source", "introducer", "summary", "nextAction",
   "nextActionDueAt", "expectedCloseDate", "estimatedValue", "productTags", "probability",
+  "assignedTeam", "taskOrder", "deliveryStatus", "projectProgress", "sourceSalesPhase",
 ];
 const QUALIFICATION_FIELDS = [
   "showcaseMeetingAt", "showcaseLocation", "showcaseProducts", "showcaseAttendeesSummary", "showcaseFit", "showcaseOutcome",
@@ -293,6 +294,17 @@ export function MarketingOpportunitySheet({
               {field("Next action due", "nextActionDueAt", { input: { type: "datetime-local" } })}{field("Expected close date", "expectedCloseDate", { input: { type: "date" } })}
               {field("Estimated value", "estimatedValue", { input: { type: "number", min: 0, step: "0.01" } })}{field("Probability", "probability", { input: { type: "number", min: 0, max: 100 } })}
               <Field label="Products" htmlFor="marketing-productTags" className="marketing-field-wide"><Input id="marketing-productTags" value={Array.isArray(overview.productTags) ? overview.productTags.join(", ") : overview.productTags} onChange={event => setField("productTags", event.target.value)}/></Field>
+              <fieldset className="marketing-portfolio-context marketing-field-wide">
+                <legend>Portfolio context</legend>
+                <p>These fields preserve the operating view supplied by the marketing team. Beacon stage and probability remain the sales forecast controls.</p>
+                <div className="marketing-form-grid">
+                  {field("Assigned team", "assignedTeam")}
+                  {field("Task order", "taskOrder")}
+                  {area("Phases / Current Status", "deliveryStatus")}
+                  {field("Project %", "projectProgress", { input: { type: "number", min: 0, max: 100, step: "0.01" } })}
+                  {field("Original sales phase", "sourceSalesPhase", { wide: true })}
+                </div>
+              </fieldset>
               <div className="marketing-field-wide"><MarketingContactsPanel opportunity={current} contacts={localContacts} clients={clients} onChanged={rows => reconcileRelation("contacts", rows)}/></div>
             </div>}
 

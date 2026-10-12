@@ -8,20 +8,27 @@ const money = value => new Intl.NumberFormat("en-US", { style: "currency", curre
 const date = value => value ? String(value).slice(0, 10) : "—";
 
 const COLUMNS = [
-  { key: "title", label: "Opportunity", value: row => row.title || "" },
-  { key: "organizationName", label: "Organization", value: row => row.organizationName || "" },
-  { key: "stage", label: "Stage", value: row => row.stage || "" },
+  { key: "title", label: "Project", value: row => row.title || "" },
+  { key: "products", label: "Product", value: row => (row.productTags || []).join(", ") },
+  { key: "source", label: "Lead source", value: row => row.source || "" },
+  { key: "organizationName", label: "Client", value: row => row.organizationName || "" },
+  { key: "poc", label: "POC", value: row => (row.contacts || []).map(contact => contact.name).filter(Boolean).join(" / ") },
+  { key: "assignedTeam", label: "Assigned To", value: row => row.assignedTeam || row.ownerName || "" },
+  { key: "taskOrder", label: "Task Order", value: row => row.taskOrder || "" },
+  { key: "deliveryStatus", label: "Phases / Current Status", value: row => row.deliveryStatus || "" },
+  { key: "projectProgress", label: "Project %", value: row => row.projectProgress ?? -1, render: row => row.projectProgress === null || row.projectProgress === undefined ? "—" : `${Number(row.projectProgress)}%` },
+  { key: "sourceSalesPhase", label: "Original Sales Phase", value: row => row.sourceSalesPhase || "" },
+  { key: "probability", label: "Sales %", value: row => Number(row.probability || 0), render: row => `${Number(row.probability || 0)}%` },
+  { key: "stage", label: "Beacon Stage", value: row => row.stage || "" },
   { key: "outcome", label: "Outcome", value: row => row.outcome || "Open" },
   { key: "ownerName", label: "Owner", value: row => row.ownerName || "" },
   { key: "estimatedValue", label: "Estimated value", value: row => Number(row.estimatedValue || 0), render: row => money(row.estimatedValue) },
   { key: "weightedValue", label: "Weighted value", value: weightedMarketingValue, render: row => money(weightedMarketingValue(row)) },
-  { key: "probability", label: "Probability", value: row => Number(row.probability || 0), render: row => `${Number(row.probability || 0)}%` },
   { key: "expectedCloseDate", label: "Expected close", value: row => row.expectedCloseDate || "", render: row => date(row.expectedCloseDate) },
   { key: "nextAction", label: "Next action", value: row => row.nextAction || "" },
   { key: "nextActionDueAt", label: "Next action due", value: row => row.nextActionDueAt || "", render: row => date(row.nextActionDueAt) },
   { key: "health", label: "Health", value: row => row.health || "" },
   { key: "daysInStage", label: "Days in stage", value: row => row.daysInStage || 0 },
-  { key: "products", label: "Products", value: row => (row.productTags || []).join(", ") },
   { key: "lastActivityAt", label: "Last activity", value: row => row.lastActivityAt || "", render: row => date(row.lastActivityAt) },
 ];
 
