@@ -5,6 +5,17 @@
 import { createClient } from "@supabase/supabase-js";
 import { adaptDirectoryCompany } from "./lib/company-directory";
 import { patchForIntervalCategory } from "./timekeepingPolicy";
+import {
+  MarketingConflictError,
+  adaptMarketingActivity,
+  adaptMarketingContact,
+  adaptMarketingDocument,
+  adaptMarketingHistory,
+  adaptMarketingOpportunity,
+  adaptMarketingTask,
+  marketingOpportunityInsert,
+  marketingOpportunityPatch,
+} from "./marketing-model.js";
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -5339,4 +5350,299 @@ export function mergeRefSummary(entity, { projectsByType, invoice, hotLeads = []
     bidCount,
     total: projects.length + leadCount + bidCount,
   };
+}
+
+// ----------------------------------------------------------------------
+// Marketing — dedicated SaaS / AI opportunity pipeline.
+// ----------------------------------------------------------------------
+const MARKETING_OPPORTUNITY_SELECT = "*, client:clients!marketing_opportunities_client_id_fkey(*), owner:users!marketing_opportunities_owner_id_fkey(*)";
+
+const groupMarketingRows = rows => (rows || []).reduce((map, row) => {
+  const key = row.opportunity_id;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(row);
+  return map;
+}, new Map());
+
+async function latestMarketingVersion(id) {
+  const { data } = await supabase.from("marketing_opportunities")
+    .select("version").eq("id", id).maybeSingle();
+  return data?.version ?? null;
+}
+
+async function marketingConflict(id, error = null) {
+  const latestVersion = await latestMarketingVersion(id);
+  return new MarketingConflictError(error?.message || undefined, latestVersion);
+}
+
+function throwMarketingError(error, label) {
+  if (!error) return;
+  if (error.code === "40001") throw new MarketingConflictError(error.message);
+  throw new Error(`${label}: ${error.message}`);
+}
+
+export async function loadMarketingWorkspace() {
+  const [opportunities, contacts, activities, tasks, documents, history, settings] = await Promise.all([
+    supabase.from("marketing_opportunities").select(MARKETING_OPPORTUNITY_SELECT).order("created_at", { ascending: false }),
+    supabase.from("marketing_opportunity_contacts")
+      .select("*, contact:contacts(*)").order("created_at", { ascending: true }),
+    supabase.from("marketing_activities")
+      .select("*, marketing_activity_users(user_id), marketing_activity_contacts(contact_id)")
+      .order("occurred_at", { ascending: false }),
+    supabase.from("marketing_tasks").select("*").order("due_at", { ascending: true, nullsFirst: false }),
+    supabase.from("marketing_documents").select("*").order("uploaded_at", { ascending: false }),
+    supabase.from("marketing_stage_history").select("*").order("changed_at", { ascending: false }),
+    supabase.from("app_settings").select("marketing_stalled_after_days").eq("singleton", true).maybeSingle(),
+  ]);
+  const failed = [opportunities, contacts, activities, tasks, documents, history, settings].find(result => result.error);
+  if (failed?.error) throw new Error(`load Marketing: ${failed.error.message}`);
+
+  const contactMap = groupMarketingRows(contacts.data);
+  const activityMap = groupMarketingRows(activities.data);
+  const taskMap = groupMarketingRows(tasks.data);
+  const documentMap = groupMarketingRows(documents.data);
+  const historyMap = groupMarketingRows(history.data);
+  const rows = (opportunities.data || []).map(row => adaptMarketingOpportunity({
+    ...row,
+    contacts: contactMap.get(row.id) || [],
+    activities: activityMap.get(row.id) || [],
+    tasks: taskMap.get(row.id) || [],
+    documents: documentMap.get(row.id) || [],
+    history: historyMap.get(row.id) || [],
+  }));
+  return {
+    opportunities: rows.filter(row => !row.archivedAt),
+    archivedOpportunities: rows.filter(row => !!row.archivedAt),
+    contacts: (contacts.data || []).map(adaptMarketingContact),
+    activities: (activities.data || []).map(adaptMarketingActivity),
+    tasks: (tasks.data || []).map(adaptMarketingTask),
+    documents: (documents.data || []).map(adaptMarketingDocument),
+    history: (history.data || []).map(adaptMarketingHistory),
+    stalledAfterDays: Number(settings.data?.marketing_stalled_after_days ?? 14),
+  };
+}
+
+export async function createMarketingOpportunity(input = {}) {
+  let clientId = input.clientId || null;
+  if (!clientId && input.newClient?.name) {
+    const clean = String(input.newClient.name).trim();
+    const { data: client, error: clientError } = await supabase.from("clients").insert({
+      name: clean,
+      district: String(input.newClient.district || "").trim() || null,
+      org_type: input.newClient.orgType || null,
+      contact_person: String(input.newClient.contactPerson || "").trim() || null,
+      email: String(input.newClient.email || "").trim() || null,
+      phone: String(input.newClient.phone || "").trim() || null,
+      address: String(input.newClient.address || "").trim() || null,
+      notes: String(input.newClient.notes || "").trim() || null,
+    }).select("id").single();
+    if (clientError?.code === "23505") throw new Error(`A client named "${clean}" already exists in the Directory`);
+    if (clientError) throw new Error(`create Directory client: ${clientError.message}`);
+    clientId = client.id;
+  }
+  const me = getCurrentBeaconUser();
+  const payload = marketingOpportunityInsert({ ...input, clientId, createdBy: me?.id, updatedBy: me?.id });
+  const { data, error } = await supabase.from("marketing_opportunities")
+    .insert(payload).select(MARKETING_OPPORTUNITY_SELECT).single();
+  throwMarketingError(error, "create Marketing opportunity");
+  return adaptMarketingOpportunity(data);
+}
+
+export async function updateMarketingOpportunity(id, input, expectedVersion) {
+  const { patch, expectedVersion: version } = marketingOpportunityPatch(input, expectedVersion);
+  if (!Object.keys(patch).length) return loadMarketingOpportunityFresh(id);
+  patch.updated_by = getCurrentBeaconUser()?.id || null;
+  const { data, error } = await supabase.from("marketing_opportunities")
+    .update(patch).eq("id", id).eq("version", version)
+    .select(MARKETING_OPPORTUNITY_SELECT).maybeSingle();
+  if (error?.code === "40001") throw await marketingConflict(id, error);
+  throwMarketingError(error, "update Marketing opportunity");
+  if (!data) throw await marketingConflict(id);
+  return adaptMarketingOpportunity(data);
+}
+
+export async function transitionMarketingOpportunity(id, input = {}, expectedVersion) {
+  const { data, error } = await supabase.rpc("transition_marketing_opportunity", {
+    _id: id,
+    _expected_version: Number(expectedVersion),
+    _stage: input.stage || input.toStage,
+    _probability: Number(input.probability),
+    _outcome: input.outcome || null,
+    _signed_at: input.signedAt || null,
+    _final_contract_value: input.finalContractValue === "" ? null : input.finalContractValue ?? null,
+    _loss_reason: input.lossReason || null,
+    _loss_detail: String(input.lossDetail || "").trim() || null,
+    _transition_note: String(input.transitionNote || "").trim() || null,
+  });
+  if (error?.code === "40001") throw await marketingConflict(id, error);
+  throwMarketingError(error, "move Marketing opportunity");
+  return loadMarketingOpportunityFresh(data?.id || id);
+}
+
+async function setMarketingArchive(id, expectedVersion, archived) {
+  const me = getCurrentBeaconUser();
+  const patch = archived
+    ? { archived_at: new Date().toISOString(), archived_by: me?.id || null, updated_by: me?.id || null }
+    : { archived_at: null, archived_by: null, updated_by: me?.id || null };
+  const { data, error } = await supabase.from("marketing_opportunities")
+    .update(patch).eq("id", id).eq("version", Number(expectedVersion))
+    .select(MARKETING_OPPORTUNITY_SELECT).maybeSingle();
+  throwMarketingError(error, archived ? "archive Marketing opportunity" : "restore Marketing opportunity");
+  if (!data) throw await marketingConflict(id);
+  return adaptMarketingOpportunity(data);
+}
+
+export const archiveMarketingOpportunity = (id, expectedVersion) => setMarketingArchive(id, expectedVersion, true);
+export const restoreMarketingOpportunity = (id, expectedVersion) => setMarketingArchive(id, expectedVersion, false);
+
+export async function addMarketingContact(input = {}) {
+  let contactId = input.contactId || null;
+  if (!contactId && input.contact) {
+    const contact = await addContact({ ...input.contact, companyId: input.contact.companyId || input.companyId });
+    contactId = contact.id;
+  }
+  if (!input.opportunityId || !contactId) throw new Error("Choose an opportunity and Directory contact");
+  const { data, error } = await supabase.from("marketing_opportunity_contacts").insert({
+    opportunity_id: input.opportunityId,
+    contact_id: contactId,
+    role: input.role || "Other",
+    is_primary: !!input.isPrimary,
+    notes: String(input.notes || "").trim() || null,
+  }).select("*, contact:contacts(*)").single();
+  if (error?.code === "23505") throw new Error("That contact is already connected to this opportunity");
+  throwMarketingError(error, "add Marketing contact");
+  return adaptMarketingContact(data);
+}
+
+export async function updateMarketingContact(opportunityId, contactId, patch = {}) {
+  const dbPatch = {};
+  if ("role" in patch) dbPatch.role = patch.role || "Other";
+  if ("isPrimary" in patch) dbPatch.is_primary = !!patch.isPrimary;
+  if ("notes" in patch) dbPatch.notes = String(patch.notes || "").trim() || null;
+  const { data, error } = await supabase.from("marketing_opportunity_contacts")
+    .update(dbPatch).eq("opportunity_id", opportunityId).eq("contact_id", contactId)
+    .select("*, contact:contacts(*)").single();
+  throwMarketingError(error, "update Marketing contact");
+  return adaptMarketingContact(data);
+}
+
+export async function removeMarketingContact(opportunityId, contactId) {
+  const { error } = await supabase.from("marketing_opportunity_contacts")
+    .delete().eq("opportunity_id", opportunityId).eq("contact_id", contactId);
+  throwMarketingError(error, "remove Marketing contact");
+}
+
+export async function createMarketingActivity(input = {}) {
+  const summary = String(input.summary || "").trim();
+  if (!summary) throw new Error("Activity summary is required");
+  const { data, error } = await supabase.from("marketing_activities").insert({
+    opportunity_id: input.opportunityId,
+    activity_type: input.activityType || "Note",
+    occurred_at: input.occurredAt || new Date().toISOString(),
+    author_id: input.authorId || getCurrentBeaconUser()?.id || null,
+    summary,
+    outcome: String(input.outcome || "").trim() || null,
+    next_step: String(input.nextStep || "").trim() || null,
+  }).select("*").single();
+  throwMarketingError(error, "create Marketing activity");
+  const userIds = [...new Set((input.userIds || []).filter(Boolean))];
+  const contactIds = [...new Set((input.contactIds || []).filter(Boolean))];
+  const participantWrites = [];
+  if (userIds.length) participantWrites.push(supabase.from("marketing_activity_users").insert(userIds.map(userId => ({ activity_id: data.id, user_id: userId }))));
+  if (contactIds.length) participantWrites.push(supabase.from("marketing_activity_contacts").insert(contactIds.map(contactId => ({ activity_id: data.id, contact_id: contactId }))));
+  const participantResults = await Promise.all(participantWrites);
+  const failed = participantResults.find(result => result.error);
+  throwMarketingError(failed?.error, "save Marketing activity participants");
+  return adaptMarketingActivity({ ...data, marketing_activity_users: userIds.map(user_id => ({ user_id })), marketing_activity_contacts: contactIds.map(contact_id => ({ contact_id })) });
+}
+
+export async function updateMarketingActivity(id, patch = {}) {
+  const dbPatch = {};
+  if ("activityType" in patch) dbPatch.activity_type = patch.activityType;
+  if ("occurredAt" in patch) dbPatch.occurred_at = patch.occurredAt;
+  for (const [key, column] of [["summary", "summary"], ["outcome", "outcome"], ["nextStep", "next_step"]]) {
+    if (key in patch) dbPatch[column] = String(patch[key] || "").trim() || null;
+  }
+  if ("summary" in dbPatch && !dbPatch.summary) throw new Error("Activity summary is required");
+  const { data, error } = await supabase.from("marketing_activities").update(dbPatch).eq("id", id).select("*").single();
+  throwMarketingError(error, "update Marketing activity");
+  return adaptMarketingActivity(data);
+}
+
+export async function deleteMarketingActivity(id) {
+  const { error } = await supabase.from("marketing_activities").delete().eq("id", id);
+  throwMarketingError(error, "delete Marketing activity");
+}
+
+export async function createMarketingTask(input = {}) {
+  const title = String(input.title || "").trim();
+  if (!title) throw new Error("Task title is required");
+  const me = getCurrentBeaconUser();
+  const { data, error } = await supabase.from("marketing_tasks").insert({
+    opportunity_id: input.opportunityId,
+    title,
+    assignee_id: input.assigneeId || null,
+    due_at: input.dueAt || null,
+    priority: input.priority || "normal",
+    status: "open",
+    notes: String(input.notes || "").trim() || null,
+    alert_id: input.alertId || null,
+    created_by: me?.id || null,
+  }).select("*").single();
+  throwMarketingError(error, "create Marketing task");
+  return adaptMarketingTask(data);
+}
+
+export async function updateMarketingTask(id, patch = {}) {
+  const dbPatch = {};
+  if ("title" in patch) {
+    dbPatch.title = String(patch.title || "").trim();
+    if (!dbPatch.title) throw new Error("Task title is required");
+  }
+  if ("assigneeId" in patch) dbPatch.assignee_id = patch.assigneeId || null;
+  if ("dueAt" in patch) dbPatch.due_at = patch.dueAt || null;
+  if ("priority" in patch) dbPatch.priority = patch.priority || "normal";
+  if ("notes" in patch) dbPatch.notes = String(patch.notes || "").trim() || null;
+  if ("status" in patch) {
+    dbPatch.status = patch.status;
+    dbPatch.completed_at = patch.status === "completed" ? new Date().toISOString() : null;
+    dbPatch.completed_by = patch.status === "completed" ? getCurrentBeaconUser()?.id || null : null;
+  }
+  const { data, error } = await supabase.from("marketing_tasks").update(dbPatch).eq("id", id).select("*").single();
+  throwMarketingError(error, "update Marketing task");
+  return adaptMarketingTask(data);
+}
+
+export async function deleteMarketingTask(id) {
+  const { error } = await supabase.from("marketing_tasks").delete().eq("id", id);
+  throwMarketingError(error, "delete Marketing task");
+}
+
+export async function loadMarketingOpportunityFresh(id) {
+  const [opportunity, contacts, activities, tasks, documents, history] = await Promise.all([
+    supabase.from("marketing_opportunities").select(MARKETING_OPPORTUNITY_SELECT).eq("id", id).maybeSingle(),
+    supabase.from("marketing_opportunity_contacts").select("*, contact:contacts(*)").eq("opportunity_id", id),
+    supabase.from("marketing_activities").select("*, marketing_activity_users(user_id), marketing_activity_contacts(contact_id)").eq("opportunity_id", id).order("occurred_at", { ascending: false }),
+    supabase.from("marketing_tasks").select("*").eq("opportunity_id", id).order("due_at", { ascending: true, nullsFirst: false }),
+    supabase.from("marketing_documents").select("*").eq("opportunity_id", id).order("uploaded_at", { ascending: false }),
+    supabase.from("marketing_stage_history").select("*").eq("opportunity_id", id).order("changed_at", { ascending: false }),
+  ]);
+  const failed = [opportunity, contacts, activities, tasks, documents, history].find(result => result.error);
+  if (failed?.error) throw new Error(`refresh Marketing opportunity: ${failed.error.message}`);
+  if (!opportunity.data) return null;
+  return adaptMarketingOpportunity({
+    ...opportunity.data,
+    contacts: contacts.data || [], activities: activities.data || [], tasks: tasks.data || [],
+    documents: documents.data || [], history: history.data || [],
+  });
+}
+
+export async function updateMarketingSettings({ stalledAfterDays }) {
+  const days = Math.round(Number(stalledAfterDays));
+  if (!Number.isFinite(days) || days < 1 || days > 365) throw new Error("Stalled threshold must be between 1 and 365 days");
+  const { data, error } = await supabase.from("app_settings")
+    .update({ marketing_stalled_after_days: days, updated_by: getCurrentBeaconUser()?.id || null })
+    .eq("singleton", true).select("marketing_stalled_after_days").single();
+  throwMarketingError(error, "update Marketing settings");
+  return { stalledAfterDays: Number(data.marketing_stalled_after_days) };
 }
