@@ -3,6 +3,7 @@
 // Copy `.env.example` → `.env.local` and fill in your own values.
 
 import { createClient } from "@supabase/supabase-js";
+import { adaptDirectoryCompany, companyPickerOptions } from "./lib/company-directory";
 import { patchForIntervalCategory } from "./timekeepingPolicy";
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
@@ -261,9 +262,11 @@ let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, 
 
 export const getUsers     = () => _users;
 export const getAppSettings = () => _appSettings;
-export const getCompanies = () => _companies;                                         // merged (clients + companies) for generic lookups
-export const getClientsOnly   = () => _companies.filter(c => c.type === "Client");     // beacon.clients rows
-export const getCompaniesOnly = () => _companies.filter(c => c.type !== "Client");     // beacon.companies rows
+export const getCompanies = () => _companies;
+// Transitional aliases for callers moved in Task 3. They partition the one
+// company master without duplicating a company that has several roles.
+export const getClientsOnly = () => _companies.filter(c => c.relationshipRoles?.includes("Client"));
+export const getCompaniesOnly = () => _companies.filter(c => !c.relationshipRoles?.includes("Client"));
 
 // Combined Client-or-Prime-Firm picker options. Used ONLY for Sub-role
 // rows, where the "Client" column in the UI can represent either the end
@@ -271,8 +274,7 @@ export const getCompaniesOnly = () => _companies.filter(c => c.type !== "Client"
 // " · Firm" suffix on company entries lets the user tell the two kinds
 // apart in the dropdown. Prime-role rows keep the clients-only list.
 export const buildClientOrCompanyOptions = () => [
-  ...getClientsOnly().map(c => ({ value: c.id, label: c.name })),
-  ...getCompaniesOnly().map(c => ({ value: c.id, label: `${c.name} · Firm` })),
+  ...companyPickerOptions(getCompanies()),
 ];
 
 // Decide which DB column a picked "Client" UUID maps to. For Prime-role
@@ -287,20 +289,14 @@ export const buildClientOrCompanyOptions = () => [
 // role='Sub' constraint requires prime_company_id to stay set, so the
 // user must change role to Prime first to drop the prime firm.
 export const routeClientPick = (v) => {
-  if (v === "" || v == null) return { client_id: null };
-  const clients = getClientsOnly();
-  if (clients.some(c => c.id === v)) return { client_id: v };
-  return { prime_company_id: v, client_id: null };
+  return { client_id: (v === "" || v == null) ? null : v };
 };
 
 // Same idea for the dedicated Prime column on Awarded. The picker uses the
 // merged client+company list, so writes need to land on `prime_client_id`
 // (clients) or `prime_company_id` (companies). Clearing nulls both.
 export const routePrimePick = (v) => {
-  if (v === "" || v == null) return { prime_company_id: null, prime_client_id: null };
-  const clients = getClientsOnly();
-  if (clients.some(c => c.id === v)) return { prime_client_id: v, prime_company_id: null };
-  return { prime_company_id: v, prime_client_id: null };
+  return { prime_company_id: (v === "" || v == null) ? null : v };
 };
 export const userById     = (id) => _users.find(u => u.id === id);
 export const companyById  = (id) => _companies.find(c => c.id === id);
@@ -727,16 +723,11 @@ function adaptUser(u, i) {
   };
 }
 
-// ---- Directory contacts (beacon_v2.contacts, 20260914120000) ----------------
-// A client / company carries MANY contact people. Each is its own row hung off
-// exactly one parent; one may be flagged primary. The parent's legacy scalar
-// columns (contact_person / email / phone) are trigger-mirrored from the
-// primary and are only read here as a FALLBACK for a DB where the contacts
-// table isn't applied yet.
+// ---- Directory contacts -----------------------------------------------------
+// Every contact belongs to one canonical company; one may be flagged primary.
 export function adaptContact(c) {
   return {
     id: c.id,
-    clientId:  c.client_id  || null,
     companyId: c.company_id || null,
     name:  c.name  || "",
     title: c.title || "",
@@ -746,6 +737,7 @@ export function adaptContact(c) {
     isPrimary: !!c.is_primary,
     ord: c.ord ?? 0,
     createdAt: c.created_at || null,
+    updatedAt: c.updated_at || null,
   };
 }
 
@@ -797,36 +789,6 @@ export function withContactSummary(row, contacts) {
     contact: p?.name  || "",
     email:   p?.email || "",
     phone:   p?.phone || "",
-  };
-}
-
-function adaptClient(c, contacts = []) {
-  return {
-    id: c.id,
-    // `name` keeps the merged form so existing consumers (project rows' Client column,
-    // dropdowns, sub references) continue to show the full USACE — District label.
-    name: c.district ? `${c.name} – ${c.district}` : c.name,
-    baseName: c.name,
-    district: c.district || "",
-    type: "Client",
-    ...contactSummary(c, contacts),
-    contacts: sortContacts(contacts),
-    address: c.address || "",
-    notes: c.notes || "",
-    orgType: c.org_type || "",
-  };
-}
-
-function adaptCompany(c, typeMap, contacts = []) {
-  return {
-    id: c.id,
-    name: c.name,
-    isMsmm: !!c.is_msmm,
-    type: c.is_msmm ? "Multiple" : (typeMap.get(c.id) || "Prime"),
-    ...contactSummary(c, contacts),
-    contacts: sortContacts(contacts),
-    address: c.address || "",
-    notes: c.notes || "",
   };
 }
 
@@ -913,7 +875,7 @@ function adaptAwarded(r) {
     // without a stored role fall back to the prime_company_id heuristic.
     role: r.role || (r.prime_company_id ? "Sub" : "Prime"),
     clientId: r.client_id || null,
-    primeId: r.prime_client_id || r.prime_company_id || null,
+    primeId: r.prime_company_id || null,
     amount: null,
     msmm: (r.msmm_used || 0) + (r.msmm_remaining || 0),
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
@@ -2266,15 +2228,11 @@ export const invoiceRunReminders = () =>
 // project (Client / Prime / Sub), and flags rows that have a linked
 // anticipated_invoice.
 //
-// Role resolution: older adapters sometimes fold prime_company_id into
-// clientId, while newer awarded/project-item shapes can expose an explicit
-// primeId. A client_id match is "Client" for client rows and "Prime" for
-// firm rows; an explicit primeId match is always "Prime". Sub matches are
-// the fallback.
+// Role resolution follows the relationship column that matched. The company
+// itself has no global Client/Prime/Sub category.
 // ----------------------------------------------------------------------
 export function linkedProjectsFor(entity, projectsByType, invoice) {
   if (!entity) return [];
-  const isClient = entity.type === "Client";
   const STATUS_KEYS = ["awaiting", "awarded", "potential", "closed"];
   const invoiceBySource = new Map();
   for (const inv of (invoice || [])) {
@@ -2288,7 +2246,7 @@ export function linkedProjectsFor(entity, projectsByType, invoice) {
       const isPrimeMatch = p.primeId === entity.id;
       const subMatch = (p.subs || []).some(s => s.cId === entity.id);
       if (!isPrimaryMatch && !isPrimeMatch && !subMatch) continue;
-      const role = isPrimaryMatch ? (isClient ? "Client" : "Prime") : (isPrimeMatch ? "Prime" : "Sub");
+      const role = isPrimaryMatch ? "Client" : (isPrimeMatch ? "Prime" : "Sub");
       const inv  = invoiceBySource.get(p.id);
       out.push({
         id: p.id,
@@ -2372,13 +2330,12 @@ export async function loadBeacon() {
   // dropped). PMs and subs use the consolidated project_pms / project_subs
   // join tables.
   const [
-    users, clients, companies, projects, invoice, events, hotLeads,
+    users, companies, projects, invoice, events, hotLeads,
     subInvRows, subInvFileRows, primeInvFileRows, partyInvFileRows, appSettingsRows,
     openBidRows, invoiceNoteRows, invoiceLinkRows, projectItemRows,
     amendmentRows, contactRows,
   ] = await Promise.all([
     pget(supabase.from("users").select("*").order("display_name"), "users"),
-    pget(supabase.from("clients").select("*").order("name"), "clients"),
     pget(supabase.from("companies").select("*").order("name"), "companies"),
     pget(
       supabase.from("projects")
@@ -2536,37 +2493,44 @@ export async function loadBeacon() {
 
   _users = users.map(adaptUser);
 
-  // Infer company role (Prime / Sub / Multiple) from observed usage across
-  // every project, regardless of status. v2's single projects table makes
-  // this a single iteration instead of 3 separate ones.
-  const primeIds = new Set();
-  const subIds = new Set();
+  // Relationship roles are derived from usage. They describe how a company
+  // participates in work; they are not mutually-exclusive record categories.
+  const rolesByCompany = new Map();
+  const addRole = (companyId, role) => {
+    if (!companyId) return;
+    if (!rolesByCompany.has(companyId)) rolesByCompany.set(companyId, new Set());
+    rolesByCompany.get(companyId).add(role);
+  };
   projects.forEach(r => {
-    if (r.prime_company_id) primeIds.add(r.prime_company_id);
-    (r.subs || []).forEach(s => { if (s.company_id) subIds.add(s.company_id); });
+    addRole(r.client_id, "Client");
+    addRole(r.prime_company_id, "Prime");
+    (r.subs || []).forEach(s => addRole(s.company_id, s.kind === "prime" ? "Prime" : "Sub"));
   });
-  const typeMap = new Map();
-  companies.forEach(c => {
-    const isP = primeIds.has(c.id), isS = subIds.has(c.id);
-    typeMap.set(c.id, (isP && isS) ? "Multiple" : isP ? "Prime" : isS ? "Sub" : "Prime");
+  hotLeads.forEach(r => {
+    addRole(r.client_id, "Client");
+    addRole(r.prime_company_id, "Prime");
+  });
+  (openBidRows || []).forEach(r => addRole(r.client_id, "Client"));
+  (projectItemRows || []).forEach(r => {
+    addRole(r.client_id, "Client");
+    addRole(r.prime_company_id, "Prime");
+    (r.subs || []).forEach(s => addRole(s.company_id, "Sub"));
   });
 
-  // Group contact rows by parent so each Directory row carries its people.
-  const contactsByClient = new Map();
+  // Group contact rows by company so each Directory row carries its people.
   const contactsByCompany = new Map();
   for (const raw of (contactRows || [])) {
     const ct = adaptContact(raw);
-    const m = ct.clientId ? contactsByClient : ct.companyId ? contactsByCompany : null;
-    if (!m) continue;
-    const key = ct.clientId || ct.companyId;
-    if (!m.has(key)) m.set(key, []);
-    m.get(key).push(ct);
+    if (!ct.companyId) continue;
+    if (!contactsByCompany.has(ct.companyId)) contactsByCompany.set(ct.companyId, []);
+    contactsByCompany.get(ct.companyId).push(ct);
   }
 
-  _companies = [
-    ...clients.map(c => adaptClient(c, contactsByClient.get(c.id) || [])),
-    ...companies.map(c => adaptCompany(c, typeMap, contactsByCompany.get(c.id) || [])),
-  ];
+  _companies = companies.map(c => adaptDirectoryCompany(
+    c,
+    contactsByCompany.get(c.id) || [],
+    [...(rolesByCompany.get(c.id) || [])],
+  ));
 
   // DISABLED: the automatic Orange-Invoice reconciliation previously ran
   // on every load to back-fill invoices for Orange potentials missing a
@@ -3137,17 +3101,45 @@ export async function addProjectSub({ projectId, companyId, discipline, amount, 
   return { row: data, existed: false };
 }
 
-// Create a brand-new company (firm) in the Directory and return it in the
-// adapted UI shape. Backs the inline "create firm" affordance in AddSubModal:
-// when a sub firm isn't in the Directory yet, the user can add it without
-// leaving the modal. The row lands in beacon_v2.companies, so it immediately
-// surfaces on the Directory tab and in every company picker app-wide once the
-// caller mirrors the returned row into App state.
-export async function addCompany({ name, contact, email, phone, address, notes } = {}) {
+// Refresh the one company master and all of its nested contacts. Relationship
+// roles are preserved from the last full load; they only change when work
+// records change, at which point the normal app reload recomputes them.
+export async function reloadDirectory() {
+  const [companies, contacts] = await Promise.all([
+    pget(supabase.from("companies").select("*").order("name"), "companies"),
+    pget(
+      supabase.from("contacts").select("*")
+        .order("ord", { ascending: true })
+        .order("created_at", { ascending: true }),
+      "contacts",
+    ),
+  ]);
+  const oldRoles = new Map(_companies.map(c => [c.id, c.relationshipRoles || []]));
+  const contactsByCompany = new Map();
+  for (const row of contacts) {
+    const contact = adaptContact(row);
+    if (!contact.companyId) continue;
+    const list = contactsByCompany.get(contact.companyId) || [];
+    list.push(contact);
+    contactsByCompany.set(contact.companyId, list);
+  }
+  _companies = companies.map(company => adaptDirectoryCompany(
+    company,
+    contactsByCompany.get(company.id) || [],
+    oldRoles.get(company.id) || [],
+  ));
+  return _companies;
+}
+
+// Create a brand-new canonical company and optionally its first contact.
+export async function addCompany({ name, contact, email, phone, address, notes, district, orgType, website } = {}) {
   const clean = (name || "").trim();
   if (!clean) throw new Error("Company name is required");
   const payload = {
     name: clean,
+    district: (district || "").trim() || null,
+    org_type: orgType || null,
+    website: (website || "").trim() || null,
     address: (address || "").trim() || null,
     notes: (notes || "").trim() || null,
   };
@@ -3175,21 +3167,16 @@ export async function addCompany({ name, contact, email, phone, address, notes }
       console.warn("[beacon_v2] addCompany: contact insert skipped:", e?.message || e);
     }
   }
-  // A fresh company has no observed project usage yet, so adaptCompany's
-  // empty-typeMap fallback ("Prime", i.e. non-Client) is exactly right — it
-  // passes the sub-picker's `type !== "Client"` filter immediately.
-  return adaptCompany(data, new Map(), contacts);
+  return adaptDirectoryCompany(data, contacts, []);
 }
 
 // ---- Directory contacts CRUD -------------------------------------------------
-// One of clientId / companyId is required (exactly one — the DB CHECKs it).
-export async function addContact({ clientId = null, companyId = null, name, title, email, phone, notes, isPrimary = false, ord = 0 } = {}) {
+export async function addContact({ companyId, name, title, email, phone, notes, isPrimary = false, ord = 0 } = {}) {
   const clean = (name || "").trim();
   if (!clean) throw new Error("Contact name is required");
-  if (!!clientId === !!companyId) throw new Error("A contact belongs to exactly one client or company");
+  if (!companyId) throw new Error("A contact belongs to a company");
   const payload = {
-    client_id: clientId || null,
-    company_id: companyId || null,
+    company_id: companyId,
     name: clean,
     title: (title || "").trim() || null,
     email: (email || "").trim() || null,
@@ -3234,11 +3221,12 @@ export async function setPrimaryContact(id) {
   if (error) throw new Error(`set primary contact: ${error.message}`);
 }
 
-// Fresh pull of one parent's contacts (multi-user freshness on drawer open).
-export async function reloadContactsFor({ clientId = null, companyId = null } = {}) {
-  let q = supabase.from("contacts").select("*")
+// Fresh pull of one company's contacts (multi-user freshness on drawer open).
+export async function reloadContactsFor({ companyId } = {}) {
+  if (!companyId) throw new Error("Company is required");
+  const q = supabase.from("contacts").select("*")
+    .eq("company_id", companyId)
     .order("ord", { ascending: true }).order("created_at", { ascending: true });
-  q = clientId ? q.eq("client_id", clientId) : q.eq("company_id", companyId);
   const { data, error } = await q;
   if (error) throw new Error(`load contacts: ${error.message}`);
   return sortContacts((data || []).map(adaptContact));
@@ -5327,7 +5315,7 @@ export async function getOpenBidPdfSignedUrl(filePath, expiresInSeconds = 60) {
 }
 
 // ----------------------------------------------------------------------
-// Directory — merge duplicate companies / clients.
+// Directory — merge duplicate companies.
 //
 // Repoints EVERY reference (across Open Bids, Awaiting, Awarded, Closed Out,
 // Potential, Invoice, sub-invoices, Hot Leads) from the loser rows onto one
@@ -5337,29 +5325,21 @@ export async function getOpenBidPdfSignedUrl(filePath, expiresInSeconds = 60) {
 // reference rolls the whole thing back rather than half-merging. Returns the
 // RPC's jsonb summary of how many references were repointed per table.
 // ----------------------------------------------------------------------
-export async function mergeEntities({ kind, survivorId, loserIds }) {
+export async function mergeCompanies(survivorId, loserIds) {
   const losers = (loserIds || []).filter(id => id && id !== survivorId);
   if (!survivorId) throw new Error("Pick a record to keep before merging.");
   if (!losers.length) throw new Error("Select at least one other record to merge in.");
-  const fn = kind === "Client" ? "merge_clients" : "merge_companies";
-  // Contacts (20260914120000) hang off the parent with ON DELETE CASCADE, and
-  // the merge RPCs predate the table — so move the losers' people onto the
-  // survivor FIRST, or the RPC's final delete would drop them. Demote them
-  // from primary so the survivor's own primary (if any) keeps that flag
-  // (the partial-unique index allows one per parent).
-  const parentCol = kind === "Client" ? "client_id" : "company_id";
-  const { error: cErr } = await supabase.from("contacts")
-    .update({ [parentCol]: survivorId, is_primary: false })
-    .in(parentCol, losers);
-  if (cErr && cErr.code !== "42P01" && !/relation .* does not exist/i.test(cErr.message || "")) {
-    throw new Error(`move contacts: ${cErr.message}`);
-  }
-  const { data, error } = await supabase.rpc(fn, {
+  const { data, error } = await supabase.rpc("merge_companies", {
     p_survivor: survivorId,
     p_losers: losers,
   });
   if (error) throw new Error(error.message);
   return data; // { kind, survivor, merged, projects, project_subs, sub_invoices, ... }
+}
+
+// Transitional call shape for the existing modal; Task 3 removes the kind.
+export async function mergeEntities({ survivorId, loserIds }) {
+  return mergeCompanies(survivorId, loserIds);
 }
 
 // Read-only preview of everything that points at `entity`, computed from the
@@ -5372,9 +5352,7 @@ export function mergeRefSummary(entity, { projectsByType, invoice, hotLeads = []
   if (!entity) return { projects: [], leadCount: 0, bidCount: 0, total: 0 };
   const projects = linkedProjectsFor(entity, projectsByType, invoice);
   const leadCount = hotLeads.filter(l => l.clientId === entity.id).length;
-  const bidCount  = (entity.type === "Client")
-    ? openBids.filter(b => b.clientId === entity.id).length
-    : 0; // open bids only reference clients
+  const bidCount = openBids.filter(b => b.clientId === entity.id).length;
   return {
     projects,
     leadCount,
