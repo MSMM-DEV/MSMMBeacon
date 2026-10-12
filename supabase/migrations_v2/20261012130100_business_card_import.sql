@@ -7,7 +7,27 @@
 
 set search_path = beacon_v2, public, extensions;
 
-create or replace function beacon_v2.apply_business_card_import(p_payload jsonb)
+create table if not exists beacon_v2.business_card_import_runs (
+  idempotency_key uuid primary key,
+  auth_user_id uuid not null,
+  payload_hash text not null,
+  result jsonb not null,
+  created_at timestamptz not null default now()
+);
+alter table beacon_v2.business_card_import_runs enable row level security;
+drop policy if exists business_card_import_runs_self_select on beacon_v2.business_card_import_runs;
+create policy business_card_import_runs_self_select on beacon_v2.business_card_import_runs
+  for select to authenticated using (auth.uid() = auth_user_id);
+drop policy if exists business_card_import_runs_self_insert on beacon_v2.business_card_import_runs;
+create policy business_card_import_runs_self_insert on beacon_v2.business_card_import_runs
+  for insert to authenticated with check (auth.uid() = auth_user_id);
+revoke all on table beacon_v2.business_card_import_runs from public, anon;
+grant select, insert on table beacon_v2.business_card_import_runs to authenticated;
+
+create or replace function beacon_v2.apply_business_card_import(
+  p_payload jsonb,
+  p_idempotency_key uuid
+)
 returns jsonb
 language plpgsql
 security invoker
@@ -34,6 +54,9 @@ declare
   v_skipped integer := 0;
   v_created_company_ids jsonb := '{}'::jsonb;
   v_created_contact_ids jsonb := '[]'::jsonb;
+  v_payload_hash text;
+  v_stored_hash text;
+  v_result jsonb;
 begin
   if auth.uid() is null then
     raise exception 'business-card import requires authentication' using errcode = '42501';
@@ -47,6 +70,24 @@ begin
   if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
     raise exception 'business-card import payload must be an object';
   end if;
+  if p_idempotency_key is null then
+    raise exception 'business-card import idempotency key is required';
+  end if;
+  -- Serialize retries for this key. If the first request committed but its
+  -- response was lost, the retry returns the stored result without re-writing.
+  perform pg_advisory_xact_lock(hashtextextended(p_idempotency_key::text, 0));
+  v_payload_hash := encode(digest(p_payload::text, 'sha256'), 'hex');
+  select r.payload_hash, r.result
+    into v_stored_hash, v_result
+    from beacon_v2.business_card_import_runs r
+   where r.idempotency_key = p_idempotency_key
+     and r.auth_user_id = auth.uid();
+  if found then
+    if v_stored_hash <> v_payload_hash then
+      raise exception 'business-card import idempotency key was already used for a different reviewed payload';
+    end if;
+    return v_result;
+  end if;
   if (p_payload - array['companies', 'contacts', 'skipped']::text[]) <> '{}'::jsonb then
     raise exception 'business-card import payload contains unsupported top-level keys';
   end if;
@@ -57,6 +98,15 @@ begin
   if jsonb_array_length(coalesce(p_payload->'companies', '[]'::jsonb)) > 100
      or jsonb_array_length(coalesce(p_payload->'contacts', '[]'::jsonb)) > 200 then
     raise exception 'business-card import batch is too large';
+  end if;
+  if exists (
+    select 1
+      from jsonb_array_elements(coalesce(p_payload->'contacts', '[]'::jsonb)) op
+     where coalesce((op->'patch'->>'is_primary')::boolean, false)
+     group by coalesce('id:' || nullif(op->>'companyId', ''), 'temp:' || nullif(op->>'companyTempId', ''))
+    having count(*) > 1
+  ) then
+    raise exception 'business-card import allows only one selected primary contact per company';
   end if;
 
   v_skipped := greatest(0, coalesce(nullif(p_payload->>'skipped', '')::integer, 0));
@@ -218,7 +268,7 @@ begin
     end if;
   end loop;
 
-  return jsonb_build_object(
+  v_result := jsonb_build_object(
     'companies_created', v_companies_created,
     'companies_updated', v_companies_updated,
     'contacts_created', v_contacts_created,
@@ -227,11 +277,17 @@ begin
     'company_ids', v_created_company_ids,
     'contact_ids', v_created_contact_ids
   );
+  insert into beacon_v2.business_card_import_runs (
+    idempotency_key, auth_user_id, payload_hash, result
+  ) values (
+    p_idempotency_key, auth.uid(), v_payload_hash, v_result
+  );
+  return v_result;
 end;
 $function$;
 
-revoke all on function beacon_v2.apply_business_card_import(jsonb) from public, anon;
-grant execute on function beacon_v2.apply_business_card_import(jsonb) to authenticated;
+revoke all on function beacon_v2.apply_business_card_import(jsonb, uuid) from public, anon;
+grant execute on function beacon_v2.apply_business_card_import(jsonb, uuid) to authenticated;
 
 notify pgrst, 'reload schema';
 
@@ -242,7 +298,7 @@ notify pgrst, 'reload schema';
 --   'companies', jsonb_build_array(jsonb_build_object(
 --     'action','update', 'companyId','00000000-0000-0000-0000-000000000000',
 --     'expectedUpdatedAt','2000-01-01T00:00:00Z', 'patch',jsonb_build_object('notes','must not land'))),
---   'contacts','[]'::jsonb, 'skipped',0));
+--   'contacts','[]'::jsonb, 'skipped',0), gen_random_uuid());
 -- -- Expected: "stale company" exception.
 -- rollback;
 
@@ -255,6 +311,6 @@ notify pgrst, 'reload schema';
 --   "contacts":[
 --     {"action":"create","companyTempId":"new:1","patch":{"name":"Valid first"}},
 --     {"action":"create","companyTempId":"new:1","patch":{"name":""}}
---   ],"skipped":0}'::jsonb);
+--   ],"skipped":0}'::jsonb, gen_random_uuid());
 -- -- Expected: contact create requires name; SELECT from companies returns 0.
 -- rollback;

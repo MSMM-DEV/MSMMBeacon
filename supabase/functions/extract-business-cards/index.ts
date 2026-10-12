@@ -168,6 +168,7 @@ Deno.serve(async req => {
     .from("users")
     .select("id")
     .eq("auth_user_id", authData.user.id)
+    .eq("is_enabled", true)
     .maybeSingle();
   if (profileError) return json({ ok: false, error: "profile lookup failed" }, 500);
   if (!profile) return json({ ok: false, error: "forbidden" }, 403);

@@ -2,12 +2,12 @@
 """
 MSMM Beacon — seed-data ingester.
 
-Parses the CSVs + xlsx under Data/ and populates the `beacon` schema
+Parses the CSVs + xlsx under Data/ and populates the live `beacon_v2` schema
 via Supabase PostgREST (using SUPABASE_SERVICE_KEY from .env).
 
   python3 scripts/ingest_seed_data.py --dry-run    # parse only, no writes
   python3 scripts/ingest_seed_data.py              # parse + upload
-  python3 scripts/ingest_seed_data.py --wipe       # DELETE all data first, then upload
+  python3 scripts/ingest_seed_data.py --wipe       # replace rows matching this seed's natural keys
 """
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ REST = f"{URL}/rest/v1"
 H_BASE = {
     "apikey": KEY,
     "Authorization": f"Bearer {KEY}",
-    "Accept-Profile": "beacon",
-    "Content-Profile": "beacon",
+    "Accept-Profile": "beacon_v2",
+    "Content-Profile": "beacon_v2",
 }
 H_JSON = {**H_BASE, "Content-Type": "application/json"}
 
@@ -63,13 +63,13 @@ def preflight():
         r.status_code >= 400 and "schema" in r.text.lower() and "beacon" in r.text.lower()
     ):
         sys.exit(
-            "ERROR: PostgREST cannot see the 'beacon' schema.\n"
-            "Open Supabase Dashboard → Settings → API → Exposed schemas → add 'beacon'.\n"
+            "ERROR: PostgREST cannot see the 'beacon_v2' schema.\n"
+            "Open Supabase Dashboard → Settings → API → Exposed schemas → add 'beacon_v2'.\n"
             f"(response: {r.status_code} {r.text[:200]})"
         )
     r.raise_for_status()
     rows = r.json()
-    print(f"Preflight OK — beacon.users returns {len(rows)} row(s).")
+    print(f"Preflight OK — beacon_v2.users returns {len(rows)} row(s).")
 
 
 # --------------------------------------------------------------------------
@@ -478,15 +478,18 @@ def upsert_rows(table: str, rows: list[dict], on_conflict: str) -> list[dict]:
     return r.json()
 
 
-def delete_all(table: str, filter_col: str = "id"):
-    # PostgREST requires at least one filter. Use something always-true-ish.
-    if filter_col == "id":
-        params = {"id": "neq.00000000-0000-0000-0000-000000000000"}
-    else:
-        params = {filter_col: "not.is.null"}
-    r = requests.delete(f"{REST}/{table}", headers=H_BASE, params=params, timeout=60)
-    if r.status_code >= 400 and r.status_code != 404:
-        raise RuntimeError(f"DELETE {table} → {r.status_code}: {r.text[:300]}")
+def delete_matching_rows(table: str, rows: list[dict], key_fields: tuple[str, ...]):
+    """Delete only rows with the exact natural keys represented by this seed."""
+    keys = {
+        tuple(row.get(field) for field in key_fields)
+        for row in rows
+        if all(row.get(field) is not None for field in key_fields)
+    }
+    for values in sorted(keys, key=lambda value: tuple(str(part) for part in value)):
+        params = {field: f"eq.{value}" for field, value in zip(key_fields, values)}
+        r = requests.delete(f"{REST}/{table}", headers=H_BASE, params=params, timeout=60)
+        if r.status_code >= 400 and r.status_code != 404:
+            raise RuntimeError(f"DELETE {table} {dict(zip(key_fields, values))} → {r.status_code}: {r.text[:300]}")
 
 
 # --------------------------------------------------------------------------
@@ -495,7 +498,7 @@ def delete_all(table: str, filter_col: str = "id"):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="parse only; no writes")
-    ap.add_argument("--wipe", action="store_true", help="DELETE all data first (keeps users, awarded_stages, MSMM company)")
+    ap.add_argument("--wipe", action="store_true", help="replace seed-owned project/invoice rows (keeps Directory companies and unrelated features)")
     args = ap.parse_args()
 
     if not args.dry_run:
@@ -557,52 +560,78 @@ def main():
         row["prime_company_name"] = None
         row["role"] = "Prime"
 
-    # ----- Build client + company dedup sets -----
-    # Org type mapping: prefer Awarded section then Awaiting section then Potential inference
-    client_org_type: dict[tuple, str] = {}
+    # ----- Build one canonical company set -----
+    # "Client", "Prime", and "Sub" are relationship roles. Every outside
+    # organization is stored in companies; client_id columns now FK there.
+    # Org type mapping: prefer Awarded, then Awaiting, then Potential inference.
+    company_org_type: dict[tuple, str] = {}
 
     def remember_client(raw, org_type):
         n, d = canonicalize_client(raw)
         if not n:
             return None
         key = (n, d)
-        if org_type and key not in client_org_type:
-            client_org_type[key] = org_type
+        if org_type and key not in company_org_type:
+            company_org_type[key] = org_type
         return key
 
-    clients_set: set[tuple] = set()
-    companies_set: set[str] = set()
+    role_companies: set[tuple[str, str | None]] = set()
+    firm_names: set[str] = set()
 
     for row in awarded:
         k = remember_client(row["client_raw"], row["org_type"])
-        if k: clients_set.add(k)
+        if k: role_companies.add(k)
         if row["prime_raw"]:
-            companies_set.add(row["prime_raw"].strip())
+            firm_names.add(row["prime_raw"].strip())
         for s in split_semi_list(row["sub_raw"]):
-            companies_set.add(s)
+            firm_names.add(s)
 
     for row in awaiting:
         k = remember_client(row["client_raw"], row["org_type"])
-        if k: clients_set.add(k)
+        if k: role_companies.add(k)
         if row["prime_raw"]:
-            companies_set.add(row["prime_raw"].strip())
+            firm_names.add(row["prime_raw"].strip())
         for s in split_semi_list(row["sub_raw"]):
-            companies_set.add(s)
+            firm_names.add(s)
 
     for row in pot2026 + pot2025:
         k = row.get("client_canonical") or (None, None)
         if k[0]:
-            clients_set.add(k)
-            if row.get("client_org_type") and k not in client_org_type:
-                client_org_type[k] = row["client_org_type"]
+            role_companies.add(k)
+            if row.get("client_org_type") and k not in company_org_type:
+                company_org_type[k] = row["client_org_type"]
         if row.get("prime_company_name"):
-            companies_set.add(row["prime_company_name"])
+            firm_names.add(row["prime_company_name"])
 
-    companies_set.discard("")
-    companies_set.discard(None)  # type: ignore
+    firm_names.discard("")
 
-    print(f"\nUnique clients: {len(clients_set)}")
-    print(f"Unique companies: {len(companies_set)}")
+    # companies.name is unique. A base name shared by several districts gets a
+    # stable district suffix; a sole district record keeps the natural name so
+    # a Prime/Sub occurrence of the same organization coalesces onto it.
+    districts_by_name: dict[str, set[str | None]] = {}
+    for name, district in role_companies:
+        districts_by_name.setdefault(name, set()).add(district)
+
+    def company_display_name(name: str, district: str | None) -> str:
+        if len(districts_by_name.get(name, set())) <= 1:
+            return name
+        return f"{name} — {district or 'No district'}"
+
+    companies_payload_by_name: dict[str, dict] = {
+        name: {"name": name} for name in sorted(firm_names)
+    }
+    client_company_name: dict[tuple[str, str | None], str] = {}
+    for name, district in sorted(role_companies, key=lambda value: (value[0], value[1] or "")):
+        display_name = company_display_name(name, district)
+        client_company_name[(name, district)] = display_name
+        payload = companies_payload_by_name.setdefault(display_name, {"name": display_name})
+        if district:
+            payload["district"] = district
+        if company_org_type.get((name, district)):
+            payload["org_type"] = company_org_type[(name, district)]
+
+    print(f"\nUnique companies: {len(companies_payload_by_name)}")
+    print(f"  contextual Client relationships: {len(role_companies)}")
 
     if args.dry_run:
         print("\n--dry-run: no writes. Sample parsed rows:")
@@ -610,95 +639,51 @@ def main():
         print("  awaiting[0]:", awaiting[0] if awaiting else None)
         print("  awarded[0]:", awarded[0] if awarded else None)
         print("  invoice 2026[0]:", inv2026[0] if inv2026 else None)
-        print("  clients sample:", sorted(clients_set)[:5])
-        print("  companies sample:", sorted(companies_set)[:10])
-        print("  org types:", {k: v for k, v in list(client_org_type.items())[:5]})
+        print("  companies sample:", list(sorted(companies_payload_by_name))[:10])
+        print("  org types:", {k: v for k, v in list(company_org_type.items())[:5]})
         return
 
     # ----- Wipe (optional) -----
     if args.wipe:
-        print("\nWiping existing data (children first)…")
-        for t in [
-            "anticipated_invoice_pms", "anticipated_invoice",
-            "closed_out_project_pms", "closed_out_projects",
-            "awarded_project_subs", "awarded_project_pms", "awarded_projects",
-            "awaiting_verdict_subs", "awaiting_verdict_pms", "awaiting_verdict",
-            "potential_project_subs", "potential_project_pms", "potential_projects",
-            "event_attendees", "events",
-            "alert_recipients", "alert_fires", "alerts",
-        ]:
-            pk = "id"
-            if t.endswith("_pms") or t.endswith("_subs") or t in ("event_attendees", "alert_recipients"):
-                # Composite-PK tables — use any non-null column
-                if t.startswith("potential_project_subs"):
-                    pk = "potential_project_id"
-                elif t.startswith("potential_project_pms"):
-                    pk = "potential_project_id"
-                elif t.startswith("awaiting_verdict_subs") or t.startswith("awaiting_verdict_pms"):
-                    pk = "awaiting_verdict_id"
-                elif t.startswith("awarded_project_subs") or t.startswith("awarded_project_pms"):
-                    pk = "awarded_project_id"
-                elif t.startswith("closed_out_project_pms"):
-                    pk = "closed_out_project_id"
-                elif t.startswith("anticipated_invoice_pms"):
-                    pk = "anticipated_invoice_id"
-                elif t == "event_attendees":
-                    pk = "event_id"
-                elif t == "alert_recipients":
-                    pk = "alert_id"
-            delete_all(t, pk)
-        # clients (no FK dependents after the above) and non-MSMM companies
-        delete_all("clients", "id")
-        r = requests.delete(
-            f"{REST}/companies",
-            headers=H_BASE,
-            params={"is_msmm": "eq.false"},
-            timeout=60,
-        )
-        if r.status_code >= 400 and r.status_code != 404:
-            raise RuntimeError(f"DELETE companies: {r.status_code}: {r.text[:300]}")
-        print("  wiped.")
+        print("\nReplacing rows matching this seed's natural keys…")
+        delete_matching_rows("anticipated_invoice", inv2025 + inv2026, ("year", "project_name"))
+        seeded_projects = [
+            *({"status": "potential", "year": row["year"], "project_name": row["project_name"]} for row in pot2025 + pot2026),
+            *({"status": "awaiting", "year": row["proposal_year"], "project_name": row["title"]} for row in awaiting),
+            *({"status": "awarded", "year": row["proposal_year"], "project_name": row["title"]} for row in awarded),
+        ]
+        # project_pms/project_subs cascade with their matching parent projects;
+        # user-created projects with other natural keys remain untouched.
+        delete_matching_rows("projects", seeded_projects, ("status", "year", "project_name"))
+        print("  replaced only matching project/invoice identities; Directory companies and unrelated rows were retained.")
 
     # ----- Upsert companies -----
-    print(f"\nUpserting {len(companies_set)} companies…")
-    companies_payload = [{"name": n} for n in sorted(companies_set)]
-    upsert_rows("companies", companies_payload, on_conflict="name")
-    companies_all = fetch_all("companies", select="id,name")
+    print(f"\nUpserting {len(companies_payload_by_name)} companies…")
+    companies_payload = list(companies_payload_by_name.values())
+    # Group identical JSON shapes because PostgREST bulk rows must have the same
+    # keys. No payload includes a null profile field, so repeat runs never blank
+    # district/org_type merely because a source omitted them.
+    payload_groups: dict[tuple[str, ...], list[dict]] = {}
+    for company in companies_payload:
+        payload_groups.setdefault(tuple(sorted(company)), []).append(company)
+    for _shape, rows in payload_groups.items():
+        _req(
+            "POST", "companies", json=rows,
+            params={"on_conflict": "name"},
+            prefer="return=representation,resolution=merge-duplicates,missing=default",
+        )
+    companies_all = fetch_all("companies", select="id,name,district,org_type")
     comp_id = {c["name"]: c["id"] for c in companies_all}
     msmm_id = comp_id.get("MSMM")
     if not msmm_id:
         sys.exit("MSMM company row missing — was the migration applied?")
 
-    # ----- Upsert clients -----
-    print(f"Upserting {len(clients_set)} clients…")
-    clients_payload = []
-    for (n, d) in sorted(clients_set, key=lambda x: (x[0], x[1] or "")):
-        clients_payload.append({
-            "name": n,
-            "district": d,
-            "org_type": client_org_type.get((n, d)),
-        })
-    # clients has an expression-based unique index (coalesce(district,'')) which
-    # PostgREST's on_conflict can't match. Insert per row and tolerate 409/23505.
-    inserted = skipped = 0
-    for c in clients_payload:
-        rr = requests.post(
-            f"{REST}/clients",
-            headers={**H_JSON, "Prefer": "return=representation"},
-            json=c, timeout=30,
-        )
-        if rr.status_code < 300:
-            inserted += 1
-            continue
-        if rr.status_code == 409 or "duplicate key" in rr.text or "23505" in rr.text:
-            skipped += 1
-            continue
-        print(f"    WARN client insert failed for {c}: {rr.status_code} {rr.text[:200]}")
-    print(f"  inserted={inserted} skipped(dup)={skipped}")
-    clients_all = fetch_all("clients", select="id,name,district")
-    client_id = {(c["name"], c["district"]): c["id"] for c in clients_all}
+    client_company_id = {
+        key: comp_id.get(display_name)
+        for key, display_name in client_company_name.items()
+    }
 
-    # ----- Insert potential_projects -----
+    # ----- Insert potential projects -----
     print(f"\nInserting potential projects (2025+2026)…")
     stages_all = fetch_all("awarded_stages", select="id,name")
     stage_id_by_name = {s["name"]: s["id"] for s in stages_all}
@@ -707,7 +692,7 @@ def main():
         c = row.get("client_canonical") or (None, None)
         if not c[0]:
             return None
-        return client_id.get(c)
+        return client_company_id.get(c)
 
     def prime_fk(row):
         name = row.get("prime_company_name")
@@ -716,6 +701,7 @@ def main():
     pot_payload = []
     for row in pot2026 + pot2025:
         pot_payload.append({
+            "status": "potential",
             "year": row["year"],
             "project_name": row["project_name"],
             "role": row["role"],
@@ -729,8 +715,8 @@ def main():
             "project_number": row["project_number"],
             "probability": row["probability"],
         })
-    inserted_pot = insert_rows("potential_projects", pot_payload)
-    print(f"  inserted {len(inserted_pot)} potential_projects")
+    inserted_pot = insert_rows("projects", pot_payload)
+    print(f"  inserted {len(inserted_pot)} potential projects")
     pot_id_by_key = {(p["year"], p["project_name"]): p["id"] for p in inserted_pot}
 
     # Subs for potential (from subs_raw — company_id stays NULL per agreement)
@@ -744,25 +730,26 @@ def main():
             if amount is None and disc is None:
                 continue
             subs_payload.append({
-                "potential_project_id": pid,
+                "project_id": pid,
                 "ord": idx,
                 "company_id": None,
                 "discipline": disc,
                 "amount": amount,
             })
     if subs_payload:
-        inserted_subs = insert_rows("potential_project_subs", subs_payload)
-        print(f"  inserted {len(inserted_subs)} potential_project_subs")
+        inserted_subs = insert_rows("project_subs", subs_payload)
+        print(f"  inserted {len(inserted_subs)} potential project_subs")
 
-    # ----- Insert awaiting_verdict -----
+    # ----- Insert awaiting projects -----
     print(f"\nInserting awaiting verdict rows…")
     aw_payload = []
     for row in awaiting:
         cname, cdist = canonicalize_client(row["client_raw"])
         aw_payload.append({
+            "status": "awaiting",
             "year": row["proposal_year"],
             "project_name": row["title"],
-            "client_id": client_id.get((cname, cdist)) if cname else None,
+            "client_id": client_company_id.get((cname, cdist)) if cname else None,
             "prime_company_id": comp_id.get(row["prime_raw"]) if row["prime_raw"] else None,
             "project_number": None,
             "notes": None,
@@ -772,8 +759,8 @@ def main():
             "msmm_used": row["msmm_used"],
             "msmm_remaining": row["msmm_remaining"],
         })
-    inserted_aw = insert_rows("awaiting_verdict", aw_payload)
-    print(f"  inserted {len(inserted_aw)} awaiting_verdict")
+    inserted_aw = insert_rows("projects", aw_payload)
+    print(f"  inserted {len(inserted_aw)} awaiting projects")
     aw_id_by_title = {a["project_name"]: a["id"] for a in inserted_aw}
 
     aw_subs_payload = []
@@ -784,22 +771,23 @@ def main():
         for s in split_semi_list(row["sub_raw"]):
             cid = comp_id.get(s)
             if cid:
-                aw_subs_payload.append({"awaiting_verdict_id": aid, "company_id": cid})
+                aw_subs_payload.append({"project_id": aid, "company_id": cid})
     # Dedup composite PK within payload
-    aw_subs_payload = list({(p["awaiting_verdict_id"], p["company_id"]): p for p in aw_subs_payload}.values())
+    aw_subs_payload = list({(p["project_id"], p["company_id"]): p for p in aw_subs_payload}.values())
     if aw_subs_payload:
-        insert_rows("awaiting_verdict_subs", aw_subs_payload)
-        print(f"  inserted {len(aw_subs_payload)} awaiting_verdict_subs")
+        insert_rows("project_subs", aw_subs_payload)
+        print(f"  inserted {len(aw_subs_payload)} awaiting project_subs")
 
-    # ----- Insert awarded_projects -----
+    # ----- Insert awarded projects -----
     print(f"\nInserting awarded projects…")
     aw_proj_payload = []
     for row in awarded:
         cname, cdist = canonicalize_client(row["client_raw"])
         aw_proj_payload.append({
+            "status": "awarded",
             "year": row["proposal_year"],
             "project_name": row["title"],
-            "client_id": client_id.get((cname, cdist)) if cname else None,
+            "client_id": client_company_id.get((cname, cdist)) if cname else None,
             "prime_company_id": comp_id.get(row["prime_raw"]) if row["prime_raw"] else None,
             "project_number": None,
             "date_submitted": row["date_submitted"],
@@ -812,8 +800,8 @@ def main():
             "pool": row["pool"],
             "contract_expiry_date": row["contract_expiry_date"],
         })
-    inserted_awp = insert_rows("awarded_projects", aw_proj_payload)
-    print(f"  inserted {len(inserted_awp)} awarded_projects")
+    inserted_awp = insert_rows("projects", aw_proj_payload)
+    print(f"  inserted {len(inserted_awp)} awarded projects")
     # Key by (year, title) to handle duplicate titles across rows (same proposal, different primes)
     awp_rows_by_key = {}
     for p in inserted_awp:
@@ -826,11 +814,11 @@ def main():
         for s in split_semi_list(src["sub_raw"]):
             cid = comp_id.get(s)
             if cid:
-                awp_subs_payload.append({"awarded_project_id": aid, "company_id": cid})
-    awp_subs_payload = list({(p["awarded_project_id"], p["company_id"]): p for p in awp_subs_payload}.values())
+                awp_subs_payload.append({"project_id": aid, "company_id": cid})
+    awp_subs_payload = list({(p["project_id"], p["company_id"]): p for p in awp_subs_payload}.values())
     if awp_subs_payload:
-        insert_rows("awarded_project_subs", awp_subs_payload)
-        print(f"  inserted {len(awp_subs_payload)} awarded_project_subs")
+        insert_rows("project_subs", awp_subs_payload)
+        print(f"  inserted {len(awp_subs_payload)} awarded project_subs")
 
     # ----- Insert anticipated_invoice -----
     print(f"\nInserting invoice rows…")

@@ -5812,9 +5812,8 @@ function fmtQuickTime(iso) {
 // Lightweight tracker for early-stage opportunities (partner chats, trade
 // shows, pre-RFP conversations) before they become Potential Projects.
 // Structurally similar to Events: title + datetime + attendees + notes,
-// plus a Client-or-Firm picker that routes to either client_id or
-// prime_company_id on the underlying row via routeClientPick (handled in
-// updateHotLeads in App.jsx). Chronological, sorted newest-first.
+// plus a company picker. `client_id` is the contextual relationship column;
+// its FK points to the canonical companies table. Chronological, newest-first.
 export const HotLeadsTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, onForward, onAlert, flashId, filters,
   yearOptions, yearValue, onYearChange,
@@ -6909,9 +6908,16 @@ export const DirectoryTable = ({
         )}
 
         <div className="bxt-toolbar-actions">
-          <Button variant="secondary" size="sm" onClick={onImportCards}>
-            <Icon name="upload" size={13}/>Import business cards
-          </Button>
+          {onImportCards ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onImportCards}
+              data-business-card-import-trigger
+            >
+              <Icon name="upload" size={13}/>Import business cards
+            </Button>
+          ) : null}
           <span className="bxt-dir-tally">
             <span className="num">{shownRows}</span>
             <span className="bxt-dir-tally-sep">/</span>

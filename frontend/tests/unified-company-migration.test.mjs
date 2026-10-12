@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-const sql = readFileSync(new URL("../../supabase/migrations_v2/20261012120000_unified_companies.sql", import.meta.url), "utf8");
+const prep = readFileSync(new URL("../../supabase/migrations_v2/20261012125000_company_unification_prep.sql", import.meta.url), "utf8");
+const sql = readFileSync(new URL("../../supabase/migrations_v2/20261012130000_unified_companies.sql", import.meta.url), "utf8");
 const preflight = readFileSync(new URL("../../scripts/preflight_unified_companies.sql", import.meta.url), "utf8");
 
 test("cutover retargets every client-role table to companies", () => {
@@ -17,6 +18,13 @@ test("preflight calls out district collisions and conflicting primes", () => {
   assert.match(preflight, /district/i);
   assert.match(preflight, /prime_client_id/i);
   assert.match(preflight, /prime_company_id/i);
+  assert.match(preflight, /profile_conflict/i);
+  assert.match(preflight, /candidate_count/i);
+});
+
+test("a preparatory migration creates the operator override table before preflight", () => {
+  assert.match(prep, /create table beacon_v2\.company_unification_overrides/i);
+  assert.match(prep, /client_id uuid primary key references beacon_v2\.clients/i);
 });
 
 test("post-cutover company merges repoint client roles and company-owned contacts", () => {
@@ -27,4 +35,11 @@ test("post-cutover company merges repoint client roles and company-owned contact
   ]) {
     assert.match(sql, new RegExp(relation.replaceAll(" ", "\\s+"), "i"), relation);
   }
+  assert.match(sql, /marketing_opportunities set client_id/i);
+  assert.match(sql, /v_company_projects[\s\S]+'client'::text/i);
+});
+
+test("cutover blocks unresolved profile differences instead of picking silently", () => {
+  assert.match(sql, /conflicting non-empty profile values/i);
+  assert.match(sql, /group by m\.company_id, d\.field_name[\s\S]+count\(distinct d\.client_value\) > 1/i);
 });

@@ -110,9 +110,10 @@ export async function extractBusinessCards(images) {
   return data;
 }
 
-export async function applyBusinessCardImport(payload) {
+export async function applyBusinessCardImport(payload, idempotencyKey) {
   const { data, error } = await supabase.rpc("apply_business_card_import", {
     p_payload: payload,
+    p_idempotency_key: idempotencyKey,
   });
   if (error) throw new Error(error.message || "Business-card import failed");
   return data;

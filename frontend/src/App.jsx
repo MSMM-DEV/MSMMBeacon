@@ -30,6 +30,7 @@ import { LicensesTab } from "./licenses.jsx";
 import { TeamCalendarTab } from "./team-calendar.jsx";
 import { ProjectDetailPage } from "./project-detail.jsx";
 import { UserAccessPage } from "./user-access.jsx";
+import { BusinessCardImport } from "./business-card-import.jsx";
 import { createAccess, normalizeAccessConfig } from "./access.js";
 import { exportPDF, drawStar } from "./utils/pdf.js";
 import { isChunkLoadError } from "./utils/lazy-chunk.js";
@@ -1576,6 +1577,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   // after a successful merge so DirectoryTable drops its (now stale) selection.
   const [mergeModal, setMergeModal] = useState(null);
   const [mergeResetKey, setMergeResetKey] = useState(0);
+  const [businessCardImportOpen, setBusinessCardImportOpen] = useState(false);
   // Generic confirm prompt — { title, message, confirmLabel, tone, icon, onConfirm } or null.
   // Currently drives the "unmark a paid invoice" gate; reusable for other guards.
   const [confirmState, setConfirmState] = useState(null);
@@ -6968,7 +6970,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             flashId={flashId}
             filters={chipsFor("directory")}
             onMerge={(entities) => setMergeModal({ entities })}
-            onImportCards={() => showToast("Business card import is loading in the next step.", "upload")}
+            onImportCards={() => setBusinessCardImportOpen(true)}
             mergeResetKey={mergeResetKey}
             tab="directory"/>
         )}
@@ -7257,6 +7259,15 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
           openBids={openBids}
           onClose={() => setMergeModal(null)}
           onConfirm={handleMergeConfirm}
+        />
+      )}
+
+      {businessCardImportOpen && tab === "directory" && (
+        <BusinessCardImport
+          companies={companies}
+          onClose={() => setBusinessCardImportOpen(false)}
+          onComplete={(_summary, freshCompanies) => setCompanies(freshCompanies)}
+          onToast={showToast}
         />
       )}
 

@@ -1,4 +1,4 @@
--- Read-only preflight for 20261012120000_unified_companies.sql.
+-- Read-only preflight for 20261012130000_unified_companies.sql.
 -- Run in Supabase Studio before the cutover. Every result set is diagnostic;
 -- this script creates or changes nothing.
 
@@ -35,7 +35,8 @@ with client_names as (
          case
            when lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.display_key then 'name_and_district'
            else 'unique_name'
-         end as match_reason
+         end as match_reason,
+         count(*) over (partition by c.id) as candidate_count
     from client_names c
     join beacon_v2.companies f
       on lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.display_key
@@ -44,7 +45,7 @@ with client_names as (
         and lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.name_key
       )
 )
-select 'automatic_exact_match' as report, *
+select case when candidate_count = 1 then 'automatic_exact_match' else 'ambiguous_exact_match' end as report, *
   from candidates
  order by client_name, district, company_name;
 
@@ -90,6 +91,94 @@ select 'uuid_collision' as report,
   join beacon_v2.companies f on f.id = c.id
  order by c.name;
 
+-- Any two non-empty profile values that differ are blocking. The cutover never
+-- silently chooses between them. Resolve the data or record a different mapping
+-- in company_unification_overrides, then rerun this report until it is empty.
+with client_names as (
+  select c.*,
+         lower(regexp_replace(btrim(c.name), '[^a-z0-9]+', '', 'gi')) as name_key,
+         lower(regexp_replace(btrim(c.name || coalesce(' ' || c.district, '')), '[^a-z0-9]+', '', 'gi')) as display_key,
+         count(*) over (partition by lower(regexp_replace(btrim(c.name), '[^a-z0-9]+', '', 'gi'))) as same_name_count
+    from beacon_v2.clients c
+), candidates as (
+  select c.id as client_id, f.id as company_id,
+         count(*) over (partition by c.id) as candidate_count
+    from client_names c
+    join beacon_v2.companies f
+      on lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.display_key
+      or (c.same_name_count = 1 and lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.name_key)
+), resolved as (
+  select o.client_id, o.company_id, 'override'::text as match_reason
+    from beacon_v2.company_unification_overrides o
+  union all
+  select client_id, company_id, 'automatic'::text
+    from candidates
+   where candidate_count = 1
+     and not exists (select 1 from beacon_v2.company_unification_overrides o where o.client_id = candidates.client_id)
+)
+select 'profile_conflict' as report,
+       r.match_reason, r.client_id, c.name as client_name,
+       r.company_id, f.name as company_name,
+       d.field_name, d.company_value, d.client_value
+  from resolved r
+  join beacon_v2.clients c on c.id = r.client_id
+  join beacon_v2.companies f on f.id = r.company_id
+  cross join lateral (values
+    ('district', nullif(btrim(f.district), ''), nullif(btrim(c.district), '')),
+    ('org_type', f.org_type::text, c.org_type::text),
+    ('contact_person', nullif(btrim(f.contact_person), ''), nullif(btrim(c.contact_person), '')),
+    ('email', nullif(lower(btrim(f.email)), ''), nullif(lower(btrim(c.email)), '')),
+    ('phone', nullif(regexp_replace(f.phone, '\D', '', 'g'), ''), nullif(regexp_replace(c.phone, '\D', '', 'g'), '')),
+    ('address', nullif(lower(btrim(f.address)), ''), nullif(lower(btrim(c.address)), '')),
+    ('notes', nullif(btrim(f.notes), ''), nullif(btrim(c.notes), ''))
+  ) d(field_name, company_value, client_value)
+ where d.company_value is not null
+   and d.client_value is not null
+   and d.company_value <> d.client_value
+ order by f.name, c.name, d.field_name;
+
+-- Also catch two legacy clients mapped to the same company when the company
+-- field is blank but the two source values disagree.
+with client_names as (
+  select c.*,
+         lower(regexp_replace(btrim(c.name), '[^a-z0-9]+', '', 'gi')) as name_key,
+         lower(regexp_replace(btrim(c.name || coalesce(' ' || c.district, '')), '[^a-z0-9]+', '', 'gi')) as display_key,
+         count(*) over (partition by lower(regexp_replace(btrim(c.name), '[^a-z0-9]+', '', 'gi'))) as same_name_count
+    from beacon_v2.clients c
+), candidates as (
+  select c.id as client_id, f.id as company_id,
+         count(*) over (partition by c.id) as candidate_count
+    from client_names c
+    join beacon_v2.companies f
+      on lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.display_key
+      or (c.same_name_count = 1 and lower(regexp_replace(btrim(f.name), '[^a-z0-9]+', '', 'gi')) = c.name_key)
+), resolved as (
+  select o.client_id, o.company_id from beacon_v2.company_unification_overrides o
+  union all
+  select client_id, company_id from candidates
+   where candidate_count = 1
+     and not exists (select 1 from beacon_v2.company_unification_overrides o where o.client_id = candidates.client_id)
+)
+select 'profile_conflict_between_clients' as report,
+       r.company_id, f.name as company_name, d.field_name,
+       jsonb_agg(distinct d.client_value) as conflicting_values
+  from resolved r
+  join beacon_v2.clients c on c.id = r.client_id
+  join beacon_v2.companies f on f.id = r.company_id
+  cross join lateral (values
+    ('district', nullif(lower(btrim(c.district)), '')),
+    ('org_type', c.org_type::text),
+    ('contact_person', nullif(lower(btrim(c.contact_person)), '')),
+    ('email', nullif(lower(btrim(c.email)), '')),
+    ('phone', nullif(regexp_replace(c.phone, '\D', '', 'g'), '')),
+    ('address', nullif(lower(btrim(c.address)), '')),
+    ('notes', nullif(btrim(c.notes), ''))
+  ) d(field_name, client_value)
+ where d.client_value is not null
+ group by r.company_id, f.name, d.field_name
+having count(distinct d.client_value) > 1
+ order by f.name, d.field_name;
+
 -- Both prime columns populated is legal under old data only when they resolve
 -- to the same organization. The migration refuses differing values.
 select 'conflicting_prime_columns' as report,
@@ -131,4 +220,3 @@ select 'orphan_counts' as report, jsonb_build_object(
   'item_clients', (select count(*) from beacon_v2.project_items i left join beacon_v2.clients c on c.id = i.client_id where i.client_id is not null and c.id is null),
   'contact_clients', (select count(*) from beacon_v2.contacts ct left join beacon_v2.clients c on c.id = ct.client_id where ct.client_id is not null and c.id is null)
 ) as details;
-

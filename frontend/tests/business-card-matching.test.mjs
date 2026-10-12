@@ -63,6 +63,20 @@ test("same-batch exact duplicates coalesce but conflicting cards stay reviewable
   assert.equal(items[2].status, "needs_attention");
   assert.equal(items[2].duplicateOf, null);
   assert.match(items[2].reasons.join(" "), /conflicts with another card/i);
+  items[0].include = true;
+  items[0].reviewed = true;
+  items[1].include = true;
+  items[1].reviewed = true;
+  assert.throws(() => buildImportPayload(items), /only one copy/i);
+});
+
+test("same-batch duplicate detection checks phone even when both cards have email", () => {
+  const items = matchBusinessCards({ candidates: [
+    { sourceId: "i1", cardIndex: 0, personName: "Jane Doe", email: "jane@new.test", phone: "504-555-0100", companyName: "New Co" },
+    { sourceId: "i2", cardIndex: 0, personName: "Janet Different", email: "janet@other.test", phone: "(504) 555-0100", companyName: "Other Co" },
+  ], companies: [] });
+  assert.equal(items[1].status, "needs_attention");
+  assert.match(items[1].reasons.join(" "), /same email or phone/i);
 });
 
 test("name-only fuzzy suggestions never authorize an update", () => {
@@ -111,4 +125,61 @@ test("new contacts require both person and company names", () => {
   item.include = true;
   item.reviewed = true;
   assert.throws(() => buildImportPayload([item]), /person name/i);
+});
+
+test("multiple reviewed cards merge non-conflicting updates for one company", () => {
+  const company = { id: "co1", name: "Acme", address: "Old", website: "old.test", updatedAt: "company-v1", contacts: [] };
+  const items = matchBusinessCards({ candidates: [
+    { sourceId: "i1", cardIndex: 0, personName: "Jane", companyName: "Acme", companyAddress: "New address" },
+    { sourceId: "i2", cardIndex: 0, personName: "Alex", companyName: "Acme", companyWebsite: "new.test" },
+  ], companies: [company] });
+  for (const item of items) {
+    item.include = true;
+    item.reviewed = true;
+    for (const diff of Object.values(item.companyDiffs)) diff.decision = "use_card";
+  }
+
+  const payload = buildImportPayload(items);
+  assert.deepEqual(payload.companies, [{
+    action: "update",
+    companyId: "co1",
+    expectedUpdatedAt: "company-v1",
+    patch: { address: "New address", website: "new.test" },
+  }]);
+  assert.equal(payload.contacts.length, 2);
+});
+
+test("multiple people at one new company share one pending company create", () => {
+  const items = matchBusinessCards({ candidates: [
+    { sourceId: "i1", cardIndex: 0, personName: "Jane", email: "jane@new.test", companyName: "New Co", companyWebsite: "new.test" },
+    { sourceId: "i2", cardIndex: 0, personName: "Alex", email: "alex@new.test", companyName: "New Co", companyAddress: "10 Main St" },
+  ], companies: [] });
+  assert.equal(items[0].companyTempId, items[1].companyTempId);
+  for (const item of items) {
+    item.include = true;
+    item.reviewed = true;
+  }
+
+  const payload = buildImportPayload(items);
+  assert.equal(payload.companies.length, 1);
+  assert.deepEqual(payload.companies[0].patch, {
+    name: "New Co",
+    website: "new.test",
+    address: "10 Main St",
+  });
+  assert.equal(payload.contacts.length, 2);
+  assert.ok(payload.contacts.every(contact => contact.companyTempId === payload.companies[0].tempId));
+});
+
+test("a reviewed batch rejects two primary contacts for the same company", () => {
+  const items = matchBusinessCards({ candidates: [
+    { sourceId: "i1", cardIndex: 0, personName: "Jane", companyName: "New Co" },
+    { sourceId: "i2", cardIndex: 0, personName: "Alex", companyName: "New Co" },
+  ], companies: [] });
+  for (const item of items) {
+    item.include = true;
+    item.reviewed = true;
+    item.isPrimary = true;
+  }
+  assert.throws(() => buildImportPayload(items), /only one primary contact/i);
 });

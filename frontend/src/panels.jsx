@@ -685,14 +685,13 @@ export const DetailDrawer = ({
         />
       );
     }
-    // Hot Leads have no role concept, but still want the merged list so
-    // early-stage leads can reference either an actual client or an
-    // external firm. updateHotLeads in App.jsx routes via routeClientPick.
+    // Hot Leads have no role concept; every outside organization comes from
+    // the one canonical company list.
     if (f.type === "clientOrFirm") return (
       <SearchableSelect
         value={val || ""}
         options={CLIENT_OR_FIRM_OPTIONS}
-        placeholder="Search clients or firms…"
+        placeholder="Search companies…"
         onChange={v => set(v || null)}
       />
     );

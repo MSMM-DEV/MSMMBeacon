@@ -13,7 +13,7 @@ Mapping (columns are matched by HEADER name, so column order can differ):
   Project#                     → local_id (root) / Phase → local_id (child)
   Project Name/Tasks           → name (root name overridden by the matching
                                   invoice project name when one exists)
-  ClientID                     → matched to a beacon_v2.clients row → client_id
+  ClientID                     → matched to a beacon_v2.companies row → client_id
   Project Manager ID           → matched to a beacon_v2.users row → manager_user_id
   Contract Type                → enum (Fixed/Hourly/HNTE→hourly_nte/Overhead/…)
   Contract Amount              → contract_amount
@@ -25,7 +25,7 @@ Mapping (columns are matched by HEADER name, so column order can differ):
   [A+B+C]Total Billed/Paid     → total_billed_paid
 
 Matching:
-  * Clients + PMs match case-insensitively, then FUZZY (difflib) so typos /
+  * Companies + PMs match case-insensitively, then FUZZY (difflib) so typos /
     middle-initials resolve (e.g. "Stuart Steiler" → Stuart Seiler, "James A.
     Wilson" → James Wilson). Genuinely-new names are left UNLINKED and reported.
   * The root gets item_type='main' when it has child phases (a container — no
@@ -86,7 +86,7 @@ PM_OVERRIDES = {
     "stuart steiler": "stuart seiler",   # typo
     "james a wilson": "jim wilson",      # Jim is the Beacon display name for James
 }
-CLIENT_OVERRIDES = {
+COMPANY_OVERRIDES = {
     "st tammany parish": "st tammany parish government",
 }
 
@@ -95,6 +95,20 @@ FUZZY = 0.84  # difflib ratio threshold for a confident name match
 
 def norm(s) -> str:
     return " ".join(str(s or "").strip().lower().replace(".", " ").split())
+
+
+def company_match_keys(name, district):
+    """Return display, full-district, and district-code lookup keys once each."""
+    display = str(name or "").strip()
+    district = str(district or "").strip()
+    suffix = f" — {district}" if district else ""
+    base = display[:-len(suffix)].strip() if suffix and display.endswith(suffix) else display
+    code = district.split("-")[0].split("(")[0].strip()
+    return {
+        "display": display,
+        "full": f"{base} {district}".strip(),
+        "code": f"{base} {code}".strip() if code else base,
+    }
 
 
 def numv(v):
@@ -168,8 +182,8 @@ def main():
     wipe = "--wipe" in sys.argv
 
     # --- reference data from beacon_v2 ---
-    clients = requests.get(f"{URL}/rest/v1/clients", headers=H_READ,
-                           params={"select": "id,name,district"}, timeout=30).json()
+    companies = requests.get(f"{URL}/rest/v1/companies", headers=H_READ,
+                             params={"select": "id,name,district"}, timeout=30).json()
     users = requests.get(f"{URL}/rest/v1/users", headers=H_READ,
                          params={"select": "id,first_name,last_name,display_name"}, timeout=30).json()
     invoices = requests.get(f"{URL}/rest/v1/anticipated_invoice", headers=H_READ,
@@ -183,15 +197,14 @@ def main():
 
     for u in users:
         u["full"] = " ".join(filter(None, [u.get("first_name"), u.get("last_name")]))
-    # USACE-style clients store the district separately ("USACE" / "MVN-New
+    # USACE-style companies store the district separately ("USACE" / "MVN-New
     # Orleans District"), but the sheet writes "USACE MVN". Index extra keys so
     # name+district and name+district-code ("USACE MVN") both resolve.
-    for c in clients:
-        nm, d = (c.get("name") or ""), (c.get("district") or "")
-        code = d.split("-")[0].split("(")[0].strip()
-        c["_kfull"] = f"{nm} {d}".strip()
-        c["_kcode"] = f"{nm} {code}".strip() if code else nm
-    client_m = Matcher(clients, ["name", "_kfull", "_kcode"], CLIENT_OVERRIDES)
+    for c in companies:
+        keys = company_match_keys(c.get("name"), c.get("district"))
+        c["_kfull"] = keys["full"]
+        c["_kcode"] = keys["code"]
+    company_m = Matcher(companies, ["name", "_kfull", "_kcode"], COMPANY_OVERRIDES)
     user_m = Matcher(users, ["display_name", "full"], PM_OVERRIDES)
     invoice_name = {}
     for iv in invoices:
@@ -234,7 +247,7 @@ def main():
         print(f"  wiped existing project_items → HTTP {d.status_code}\n")
         existing = set()
 
-    unmatched_clients, unmatched_pms = set(), set()
+    unmatched_companies, unmatched_pms = set(), set()
     n_proj = n_phase = n_skip_existing = 0
     errors = []
 
@@ -261,10 +274,10 @@ def main():
 
         # client / PM (resolved from the root row; same across the project)
         craw, praw = cell(root_row, "client"), cell(root_row, "pm")
-        client, cway = client_m.match(craw)
+        company, cway = company_m.match(craw)
         user, pway = user_m.match(praw)
-        if craw and not client:
-            unmatched_clients.add(str(craw).strip())
+        if craw and not company:
+            unmatched_companies.add(str(craw).strip())
         if praw and not user:
             unmatched_pms.add(str(praw).strip())
 
@@ -282,7 +295,7 @@ def main():
             cap_warn = f" ⚠ phases ${phase_sum:,.0f} > root ${root_amt:,.0f} → root cap dropped"
             root_amt = None
 
-        cl = (f"{client['name']}({cway})" if client else (f"NO MATCH:{craw}" if craw else "—"))
+        cl = (f"{company['name']}({cway})" if company else (f"NO MATCH:{craw}" if craw else "—"))
         pm = (f"{user['full']}({pway})" if user else (f"NO MATCH:{praw}" if praw else "—"))
         print(f"[{pid}] {name[:46]:46s} {name_src:7s} client={cl[:28]:28s} pm={pm[:24]:24s} "
               f"{len(phase_rows)} phases{extra_root}{cap_warn}")
@@ -294,7 +307,9 @@ def main():
 
         def base_fields(r):
             d = {
-                "client_id": client["id"] if client else None,
+                # `client_id` is a contextual role name; its FK now targets the
+                # one canonical companies table.
+                "client_id": company["id"] if company else None,
                 "manager_user_id": user["id"] if user else None,
                 "contract_type": map_ctype(cell(r, "ctype")),
                 "total_labor_cost": numv(cell(r, "labor")),
@@ -348,9 +363,9 @@ def main():
     print("\n" + "=" * 72)
     print(f"{'Imported' if apply else 'Would import'}: {n_proj} projects, {n_phase} phases"
           + (f"  ·  skipped {n_skip_existing} already-present projects" if n_skip_existing else ""))
-    if unmatched_clients:
-        print(f"\nUNMATCHED CLIENTS ({len(unmatched_clients)}) — imported UNLINKED, add to the directory + re-run:")
-        for c in sorted(unmatched_clients):
+    if unmatched_companies:
+        print(f"\nUNMATCHED COMPANIES ({len(unmatched_companies)}) — imported UNLINKED, add to the directory + re-run:")
+        for c in sorted(unmatched_companies):
             print(f"   · {c}")
     if unmatched_pms:
         print(f"\nUNMATCHED PROJECT MANAGERS ({len(unmatched_pms)}) — imported UNLINKED:")

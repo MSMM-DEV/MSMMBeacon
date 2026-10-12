@@ -37,7 +37,8 @@
 
 **Files:**
 - Create: `scripts/preflight_unified_companies.sql`
-- Create: `supabase/migrations_v2/20261012120000_unified_companies.sql`
+- Create: `supabase/migrations_v2/20261012125000_company_unification_prep.sql`
+- Create: `supabase/migrations_v2/20261012130000_unified_companies.sql`
 - Create: `frontend/tests/unified-company-migration.test.mjs`
 
 **Interfaces:**
@@ -52,7 +53,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-const sql = readFileSync(new URL("../../supabase/migrations_v2/20261012120000_unified_companies.sql", import.meta.url), "utf8");
+const sql = readFileSync(new URL("../../supabase/migrations_v2/20261012130000_unified_companies.sql", import.meta.url), "utf8");
 const preflight = readFileSync(new URL("../../scripts/preflight_unified_companies.sql", import.meta.url), "utf8");
 
 test("cutover retargets every client-role table to companies", () => {
@@ -145,14 +146,14 @@ Run: `node --test frontend/tests/unified-company-migration.test.mjs`
 
 Expected: PASS.
 
-Run: `rg -n "references beacon_v2\.clients" supabase/migrations_v2/20261012120000_unified_companies.sql`
+Run: `rg -n "references beacon_v2\.clients" supabase/migrations_v2/20261012130000_unified_companies.sql`
 
 Expected: no matches.
 
 - [ ] **Step 6: Commit the schema checkpoint**
 
 ```bash
-git add scripts/preflight_unified_companies.sql supabase/migrations_v2/20261012120000_unified_companies.sql frontend/tests/unified-company-migration.test.mjs
+git add scripts/preflight_unified_companies.sql supabase/migrations_v2/20261012125000_company_unification_prep.sql supabase/migrations_v2/20261012130000_unified_companies.sql frontend/tests/unified-company-migration.test.mjs
 git commit -m "Unify clients into canonical companies"
 ```
 
@@ -569,7 +570,7 @@ git commit -m "Extract multiple business cards with vision"
 ### Task 7: Atomic reviewed-import RPC
 
 **Files:**
-- Create: `supabase/migrations_v2/20261012120100_business_card_import.sql`
+- Create: `supabase/migrations_v2/20261012130100_business_card_import.sql`
 - Create: `frontend/tests/business-card-import-sql.test.mjs`
 - Modify: `frontend/src/data.js`
 
@@ -584,7 +585,7 @@ git commit -m "Extract multiple business cards with vision"
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-const sql = readFileSync(new URL("../../supabase/migrations_v2/20261012120100_business_card_import.sql", import.meta.url), "utf8");
+const sql = readFileSync(new URL("../../supabase/migrations_v2/20261012130100_business_card_import.sql", import.meta.url), "utf8");
 
 test("import RPC is authenticated, explicit and version checked", () => {
   assert.match(sql, /create or replace function beacon_v2\.apply_business_card_import\(p_payload jsonb\)/i);
@@ -634,7 +635,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit the atomic-write checkpoint**
 
 ```bash
-git add supabase/migrations_v2/20261012120100_business_card_import.sql frontend/src/data.js frontend/tests/business-card-import-sql.test.mjs
+git add supabase/migrations_v2/20261012130100_business_card_import.sql frontend/src/data.js frontend/tests/business-card-import-sql.test.mjs
 git commit -m "Apply reviewed card imports atomically"
 ```
 
@@ -767,7 +768,7 @@ Document:
 
 - canonical `companies` organization storage and contextual Client/Prime/Sub roles;
 - company-only contacts;
-- migrations `20261012120000` and `20261012120100`;
+- migrations `20261012125000`, `20261012130000`, and `20261012130100`;
 - `extract-business-cards` deployment;
 - `OPENAI_API_KEY` and optional `OPENAI_CARD_MODEL`;
 - ephemeral image handling and review-before-save behavior;

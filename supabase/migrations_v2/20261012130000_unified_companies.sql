@@ -12,13 +12,15 @@ alter table beacon_v2.companies add column if not exists district text;
 alter table beacon_v2.companies add column if not exists org_type beacon_v2.org_type_enum;
 alter table beacon_v2.companies add column if not exists website text;
 
--- Studio-only operator decisions for ambiguous legacy pairs. Application roles
--- receive no privileges on this table.
-create table if not exists beacon_v2.company_unification_overrides (
-  client_id uuid primary key,
-  company_id uuid not null references beacon_v2.companies(id) on delete restrict,
-  created_at timestamptz not null default now()
-);
+-- Studio-only operator decisions are staged by the prep migration so they can
+-- be reviewed before this transaction starts.
+do $$
+begin
+  if to_regclass('beacon_v2.company_unification_overrides') is null then
+    raise exception 'apply 20261012125000_company_unification_prep.sql before the company cutover';
+  end if;
+end;
+$$;
 revoke all on table beacon_v2.company_unification_overrides from public, anon, authenticated;
 
 create or replace function beacon_v2.fn_normalize_company_name(p_value text)
@@ -137,18 +139,71 @@ begin
     raise exception 'company cutover: not every client received a company mapping';
   end if;
 
-  -- Fill blanks on matched companies; never overwrite an existing value.
+  -- Profile differences are operator decisions, not migration guesses. The
+  -- preflight names every differing field. It must be resolved by editing the
+  -- source/canonical row or choosing a different override before cutover.
+  if exists (
+    select 1
+      from tmp_company_map m
+      join beacon_v2.clients c on c.id = m.client_id
+      join beacon_v2.companies f on f.id = m.company_id
+      cross join lateral (values
+        ('district', nullif(btrim(f.district), ''), nullif(btrim(c.district), '')),
+        ('org_type', f.org_type::text, c.org_type::text),
+        ('contact_person', nullif(btrim(f.contact_person), ''), nullif(btrim(c.contact_person), '')),
+        ('email', nullif(lower(btrim(f.email)), ''), nullif(lower(btrim(c.email)), '')),
+        ('phone', nullif(regexp_replace(f.phone, '\D', '', 'g'), ''), nullif(regexp_replace(c.phone, '\D', '', 'g'), '')),
+        ('address', nullif(lower(btrim(f.address)), ''), nullif(lower(btrim(c.address)), '')),
+        ('notes', nullif(btrim(f.notes), ''), nullif(btrim(c.notes), ''))
+      ) d(field_name, company_value, client_value)
+     where d.company_value is not null
+       and d.client_value is not null
+       and d.company_value <> d.client_value
+  ) or exists (
+    select 1
+      from tmp_company_map m
+      join beacon_v2.clients c on c.id = m.client_id
+      cross join lateral (values
+        ('district', nullif(lower(btrim(c.district)), '')),
+        ('org_type', c.org_type::text),
+        ('contact_person', nullif(lower(btrim(c.contact_person)), '')),
+        ('email', nullif(lower(btrim(c.email)), '')),
+        ('phone', nullif(regexp_replace(c.phone, '\D', '', 'g'), '')),
+        ('address', nullif(lower(btrim(c.address)), '')),
+        ('notes', nullif(btrim(c.notes), ''))
+      ) d(field_name, client_value)
+     where d.client_value is not null
+     group by m.company_id, d.field_name
+    having count(distinct d.client_value) > 1
+  ) then
+    raise exception 'company cutover: conflicting non-empty profile values; resolve the preflight profile_conflict report first';
+  end if;
+
+  -- Fill blanks on matched companies deterministically; conflicts were blocked
+  -- above, so each aggregate has at most one meaningful value.
+  with profile as (
+    select m.company_id,
+           max(nullif(btrim(c.district), '')) as district,
+           max(c.org_type::text)::beacon_v2.org_type_enum as org_type,
+           max(nullif(btrim(c.contact_person), '')) as contact_person,
+           max(nullif(btrim(c.email), '')) as email,
+           max(nullif(btrim(c.phone), '')) as phone,
+           max(nullif(btrim(c.address), '')) as address,
+           max(nullif(btrim(c.notes), '')) as notes
+      from tmp_company_map m
+      join beacon_v2.clients c on c.id = m.client_id
+     group by m.company_id
+  )
   update beacon_v2.companies f
-     set district       = coalesce(nullif(f.district, ''), c.district),
-         org_type       = coalesce(f.org_type, c.org_type),
-         contact_person = coalesce(nullif(f.contact_person, ''), c.contact_person),
-         email          = coalesce(nullif(f.email, ''), c.email),
-         phone          = coalesce(nullif(f.phone, ''), c.phone),
-         address        = coalesce(nullif(f.address, ''), c.address),
-         notes          = coalesce(nullif(f.notes, ''), c.notes)
-    from tmp_company_map m
-    join beacon_v2.clients c on c.id = m.client_id
-   where f.id = m.company_id;
+     set district       = coalesce(nullif(f.district, ''), p.district),
+         org_type       = coalesce(f.org_type, p.org_type),
+         contact_person = coalesce(nullif(f.contact_person, ''), p.contact_person),
+         email          = coalesce(nullif(f.email, ''), p.email),
+         phone          = coalesce(nullif(f.phone, ''), p.phone),
+         address        = coalesce(nullif(f.address, ''), p.address),
+         notes          = coalesce(nullif(f.notes, ''), p.notes)
+    from profile p
+   where f.id = p.company_id;
 
   -- Conflicting dual-prime rows require an operator decision; do not guess.
   if exists (
@@ -269,6 +324,21 @@ begin
   revoke all on table beacon_v2.clients_legacy_20261012 from public, anon, authenticated;
 end;
 $migration$;
+
+-- A company can now be the client, prime, or sub on a project. Preserve each
+-- contextual role explicitly, even when one company holds two roles.
+create or replace view beacon_v2.v_company_projects as
+  select p.id as project_id, p.client_id as company_id, 'client'::text as relation
+    from beacon_v2.projects p where p.client_id is not null
+  union
+  select p.id, p.prime_company_id, 'prime'::text
+    from beacon_v2.projects p where p.prime_company_id is not null
+  union
+  select s.project_id, s.company_id, 'sub'::text
+    from beacon_v2.project_subs s where s.company_id is not null;
+
+comment on view beacon_v2.v_company_projects is
+  'Reverse-browse helper: every project/company relationship as client, prime, or sub.';
 
 -- Company-only contact compatibility mirror.
 create or replace function beacon_v2.fn_contacts_mirror_primary()
@@ -468,6 +538,13 @@ begin
     get diagnostics v_n = row_count; v_items := v_items + v_n;
     update beacon_v2.invoice_party_files set party_company_id = p_survivor where party_company_id = v_loser;
     update beacon_v2.invoice_amendments set company_id = p_survivor where company_id = v_loser;
+    update beacon_v2.company_unification_overrides set company_id = p_survivor where company_id = v_loser;
+    -- Marketing may have been migrated before this cutover. Keep the function
+    -- valid in either migration order while preserving its company relation.
+    if to_regclass('beacon_v2.marketing_opportunities') is not null then
+      execute 'update beacon_v2.marketing_opportunities set client_id = $1 where client_id = $2'
+        using p_survivor, v_loser;
+    end if;
 
     delete from beacon_v2.companies where id = v_loser;
     v_merged := v_merged + 1;

@@ -122,11 +122,13 @@ function buildDiffs(existing, proposed, fields) {
   return diffs;
 }
 
-function batchKey(candidate) {
+function batchKeys(candidate) {
+  const keys = [];
   const email = normalizeEmail(candidate.email);
-  if (email) return `email:${email}`;
   const phone = normalizePhone(candidate.phone);
-  return phone ? `phone:${phone}` : "";
+  if (email) keys.push(`email:${email}`);
+  if (phone) keys.push(`phone:${phone}`);
+  return keys;
 }
 
 function batchConflict(a, b) {
@@ -169,10 +171,13 @@ export function matchBusinessCards({ candidates = [], companies = [] } = {}) {
   const companiesByName = indexBy(companies, company => normalizeCompanyName(company.name));
   const companiesByDomain = indexBy(companies, company => normalizeDomain(company.website));
   const seenBatch = new Map();
+  const pendingCompanyIds = new Map();
 
   return candidates.map((raw, index) => {
     const candidate = candidateShape(raw);
-    const id = `${candidate.sourceId || "image"}:${candidate.cardIndex}:${index}`;
+    const id = candidate.sourceId
+      ? `${candidate.sourceId}:${candidate.cardIndex}`
+      : `image:${candidate.cardIndex}:${index}`;
     const reasons = [];
     let companyMatch = null;
     let contactMatch = null;
@@ -228,6 +233,17 @@ export function matchBusinessCards({ candidates = [], companies = [] } = {}) {
         status = "needs_attention";
         contactMode = "unresolved";
         reasons.push("More than one contact has this name at the company.");
+      } else if (personName) {
+        const suggestions = (companyMatch.contacts || [])
+          .map(contact => ({ contact, score: similarity(personName, normalizeText(contact.name)) }))
+          .filter(entry => entry.score >= 0.85)
+          .sort((a, b) => b.score - a.score || a.contact.name.localeCompare(b.contact.name));
+        if (suggestions.length) {
+          contactMatch = suggestions[0].contact;
+          contactMode = "unresolved";
+          status = "needs_attention";
+          reasons.push(`Similar person name suggests ${contactMatch.name}; confirm whether this is the same person.`);
+        }
       }
     }
 
@@ -275,21 +291,30 @@ export function matchBusinessCards({ candidates = [], companies = [] } = {}) {
     }
 
     let duplicateOf = null;
-    const key = batchKey(candidate);
-    if (key && seenBatch.has(key)) {
-      const prior = seenBatch.get(key);
-      if (batchConflict(prior.candidate, candidate)) {
+    const keys = batchKeys(candidate);
+    const priorEntries = uniqueById(keys.map(key => seenBatch.get(key)).filter(Boolean));
+    if (priorEntries.length) {
+      const conflicting = priorEntries.find(prior => batchConflict(prior.candidate, candidate));
+      if (conflicting) {
         status = "needs_attention";
         companyMode = "unresolved";
         contactMode = "unresolved";
         reasons.push("This card conflicts with another card in the same batch that has the same email or phone.");
       } else {
         status = "possible_duplicate";
-        duplicateOf = prior.id;
+        duplicateOf = priorEntries[0].id;
         reasons.push("Exact email or phone duplicates another card in this batch.");
       }
-    } else if (key) {
-      seenBatch.set(key, { id, candidate });
+    }
+    for (const key of keys) {
+      if (!seenBatch.has(key)) seenBatch.set(key, { id, candidate });
+    }
+
+    const pendingCompanyKey = companyMode === "new" ? normalizeCompanyName(candidate.companyName) : "";
+    let companyTempId = `company:${id}`;
+    if (pendingCompanyKey) {
+      companyTempId = pendingCompanyIds.get(pendingCompanyKey) || companyTempId;
+      pendingCompanyIds.set(pendingCompanyKey, companyTempId);
     }
 
     return {
@@ -306,7 +331,7 @@ export function matchBusinessCards({ candidates = [], companies = [] } = {}) {
       contactMode,
       selectedCompanyId: companyMode === "existing" ? companyMatch?.id || null : null,
       selectedContactId: contactMode === "existing" ? contactMatch?.id || null : null,
-      companyTempId: `company:${id}`,
+      companyTempId,
       include: false,
       reviewed: false,
       isPrimary: false,
@@ -331,16 +356,54 @@ function selectedDiffPatch(diffs = {}) {
   return patch;
 }
 
+function appendOrMergeUpdate(operations, operation, identityKey, label) {
+  const existing = operations.find(entry => entry.action === "update" && entry[identityKey] === operation[identityKey]);
+  if (!existing) {
+    operations.push(operation);
+    return;
+  }
+  if (existing.expectedUpdatedAt !== operation.expectedUpdatedAt) {
+    throw new Error(`${label} changed while this batch was being reviewed.`);
+  }
+  for (const [field, value] of Object.entries(operation.patch || {})) {
+    if (field in existing.patch && existing.patch[field] !== value) {
+      throw new Error(`Two selected cards propose different ${label.toLowerCase()} values for ${field}.`);
+    }
+    existing.patch[field] = value;
+  }
+}
+
+function appendOrMergeCreate(operations, operation) {
+  const existing = operations.find(entry => entry.action === "create" && entry.tempId === operation.tempId);
+  if (!existing) {
+    operations.push(operation);
+    return;
+  }
+  for (const [field, value] of Object.entries(operation.patch || {})) {
+    if (field in existing.patch && existing.patch[field] !== value) {
+      if (field === "name" && normalizeCompanyName(existing.patch[field]) === normalizeCompanyName(value)) continue;
+      throw new Error(`Two selected cards propose different new-company values for ${field}.`);
+    }
+    existing.patch[field] = value;
+  }
+}
+
 export function buildImportPayload(reviewItems = []) {
   const companies = [];
   const contacts = [];
   const companyTempIds = new Set();
+  const pendingCompaniesByName = new Map();
+  const primaryTargets = new Map();
+  const includedIds = new Set(reviewItems.filter(item => item?.include).map(item => item.id));
   let skipped = 0;
 
   for (const item of reviewItems) {
     if (!item?.include) {
       skipped += 1;
       continue;
+    }
+    if (item.duplicateOf && includedIds.has(item.duplicateOf)) {
+      throw new Error("Include only one copy of a possible duplicate card.");
     }
     if (!item.reviewed) throw new Error("Every included card must be reviewed before saving.");
     const candidate = candidateShape(item.candidate);
@@ -352,19 +415,29 @@ export function buildImportPayload(reviewItems = []) {
       if (!companyId) throw new Error("Choose a company for every included card.");
       const patch = selectedDiffPatch(item.companyDiffs);
       if (Object.keys(patch).length) {
-        companies.push({
+        appendOrMergeUpdate(companies, {
           action: "update",
           companyId,
           expectedUpdatedAt: item.companyMatch?.updatedAt || item.expectedCompanyUpdatedAt || null,
           patch,
-        });
+        }, "companyId", "Company");
       }
     } else if (item.companyMode === "new") {
       if (!candidate.companyName) throw new Error("A company name is required for a new contact.");
-      companyTempId = item.companyTempId || `company:${item.id}`;
+      const companyKey = normalizeCompanyName(candidate.companyName);
+      companyTempId = pendingCompaniesByName.get(companyKey) || item.companyTempId || `company:${item.id}`;
+      pendingCompaniesByName.set(companyKey, companyTempId);
       if (!companyTempIds.has(companyTempId)) {
         companyTempIds.add(companyTempId);
-        companies.push({
+        appendOrMergeCreate(companies, {
+          tempId: companyTempId,
+          action: "create",
+          patch: compactPatch(companyProposal(candidate), [
+            ["name"], ["district"], ["orgType", "org_type"], ["website"], ["address"], ["notes"],
+          ]),
+        });
+      } else {
+        appendOrMergeCreate(companies, {
           tempId: companyTempId,
           action: "create",
           patch: compactPatch(companyProposal(candidate), [
@@ -376,19 +449,27 @@ export function buildImportPayload(reviewItems = []) {
       throw new Error("Resolve the company match before saving.");
     }
 
+    if (item.isPrimary) {
+      const target = companyId ? `existing:${companyId}` : `pending:${companyTempId}`;
+      if (primaryTargets.has(target)) {
+        throw new Error("Choose only one primary contact for each company in this import.");
+      }
+      primaryTargets.set(target, item.id);
+    }
+
     if (item.contactMode === "existing") {
       const contactId = item.selectedContactId || item.contactMatch?.id || null;
       if (!contactId) throw new Error("Resolve the contact match before saving.");
       const patch = selectedDiffPatch(item.contactDiffs);
       if (item.isPrimary) patch.is_primary = true;
       if (Object.keys(patch).length) {
-        contacts.push({
+        appendOrMergeUpdate(contacts, {
           action: "update",
           contactId,
           companyId,
           expectedUpdatedAt: item.contactMatch?.updatedAt || item.expectedContactUpdatedAt || null,
           patch,
-        });
+        }, "contactId", "Contact");
       }
     } else if (item.contactMode === "new") {
       if (!candidate.personName) throw new Error("A person name is required for a new contact.");

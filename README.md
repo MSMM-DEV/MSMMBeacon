@@ -1,6 +1,6 @@
 # MSMM Beacon
 
-Project-lifecycle dashboard for an engineering firm. Opportunities flow through a staged pipeline — **Leads & Bids** (Hot Leads · Open Bids) → **Proposals & Awarded** (Proposals · Awarded) → **Invoice** (Invoices · In-Between · Closed Out) — with carry-forward between stages. Alongside the pipeline it runs an invoice/cash-flow tracker, an Events calendar (with Outlook sync), a Directory of clients & companies, a Licenses & Certifications tracker, NFC/web **timekeeping**, and **vacation/sick leave**. Installable as a PWA on desktop and mobile.
+Project-lifecycle dashboard for an engineering firm. Opportunities flow through a staged pipeline — **Leads & Bids** (Hot Leads · Open Bids) → **Proposals & Awarded** (Proposals · Awarded) → **Invoice** (Invoices · In-Between · Closed Out) — with carry-forward between stages. Alongside the pipeline it runs an invoice/cash-flow tracker, an Events calendar (with Outlook sync), a company Directory with multiple contact people per company, a Licenses & Certifications tracker, NFC/web **timekeeping**, and **vacation/sick leave**. Installable as a PWA on desktop and mobile.
 
 > **Source of truth for behavior:** [`PLAN.md`](./PLAN.md) (product spec) and [`CLAUDE.md`](./CLAUDE.md) (engineering context, conventions, per-migration gotchas — the current, detailed reference). This README is the high-level overview.
 
@@ -9,9 +9,9 @@ Project-lifecycle dashboard for an engineering firm. Opportunities flow through 
 - **Database** — Supabase Postgres + PostgREST. The **live schema is `beacon_v2`** (`supabase/migrations_v2/`); the legacy `beacon` schema (`supabase/migrations/`) is kept only as a cold backup. The frontend reads/writes exclusively from `beacon_v2`.
 - **Frontend** — Vite + React (ES modules), `@supabase/supabase-js`. Responsive phone → tablet → desktop, installable PWA. Lives in [`frontend/`](./frontend).
 - **Auth** — Supabase Auth (email + password). Two app roles (`Admin`, `User`) on `beacon_v2.users.role`, enforced in-app and via RLS.
-- **Edge Functions** (Deno, on Supabase) — `admin-users`, `send-alert`, `outlook-sync`, `timeclock-punch`, `timeclock-classify`, `timeclock-admin`, `timeclock-eod-sweep`, `generate-description`, `license-reminders`, `invoice-billing-reminders`. See [`supabase/functions/`](./supabase/functions).
+- **Edge Functions** (Deno, on Supabase) — `admin-users`, `send-alert`, `outlook-sync`, `timeclock-punch`, `timeclock-classify`, `timeclock-admin`, `timeclock-eod-sweep`, `generate-description`, `extract-business-cards`, `license-reminders`, `invoice-billing-reminders`. See [`supabase/functions/`](./supabase/functions).
 - **Scheduler** — GitHub Actions crons in [`.github/workflows/`](./.github/workflows): `alert-tick` (1 min), `outlook-sync-tick` (15 min), `timekeeping-classify-tick` (5 min), `timekeeping-eod-sweep-tick` (auto punch-out, every 15 min evenings), `license-reminders-tick` (daily), `invoice-billing-reminders-tick` (daily).
-- **Integrations** — Resend (email), Microsoft Graph (Outlook calendar sync), OpenAI (AI invoice-description generator). All keys are server-side Edge Function secrets, never in the browser.
+- **Integrations** — Resend (email), Microsoft Graph (Outlook calendar sync), OpenAI (AI invoice-description generator and ephemeral business-card extraction). All keys are server-side Edge Function secrets, never in the browser.
 - **Office hardware** — a Raspberry Pi NFC reader (7" kiosk or headless OLED) posts punches to `timeclock-punch`. See [`pi/`](./pi).
 
 ## Layout
@@ -24,7 +24,7 @@ MSMMBeacon/
 ├── supabase/
 │   ├── migrations_v2/           THE LIVE SCHEMA (beacon_v2). Apply in timestamp order via Studio.
 │   ├── migrations/              legacy v1 schema (beacon) — cold backup, not used by the app
-│   └── functions/               10 Edge Functions (see Stack above)
+│   └── functions/               11 Edge Functions (see Stack above)
 ├── .github/workflows/           6 cron ticks (alerts / outlook / timekeeping ×2 / licenses / invoice billing)
 ├── scripts/                     Python ingest/seed + maintenance + setup_outlook_rbac.ps1
 ├── pi/                          Raspberry Pi NFC tap reader (kiosk + headless)
@@ -48,11 +48,39 @@ There is **no local Supabase stack** — the app always talks to the cloud proje
 
 Apply each file in `supabase/migrations_v2/` **in timestamp order** by pasting it into **Supabase Studio → SQL Editor → Run** (every migration is idempotent). Then add **`beacon_v2`** to **Settings → API → Exposed schemas** so PostgREST serves it.
 
-Most recent work uses the same pattern — e.g. `20260711120000` / `20260711120100` add the **MHZ PM** invoice type (the MHZ perspective for PM projects, the PM analogue of ENG↔MHZ). CLAUDE.md documents every migration and the gotcha each one creates.
+The 2026-10 Directory cutover uses `20261012125000_company_unification_prep.sql`, `20261012130000_unified_companies.sql`, then `20261012130100_business_card_import.sql`. `AGENTS.md` documents every migration and the gotcha each one creates.
+
+### Company Directory & business-card import rollout
+
+`beacon_v2.companies` is the only organization master. Client, Prime, and Sub are contextual roles pointing to a company; each company may have many `contacts`. First apply the staging migration so reviewed overrides have a supported place to live, then run the read-only preflight and resolve every ambiguous mapping and profile conflict it reports:
+
+```sh
+# 1. Apply the staging migration in Supabase Studio.
+supabase/migrations_v2/20261012125000_company_unification_prep.sql
+
+# 2. Paste this into Studio and inspect every result set. Record reviewed
+# ambiguous mappings in company_unification_overrides, then rerun until clean.
+scripts/preflight_unified_companies.sql
+
+# 3. Only after preflight is clean, apply in Studio in this order.
+supabase/migrations_v2/20261012130000_unified_companies.sql
+supabase/migrations_v2/20261012130100_business_card_import.sql
+```
+
+The first migration preserves/repoints live references and renames the retired source table to access-revoked `clients_legacy_20261012` for temporary audit recovery. Do not drop that table during the cutover; clean it up later as a separate, deliberate operation.
+
+Deploy the extraction relay and set its server-only secrets separately:
+
+```sh
+supabase functions deploy extract-business-cards --project-ref ggqlcsppojypgaiyhods
+supabase secrets set OPENAI_API_KEY=... OPENAI_CARD_MODEL=... --project-ref ggqlcsppojypgaiyhods
+```
+
+The browser supports multiple photos and multiple cards per photo. It normalizes and chunks images, sends them to the configured AI provider only for extraction, then shows every company/contact match and every changed field for human review. Nothing is written until the reviewer explicitly includes the card and chooses which card values replace existing values. Images are never stored in Supabase and are discarded after completion or cancellation.
 
 ## Edge Functions & crons
 
-Deploy whichever function you touched (all ten deploy the same way):
+Deploy whichever function you touched (all eleven deploy the same way):
 
 ```sh
 supabase functions deploy <name> --project-ref ggqlcsppojypgaiyhods
@@ -83,7 +111,7 @@ The app is an installable PWA. It actively checks for new builds (on launch, eve
 
 ## Scripts
 
-Python ingest/seed + maintenance live in [`scripts/`](./scripts) (use `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` from `.env`; most take `--dry-run`). The legacy ingest tools target the v1 `beacon` schema; the newer leave/licenses/MSMM-maintenance scripts target `beacon_v2`. See CLAUDE.md for what each one does.
+Python ingest/seed + maintenance live in [`scripts/`](./scripts) (use `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` from `.env`; most take `--dry-run`). `ingest_seed_data.py` and `import_projects_xlsx.py` target `beacon_v2` and the canonical companies master; the seed script's `--wipe` replaces only its project/invoice rows and deliberately retains Directory companies and unrelated features. Older one-off maintenance scripts may still target v1, so inspect their profile before running. See AGENTS.md for what each one does.
 
 ## Where to look
 
