@@ -81,6 +81,23 @@ export async function browseEgnyteFolders(path) {
   return authedApiFetch(`/api/egnyte/folders${qs}`);
 }
 
+export async function extractBusinessCards(images) {
+  const payload = (images || []).map(image => ({
+    id: image.id,
+    filename: image.filename,
+    mime: image.mime,
+    dataB64: image.dataB64,
+  }));
+  const { data, error } = await supabase.functions.invoke("extract-business-cards", {
+    body: { images: payload },
+  });
+  if (error) throw new Error(error.message || "Business-card extraction failed");
+  if (!data?.ok || !Array.isArray(data.candidates)) {
+    throw new Error(data?.error || "Invalid extraction response");
+  }
+  return data;
+}
+
 export async function saveProjectEgnyteFolder(projectId, egnyteFolderPath) {
   return authedApiFetch("/api/projects/egnyte-folder", {
     method: "POST",
