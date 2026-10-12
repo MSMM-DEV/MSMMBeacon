@@ -3,7 +3,7 @@
 // Copy `.env.example` → `.env.local` and fill in your own values.
 
 import { createClient } from "@supabase/supabase-js";
-import { adaptDirectoryCompany, companyPickerOptions } from "./lib/company-directory";
+import { adaptDirectoryCompany } from "./lib/company-directory";
 import { patchForIntervalCategory } from "./timekeepingPolicy";
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
@@ -263,41 +263,6 @@ let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, 
 export const getUsers     = () => _users;
 export const getAppSettings = () => _appSettings;
 export const getCompanies = () => _companies;
-// Transitional aliases for callers moved in Task 3. They partition the one
-// company master without duplicating a company that has several roles.
-export const getClientsOnly = () => _companies.filter(c => c.relationshipRoles?.includes("Client"));
-export const getCompaniesOnly = () => _companies.filter(c => !c.relationshipRoles?.includes("Client"));
-
-// Combined Client-or-Prime-Firm picker options. Used ONLY for Sub-role
-// rows, where the "Client" column in the UI can represent either the end
-// client (client_id) or the external prime firm (prime_company_id). A
-// " · Firm" suffix on company entries lets the user tell the two kinds
-// apart in the dropdown. Prime-role rows keep the clients-only list.
-export const buildClientOrCompanyOptions = () => [
-  ...companyPickerOptions(getCompanies()),
-];
-
-// Decide which DB column a picked "Client" UUID maps to. For Prime-role
-// rows the dropdown is clients-only so picks always yield client_id. For
-// Sub-role rows the dropdown is merged and the user can pick either kind —
-// this helper inspects which pool the UUID belongs to and returns the
-// partial payload ({ client_id: v } OR { prime_company_id: v, client_id:
-// null }) that routes the write correctly without tripping the
-// client_id_fkey FK on beacon.clients.
-//
-// Clearing the cell always nulls client_id (not prime_company_id) — the
-// role='Sub' constraint requires prime_company_id to stay set, so the
-// user must change role to Prime first to drop the prime firm.
-export const routeClientPick = (v) => {
-  return { client_id: (v === "" || v == null) ? null : v };
-};
-
-// Same idea for the dedicated Prime column on Awarded. The picker uses the
-// merged client+company list, so writes need to land on `prime_client_id`
-// (clients) or `prime_company_id` (companies). Clearing nulls both.
-export const routePrimePick = (v) => {
-  return { prime_company_id: (v === "" || v == null) ? null : v };
-};
 export const userById     = (id) => _users.find(u => u.id === id);
 export const companyById  = (id) => _companies.find(c => c.id === id);
 
@@ -821,7 +786,8 @@ function adaptPotential(r) {
     year: r.year,
     name: r.project_name,
     role: r.role,
-    clientId: r.client_id || r.prime_company_id || null,
+    clientId: r.client_id || null,
+    primeId: r.prime_company_id || null,
     amount: r.total_contract_amount,
     msmm: r.msmm_amount,
     subs: adaptSubsCosted(r.subs),
@@ -842,10 +808,8 @@ function adaptAwaiting(r) {
     year: r.year,
     name: r.project_name,
     role: r.prime_company_id ? "Sub" : "Prime",
-    // Sub rows without a client_id fall back to the prime firm, matching
-    // adaptPotential. The "Client" cell then shows the prime when no
-    // actual client is set — consistent with how Potential already behaves.
-    clientId: r.client_id || r.prime_company_id || null,
+    clientId: r.client_id || null,
+    primeId: r.prime_company_id || null,
     amount: null,
     msmm: r.msmm_remaining || 0,
     subs: (r.subs || []).map(s => ({ cId: s.company_id, desc: "", amt: 0 })),
@@ -904,7 +868,8 @@ function adaptClosed(r) {
     year: r.year,
     name: r.project_name,
     role: r.prime_company_id ? "Sub" : "Prime",
-    clientId: r.client_id || r.prime_company_id || null,
+    clientId: r.client_id || null,
+    primeId: r.prime_company_id || null,
     amount: null,
     msmm: 0,
     subs: [],
@@ -1531,11 +1496,7 @@ function adaptHotLead(r) {
     type: r.type || null,
     dateTime: r.date_time || "",
     createdAt: r.created_at || null,
-    // Unified "Client or Firm" picker on Hot Leads: the adapter prefers the
-    // real client_id when set, else falls back to prime_company_id so the
-    // Client column always shows something the UI can resolve. Writes go
-    // through routeClientPick (see App.jsx) which targets the right column.
-    clientId: r.client_id || r.prime_company_id || null,
+    clientId: r.client_id || null,
     notes: r.notes || "",
     stars: r.stars == null ? null : Number(r.stars),
     anticipatedAmount: r.anticipated_amount == null ? null : Number(r.anticipated_amount),
@@ -1579,16 +1540,15 @@ const num = (v) => (v == null ? null : Number(v));
 // A tree node (Project / Phase / Subphase / …). `id` is the surrogate uuid PK
 // (keys, parent refs, updates all use it); `localId` is the human-entered
 // SCOPED id shown in the UI (unique among siblings — globally for roots).
-// `parentId` is the PARENT'S uuid (null = root). `clientId` is the merged
-// Client/Prime value (a client OR a company), exactly like adaptPotential;
-// routeClientPick splits it back into client_id / prime_company_id on write.
+// `parentId` is the PARENT'S uuid (null = root). `clientId` is the company in
+// the contextual Client relationship.
 function adaptProjectItem(r) {
   return {
     id:              r.id,
     localId:         r.local_id || "",
     parentId:        r.parent_id || null,
     name:            r.name || "",
-    clientId:        r.client_id || r.prime_company_id || null,
+    clientId:        r.client_id || null,
     itemType:        r.item_type || "standard",
     addressLine1:    r.address_line1 || "",
     addressLine2:    r.address_line2 || "",
@@ -2750,7 +2710,7 @@ export async function loadBeacon() {
     deletedAwaiting: deletedAwaitingRows.map(adaptAwaiting),
     deletedAwarded:  deletedAwardedRows.map(adaptAwarded),
     projectItems: (projectItemRows || []).map(adaptProjectItem),
-    clients:   _companies,
+    companies: _companies,
     users:     _users,
     subInvoices: subInvoicesMatrix,
     // Flat list; App.jsx re-groups it by scope with groupAmendments().
@@ -5087,8 +5047,8 @@ export async function markOpenBidMovedForward(id, projectId) {
 // ----------------------------------------------------------------------
 // Projects (tree-structured work breakdown — beacon_v2.project_items).
 // Rows key on a surrogate uuid `id`; `localId` is the scoped human ID (root =
-// global, phase/subphase = unique within parent). clientId routes via
-// routeClientPick; additional PMs ride the project_item_pms join (item_id,
+// global, phase/subphase = unique within parent). Additional PMs ride the
+// project_item_pms join (item_id,
 // synced in App.jsx via shared syncJoinUsers); subs ride project_item_subs.
 // ----------------------------------------------------------------------
 const PROJECT_ITEM_COL_MAP = {
@@ -5116,7 +5076,7 @@ const PROJECT_ITEM_COL_MAP = {
   status:          "status",
   notes:           "notes",
   sortOrd:         "sort_ord",
-  // clientId is routed via routeClientPick; pmIds + subs are join tables.
+  // clientId is written directly; pmIds + subs are join tables.
 };
 
 // Columns where "" / undefined should become NULL. local_id, item_type +
@@ -5162,7 +5122,7 @@ export async function createProjectItem(payload) {
   if (!dbPatch.name) throw new Error("Project Name is required");
   dbPatch.local_id = localId;
   if (payload.parentId !== undefined) dbPatch.parent_id = payload.parentId || null;
-  if (payload.clientId !== undefined) Object.assign(dbPatch, routeClientPick(payload.clientId));
+  if (payload.clientId !== undefined) dbPatch.client_id = payload.clientId || null;
   if (me?.id) dbPatch.created_by = me.id;
   const { data, error } = await supabase
     .from("project_items").insert(dbPatch).select(PROJECT_ITEM_SELECT).single();
@@ -5172,7 +5132,7 @@ export async function createProjectItem(payload) {
 
 export async function updateProjectItem(id, patch) {
   const dbPatch = buildProjectItemDbPatch(patch);
-  if (patch.clientId !== undefined) Object.assign(dbPatch, routeClientPick(patch.clientId));
+  if (patch.clientId !== undefined) dbPatch.client_id = patch.clientId || null;
   if (Object.keys(dbPatch).length === 0) return null;
   const { data, error } = await supabase
     .from("project_items").update(dbPatch).eq("id", id).select(PROJECT_ITEM_SELECT).single();
@@ -5335,11 +5295,6 @@ export async function mergeCompanies(survivorId, loserIds) {
   });
   if (error) throw new Error(error.message);
   return data; // { kind, survivor, merged, projects, project_subs, sub_invoices, ... }
-}
-
-// Transitional call shape for the existing modal; Task 3 removes the kind.
-export async function mergeEntities({ survivorId, loserIds }) {
-  return mergeCompanies(survivorId, loserIds);
 }
 
 // Read-only preview of everything that points at `entity`, computed from the

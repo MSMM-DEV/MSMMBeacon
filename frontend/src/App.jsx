@@ -49,6 +49,7 @@ import { getCurrentTableSnapshot } from "./table-state.js";
 import { PwaInstallChip, PwaOfflineChip, PwaUpdateToast } from "./pwa-ui.jsx";
 import { isMobileNow } from "./use-mobile.js";
 import { playPageArrival } from "./lib/page-motion.js";
+import { adaptDirectoryCompany } from "./lib/company-directory.js";
 import { invoiceIsOrange } from "./invoice-orange.js";
 import {
   groupAmendments,
@@ -77,8 +78,8 @@ import {
   reloadAmendments,
   MONTHS, TODAY_MONTH, THIS_YEAR, BID_SERVICE_OPTIONS, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, INVOICE_ACTUALS_MIN_YEAR, actualThruMonth,
   mergeInvoiceYears, adaptInvoiceRow, monthDescsForWindow, defaultWindowStartAbs, WINDOW_SIZE,
-  getClientsOnly, getCompaniesOnly, getUsers, companyById, userById, mergeEntities,
-  routeClientPick, routePrimePick, linkedProjectsFor,
+  getCompanies, getUsers, companyById, userById, mergeCompanies,
+  linkedProjectsFor,
   supabase, signOut, getCurrentSession, fetchCurrentBeaconUser, changeOwnPassword, loadMyAccess,
   getRowAnchors, TAB_TO_SUBJECT_TABLE,
   runOutlookSyncNow, reloadEvents,
@@ -105,7 +106,7 @@ const setProjectsByTypeRef = (v) => { _projectsByTypeRef = v; };
 const countRefs = (id) => {
   const all = _projectsByTypeRef || {};
   const list = [...(all.potential || []), ...(all.awaiting || []), ...(all.awarded || []), ...(all.closed || [])];
-  return list.filter(p => p.clientId === id || (p.subs || []).some(s => s.cId === id)).length;
+  return list.filter(p => p.clientId === id || p.primeId === id || (p.subs || []).some(s => s.cId === id)).length;
 };
 
 // Star ratings in the PDF are DRAWN, not typed. See drawStar() in utils/pdf.js
@@ -383,18 +384,16 @@ const FILTERS = {
     between:  r => r.status === "between",
     closed:   r => r.status === "closed_out",
   },
-  // The Directory merges Clients + Companies. Filter chips cover both
-  // the kind axis (clients vs companies) and the sub-attribute axis
-  // (Federal/State for clients; Prime/Sub/Multiple for companies).
+  // Directory filters describe relationship roles and organization profile;
+  // they never divide records into different entity types.
   directory: {
     all:       () => true,
-    clients:   r => r.type === "Client",
-    companies: r => r.type !== "Client",
-    federal:   r => r.type === "Client" && r.orgType === "Federal",
-    state:     r => r.type === "Client" && r.orgType === "State",
-    prime:     r => r.type === "Prime",
-    sub:       r => r.type === "Sub",
-    multiple:  r => r.type === "Multiple",
+    client:    r => r.relationshipRoles?.includes("Client"),
+    prime:     r => r.relationshipRoles?.includes("Prime"),
+    sub:       r => r.relationshipRoles?.includes("Sub"),
+    federal:   r => r.orgType === "Federal",
+    state:     r => r.orgType === "State",
+    local:     r => ["City", "Local", "Parish", "Regional"].includes(r.orgType),
   },
 };
 
@@ -443,17 +442,14 @@ const FILTER_CHIPS = {
     { key: "between",  label: "In Between", icon: "pause" },
     { key: "closed",   label: "Closed Out", icon: "x" },
   ],
-  // Two visual groupings on the Directory: kind (clients vs companies)
-  // then sub-attribute (org-type for clients; company-type for companies).
   directory: [
     { key: "all",       label: "All" },
-    { key: "clients",   label: "Clients",   icon: "users" },
-    { key: "companies", label: "Companies", icon: "briefcase" },
+    { key: "client",    label: "Clients",   icon: "users" },
+    { key: "prime",     label: "Primes",    icon: "flag" },
+    { key: "sub",       label: "Subs",      icon: "link" },
     { key: "federal",   label: "Federal" },
     { key: "state",     label: "State" },
-    { key: "prime",     label: "Primes" },
-    { key: "sub",       label: "Subs" },
-    { key: "multiple",  label: "Multiple" },
+    { key: "local",     label: "Local / Regional" },
   ],
 };
 
@@ -671,11 +667,11 @@ const EXPORT_COLUMNS = {
     { label: "Rating",            wMm: 22,  get: () => "" },
   ],
   directory: [
-    { label: "Name",                        get: r => r.type === "Client" ? (r.baseName || r.name) : r.name },
-    { label: "Kind",              wMm: 22,  get: r => r.type === "Client" ? "Client" : "Company" },
+    { label: "Name",                        get: r => r.name },
+    { label: "Roles",             wMm: 26,  get: r => (r.relationshipRoles || []).join(", ") },
     { label: "District",                    get: r => r.district || "" },
     { label: "Org Type",          wMm: 22,  get: r => r.orgType || "" },
-    { label: "Type",              wMm: 22,  get: r => r.type === "Client" ? "" : (r.type || "") },
+    { label: "Website",                     get: r => r.website || "" },
     // Every contact person, one per line (primary first), so the PDF / CSV
     // carries the whole roster rather than just the summary trio.
     { label: "Contact",                     get: r => contactLines(r, c => [c.name, c.title].filter(Boolean).join(" · ")) },
@@ -724,6 +720,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       name: dbRow.project_name,
       role: dbRow.role || null,
       clientId: dbRow.client_id || null,
+      primeId: dbRow.prime_company_id || null,
       amount: dbRow.total_contract_amount,
       msmm: dbRow.msmm_amount,
       // Keep the user's chosen subs shape; sort by ord if we built it from DB rows later.
@@ -744,6 +741,7 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       name: dbRow.project_name,
       role: dbRow.prime_company_id ? "Sub" : (dbRow.role || "Prime"),
       clientId: dbRow.client_id || null,
+      primeId: dbRow.prime_company_id || null,
       amount: null,
       msmm: dbRow.msmm_remaining || 0,
       subs: extras.subs || [],
@@ -769,9 +767,9 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       id: dbRow.id,
       year: dbRow.year,
       name: dbRow.project_name,
-      role: dbRow.role || (dbRow.prime_company_id || dbRow.prime_client_id ? "Sub" : "Prime"),
+      role: dbRow.role || (dbRow.prime_company_id ? "Sub" : "Prime"),
       clientId: dbRow.client_id || null,
-      primeId: dbRow.prime_client_id || dbRow.prime_company_id || null,
+      primeId: dbRow.prime_company_id || null,
       amount: null,
       msmm: (dbRow.msmm_used || 0) + (dbRow.msmm_remaining || 0),
       subs: extras.subs || [],
@@ -811,33 +809,15 @@ function adaptInsertedRow(table, dbRow, extras = {}) {
       status: dbRow.status || "Scheduled",
       type: dbRow.type || null,
       dateTime: dbRow.date_time || "",
-      clientId: dbRow.client_id || dbRow.prime_company_id || null,
+      clientId: dbRow.client_id || null,
       notes: dbRow.notes || "",
       attendees: extras.attendees || [],
       stars: dbRow.stars == null ? null : Number(dbRow.stars),
       anticipatedAmount: dbRow.anticipated_amount == null ? null : Number(dbRow.anticipated_amount),
     };
   }
-  if (table === "clients" || table === "directory-client") {
-    return withContactSummary({
-      id: dbRow.id,
-      name: dbRow.district ? `${dbRow.name} – ${dbRow.district}` : dbRow.name,
-      baseName: dbRow.name,
-      district: dbRow.district || "",
-      type: "Client",
-      address: dbRow.address || "",
-      notes: dbRow.notes || "",
-      orgType: dbRow.org_type || "",
-    }, extras.contacts || []);
-  }
   if (table === "companies" || table === "directory-company") {
-    return withContactSummary({
-      id: dbRow.id,
-      name: dbRow.name,
-      type: "Prime",
-      address: dbRow.address || "",
-      notes: dbRow.notes || "",
-    }, extras.contacts || []);
+    return adaptDirectoryCompany(dbRow, extras.contacts || [], []);
   }
   if (table === "invoice") {
     return {
@@ -1510,8 +1490,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   // The root project_item whose dedicated detail page is open (null = the
   // normal Projects tree table). Set by clicking a root on the Projects page.
   const [detailProject, setDetailProject] = useState(null);
-  const [clients,   setClients]   = useState(() => getClientsOnly());
-  const [companies, setCompanies] = useState(() => getCompaniesOnly());
+  const [companies, setCompanies] = useState(() => initial.companies || getCompanies());
   // Workspace-wide settings (singleton). Today: monthlyInvoiceBenchmark drives
   // the Quad Sheet's bar coloring (green when month total ≥ benchmark, red
   // when below). Updated locally + persisted by AdminPanel → Targets tab.
@@ -1545,13 +1524,13 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   const [drawer, setDrawer] = useState(null);
   const [moving, setMoving] = useState(null);
   const [alert, setAlertObj] = useState(null);
-  const [createTable, setCreateTable] = useState(null); // 'potential' | 'events' | 'clients' | 'companies' | null
+  const [createTable, setCreateTable] = useState(null);
   const [createSeed, setCreateSeed] = useState(null);
   // Invoice file-attachment modal — { kind, projectRow, monthIdx, sub? } or null.
   const [filesModal, setFilesModal] = useState(null);
   // "Add sub" modal — { projectRow } or null. Triggered from the Invoice expand.
   const [addSubModal, setAddSubModal] = useState(null);
-  // Directory "Merge" modal — { entities, kind } or null. mergeResetKey bumps
+  // Directory "Merge" modal — { entities } or null. mergeResetKey bumps
   // after a successful merge so DirectoryTable drops its (now stale) selection.
   const [mergeModal, setMergeModal] = useState(null);
   const [mergeResetKey, setMergeResetKey] = useState(0);
@@ -1624,28 +1603,22 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   // pmIds, attendees — handled separately). PMs + event attendees are diffed
   // and mirrored to their join tables. Subs edits are still local-only today.
   // =====================================================================
-  // NOTE on `clientId` / `primeId`: deliberately NOT in any *_COLS map.
-  // Both are merged-pool UI fields whose picked UUID could belong to either
-  // the clients or companies table. Each updater calls the matching router
-  // (routeClientPick / routePrimePick) and merges the result into dbPatch
-  // after buildDbPatch runs. clientId is unified across every project tab;
-  // primeId is awarded-only.
   const POTENTIAL_COLS = {
-    year: "year", name: "project_name", role: "role",
+    year: "year", name: "project_name", role: "role", clientId: "client_id",
     amount: "total_contract_amount", msmm: "msmm_amount",
     notes: "notes", dates: "next_action_note", nextActionDate: "next_action_date",
     projectNumber: "project_number", probability: "probability",
     anticipatedInvoiceStartMonth: "anticipated_invoice_start_month",
   };
   const AWAITING_COLS = {
-    year: "year", name: "project_name",
+    year: "year", name: "project_name", clientId: "client_id",
     notes: "notes", projectNumber: "project_number",
     dateSubmitted: "date_submitted", anticipatedResultDate: "anticipated_result_date",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
     msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
   };
   const AWARDED_COLS = {
-    year: "year", name: "project_name",
+    year: "year", name: "project_name", clientId: "client_id", primeId: "prime_company_id",
     projectNumber: "project_number", dateSubmitted: "date_submitted",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
     msmmUsed: "msmm_used", msmmRemaining: "msmm_remaining",
@@ -1655,7 +1628,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     // persist; re-create from Move Forward to pick a new stage instead.
   };
   const CLOSED_COLS = {
-    year: "year", name: "project_name",
+    year: "year", name: "project_name", clientId: "client_id",
     notes: "notes", projectNumber: "project_number",
     dateSubmitted: "date_submitted",
     clientContract: "client_contract_number", msmmContract: "msmm_contract_number",
@@ -1666,13 +1639,10 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     date: "event_date", dateTime: "event_datetime", notes: "notes",
     stars: "stars",
   };
-  // Hot Leads — like Events but with a client/company picker. `clientId` is
-  // intentionally OMITTED from this map for the same reason as the project
-  // tables (routed through routeClientPick to client_id or prime_company_id
-  // based on which pool the UUID belongs to).
   const HOT_LEADS_COLS = {
     title: "title",
     type: "type",
+    clientId: "client_id",
     dateTime: "date_time",
     anticipatedAmount: "anticipated_amount",
     notes: "notes",
@@ -1681,15 +1651,9 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   // contact / email / phone are NOT here on purpose: contact people live in
   // beacon_v2.contacts (see applyContacts) and the parent's legacy scalars are
   // trigger-mirrored from the primary contact.
-  const CLIENTS_COLS = {
-    baseName: "name", district: "district", orgType: "org_type",
-    address: "address", notes: "notes",
-  };
   const COMPANIES_COLS = {
-    name: "name", address: "address", notes: "notes",
-    // `type` on companies is derived at load time from observed Prime/Sub
-    // usage across rows — not a column on `beacon.companies`. Intentionally
-    // skipped so drawer edits don't error.
+    name: "name", district: "district", orgType: "org_type", website: "website",
+    address: "address", notes: "notes",
   };
 
   // Columns that reject empty string at the DB level (dates, numerics, UUIDs,
@@ -1764,10 +1728,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     // the check doesn't fire; Sub requires a prime company set via drawer.
     const dbPatch = buildDbPatch(patch, POTENTIAL_COLS);
     if ("role" in patch && patch.role === "Prime") dbPatch.prime_company_id = null;
-    // Route the unified UI clientId to client_id or prime_company_id based
-    // on whether the picked UUID is actually a client or a firm. See
-    // routeClientPick in data.js.
-    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
     patchTable("projects", id, dbPatch);
 
     if ("pmIds" in patch) {
@@ -1858,7 +1818,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     if (!existing) return;
     setAwaiting(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, AWAITING_COLS);
-    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
     patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
@@ -1871,8 +1830,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     if (!existing) return;
     setAwarded(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, AWARDED_COLS);
-    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
-    if ("primeId"  in patch) Object.assign(dbPatch, routePrimePick (patch.primeId));
     patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
@@ -1885,7 +1842,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     if (!existing) return;
     setClosed(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, CLOSED_COLS);
-    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
     patchTable("projects", id, dbPatch);
     if ("pmIds" in patch) {
       syncJoinUsers(id, existing.pmIds, patch.pmIds,
@@ -1949,8 +1905,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     if (!existing) return;
     setHotLeads(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
     const dbPatch = buildDbPatch(patch, HOT_LEADS_COLS);
-    // Client-or-Firm picker: route the unified clientId to the right column.
-    if ("clientId" in patch) Object.assign(dbPatch, routeClientPick(patch.clientId));
     patchTable("leads", id, dbPatch);
     if ("attendees" in patch) {
       syncJoinUsers(id, existing.attendees, patch.attendees,
@@ -2177,40 +2131,19 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     setCreateTable("projects");
   };
 
-  const updateClients = (id, patch) => {
-    const existing = clients.find(r => r.id === id);
-    if (!existing) return;
-    // clients.name in the UI is the merged display `${name} — ${district}`.
-    // Drawer/table edits target baseName / district individually; keep the
-    // merged `name` derived in local state so consumers (project rows'
-    // Client cell, dropdowns) stay consistent without a full reload.
-    let p = patch;
-    if ("baseName" in patch || "district" in patch) {
-      const newBase = "baseName" in patch ? patch.baseName : existing.baseName;
-      const newDist = "district" in patch ? patch.district : existing.district;
-      p = { ...patch, name: newDist ? `${newBase} – ${newDist}` : newBase };
-    }
-    setClients(rs => rs.map(r => r.id === id ? { ...r, ...p } : r));
-    patchTable("clients", id, buildDbPatch(patch, CLIENTS_COLS));
-  };
-
   // Contact people changed (ContactsSection in the drawer). Fold the fresh
-  // list into whichever slice owns the row and re-derive its summary trio
+  // list into the company row and re-derive its summary trio
   // (contact / email / phone = the primary) so table cells, search and
   // exports follow without a reload. Local-only — the CRUD already landed.
   const applyContacts = (id, contacts) => {
     const fold = rs => rs.map(r => r.id === id ? withContactSummary(r, contacts) : r);
-    if (clients.some(c => c.id === id)) setClients(fold);
-    else setCompanies(fold);
+    setCompanies(fold);
   };
 
   const updateCompanies = (id, patch) => {
     const existing = companies.find(r => r.id === id);
     if (!existing) return;
     setCompanies(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-    // `type` on a company is derived from observed Prime/Sub usage at load
-    // time — not a beacon.companies column. Only scalars in COMPANIES_COLS
-    // persist; everything else is local state only.
     patchTable("companies", id, buildDbPatch(patch, COMPANIES_COLS));
   };
 
@@ -2218,12 +2151,11 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   // repointing every reference (server-side, transactional). Because the merge
   // touches projects across all stages plus invoices / sub-invoices / leads /
   // bids, we re-pull those slices from loadBeacon (which also refreshes the
-  // clients/companies module caches) rather than surgically patching state.
+  // company module cache) rather than surgically patching state.
   const handleMergeConfirm = async (survivorId, loserIds) => {
-    const kind = mergeModal?.kind || "Company";
     const survivorName =
       (mergeModal?.entities || []).find(e => e.id === survivorId)?.name || "the kept record";
-    const res = await mergeEntities({ kind, survivorId, loserIds });
+    const res = await mergeCompanies(survivorId, loserIds);
     const d = await loadBeacon();
     setPotential(d.potential); setAwaiting(d.awaiting);
     setAwarded(d.awarded);     setClosed(d.closed);
@@ -2233,8 +2165,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     setDeletedAwaiting(d.deletedAwaiting || []); setDeletedAwarded(d.deletedAwarded || []);
     setSubInvoices(d.subInvoices || new Map());
     setAmendments(d.amendments || []);
-    setClients(getClientsOnly());
-    setCompanies(getCompaniesOnly());
+    setCompanies(d.companies || getCompanies());
     setMergeModal(null);
     setMergeResetKey(k => k + 1);
     const moved =
@@ -3033,7 +2964,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   const refreshInvoiceArtifacts = async () => {
     try {
       const allProjects = [...potential, ...awaiting, ...awarded, ...closed];
-      const allCompaniesOrClients = [...clients, ...companies];
+      const allCompaniesOrClients = companies;
       const [{ primeFilesByKey, subInvoicesMatrix }, partyFilesByInvoice] = await Promise.all([
         reloadInvoiceArtifacts(allProjects, allCompaniesOrClients),
         reloadInvoicePartyFiles(),
@@ -3382,7 +3313,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
 
     // Append a fresh sub_entry to the matrix for this project, so the new
     // row appears beneath the prime row in the Invoice tab.
-    const company = [...companies, ...clients].find(c => c.id === companyId);
+    const company = companies.find(c => c.id === companyId);
     setSubInvoices(prev => {
       const next = new Map(prev);
       const existing = next.get(projectId) || [];
@@ -3432,7 +3363,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     const rowsByTab = {
       potential, awaiting, awarded, closed,
       invoice, between: invoice, events, hotleads: hotLeads,
-      directory: [...clients, ...companies],
+      directory: companies,
     };
     const rows = rowsByTab[tab] || [];
     const match = rows.find(r => r.id === pendingFocusRowId);
@@ -3459,7 +3390,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     // refresh) and re-assert setTab — yanking the user's sub-tab (e.g.
     // In-Between → Invoices) with no click. Resolve once, then stop.
     setPendingFocusRowId(null);
-  }, [pendingFocusRowId, tab, potential, awaiting, awarded, closed, invoice, events, hotLeads, clients, companies]);
+  }, [pendingFocusRowId, tab, potential, awaiting, awarded, closed, invoice, events, hotLeads, companies]);
 
   // Snapshot all pipeline slices so an Undo toast can restore them in one
   // shot if the user clicks Undo within ~10s of a move. Doesn't capture
@@ -4646,7 +4577,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             year: awaitingRow.year,
             // Leads store the firm on either client_id or prime_company_id;
             // the router picks the right projects column for the value.
-            ...routeClientPick(row.clientId || null),
+            client_id: row.clientId || null,
             date_submitted: awaitingRow.dateSubmitted || null,
             anticipated_result_date: awaitingRow.anticipatedResultDate || null,
             client_contract_number: awaitingRow.clientContract || null,
@@ -4681,7 +4612,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
                 type: row.type || null,
                 stars: row.stars ?? null,
                 notes: row.notes || null,
-                ...routeClientPick(row.clientId || null),
+                client_id: row.clientId || null,
               });
               if (rErr) throw rErr;
               if ((row.attendees || []).length > 0) {
@@ -4790,7 +4721,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     if (table === "awarded")    setAwarded(rs => [uiRow, ...rs]);
     if (table === "events")     setEvents(rs => [uiRow, ...rs]);
     if (table === "hotleads")   setHotLeads(rs => [uiRow, ...rs]);
-    if (table === "clients")    setClients(rs => [uiRow, ...rs]);
     if (table === "companies")  setCompanies(rs => [uiRow, ...rs]);
     if (table === "invoice") {
       setInvoice(rs => [uiRow, ...rs]);
@@ -5793,9 +5723,8 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
       const predicate = FILTERS[key]?.[filterKey[key]];
       return predicate ? yr.filter(predicate) : yr;
     };
-    // Directory merges clients + companies into one feed; the type
-    // discriminator ("Client" vs "Prime"/"Sub"/"Multiple") drives section
-    // headers + filter chips inside DirectoryTable.
+    // Directory is one canonical company feed; filters read relationshipRoles
+    // and organization profile attributes.
     // Orange Potentials live in the Invoice tab (auto-spawned) and are
     // intentionally hidden from the Potential view — they're effectively
     // "moved to Invoice" while tagged Orange. Demoting from Orange deletes
@@ -5825,13 +5754,13 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
       // don't apply — these are archives, rendered as their own tables below.
       "leads-deleted":     [...deletedLeads, ...deletedOpenBids],
       "proposals-deleted": [...deletedAwaiting, ...deletedAwarded],
-      directory: apply("directory", [...clients, ...companies]),
+      directory: apply("directory", companies),
       // Projects is a tree — ProjectsTable does its own ancestor-aware
       // filtering, so pass the full flat list through unfiltered (the export
       // fallback + currentRows still get something sensible).
       projects:  projectItems,
     };
-  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, deletedLeads, deletedOpenBids, deletedAwaiting, deletedAwarded, clients, companies, projectItems]);
+  }, [filterKey, yearFilter, potential, awaiting, awarded, closed, invoiceMerged, events, hotLeads, openBids, deletedLeads, deletedOpenBids, deletedAwaiting, deletedAwarded, companies, projectItems]);
 
   // Current tab's visible rows (for page-head Export and New button context)
   const currentRows = filtered[tab] || [];
@@ -5904,7 +5833,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
               potential, awaiting, awarded, closed,
               events, hotleads: hotLeads,
               openbids: openBids,
-              directory: [...clients, ...companies],
+              directory: companies,
             })[tabKey] || []).filter(FILTERS[tabKey][chip.key]).length)
       : null,
     active: filterKey[tabKey] === chip.key,
@@ -5978,7 +5907,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
     hotleads: hotLeads.length,
     "leads-deleted": deletedLeads.length + deletedOpenBids.length,
     "proposals-deleted": deletedAwaiting.length + deletedAwarded.length,
-    directory: clients.length + companies.length,
+    directory: companies.length,
     projects: projectItems.length,
     timesheet:  null,  // populated via Realtime in TimesheetTab; not surfaced here
     "time-admin": null,
@@ -6033,11 +5962,11 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
   // Directory's primary "New X" defaults to client (the more common entry).
   // Companies are typically created via the sub-picker on a project rather
   // than from this tab.
-  const newForTab = { openbids: "openbids", awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "clients", projects: "projects" };
+  const newForTab = { openbids: "openbids", awaiting: "awaiting", awarded: "awarded", potential: "potential", events: "events", hotleads: "hotleads", directory: "companies", projects: "projects" };
   const newTarget = newForTab[tab];
   const newLabel = tab === "events" ? "New event"
                  : tab === "hotleads" ? "New hot lead"
-                 : tab === "directory" ? "New client"
+                 : tab === "directory" ? "New company"
                  : tab === "awaiting" ? "New proposal"
                  : tab === "awarded" ? "New awarded project"
                  : tab === "openbids" ? "New open bid"
@@ -6383,10 +6312,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             )}
             {tab === "directory" ? (
               <>
-                <Button variant="primary" size="sm" onClick={() => setCreateTable("clients")}>
-                  <Icon name="plus" size={14}/>New client
-                </Button>
-                <Button variant="default" size="sm" onClick={() => setCreateTable("companies")}>
+                <Button variant="primary" size="sm" onClick={() => setCreateTable("companies")}>
                   <Icon name="plus" size={14}/>New company
                 </Button>
               </>
@@ -6980,14 +6906,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
         )}
         {tab === "directory" && (
           <DirectoryTable rows={filtered.directory}
-            updateRow={(id, patch) => {
-              // Route to the right updater by row.type. Looking up the row
-              // in clients vs companies state slices keeps the existing
-              // updater contracts unchanged.
-              const inClients = clients.some(c => c.id === id);
-              if (inClients) updateClients(id, patch);
-              else updateCompanies(id, patch);
-            }}
+            updateRow={updateCompanies}
             onOpenDrawer={r => openDrawer(r, "directory")}
             projectsByType={{ potential, awaiting, awarded, closed }}
             invoice={invoice}
@@ -7005,7 +6924,8 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             }}
             flashId={flashId}
             filters={chipsFor("directory")}
-            onMerge={(entities, kind) => setMergeModal({ entities, kind })}
+            onMerge={(entities) => setMergeModal({ entities })}
+            onImportCards={() => showToast("Business card import is loading in the next step.", "upload")}
             mergeResetKey={mergeResetKey}
             tab="directory"/>
         )}
@@ -7052,7 +6972,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
           drawer.table === "invoice"   ? invoice   :
           drawer.table === "events"    ? events    :
           drawer.table === "hotleads"  ? hotLeads  :
-          drawer.table === "directory" ? [...clients, ...companies] :
+          drawer.table === "directory" ? companies :
           drawer.table === "projects"  ? projectItems :
           []
         );
@@ -7093,12 +7013,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             drawer.table === "hotleads"  ? updateHotLeads  :
             drawer.table === "openbids"  ? updateOpenBids  :
             drawer.table === "projects"  ? updateProjectItemRow :
-            drawer.table === "directory"
-              ? (id, patch) => {
-                  const inClients = clients.some(c => c.id === id);
-                  if (inClients) updateClients(id, patch);
-                  else updateCompanies(id, patch);
-                }
+            drawer.table === "directory" ? updateCompanies
               : () => {}
           }
           onForward={
@@ -7240,7 +7155,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
         <CreateModal
           table={createTable}
           seed={createSeed}
-          clients={clients}
           companies={companies}
           users={getUsers()}
           projectItems={projectItems}
@@ -7267,7 +7181,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             projectId={pr.sourceId}
             projectName={pr.name}
             existingSubsCount={existingSubsCount}
-            companies={[...clients, ...companies]}
+            companies={companies}
             invoiceId={pr.id}
             invoiceRow={pr}
             kind={modalKind}
@@ -7282,7 +7196,6 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
       {mergeModal && (
         <MergeModal
           entities={mergeModal.entities}
-          kind={mergeModal.kind}
           projectsByType={{ potential, awaiting, awarded, closed }}
           invoice={invoice}
           hotLeads={hotLeads}

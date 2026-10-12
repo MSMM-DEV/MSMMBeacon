@@ -178,11 +178,10 @@ function PhoneGlyph() {
 }
 
 // ---- Persisted section (DetailDrawer) ------------------------------------------
-// `row` is the adapted Directory row (type "Client" or a company). `onChanged`
+// `row` is the adapted canonical company. `onChanged`
 // receives the fresh sorted list so App.jsx can fold it back into state.
 export function ContactsSection({ row, onChanged, onToast }) {
-  const isClient = row?.type === "Client";
-  const parent = isClient ? { clientId: row.id } : { companyId: row.id };
+  const parent = { companyId: row.id };
   const [list, setList] = useState(() => sortContacts(row?.contacts));
   // No contact rows but legacy scalars on the parent → the contacts table
   // isn't applied yet (or the backfill hasn't run). Show what we have,

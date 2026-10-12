@@ -15,7 +15,7 @@ import {
 } from "@/ui";
 
 // ============ CREATE MODAL ============
-// "New X" flow for potential / events / clients / companies.
+// "New X" flow for projects, events, leads, invoices, bids and companies.
 //
 // Flow:
 //   1. Insert the main row into the primary DB table → get new id.
@@ -42,7 +42,6 @@ const DB_TABLES = {
   awarded:   "projects",
   events:    "events",
   hotleads:  "leads",
-  clients:   "clients",
   companies: "companies",
   invoice:   "anticipated_invoice",
   openbids:  "open_bids",
@@ -59,7 +58,6 @@ const TITLES = {
   awarded:   { title: "New awarded project",    icon: "check"     },
   events:    { title: "New event",               icon: "calendar"  },
   hotleads:  { title: "New hot lead",            icon: "trend"     },
-  clients:   { title: "New client",              icon: "users"     },
   companies: { title: "New company",             icon: "briefcase" },
   invoice:   { title: "New invoice row",         icon: "trend"     },
   openbids:  { title: "New open bid",            icon: "flag"      },
@@ -105,11 +103,8 @@ const DB_COLUMNS = {
   ],
   // Contact people are NOT parent columns any more — they land in
   // beacon_v2.contacts (one row per person) in the step-2 insert below.
-  clients: [
-    "name", "district", "org_type", "address", "notes",
-  ],
   companies: [
-    "name", "address", "notes",
+    "name", "district", "org_type", "website", "address", "notes",
   ],
   // anticipated_invoice — manual entry. source_project_id stays null on
   // this path; Move Forward handles linked-invoice creation. Standalone
@@ -209,16 +204,11 @@ const INITIAL = {
     attendees: [],
     stars: "",
   },
-  clients: {
+  companies: {
     name: "",
     district: "",
     org_type: "",
-    contacts: [],      // draft people → beacon_v2.contacts after the parent inserts
-    address: "",
-    notes: "",
-  },
-  companies: {
-    name: "",
+    website: "",
     contacts: [],
     address: "",
     notes: "",
@@ -275,7 +265,6 @@ const REQUIRED = {
   awarded:   ["project_name"],
   events:    ["title"],
   hotleads:  ["title"],
-  clients:   ["name"],
   companies: ["name"],
   invoice:   ["project_name", "year"],
   openbids:  ["rfq_rfp_number"],
@@ -442,11 +431,10 @@ function FormRadios({ labelId, describedBy, value, onValueChange, options }) {
 }
 
 // --------------------- shared sub-editor ---------------------
-// Same pattern the DetailDrawer uses. Companies dropdown excludes Client-type.
+// Same pattern the DetailDrawer uses. Every option is a canonical company.
 function SubsEditor({ value, companies, onChange }) {
   const subs = value || [];
   const subOptions = useMemo(() => (companies || [])
-    .filter(c => c.type !== "Client")
     .map(c => ({ value: c.id, label: c.name })),
   [companies]);
   const update = (i, patch) => onChange(subs.map((s, j) => j === i ? { ...s, ...patch } : s));
@@ -545,26 +533,15 @@ function UserMultiPicker({ value, users, onChange, placeholder = "Pick users…"
 }
 
 // --------------------- main component ---------------------
-export const CreateModal = ({ table, seed = null, clients, companies, users, projectItems = [], onClose, onCreated }) => {
+export const CreateModal = ({ table, seed = null, companies, users, projectItems = [], onClose, onCreated }) => {
   const dbTable = DB_TABLES[table];
   const titleCfg = TITLES[table];
   const required = REQUIRED[table] || [];
 
-  // The `clients` prop is passed as-adapted UI rows — `c.name` is already
-  // the merged "${base} — ${district}" display form (see adaptClient). The
-  // combobox option label just uses it verbatim; no extra concatenation.
   const clientOptions = useMemo(() =>
-    (clients || []).map(c => ({ value: c.id, label: c.name })),
-  [clients]);
-  // Merged Client+Firm list for Sub-role rows. Companies get a " · Firm"
-  // suffix so the two pools are visually distinguishable.
-  const clientOrFirmOptions = useMemo(() => ([
-    ...(clients || []).map(c => ({ value: c.id, label: c.name })),
-    ...(companies || []).filter(c => c.type !== "Client")
-                        .map(c => ({ value: c.id, label: `${c.name} · Firm` })),
-  ]), [clients, companies]);
-  // Set of real-client ids for payload routing (see onSubmit below).
-  const clientIdSet = useMemo(() => new Set((clients || []).map(c => c.id)), [clients]);
+    (companies || []).map(c => ({ value: c.id, label: c.name })),
+  [companies]);
+  const clientOrFirmOptions = clientOptions;
 
   const [form, setForm] = useState(() => ({ ...(INITIAL[table] || {}), ...(seed || {}) }));
   const [pending, setPending] = useState(false);
@@ -699,33 +676,15 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
 
     // Step 1 — insert the main row.
     const payload = buildPayload();
-    // Route the unified client_id field for project tables. The Client
-    // picker for Sub-role rows includes both clients AND companies; if the
-    // user picked a company, send it to prime_company_id instead (and
-    // blank client_id) to avoid the client_id_fkey violation on insert.
-    const projectTables = new Set(["projects", "leads"]);
-    if (projectTables.has(dbTable) && payload.client_id && !clientIdSet.has(payload.client_id)) {
-      payload.prime_company_id = payload.client_id;
-      delete payload.client_id;
-    }
     // v2: the projects table is keyed on a `status` column. Inject the
     // appropriate status for the UI tab.
     if (table === "potential") payload.status = "potential";
     if (table === "awaiting")  payload.status = "awaiting";
     if (table === "awarded") {
       payload.status = "awarded";
-      // Awarded carries a `role` column independent of prime_company_id /
-      // prime_client_id since the v1→v2 migration relaxed that constraint.
+      // Awarded carries a relationship role independent of its company ids.
       if (form.role) payload.role = form.role;
-      // Prime field is merged-pool: clients table OR companies table. The
-      // form field `prime_id` carries either UUID; route to the right
-      // column based on which pool it belongs to. (Mirrors routePrimePick
-      // in data.js — duplicated inline because forms.jsx imports the
-      // bare clients/companies arrays already.)
-      if (form.prime_id) {
-        if (clientIdSet.has(form.prime_id)) payload.prime_client_id = form.prime_id;
-        else                                payload.prime_company_id = form.prime_id;
-      }
+      if (form.prime_id) payload.prime_company_id = form.prime_id;
       // Stage is a name in the form; the DB stores stage_id. Look it up
       // against awarded_stages — fail-soft (skip) if no match so the row
       // still inserts and the user can fix via the drawer.
@@ -866,16 +825,15 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
           if (eIP) throw eIP;
           extras.pmIds = pmIds;
         }
-      } else if (table === "clients" || table === "companies") {
+      } else if (table === "companies") {
         // Draft contact people → one beacon_v2.contacts row each, hung off
         // the new parent. Exactly one draft is flagged primary (the
         // DraftContactsField keeps that invariant); ord = list position.
         const drafts = (form.contacts || []).filter(c => (c.name || "").trim());
         if (drafts.length > 0) {
-          const parentCol = table === "clients" ? "client_id" : "company_id";
           const hasPrimary = drafts.some(c => c.isPrimary);
           const payload = drafts.map((c, i) => ({
-            [parentCol]: row.id,
+            company_id: row.id,
             name:  c.name.trim(),
             title: (c.title || "").trim() || null,
             email: (c.email || "").trim() || null,
@@ -1401,10 +1359,10 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
       );
     }
 
-    if (table === "clients") {
+    if (table === "companies") {
       return (
         <>
-          <Section title="Organization">
+          <Section title="Company">
             <FormRow id={fid("name")} label="Name" required wide error={missing("name")}>
               {(p) => <Input {...p} autoFocus {...bind("name")}/>}
             </FormRow>
@@ -1419,31 +1377,8 @@ export const CreateModal = ({ table, seed = null, clients, companies, users, pro
                             onValueChange={v => set("org_type", v)}/>
               )}
             </FormRow>
-          </Section>
-
-          <Section title="Contacts">
-            <FormRow id={fid("contacts")} label="People" wide group
-                     hint="Add everyone you deal with here — the first one becomes the primary contact.">
-              {() => <DraftContactsField value={form.contacts || []} onChange={v => set("contacts", v)}/>}
-            </FormRow>
-            <FormRow id={fid("address")} label="Address" wide>
-              {(p) => <Input {...p} {...bind("address")}/>}
-            </FormRow>
-          </Section>
-
-          <Section title="Notes">
-            {notesRow()}
-          </Section>
-        </>
-      );
-    }
-
-    if (table === "companies") {
-      return (
-        <>
-          <Section title="Company">
-            <FormRow id={fid("name")} label="Name" required wide error={missing("name")}>
-              {(p) => <Input {...p} autoFocus {...bind("name")}/>}
+            <FormRow id={fid("website")} label="Website" wide>
+              {(p) => <Input {...p} type="url" placeholder="https://" {...bind("website")}/>}
             </FormRow>
           </Section>
 

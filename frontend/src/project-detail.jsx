@@ -1141,7 +1141,7 @@ function ItemEditor({ item, items, updateItem, onAddItemSub, onUpdateItemSub, on
   // Subs management (companies) wired to App's item-sub handlers.
   const [addSubId, setAddSubId] = useState("");
   const subCompanyOptions = getCompanies()
-    .filter(c => c.type !== "Client" && !(item.subs || []).some(s => s.cId === c.id))
+    .filter(c => !(item.subs || []).some(s => s.cId === c.id))
     .map(c => ({ value: c.id, label: c.name }));
   // Same commit path the old picker used: clear the pending id, then hand the
   // company to App's handler.

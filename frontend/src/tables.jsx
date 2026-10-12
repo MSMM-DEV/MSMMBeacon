@@ -9,8 +9,7 @@ import {
   StarRating,
 } from "./primitives.jsx";
 import {
-  getCompanies, getClientsOnly, getCompaniesOnly, getUsers,
-  buildClientOrCompanyOptions,
+  getCompanies, getUsers,
   companyById, userById,
   fmtMoney, fmtDate, fmtDateTime,
   MONTHS, TODAY_MONTH, THIS_YEAR, isActualInvoiceMonth, ATTACH_ONLY_ON_ACTUAL, INVOICE_ACTUALS_MIN_YEAR,
@@ -1285,18 +1284,11 @@ const renderOrderedCells = (visibleColumns, cells) =>
 // Built at the top of each table body. We rebuild per-render so newly added
 // users/companies show up — the lookup arrays are cheap (<~200 items).
 const buildOptions = () => {
-  // clientOptions (clients only) is the default for Prime-role rows —
-  // matches the client_id → beacon.clients FK so picks can't violate it.
-  // Sub-role rows get a merged Client-or-Firm list (see clientOptionsForRow
-  // below) because their "Client" cell can carry either a client or a
-  // prime firm, and updatePotential/etc. route the pick to either
-  // client_id or prime_company_id accordingly.
-  const clientOptions     = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
-  const clientsOnlyOpts   = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
-  const companiesOnlyOpts = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
-  // Combined list used when the current row is role='Sub'. Companies get
-  // a " · Firm" suffix so users can tell the two pools apart visually.
-  const clientOrFirmOpts  = buildClientOrCompanyOptions();
+  const companyOptions = getCompanies().map(c => ({ value: c.id, label: c.name }));
+  const clientOptions = companyOptions;
+  const clientsOnlyOpts = companyOptions;
+  const companiesOnlyOpts = companyOptions;
+  const clientOrFirmOpts = companyOptions;
   const userOptions       = getUsers().map(u => ({ value: u.id, label: u.name }));
   return {
     clientOptions,
@@ -1312,7 +1304,6 @@ const buildOptions = () => {
     hotLeadStatusOptions:["Scheduled", "Happened"],
     hotLeadTypeOptions:  ["Engineering", "AI"],
     invoiceTypeOptions:  INVOICE_TYPE_OPTIONS,
-    companyTypeOptions:  ["Prime", "Sub", "Multiple"],
     stageOptions:        ["Multi-Use Contract", "Single Use Contract (Project)", "AE Selected List"],
   };
 };
@@ -1820,35 +1811,6 @@ const injectOrgHeaders = (unitLabel = "row") => (sortedRows) => {
       lastOrg = o;
     }
     out.push(r);
-  }
-  return out;
-};
-
-// Same shape as injectOrgHeaders, but groups rows by entity *kind* —
-// "Clients" first (rows where r.type === "Client"), then "Companies"
-// (everything else). Used by the combined DirectoryTable.
-const injectKindHeaders = (sortedRows) => {
-  if (!sortedRows || sortedRows.length === 0) return sortedRows;
-  const clients   = sortedRows.filter(r => r.type === "Client");
-  const companies = sortedRows.filter(r => r.type !== "Client");
-  const out = [];
-  if (clients.length > 0) {
-    out.push({
-      id: "_kindheader_clients",
-      _kindHeader: "Clients",
-      _count: clients.length,
-      _unit:  clients.length === 1 ? "client" : "clients",
-    });
-    for (const r of clients) out.push(r);
-  }
-  if (companies.length > 0) {
-    out.push({
-      id: "_kindheader_companies",
-      _kindHeader: "Companies",
-      _count: companies.length,
-      _unit:  companies.length === 1 ? "company" : "companies",
-    });
-    for (const r of companies) out.push(r);
   }
   return out;
 };
@@ -6452,15 +6414,9 @@ export const OpenBidsTable = ({
 // bars, and the word is always printed next to it.
 const DIR_ORG_KEY = (v) => String(v || "").trim().toLowerCase() || "unset";
 
-// Kind axis. Icon + word carry it; the tone is a quiet informational one so
-// it can never be confused with the sage / brand / clay status ramp.
-const DIR_KIND_META = {
-  Client:  { label: "Client",  icon: "users",     tone: "info" },
-  Company: { label: "Company", icon: "building",  tone: "outline" },
-};
 export const DirectoryTable = ({
   tab, rows, updateRow = _noopUpdate, onOpenDrawer, projectsByType, invoice, flashId, filters,
-  onOpenProject, onMerge, mergeResetKey,
+  onOpenProject, onMerge, mergeResetKey, onImportCards,
 }) => {
   const [directoryView, setDirectoryView] = useState("relationships");
   const isFullTable = directoryView === "table";
@@ -6475,9 +6431,7 @@ export const DirectoryTable = ({
     });
   };
 
-  // Multi-select for merge. You can only select one KIND at a time (clients and
-  // companies have different reference sets), so the first pick locks the kind
-  // and the other kind's checkboxes disable until the selection is cleared.
+  // Multi-select for merging duplicate company records.
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const byId = React.useMemo(() => {
     const m = new Map();
@@ -6485,10 +6439,6 @@ export const DirectoryTable = ({
     return m;
   }, [rows]);
   const selectedRows = [...selectedIds].map(id => byId.get(id)).filter(Boolean);
-  const selectedKind = selectedRows.length
-    ? (selectedRows[0].type === "Client" ? "Client" : "Company")
-    : null;
-  const kindOf = (r) => (r.type === "Client" ? "Client" : "Company");
   const toggleSelect = (r) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -6504,7 +6454,7 @@ export const DirectoryTable = ({
 
   const startMerge = () => {
     if (selectedRows.length < 2 || !onMerge) return;
-    onMerge(selectedRows, selectedKind);
+    onMerge(selectedRows);
   };
 
   const [search, setSearch] = useState("");
@@ -6513,7 +6463,7 @@ export const DirectoryTable = ({
     if (!q) return rows || [];
     return (rows || []).filter(r => {
       const projectCount = countRefsFor(r.id, projectsByType);
-      const related = relatedDirectoryPartiesFor(r, projectsByType, r.type === "Client" ? "companies" : "clients")
+      const related = relatedDirectoryPartiesFor(r, projectsByType)
         .map(p => p.name)
         .join(" ");
       return matchesDirectoryQuery(r, q, [related, String(projectCount)]);
@@ -6535,11 +6485,10 @@ export const DirectoryTable = ({
     { label: "__expand", w: "40px", locked: true },
     { label: "__select", w: "42px", locked: true },
     { label: "Name",           w: "minmax(220px, 2fr)",   sortKey: "name" },
-    // Kind is the outer grouping axis, so it is deliberately not sortable:
-    // the roster always reads clients first, then companies.
-    { label: "Kind",           w: "118px" },
-    { label: "Role / Org Type", w: "168px",               sortKey: "class",
-      get: r => (r.type === "Client" ? (r.orgType || "") : (r.type || "")) },
+    { label: "Roles",          w: "168px",                 sortKey: "roles",
+      get: r => (r.relationshipRoles || []).join(" ") },
+    { label: "Org Type",       w: "140px",                 sortKey: "orgType",
+      get: r => r.orgType || "" },
     { label: "Related",        w: "minmax(180px, 1.3fr)" },
     { label: "Projects",       w: "124px",                sortKey: "projects",
       get: r => countFor(r) },
@@ -6574,7 +6523,7 @@ export const DirectoryTable = ({
     return (next.key && next.dir) ? next : { key: "name", dir: "asc" };
   });
 
-  const groupedRows = useMemo(() => {
+  const sortedRows = useMemo(() => {
     const byName = (a, b) =>
       String(a.baseName || a.name || "").localeCompare(String(b.baseName || b.name || ""), undefined, { sensitivity: "base" });
     const col = dirColumns.find(c => c.sortKey === sort.key);
@@ -6588,17 +6537,13 @@ export const DirectoryTable = ({
     const dirAware = (sort.key === "name" && sort.dir === "desc")
       ? (a, b) => -byName(a, b)
       : compare;
-    // Kind stays the outer axis whatever the user sorts by, so the roster
-    // never loses its clients-then-companies reading.
-    return {
-      clients: searchableRows.filter(r => r.type === "Client").slice().sort(dirAware),
-      companies: searchableRows.filter(r => r.type !== "Client").slice().sort(dirAware),
-    };
+    return searchableRows.slice().sort(dirAware);
   }, [searchableRows, sort, dirColumns]);
 
   const snapshotColumns = useMemo(() => ([
     { label: "Name", sortKey: "name" },
-    { label: "Kind", sortKey: "type" },
+    { label: "Roles", sortKey: "relationshipRoles" },
+    { label: "Org Type", sortKey: "orgType" },
     { label: "Contact", sortKey: "contact" },
     { label: "Email", sortKey: "email" },
     { label: "Phone", sortKey: "phone" },
@@ -6608,7 +6553,7 @@ export const DirectoryTable = ({
   ]), []);
 
   useEffect(() => {
-    const processedRows = [...groupedRows.clients, ...groupedRows.companies].map(r => ({
+    const processedRows = sortedRows.map(r => ({
       ...r,
       projectCount: countRefsFor(r.id, projectsByType),
     }));
@@ -6624,20 +6569,18 @@ export const DirectoryTable = ({
       year: null,
       processedRows,
     });
-  }, [tab, snapshotColumns, groupedRows, projectsByType, search]);
-
-  const { companyTypeOptions } = buildOptions();
+  }, [tab, snapshotColumns, sortedRows, projectsByType, search]);
 
   const nameOf = (r) => r.baseName || r.name || "directory entry";
   const hasSearch = !!search.trim();
 
   // ---- Related parties (firms for a client, clients for a firm) --------
-  const renderRelated = (row, isClient) => {
-    const related = relatedDirectoryPartiesFor(row, projectsByType, isClient ? "companies" : "clients");
+  const renderRelated = (row) => {
+    const related = relatedDirectoryPartiesFor(row, projectsByType);
     if (related.length === 0) {
       return (
         <span className="empty-cell">
-          No related {isClient ? "firms" : "clients"} yet
+          No related companies yet
         </span>
       );
     }
@@ -6651,7 +6594,7 @@ export const DirectoryTable = ({
         ))}
         {related.length > 2 && (
           <details className="bcn-directory-related-more" onClick={e => e.stopPropagation()}>
-            <summary>{related.length - 2} more {isClient ? "firms" : "clients"}</summary>
+            <summary>{related.length - 2} more companies</summary>
             <span className="bcn-directory-related-list">
               {related.slice(2).map(p => <span key={p.id}><span>{p.name}</span><span className="num">{p.count} shared {p.count === 1 ? "project" : "projects"}</span></span>)}
             </span>
@@ -6663,12 +6606,8 @@ export const DirectoryTable = ({
 
   // ---- One entity row (plus its expand row when open) ------------------
   const renderRow = (r) => {
-    const isClient        = r.type === "Client";
-    const kindKey         = isClient ? "Client" : "Company";
-    const kindMeta        = DIR_KIND_META[kindKey];
     const isExpanded      = expandedIds.has(r.id);
     const isSelected      = selectedIds.has(r.id);
-    const otherKindLocked = selectedKind && kindOf(r) !== selectedKind;
     const projectCount    = countFor(r);
     const label           = nameOf(r);
     const panelId         = `bxt-dir-linked-${r.id}`;
@@ -6689,7 +6628,7 @@ export const DirectoryTable = ({
           (isSelected ? " selected" : "")
         }
         role="row"
-        data-kind={isClient ? "client" : "company"}
+        data-kind="company"
         style={{ gridTemplateColumns: dirGridCols, cursor: "default" }}
         onDoubleClick={() => onOpenDrawer(r)}
       >
@@ -6713,11 +6652,8 @@ export const DirectoryTable = ({
           <input
             type="checkbox"
             checked={isSelected}
-            disabled={!!otherKindLocked}
             aria-label={`Select ${label} for merge`}
-            title={otherKindLocked
-              ? `Finish or clear the ${String(selectedKind).toLowerCase()} selection first. Clients and companies cannot be merged together.`
-              : "Select to merge"}
+            title="Select to merge"
             onChange={() => toggleSelect(r)}
           />
         </div>
@@ -6725,65 +6661,42 @@ export const DirectoryTable = ({
         </>}
         <div className="td bxt-td-identity bxt-td-stack" role="cell">
           <span className="bxt-td-fullwidth bcn-directory-name">
-            {!isFullTable ? <button type="button" className="bcn-directory-open" onClick={() => onOpenDrawer(r)}>{r.baseName || r.name}</button> : isClient ? (
-              <EditableCell value={r.baseName || r.name}
-                onChange={v => {
-                  const district = r.district || "";
-                  updateRow(r.id, {
-                    baseName: v,
-                    // Fourth and last builder of the merged client display
-                    // name. adaptClient (data.js), adaptInsertedRow and
-                    // updateClients (App.jsx) build the same string, so the
-                    // separator has to match all three or a renamed row would
-                    // render differently from the same row after a reload.
-                    name: district ? v + " – " + district : v,
-                  });
-                }}/>
-            ) : (
+            {!isFullTable ? <button type="button" className="bcn-directory-open" onClick={() => onOpenDrawer(r)}>{r.name}</button> : (
               <EditableCell value={r.name}
                 onChange={v => updateRow(r.id, { name: v })}/>
             )}
           </span>
-          {isClient && r.district && (
+          {r.district && (
             <span className="bxt-td-sub" title={r.district}>{r.district}</span>
           )}
           {!isFullTable && <span className="bcn-directory-classification">
-            <Icon name={kindMeta.icon} size={13} aria-hidden="true"/>
-            <span>{kindMeta.label}</span>
-            <span>{(isClient ? r.orgType : r.type) || ""}</span>
+            <Icon name="building" size={13} aria-hidden="true"/>
+            <span>{(r.relationshipRoles || []).join(" · ") || "Company"}</span>
+            <span>{r.orgType || ""}</span>
           </span>}
         </div>
 
         {isFullTable && <div className="td" role="cell">
-          <Badge tone={kindMeta.tone} className="max-w-full whitespace-normal">
-            <Icon name={kindMeta.icon} size={12} aria-hidden="true"/>
-            <span className="min-w-0">{kindMeta.label}</span>
-          </Badge>
+          <span className="flex flex-wrap gap-1">
+            {(r.relationshipRoles || []).length > 0
+              ? r.relationshipRoles.map(role => <Badge key={role} tone="outline">{role}</Badge>)
+              : <span className="empty-cell">No project role</span>}
+          </span>
         </div>}
 
-        {/* Sub-attribute axis: org type for a client (read-only, set on the
-            record), commercial role for a firm (inline editable, as before). */}
         {isFullTable && <div className="td" role="cell">
-          {isClient ? (
-            r.orgType ? (
-              <Badge tone="outline" className="max-w-full whitespace-normal" title={`Org type: ${r.orgType}`}>
-                <span className="bxt-dir-orgdot" data-org={orgKey} aria-hidden="true"/>
-                <span className="min-w-0">{r.orgType}</span>
-              </Badge>
-            ) : (
-              <span className="empty-cell">No org type</span>
-            )
+          {r.orgType ? (
+            <Badge tone="outline" className="max-w-full whitespace-normal" title={`Org type: ${r.orgType}`}>
+              <span className="bxt-dir-orgdot" data-org={orgKey} aria-hidden="true"/>
+              <span className="min-w-0">{r.orgType}</span>
+            </Badge>
           ) : (
-            <EditableCell value={r.type} type="select" options={companyTypeOptions}
-              onChange={v => updateRow(r.id, { type: v })}
-              render={v => v
-                ? <RoleChip role={v}/>
-                : <span className="empty-cell">No role</span>}/>
+            <span className="empty-cell">No org type</span>
           )}
         </div>}
 
         {isFullTable && <><div className="td bxt-td-note" role="cell">
-          {renderRelated(r, isClient)}
+          {renderRelated(r)}
         </div>
 
         {/* Second, wordier route to the same disclosure, so the count and
@@ -6864,8 +6777,7 @@ export const DirectoryTable = ({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator/>
                 <DropdownMenuItem
-                  disabled={!!otherKindLocked}
-                  onSelect={() => { if (!otherKindLocked) toggleSelect(r); }}
+                  onSelect={() => toggleSelect(r)}
                 >
                   <Icon name="merge" size={13}/>
                   <span className="bxt-menu-text">
@@ -6887,7 +6799,7 @@ export const DirectoryTable = ({
         <div
           className="trow bxt-dirx"
           role="row"
-          data-kind={isClient ? "client" : "company"}
+          data-kind="company"
           style={{ gridTemplateColumns: dirGridCols }}
         >
           <div className="td bxt-dirx-cell" role="cell" aria-colspan={visibleDirColumns.length}>
@@ -6933,33 +6845,9 @@ export const DirectoryTable = ({
     );
   };
 
-  // ---- Section bar introducing each kind -------------------------------
-  const renderGroupHead = (kind, unit, items) => (
-    <div
-      key={`head-${kind}`}
-      className="trow bxt-grouphead bxt-dirhead"
-      role="row"
-      data-kind={kind}
-      style={{ gridTemplateColumns: dirGridCols }}
-    >
-      <div className="td bxt-grouphead-cell bxt-dirhead-cell" role="cell" aria-colspan={visibleDirColumns.length}>
-        <span className="bxt-dirhead-inner">
-          <span className="bxt-dirhead-dot" aria-hidden="true"/>
-          <span className="bxt-orghead-kicker">{kind === "client" ? "Who we work for" : "Who we work with"}</span>
-          <span className="bxt-grouphead-label bxt-truncate">
-            {kind === "client" ? "Clients" : "Companies"}
-          </span>
-          <span className="bxt-grouphead-count">
-            <span className="num">{items.length}</span> {items.length === 1 ? unit : `${unit}s`}
-          </span>
-        </span>
-      </div>
-    </div>
-  );
-
   const showNoMatches = hasSearch && searchableRows.length === 0 && (rows || []).length > 0;
   const totalRows = (rows || []).length;
-  const shownRows = groupedRows.clients.length + groupedRows.companies.length;
+  const shownRows = sortedRows.length;
 
   return (
     // data-skin rather than a `skin` prop: Directory builds its own chrome
@@ -7021,6 +6909,9 @@ export const DirectoryTable = ({
         )}
 
         <div className="bxt-toolbar-actions">
+          <Button variant="secondary" size="sm" onClick={onImportCards}>
+            <Icon name="upload" size={13}/>Import business cards
+          </Button>
           <span className="bxt-dir-tally">
             <span className="num">{shownRows}</span>
             <span className="bxt-dir-tally-sep">/</span>
@@ -7030,23 +6921,19 @@ export const DirectoryTable = ({
         </div>
       </div>
 
-      {/* Merge selection. Its own bar rather than a control squeezed into
-          the toolbar: it appears only while a selection exists, states what
-          is selected, and says why the other kind is locked out. */}
+      {/* Merge selection. */}
       {selectedRows.length > 0 && (
         <div className="bxt-selbar" role="status" aria-live="polite">
           <span className="bxt-selbar-count">
             <Icon name="checkAll" size={14} aria-hidden="true"/>
             <strong className="num">{selectedRows.length}</strong>
             {" "}
-            {selectedKind === "Client"
-              ? (selectedRows.length === 1 ? "client" : "clients")
-              : (selectedRows.length === 1 ? "company" : "companies")}
+            {selectedRows.length === 1 ? "company" : "companies"}
             {" "}selected
           </span>
           <span className="bxt-selbar-hint">
             {selectedRows.length < 2
-              ? "Pick one more record of the same kind to merge."
+              ? "Pick one more company to merge."
               : "Merging keeps a single record and repoints every linked project onto it."}
           </span>
           <span className="bxt-selbar-actions">
@@ -7055,7 +6942,7 @@ export const DirectoryTable = ({
             </Button>
             <Button variant="primary" size="sm" onClick={startMerge} disabled={selectedRows.length < 2}>
               <Icon name="merge" size={13}/>
-              Merge {selectedKind === "Client" ? "clients" : "companies"}
+              Merge companies
             </Button>
           </span>
         </div>
@@ -7127,10 +7014,7 @@ export const DirectoryTable = ({
             })}
           </div>
 
-          {groupedRows.clients.length > 0 && renderGroupHead("client", "client", groupedRows.clients)}
-          {groupedRows.clients.map(r => renderRow(r))}
-          {groupedRows.companies.length > 0 && renderGroupHead("company", "company", groupedRows.companies)}
-          {groupedRows.companies.map(r => renderRow(r))}
+          {sortedRows.map(r => renderRow(r))}
         </div>
 
         {/* Outside the role="table" subtree, so no cell-less row is ever
@@ -7139,7 +7023,7 @@ export const DirectoryTable = ({
         {totalRows === 0 ? (
           <EmptyState
             title="No directory entries yet"
-            hint="Add a client or a company and it joins this roster, with every project it is linked to."
+            hint="Add a company and it joins this roster with every project relationship and contact."
             iconName="users"
           />
         ) : showNoMatches ? (
@@ -7151,7 +7035,7 @@ export const DirectoryTable = ({
         ) : shownRows === 0 ? (
           <EmptyState
             title="Nothing in this filter"
-            hint="No client or company is in this group right now. Switch back to All to see the whole roster."
+            hint="No company is in this group right now. Switch back to All to see the whole roster."
             iconName="filter"
           />
         ) : null}
@@ -7175,16 +7059,14 @@ function countRefsFor(id, projectsByType) {
   ).length;
 }
 
-function relatedDirectoryPartiesFor(row, projectsByType, targetKind) {
+function relatedDirectoryPartiesFor(row, projectsByType) {
   const all = [
     ...(projectsByType?.potential || []),
     ...(projectsByType?.awaiting  || []),
     ...(projectsByType?.awarded   || []),
     ...(projectsByType?.closed    || []),
   ];
-  const clients = getClientsOnly();
-  const companies = getCompaniesOnly();
-  const isCompany = row?.type !== "Client";
+  const companies = getCompanies();
   const counts = new Map();
   const add = (entity) => {
     if (!entity || entity.id === row.id) return;
@@ -7198,19 +7080,13 @@ function relatedDirectoryPartiesFor(row, projectsByType, targetKind) {
   };
 
   for (const p of all) {
-    const isPrimeMatch = p.clientId === row.id || p.primeId === row.id;
-    const isSubMatch = (p.subs || []).some(s => s.cId === row.id);
-    const isClientMatch = p.clientId === row.id;
-
-    if (targetKind === "clients" && isCompany && (isPrimeMatch || isSubMatch)) {
-      add(clients.find(c => c.id === p.clientId));
-      continue;
-    }
-
-    if (targetKind === "companies" && !isCompany && isClientMatch) {
-      add(companies.find(c => c.id === p.primeId));
-      for (const s of (p.subs || [])) add(companies.find(c => c.id === s.cId));
-    }
+    const participantIds = new Set([
+      p.clientId,
+      p.primeId,
+      ...(p.subs || []).map(s => s.cId),
+    ].filter(Boolean));
+    if (!participantIds.has(row.id)) continue;
+    for (const id of participantIds) add(companies.find(c => c.id === id));
   }
 
   return [...counts.values()].sort((a, b) =>

@@ -2,7 +2,7 @@ import React, { useState, useRef, useId } from "react";
 import { Icon } from "./icons.jsx";
 import { StatusChip, StarRating } from "./primitives.jsx";
 import {
-  getClientsOnly, getCompaniesOnly, buildClientOrCompanyOptions,
+  getCompanies,
   getUsers, companyById, userById, fmtMoney, fmtDate, fmtDateTime, MONTHS,
   uploadInvoiceFile, deleteInvoiceFile, getInvoiceFileSignedUrl,
   uploadInvoicePartyFile, deleteInvoicePartyFile,
@@ -426,23 +426,13 @@ export const DetailDrawer = ({
 }) => {
   if (!row) return null;
 
-  // Two distinct lists:
-  //   CLIENT_OPTIONS — beacon.clients rows only. Used by the drawer's
-  //     f.type === "company" renderer (every such field is a clientId FK).
-  //   SUB_OPTIONS — beacon.companies rows only (external firms). Used by
-  //     the Subs editor inside f.type === "subs".
-  // Before splitting these, the Subs picker was filtering a clients-only
-  // list looking for non-clients — always returned empty.
-  const CLIENT_OPTIONS         = getClientsOnly().map(c => ({ value: c.id, label: c.name }));
-  const CLIENT_OR_FIRM_OPTIONS = buildClientOrCompanyOptions();
-  const SUB_OPTIONS            = getCompaniesOnly().map(c => ({ value: c.id, label: c.name }));
+  const COMPANY_OPTIONS = getCompanies().map(c => ({ value: c.id, label: c.name }));
+  const CLIENT_OPTIONS = COMPANY_OPTIONS;
+  const CLIENT_OR_FIRM_OPTIONS = COMPANY_OPTIONS;
+  const SUB_OPTIONS = COMPANY_OPTIONS;
   const USERS = getUsers();
 
-  // The Directory tab merges Clients + Companies into one table. The drawer
-  // routes to the right field block based on the row's `type` discriminator.
-  const fieldsKey = table === "directory"
-    ? (row.type === "Client" ? "clients" : "companies")
-    : table;
+  const fieldsKey = table === "directory" ? "companies" : table;
 
   // Every column that appears in the corresponding table in tables.jsx must have
   // a field here so the drawer is the complete editor for the row.
@@ -555,23 +545,11 @@ export const DetailDrawer = ({
       { k: "attendees",      label: "Attendees from MSMM",     type: "users" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
-    clients: [
-      // Edit baseName (not the merged display `name`) so the PATCH sends
-      // just the raw name to beacon.clients.name. updateClients() in App.jsx
-      // recomputes the merged display locally so project rows' Client cells
-      // stay consistent without a reload.
-      { k: "baseName",       label: "Client Name" },
-      { k: "district",       label: "District / State" },
-      { k: "orgType",        label: "Org Type",                type: "select", options: ["City","State","Federal","Local","Parish","Regional","Other"] },
-      // Contact people live in beacon_v2.contacts (many per client) and are
-      // edited in the dedicated <ContactsSection> below — not as row fields.
-      { k: "address",        label: "Address" },
-      { k: "notes",          label: "Notes",                   type: "textarea" },
-    ],
     companies: [
       { k: "name",           label: "Company Name" },
-      { k: "type",           label: "Type",                    type: "select", options: ["Prime","Sub","Multiple"] },
-      // Contact people → <ContactsSection> (beacon_v2.contacts).
+      { k: "district",       label: "District / State" },
+      { k: "orgType",        label: "Org Type",                type: "select", options: ["City","State","Federal","Local","Parish","Regional","Other"] },
+      { k: "website",        label: "Website" },
       { k: "address",        label: "Address" },
       { k: "notes",          label: "Notes",                   type: "textarea" },
     ],
@@ -898,15 +876,12 @@ export const DetailDrawer = ({
     closed:    "Closed Out Project",
     invoice:   "Anticipated Invoice",
     events:    "Event",
-    clients:   "Client",
     companies: "Company",
     hotleads:  "Hot Lead",
     openbids:  "Open Bid",
     projects:  "Project",
   };
-  const titleLabel = table === "directory"
-    ? (row.type === "Client" ? "Client" : "Company")
-    : titleMap[table];
+  const titleLabel = table === "directory" ? "Company" : titleMap[table];
 
   // ---- Presentation-only derivations -------------------------------------
   const visibleFields = fields.filter(f => !f.showIf || f.showIf(row));
@@ -2424,7 +2399,6 @@ export const AddSubModal = ({
     ...localCompanies.filter(c => !seenIds.has(c.id)),
   ];
   const subOptions = mergedCompanies
-    .filter(c => c.type !== "Client")
     .map(c => ({ value: c.id, label: c.name }));
 
   const beginCreate = (seedName = "") => {
@@ -2440,7 +2414,7 @@ export const AddSubModal = ({
     // If the firm is actually already in the Directory (case-insensitive),
     // just select it instead of creating a near-duplicate.
     const dup = mergedCompanies.find(
-      c => c.type !== "Client" && (c.name || "").trim().toLowerCase() === clean.toLowerCase()
+      c => (c.name || "").trim().toLowerCase() === clean.toLowerCase()
     );
     if (dup) {
       setCompanyId(dup.id);
@@ -2654,17 +2628,13 @@ export const AddSubModal = ({
 // ---------- MergeModal ----------
 // Consolidate 2+ duplicate Directory rows into one. The user picks which record
 // to KEEP (the survivor); every reference on the others is repointed to it and
-// the duplicates are deleted (server-side, transactional — see mergeEntities /
-// 20260606130000_merge_entities.sql). All selected rows are the same kind (the
-// table only lets you select one kind at a time). The MSMM company can never be
-// deleted, so if it's in the set it's force-kept.
+// the duplicates are deleted (server-side and transactional). The MSMM company
+// can never be deleted, so if it's in the set it's force-kept.
 export const MergeModal = ({
   entities = [],
-  kind = "Company",                 // "Client" | "Company"
   projectsByType, invoice, hotLeads = [], openBids = [],
   onClose, onConfirm,
 }) => {
-  const isClient = kind === "Client";
   // Per-entity reference blast radius, memoized off the in-memory slices.
   const summaries = React.useMemo(() => {
     const m = new Map();
@@ -2694,9 +2664,8 @@ export const MergeModal = ({
   const losers   = entities.filter(e => e.id !== survivorId);
   const totalRefs = losers.reduce((a, e) => a + (summaries.get(e.id)?.total || 0), 0);
 
-  const nameOf = (e) => isClient ? (e.baseName || e.name) : e.name;
-  const subOf  = (e) =>
-    isClient ? (e.district || "") : (e.type && e.type !== "Multiple" ? e.type : "");
+  const nameOf = (e) => e.name;
+  const subOf = (e) => [e.district, e.orgType].filter(Boolean).join(" · ");
 
   const summaryLine = (s) => {
     if (!s || !s.total) return "No references";
@@ -2728,12 +2697,12 @@ export const MergeModal = ({
             Directory merge
           </Badge>
           <DialogTitle className="break-words">
-            Merge {entities.length} {isClient ? "clients" : "companies"} into one
+            Merge {entities.length} companies into one
           </DialogTitle>
           <DialogDescription>
             Pick the record to <strong className="font-semibold text-[var(--text)]">keep</strong>. Every
-            reference on the others (across Open Bids, Awaiting, Awarded, Closed Out, Potential, Invoice
-            {isClient ? "" : ", sub-invoices"} and Hot Leads) moves to it, then the duplicates are deleted.
+            reference on the others (across Open Bids, Awaiting, Awarded, Closed Out, Potential, Invoice,
+            sub-invoices and Hot Leads) moves to it, then the duplicates are deleted.
           </DialogDescription>
         </DialogHeader>
 

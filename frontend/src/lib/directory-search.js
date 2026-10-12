@@ -6,8 +6,9 @@ export function matchesDirectoryQuery(record, query, relatedTerms = []) {
   const needle = String(query || "").trim().toLowerCase();
   if (!needle) return true;
   const people = Array.isArray(record.contacts) ? record.contacts : [];
-  const haystack = [record.baseName, record.name, record.type, record.contact,
-    record.email, record.phone, record.address, record.district, record.orgType,
+  const haystack = [record.baseName, record.name, record.contact,
+    record.email, record.phone, record.address, record.district, record.orgType, record.website,
+    ...(record.relationshipRoles || []),
     ...people.flatMap(p => [p.name, p.title, p.email, p.phone, p.notes]),
     ...relatedTerms].filter(Boolean).join(" ").toLowerCase();
   if (haystack.includes(needle)) return true;
