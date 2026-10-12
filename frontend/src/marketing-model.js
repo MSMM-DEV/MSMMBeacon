@@ -30,6 +30,14 @@ export function nextMarketingAction(tasks = [], fallback = "") {
   return sortMarketingTasks(tasks).find(task => task.status !== "completed") || fallback;
 }
 
+export function marketingSettingsPatch(stalledAfterDays) {
+  const days = Math.round(Number(stalledAfterDays));
+  if (!Number.isFinite(days) || days < 1 || days > 365) {
+    throw new Error("Stalled threshold must be between 1 and 365 days");
+  }
+  return { marketing_stalled_after_days: days };
+}
+
 const OPPORTUNITY_FIELDS = Object.freeze({
   title: "title",
   clientId: "client_id",

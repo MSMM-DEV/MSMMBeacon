@@ -15,6 +15,7 @@ import {
   adaptMarketingTask,
   marketingOpportunityInsert,
   marketingOpportunityPatch,
+  marketingSettingsPatch,
 } from "./marketing-model.js";
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
@@ -294,7 +295,7 @@ let _companies = [];
 // on every loadBeacon and on every successful updateMonthlyBenchmark write so
 // the in-memory copy never drifts from the DB. Defaults shape used when the
 // table is empty / migration not yet applied:
-let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null, tkHolidays: [], tkWorkdayHours: 8 };
+let _appSettings = { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, marketingStalledAfterDays: 14, updatedAt: null, tkHolidays: [], tkWorkdayHours: 8 };
 
 export const getUsers     = () => _users;
 export const getAppSettings = () => _appSettings;
@@ -1621,7 +1622,7 @@ const LEAVE_SETTING_DEFAULTS = {
   leaveSickAccrual: 1.538461538,       // hrs per pay period (= 40 hrs/yr over 26)
 };
 function adaptAppSettings(row) {
-  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, updatedAt: null, tkHolidays: [], tkWorkdayHours: 8, ...LEAVE_SETTING_DEFAULTS };
+  if (!row) return { monthlyInvoiceBenchmark: null, invoiceActualCutoverDay: 1, invoiceActualCutoverNextMonth: false, marketingStalledAfterDays: 14, updatedAt: null, tkHolidays: [], tkWorkdayHours: 8, ...LEAVE_SETTING_DEFAULTS };
   const v = row.monthly_invoice_benchmark;
   const dayRaw = row.invoice_actual_cutover_day;
   const day = dayRaw == null ? 1 : Math.min(31, Math.max(1, Math.round(Number(dayRaw)) || 1));
@@ -1629,6 +1630,7 @@ function adaptAppSettings(row) {
     monthlyInvoiceBenchmark: v == null || v === "" ? null : Number(v),
     invoiceActualCutoverDay: day,
     invoiceActualCutoverNextMonth: !!row.invoice_actual_cutover_next_month,
+    marketingStalledAfterDays: row.marketing_stalled_after_days == null ? 14 : Number(row.marketing_stalled_after_days),
     updatedAt: row.updated_at || null,
     // Company holidays (jsonb array of 'YYYY-MM-DD') + nominal workday length —
     // surfaced app-wide so the leave day-counter (weekdays minus holidays) and
@@ -5733,11 +5735,16 @@ export async function removeMarketingDocument({ id, filePath }) {
 }
 
 export async function updateMarketingSettings({ stalledAfterDays }) {
-  const days = Math.round(Number(stalledAfterDays));
-  if (!Number.isFinite(days) || days < 1 || days > 365) throw new Error("Stalled threshold must be between 1 and 365 days");
+  const patch = marketingSettingsPatch(stalledAfterDays);
   const { data, error } = await supabase.from("app_settings")
-    .update({ marketing_stalled_after_days: days, updated_by: getCurrentBeaconUser()?.id || null })
-    .eq("singleton", true).select("marketing_stalled_after_days").single();
+    .update({ ...patch, updated_at: new Date().toISOString(), updated_by: getCurrentBeaconUser()?.id || null })
+    .eq("singleton", true).select().single();
   throwMarketingError(error, "update Marketing settings");
-  return { stalledAfterDays: Number(data.marketing_stalled_after_days) };
+  _appSettings = adaptAppSettings(data);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("beacon:marketing-settings", {
+      detail: { stalledAfterDays: _appSettings.marketingStalledAfterDays },
+    }));
+  }
+  return _appSettings;
 }

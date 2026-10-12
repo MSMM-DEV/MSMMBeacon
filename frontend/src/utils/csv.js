@@ -17,7 +17,7 @@ function escapeCell(s) {
   return s;
 }
 
-export function exportCSV(columns, rows, filename = "export.csv") {
+export function serializeCSV(columns, rows) {
   const header = columns.map(c => escapeCell(normalize(c.label))).join(",");
   const body = (rows || []).map(row =>
     columns.map(c => {
@@ -27,7 +27,11 @@ export function exportCSV(columns, rows, filename = "export.csv") {
   );
 
   // UTF-8 BOM + RFC 4180 CRLF separators.
-  const text = "\uFEFF" + [header, ...body].join("\r\n");
+  return "\uFEFF" + [header, ...body].join("\r\n");
+}
+
+export function exportCSV(columns, rows, filename = "export.csv") {
+  const text = serializeCSV(columns, rows);
 
   const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);

@@ -238,7 +238,8 @@ function countBy(rows, labelOf, valueOf = () => 0) {
   return [...map.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
-export function buildMarketingInsights(rows = [], tasks = [], activities = [], { now = new Date(), stalledAfterDays = 14 } = {}) {
+export function buildMarketingInsights(rows = [], tasks = [], activities = [], options = {}) {
+  const { now = new Date(), stalledAfterDays = 14 } = options;
   const active = rows.filter(row => !row.archivedAt && !row.outcome);
   const won = rows.filter(row => !row.archivedAt && row.outcome === "won");
   const lost = rows.filter(row => !row.archivedAt && row.outcome === "lost");
@@ -255,6 +256,35 @@ export function buildMarketingInsights(rows = [], tasks = [], activities = [], {
       value: items.reduce((sum, row) => sum + Number(row.estimatedValue || 0), 0),
       weightedValue: items.reduce((sum, row) => sum + weightedMarketingValue(row), 0),
     };
+  });
+  const visible = rows.filter(row => !row.archivedAt);
+  const expectedCloseMonths = countBy(visible.filter(row => row.expectedCloseDate), row => String(row.expectedCloseDate).slice(0, 7), row => row.estimatedValue);
+  const expectedCloseQuarters = countBy(visible.filter(row => row.expectedCloseDate), row => {
+    const close = dateOnlyParts(row.expectedCloseDate);
+    return close ? `${close.year} Q${quarter(close)}` : "Unspecified";
+  }, row => row.estimatedValue);
+  const usersById = options.usersById || {};
+  const clientsById = options.clientsById || {};
+  const history = options.history || [];
+  const durations = new Map(MARKETING_STAGE_NAMES.map(stage => [stage, []]));
+  for (const row of visible) {
+    const rowHistory = history.filter(item => item.opportunityId === row.id).sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
+    let enteredAt = row.createdAt ? new Date(row.createdAt) : null;
+    for (const item of rowHistory) {
+      const changedAt = new Date(item.changedAt);
+      if (item.fromStage && enteredAt && !Number.isNaN(+changedAt) && !Number.isNaN(+enteredAt)) {
+        durations.get(item.fromStage)?.push(Math.max(0, (changedAt - enteredAt) / 86400000));
+      } else if (item.fromStage) durations.get(item.fromStage)?.push(0);
+      enteredAt = changedAt;
+    }
+    if (!row.outcome && row.stage) {
+      const start = row.stageEnteredAt ? new Date(row.stageEnteredAt) : enteredAt;
+      durations.get(row.stage)?.push(start && !Number.isNaN(+start) ? Math.max(0, (now - start) / 86400000) : 0);
+    }
+  }
+  const stageVelocity = MARKETING_STAGE_NAMES.map(stage => {
+    const values = durations.get(stage) || [];
+    return { stage, samples: values.length, averageDays: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0 };
   });
   return {
     activeCount: active.length,
@@ -273,7 +303,15 @@ export function buildMarketingInsights(rows = [], tasks = [], activities = [], {
     lossReasons: countBy(lost, row => row.lossReason, row => row.estimatedValue),
     sources: countBy(rows.filter(row => !row.archivedAt), row => row.source, row => row.estimatedValue),
     products: countBy(rows.filter(row => !row.archivedAt).flatMap(row => (row.productTags || []).map(product => ({ product, estimatedValue: row.estimatedValue }))), row => row.product, row => row.estimatedValue),
-    activityTypes: countBy(activities, row => row.type),
+    activityTypes: countBy(activities, row => row.activityType || row.type),
+    activityOwners: countBy(activities, row => usersById[row.authorId]?.name || row.authorName || "Unassigned"),
+    owners: countBy(visible, row => usersById[row.ownerId]?.name || row.ownerName || "Unassigned", row => row.estimatedValue),
+    organizations: countBy(visible, row => clientsById[row.clientId]?.name || row.organizationName || "Unspecified", row => row.estimatedValue),
+    competitors: countBy(lost.filter(row => row.competitor), row => row.competitor, row => row.estimatedValue),
+    expectedCloseMonths,
+    expectedCloseQuarters,
+    stageVelocity,
+    attention: active.filter(row => ["attention", "stalled"].includes(marketingHealth(row, tasks, { now, stalledAfterDays }))),
   };
 }
 
@@ -303,4 +341,3 @@ export function marketingCsvRows(rows = [], { usersById = {}, clientsById = {} }
     lossDetail: row.lossDetail || "",
   }));
 }
-

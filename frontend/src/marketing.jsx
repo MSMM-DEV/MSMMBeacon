@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert, Badge, Button, Dialog, DialogBody, DialogContent, DialogDescription,
+  Alert, Button, Dialog, DialogBody, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle, EmptyState, Field, Input, InputGroup,
   Tabs, TabsList, TabsTrigger, Textarea,
 } from "@/ui";
@@ -19,6 +19,8 @@ import {
 import { MarketingBoard } from "./marketing-components/MarketingBoard.jsx";
 import { MarketingTransitionDialog } from "./marketing-components/MarketingTransitionDialog.jsx";
 import { MarketingOpportunitySheet } from "./marketing-components/MarketingOpportunitySheet.jsx";
+import { MarketingList } from "./marketing-components/MarketingList.jsx";
+import { MarketingInsights } from "./marketing-components/MarketingInsights.jsx";
 
 const VIEW_LABELS = { pipeline: "Pipeline", list: "Opportunity list", insights: "Insights" };
 const money = value => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value || 0));
@@ -149,6 +151,7 @@ function MarketingToolbar({ filters, setFilters, opportunities, users, clients, 
       <select aria-label="Filter by health" value={filters.health} onChange={event => update("health", event.target.value)}><option value="all">All health</option><option value="on_track">On track</option><option value="attention">Needs attention</option><option value="stalled">Stalled</option></select>
       <select aria-label="Filter by close period" value={filters.closePeriod} onChange={event => update("closePeriod", event.target.value)}><option value="all">Any close date</option><option value="overdue">Overdue</option><option value="month">This month</option><option value="quarter">This quarter</option></select>
       <select aria-label="Filter by outcome" value={filters.outcome} onChange={event => update("outcome", event.target.value)}><option value="all">All outcomes</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select>
+      <select aria-label="Show active or archived" value={filters.archiveMode} onChange={event => update("archiveMode", event.target.value)}><option value="active">Active only</option><option value="archived">Archived only</option><option value="all">Active and archived</option></select>
       <Button variant="primary" onClick={onCreate}><Icon name="plus"/>New opportunity</Button>
     </div>
   );
@@ -178,7 +181,7 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
   const [moveSaving, setMoveSaving] = useState(false);
   const [moveError, setMoveError] = useState("");
   const [mobileStage, setMobileStage] = useState(MARKETING_STAGE_NAMES[0]);
-  const [filters, setFilters] = useState({ search: "", ownerId: "all", clientId: "all", stage: "all", product: "all", health: "all", closePeriod: "all", outcome: "all" });
+  const [filters, setFilters] = useState({ search: "", ownerId: "all", clientId: "all", stage: "all", product: "all", health: "all", closePeriod: "all", outcome: "all", archiveMode: "active" });
 
   const load = useCallback(async () => {
     setStatus("loading"); setError(null);
@@ -188,16 +191,33 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
   useEffect(() => { load(); }, [load, reloadKey]);
   useEffect(() => { if (allowedNames.length && !allowedNames.includes(view)) setView(allowedNames[0]); }, [allowedNames, view]);
   useEffect(() => { if (allowedNames.includes(view)) updateMarketingUrl(view, selectedId); }, [allowedNames, selectedId, view]);
+  useEffect(() => {
+    const applySettings = event => setWorkspace(current => current ? {
+      ...current,
+      stalledAfterDays: event.detail?.stalledAfterDays ?? current.stalledAfterDays,
+    } : current);
+    window.addEventListener("beacon:marketing-settings", applySettings);
+    return () => window.removeEventListener("beacon:marketing-settings", applySettings);
+  }, []);
 
   if (status === "loading") return <div className="marketing-state" role="status" aria-live="polite"><Icon name="spinner" className="animate-spin"/> Loading Marketing…</div>;
   if (status === "error") return <Alert tone="danger" title="Marketing could not load" icon={<Icon name="warn"/>}><p>{error?.message || "Please try again."}</p><Button size="sm" variant="default" onClick={() => setReloadKey(key => key + 1)}><Icon name="refresh"/> Retry</Button></Alert>;
 
   const opportunities = workspace?.opportunities || [];
-  const filtered = filterMarketingOpportunities(opportunities, filters, { tasks: workspace?.tasks || [], stalledAfterDays: workspace?.stalledAfterDays });
-  const insights = buildMarketingInsights(filtered, workspace?.tasks || [], workspace?.activities || [], { stalledAfterDays: workspace?.stalledAfterDays });
+  const allOpportunities = [...opportunities, ...(workspace?.archivedOpportunities || [])];
+  const filtered = filterMarketingOpportunities(allOpportunities, {
+    ...filters,
+    archived: filters.archiveMode === "archived" ? true : filters.archiveMode === "all" ? "all" : false,
+  }, { tasks: workspace?.tasks || [], stalledAfterDays: workspace?.stalledAfterDays });
   const selected = [...opportunities, ...(workspace?.archivedOpportunities || [])].find(row => row.id === selectedId) || null;
   const clientsById = Object.fromEntries(clients.map(client => [client.id, client]));
   const usersById = Object.fromEntries(users.map(user => [user.id, user]));
+  const insights = buildMarketingInsights(filtered, workspace?.tasks || [], workspace?.activities || [], {
+    stalledAfterDays: workspace?.stalledAfterDays,
+    history: workspace?.history || [],
+    usersById,
+    clientsById,
+  });
 
   const confirmMove = async transition => {
     setMoveSaving(true); setMoveError("");
@@ -215,14 +235,14 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
       <div className="marketing-page-bar">{visibleViews.length > 1 && <Tabs value={view} onValueChange={setView}><TabsList variant="underline" className="bx-page-tabs" aria-label="Marketing views">{visibleViews.map(node => <TabsTrigger key={node.key} value={node.view}>{VIEW_LABELS[node.view] || node.label}</TabsTrigger>)}</TabsList></Tabs>}</div>
       <MarketingKpis insights={insights}/>
       <MarketingToolbar filters={filters} setFilters={setFilters} opportunities={opportunities} users={users} clients={clients} onCreate={() => setCreateOpen(true)}/>
-      {!opportunities.length ? (
+      {!allOpportunities.length ? (
         <EmptyState iconName="marketing" title="Build your first Marketing opportunity" hint="Track the relationship from introduction through a signed or lost contract." action={<Button variant="primary" onClick={() => setCreateOpen(true)}>New opportunity</Button>}/>
       ) : view === "pipeline" ? (
         <MarketingBoard opportunities={filtered} tasks={workspace.tasks} clientsById={clientsById} usersById={usersById} selectedMobileStage={mobileStage} onSelectedMobileStage={setMobileStage} onOpen={row => setSelectedId(row.id)} onMoveIntent={(opportunity, toStage) => { setMoveError(""); setMoveIntent({ opportunity, toStage }); }}/>
       ) : view === "list" ? (
-        <div className="marketing-list-preview">{filtered.map(row => <button key={row.id} type="button" onClick={() => setSelectedId(row.id)}><strong>{row.title}</strong><span>{row.stage}</span><Badge>{row.probability}%</Badge></button>)}</div>
+        <MarketingList rows={filtered} tasks={workspace.tasks} usersById={usersById} clientsById={clientsById} stalledAfterDays={workspace.stalledAfterDays} onOpen={row => setSelectedId(row.id)}/>
       ) : (
-        <div className="marketing-insights-preview"><h2>Pipeline by stage</h2>{insights.stages.map(stage => <div key={stage.stage}><span>{stage.stage}</span><strong>{stage.count}</strong><span>{money(stage.weightedValue)}</span></div>)}</div>
+        <MarketingInsights insights={insights} onOpen={row => setSelectedId(row.id)}/>
       )}
       {selected && <MarketingOpportunitySheet
         opportunity={selected}

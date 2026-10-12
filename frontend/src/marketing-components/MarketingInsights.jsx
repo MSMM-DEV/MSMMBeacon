@@ -1,0 +1,19 @@
+import React from "react";
+import { Badge } from "@/ui";
+
+const money = value => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value || 0));
+const percent = value => `${Math.round(Number(value || 0) * 100)}%`;
+
+function BreakdownTable({ title, rows = [], moneyValues = true }) {
+  return <section className="marketing-report-card"><h3>{title}</h3><table><caption className="sr-only">{title} direct values</caption><thead><tr><th scope="col">Category</th><th scope="col">Count</th>{moneyValues && <th scope="col">Value</th>}</tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.label}><th scope="row">{row.label}</th><td>{row.count}</td>{moneyValues && <td>{money(row.value)}</td>}</tr>) : <tr><td colSpan={moneyValues ? 3 : 2}>No data yet.</td></tr>}</tbody></table></section>;
+}
+
+export function MarketingInsights({ insights, onOpen }) {
+  const summary = `${insights.activeCount} active opportunities worth ${money(insights.activeValue)}, weighted to ${money(insights.weightedValue)}. Win rate ${percent(insights.winRate)}.`;
+  return <div className="marketing-insights"><p className="sr-only">{summary}</p><section className="marketing-insight-summary" aria-label="Outcome summary"><article><span>Active value</span><strong>{money(insights.activeValue)}</strong></article><article><span>Weighted forecast</span><strong>{money(insights.weightedValue)}</strong></article><article><span>Win rate</span><strong>{percent(insights.winRate)}</strong></article><article><span>Won / Lost value</span><strong>{money(insights.wonValue)} / {money(insights.lostValue)}</strong></article></section>
+    <section className="marketing-report-card marketing-funnel"><h3>Stage funnel</h3><div role="img" aria-label={insights.stages.map(row => `${row.stage}: ${row.count}`).join("; ")}>{insights.stages.map((row, index) => <div key={row.stage} style={{ "--funnel-width": `${Math.max(18, 100 - index * 10)}%` }}><span>{row.stage}</span><b>{row.count}</b></div>)}</div><table><caption className="sr-only">Stage funnel values</caption><thead><tr><th>Stage</th><th>Count</th><th>Value</th><th>Weighted</th></tr></thead><tbody>{insights.stages.map(row => <tr key={row.stage}><th>{row.stage}</th><td>{row.count}</td><td>{money(row.value)}</td><td>{money(row.weightedValue)}</td></tr>)}</tbody></table></section>
+    <div className="marketing-report-grid"><BreakdownTable title="Expected closes by month" rows={insights.expectedCloseMonths}/><BreakdownTable title="Expected closes by quarter" rows={insights.expectedCloseQuarters}/><section className="marketing-report-card"><h3>Stage aging and average duration</h3><table><thead><tr><th>Stage</th><th>Samples</th><th>Average days</th></tr></thead><tbody>{insights.stageVelocity.map(row => <tr key={row.stage}><th>{row.stage}</th><td>{row.samples}</td><td>{row.averageDays.toFixed(1)}</td></tr>)}</tbody></table></section><section className="marketing-report-card"><h3>Overdue and stalled</h3>{insights.attention.length ? insights.attention.map(row => <button type="button" key={row.id} onClick={() => onOpen?.(row)}><span>{row.title}</span><Badge tone="warning">Review</Badge></button>) : <p>Nothing needs attention.</p>}</section><BreakdownTable title="Activity by type" rows={insights.activityTypes} moneyValues={false}/><BreakdownTable title="Activity by owner" rows={insights.activityOwners} moneyValues={false}/><BreakdownTable title="Lost reasons" rows={insights.lossReasons}/><BreakdownTable title="Competitors" rows={insights.competitors}/><BreakdownTable title="Sources" rows={insights.sources}/><BreakdownTable title="Products" rows={insights.products}/><BreakdownTable title="Owners" rows={insights.owners}/><BreakdownTable title="Organizations" rows={insights.organizations}/></div>
+  </div>;
+}
+
+export default MarketingInsights;

@@ -4,7 +4,8 @@ import { Icon } from "./icons.jsx";
 import { AppearanceSettings } from "./tweaks.jsx";
 import { AlertsAdmin } from "./admin-alerts.jsx";
 import { listAllUsersFull, adminAction, getUsers, updateMonthlyBenchmark,
-         updateInvoiceActualCutover, invoiceRunReminders, actualThruMonth, MONTHS, fmtMoney } from "./data.js";
+         updateInvoiceActualCutover, updateMarketingSettings, invoiceRunReminders,
+         actualThruMonth, MONTHS, fmtMoney } from "./data.js";
 import {
   Alert,
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -783,6 +784,7 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
   return (
     <div className="adm-stack">
       <CutoverCard appSettings={appSettings} onSaved={onSaved} onError={onError} />
+      <MarketingStalledCard appSettings={appSettings} onSaved={onSaved} onError={onError} />
 
       <form className="adm-card" onSubmit={onSubmit}>
         <div className="adm-card-head">
@@ -852,6 +854,65 @@ const TargetsPanel = ({ appSettings, onSaved, onError }) => {
       </form>
       <BillingRemindersCard onSaved={onSaved} onError={onError} />
     </div>
+  );
+};
+
+const MarketingStalledCard = ({ appSettings, onSaved, onError }) => {
+  const saved = appSettings?.marketingStalledAfterDays ?? 14;
+  const [draft, setDraft] = useState(String(saved));
+  const [pending, setPending] = useState(false);
+  useEffect(() => { setDraft(String(saved)); }, [saved]);
+
+  const days = Math.round(Number(draft));
+  const valid = Number.isFinite(days) && days >= 1 && days <= 365;
+  const dirty = valid && days !== saved;
+  const onSubmit = async event => {
+    event.preventDefault();
+    if (!dirty || pending) return;
+    setPending(true);
+    try {
+      const next = await updateMarketingSettings({ stalledAfterDays: days });
+      onSaved?.(next, "Marketing threshold updated");
+    } catch (error) {
+      onError?.(String(error.message || error));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <form className="adm-card" onSubmit={onSubmit}>
+      <div className="adm-card-head">
+        <p className="adm-card-eyebrow">Marketing · Pipeline health</p>
+        <h4 className="adm-card-title">Stalled opportunity threshold</h4>
+        <p className="adm-card-desc">
+          Flag an open opportunity as stalled after this many days without meaningful activity.
+          Marketing uses the flag in the board, list, filters, and insights.
+        </p>
+      </div>
+      <div className="adm-card-body">
+        <Field label="Days without meaningful activity" htmlFor="adm-marketing-stalled" className="adm-field-grow">
+          <InputGroup
+            id="adm-marketing-stalled"
+            type="number"
+            min="1"
+            max="365"
+            step="1"
+            inputMode="numeric"
+            trailing={<span className="adm-adorn adm-adorn-suffix">days</span>}
+            value={draft}
+            aria-invalid={!valid || undefined}
+            onChange={event => setDraft(event.target.value)}
+          />
+        </Field>
+        <div className="adm-card-actions">
+          <Button type="submit" variant="primary" loading={pending} disabled={!dirty || pending}>
+            {pending ? "Saving…" : "Save threshold"}
+          </Button>
+        </div>
+      </div>
+      {!valid && <Alert tone="danger" className="adm-card-alert">Enter a whole number from 1 to 365.</Alert>}
+    </form>
   );
 };
 
