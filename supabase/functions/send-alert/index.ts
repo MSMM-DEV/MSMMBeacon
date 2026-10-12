@@ -79,6 +79,7 @@ const SUBJECT_TABLE: Record<string, string> = {
   invoice:     "anticipated_invoice",
   event:       "events",
   lead:        "leads",
+  marketing:   "marketing_opportunities",
   timesheet:   "users",         // surrogate — body comes from alert.message
 };
 
@@ -201,6 +202,16 @@ function render(subjectTable: string, row: any, alert: Alert): Rendered {
         row.date_time ? `When: ${fmtDate(row.date_time)}` : null,
         row.status ? `Status: ${row.status}` : null,
         row.notes ? `Notes: ${row.notes}` : null,
+      ].filter(Boolean) as string[],
+    };
+    case "marketing": return {
+      subject:      `Beacon · Marketing action: "${row.title}"`,
+      deepLinkTab:  "marketing",
+      summaryLines: [
+        row.stage ? `Stage: ${row.stage}` : null,
+        row.probability != null ? `Probability: ${Number(row.probability)}%` : null,
+        row.expected_close_date ? `Expected close: ${fmtDate(row.expected_close_date)}` : null,
+        row.next_action ? `Next action: ${row.next_action}` : null,
       ].filter(Boolean) as string[],
     };
     case "timesheet": {
@@ -441,7 +452,9 @@ Deno.serve(async (req) => {
       // we omit the rowId (the date is the relevant focus, not the user id).
       const deepLink  = alert.subject_table === "timesheet"
         ? `${APP_URL}?tab=${rendered.deepLinkTab}`
-        : `${APP_URL}?tab=${rendered.deepLinkTab}&rowId=${encodeURIComponent(alert.subject_row_id)}`;
+        : alert.subject_table === "marketing"
+          ? `${APP_URL}?tab=marketing&opportunity=${encodeURIComponent(alert.subject_row_id)}`
+          : `${APP_URL}?tab=${rendered.deepLinkTab}&rowId=${encodeURIComponent(alert.subject_row_id)}`;
       const anchorLn  = anchorPhrase(alert, row);
 
       for (const rec of recipients) {

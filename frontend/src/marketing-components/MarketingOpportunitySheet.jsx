@@ -20,6 +20,7 @@ import { MARKETING_CONTACT_ROLES, MarketingConflictError } from "../marketing-mo
 import { attemptMarketingSectionSave, changedMarketingFields } from "./marketing-sheet-model.js";
 import { MarketingActivityPanel } from "./MarketingActivityPanel.jsx";
 import { MarketingTaskPanel } from "./MarketingTaskPanel.jsx";
+import { MarketingDocumentPanel } from "./MarketingDocumentPanel.jsx";
 
 const SECTIONS = [
   { key: "overview", label: "Overview" },
@@ -120,6 +121,7 @@ export function MarketingOpportunitySheet({
   const [localContacts, setLocalContacts] = useState(contacts);
   const [localActivities, setLocalActivities] = useState(activities);
   const [localTasks, setLocalTasks] = useState(tasks);
+  const [localDocuments, setLocalDocuments] = useState(documents);
   const errorRef = useRef(null);
 
   useEffect(() => {
@@ -132,6 +134,7 @@ export function MarketingOpportunitySheet({
   useEffect(() => { setLocalContacts(contacts); }, [contacts]);
   useEffect(() => { setLocalActivities(activities); }, [activities]);
   useEffect(() => { setLocalTasks(tasks); }, [tasks]);
+  useEffect(() => { setLocalDocuments(documents); }, [documents]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
   const baselineOverview = useMemo(() => valuesFor(current, OVERVIEW_FIELDS), [current]);
@@ -260,7 +263,7 @@ export function MarketingOpportunitySheet({
 
             {section === "activity" && <MarketingActivityPanel opportunityId={current.id} activities={localActivities} users={users} contacts={localContacts} onCreated={activityCreated}/>}
             {section === "tasks" && <MarketingTaskPanel opportunityId={current.id} tasks={localTasks} users={users} onChanged={taskChanged}/>}
-            {section === "documents" && <section className="marketing-detail-list"><h3>Documents</h3>{documents.length ? documents.map(item => <article key={item.id}><Icon name="file"/><strong>{item.fileName}</strong><span>{item.documentType}</span></article>) : <p>No documents uploaded yet.</p>}</section>}
+            {section === "documents" && <MarketingDocumentPanel opportunityId={current.id} documents={localDocuments} onChanged={setLocalDocuments}/>}
             {section === "history" && <section className="marketing-detail-list"><h3>History</h3>{history.length ? history.map(item => <article key={item.id}><strong>{item.fromStage || "Created"} → {item.toStage}</strong><span>{userName(item.changedBy)} · {displayDate(item.changedAt)}</span>{item.transitionNote && <p>{item.transitionNote}</p>}</article>) : <p>No stage changes yet.</p>}</section>}
           </SheetBody>
           <SheetFooter>

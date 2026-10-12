@@ -2030,36 +2030,70 @@ export async function reopenLeaveRequest(id) {
   return adaptLeaveRequest(data);
 }
 
-// One-shot alert (alerts + recipients + a pending fire) reusing the existing
-// alerts→send-alert→Resend pipeline. subject_table='timesheet' renders the
-// message verbatim, so no Edge Function change is needed. Best-effort: callers
-// wrap this in try/catch so a notify failure never blocks the core action.
-export async function createOneShotAlert({ subjectTable = "timesheet", subjectRowId, message, recipientUserIds }) {
+export async function createScheduledAlert({
+  subjectTable,
+  subjectRowId,
+  firstFireAt,
+  recurrence = "one_time",
+  recurrenceRule = null,
+  message = null,
+  recipientUserIds,
+  anchorField = null,
+  anchorOffsetMinutes = null,
+  timezone = "America/Chicago",
+}) {
   const ids = [...new Set((recipientUserIds || []).filter(Boolean))];
-  if (!ids.length || !subjectRowId) return null;
+  if (!ids.length) throw new Error("At least one alert recipient is required");
+  if (!subjectRowId || !subjectTable) throw new Error("An alert subject is required");
+  if (!firstFireAt || Number.isNaN(new Date(firstFireAt).getTime())) throw new Error("A valid first alert time is required");
   const me = getCurrentBeaconUser();
-  const firstFireAt = new Date().toISOString();
   const { data: row, error: aErr } = await supabase
     .from("alerts")
     .insert({
       subject_table: subjectTable,
       subject_row_id: subjectRowId,
       first_fire_at: firstFireAt,
-      recurrence: "one_time",
-      message: message || null,
-      timezone: "America/Chicago",
+      recurrence,
+      recurrence_rule: recurrenceRule,
+      message,
+      anchor_field: anchorField,
+      anchor_offset_minutes: anchorOffsetMinutes,
+      timezone,
       created_by: me?.id || null,
       is_active: true,
     })
     .select("id").single();
-  if (aErr) throw aErr;
+  if (aErr) throw new Error(`create scheduled alert: ${aErr.message}`);
+  const deactivate = async () => {
+    const { error } = await supabase.from("alerts").update({ is_active: false }).eq("id", row.id);
+    return error;
+  };
   const { error: rErr } = await supabase.from("alert_recipients")
     .insert(ids.map(uid => ({ alert_id: row.id, user_id: uid })));
-  if (rErr) throw rErr;
+  if (rErr) {
+    const cleanup = await deactivate();
+    throw new Error(`save alert recipients: ${rErr.message}${cleanup ? `; alert deactivation also failed: ${cleanup.message}` : ""}`);
+  }
   const { error: fErr } = await supabase.from("alert_fires")
     .insert({ alert_id: row.id, scheduled_at: firstFireAt, status: "pending" });
-  if (fErr) throw fErr;
+  if (fErr) {
+    const cleanup = await deactivate();
+    throw new Error(`save first pending fire: ${fErr.message}${cleanup ? `; alert deactivation also failed: ${cleanup.message}` : ""}`);
+  }
   return row.id;
+}
+
+// One-shot alert compatibility wrapper used by leave and timesheet flows.
+export async function createOneShotAlert({ subjectTable = "timesheet", subjectRowId, message, recipientUserIds }) {
+  if (!(recipientUserIds || []).filter(Boolean).length || !subjectRowId) return null;
+  return createScheduledAlert({
+    subjectTable,
+    subjectRowId,
+    firstFireAt: new Date().toISOString(),
+    recurrence: "one_time",
+    message,
+    recipientUserIds,
+  });
 }
 
 // ----------------------------------------------------------------------
@@ -5617,6 +5651,7 @@ export async function updateMarketingTask(id, patch = {}) {
   if ("dueAt" in patch) dbPatch.due_at = patch.dueAt || null;
   if ("priority" in patch) dbPatch.priority = patch.priority || "normal";
   if ("notes" in patch) dbPatch.notes = String(patch.notes || "").trim() || null;
+  if ("alertId" in patch) dbPatch.alert_id = patch.alertId || null;
   if ("status" in patch) {
     dbPatch.status = patch.status;
     dbPatch.completed_at = patch.status === "completed" ? new Date().toISOString() : null;
@@ -5649,6 +5684,52 @@ export async function loadMarketingOpportunityFresh(id) {
     contacts: contacts.data || [], activities: activities.data || [], tasks: tasks.data || [],
     documents: documents.data || [], history: history.data || [],
   });
+}
+
+const marketingFileName = name => String(name || "file")
+  .replace(/[/\\?%*:|"<>]+/g, "-")
+  .replace(/\s+/g, " ")
+  .trim() || "file";
+
+export async function uploadMarketingDocument({ opportunityId, documentType = "Supporting", file }) {
+  if (!opportunityId || !file) throw new Error("Choose a file to upload");
+  const objectId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const path = `${opportunityId}/${objectId}-${marketingFileName(file.name)}`;
+  const uploaded = await supabase.storage.from("marketing-documents").upload(path, file, {
+    upsert: false, cacheControl: "3600",
+  });
+  if (uploaded.error) throw new Error(`Marketing document upload: ${uploaded.error.message}`);
+  const { data, error } = await supabase.from("marketing_documents").insert({
+    opportunity_id: opportunityId,
+    document_type: documentType,
+    file_path: path,
+    file_name: file.name || "file",
+    mime_type: file.type || null,
+    size_bytes: file.size ?? null,
+    uploaded_by: getCurrentBeaconUser()?.id || null,
+  }).select("*").single();
+  if (error) {
+    const cleanup = await supabase.storage.from("marketing-documents").remove([path]);
+    throw new Error(`Marketing document metadata: ${error.message}${cleanup.error ? `; uploaded object cleanup also failed: ${cleanup.error.message}` : ""}`);
+  }
+  return adaptMarketingDocument(data);
+}
+
+export async function getMarketingDocumentSignedUrl(filePath) {
+  const { data, error } = await supabase.storage.from("marketing-documents").createSignedUrl(filePath, 60);
+  if (error) throw new Error(`Marketing document link: ${error.message}`);
+  return data?.signedUrl;
+}
+
+export async function removeMarketingDocument({ id, filePath }) {
+  const removed = await supabase.storage.from("marketing-documents").remove([filePath]);
+  if (removed.error) throw new Error(`Marketing document remove: ${removed.error.message}`);
+  const { error } = await supabase.from("marketing_documents").delete().eq("id", id);
+  if (error) {
+    const cleanupError = new Error(`File removed, but metadata cleanup failed: ${error.message}`);
+    cleanupError.code = "MARKETING_DOCUMENT_CLEANUP";
+    throw cleanupError;
+  }
 }
 
 export async function updateMarketingSettings({ stalledAfterDays }) {
