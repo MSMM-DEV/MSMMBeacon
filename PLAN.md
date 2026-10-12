@@ -66,6 +66,30 @@ This table also supports the **row-level alert action** described above.
 
 ---
 
+**Dedicated Marketing module** (standalone commercial pipeline; it does not hand contracts into Projects or Invoice)
+
+Marketing is its own top-level Beacon workflow with three access-controlled views: **Pipeline**, **Opportunity list**, and **Insights**. The Pipeline is a seven-lane Kanban board. These stage names are product language and must remain exact and in this order:
+
+1. Intro to Target or prospect
+2. Initial meeting to showcase products and qualify prospect
+3. IQM - Initial Qualified Meeting
+4. BANT - Budget Authority Need Time
+5. Verbal Approval to Proceed
+6. Legal and Contract Negotiation
+7. Contract Signed Won or Lost
+
+Each opportunity records its organization, owner, estimated and weighted value, expected close, probability, products, source, introducer, next action, and detailed qualification evidence. IQM captures the client problem, desired outcome, fit, clarifying questions, answers, and draft SOW status. BANT captures Budget, Authority, Need, Time, and the decision process. Proposal, verbal approval, legal/MSA/SOW, contract, competitor, and lessons-learned fields keep the full commercial story in one record.
+
+Stage changes are confirmed before persistence, keep an immutable history entry, use optimistic version checks, and recommend a probability within the destination stage's band without silently overwriting an acknowledged custom value. The terminal lane requires either **Won** (signature date and final contract value) or **Lost** (one of Price / Did not meet needs / Timing was not right / Competitor / Internal build / Other, plus optional detail). Won and Lost opportunities remain in Marketing; there is intentionally no automatic downstream handoff.
+
+Stakeholders link to Directory contacts with the relationship roles Decision-maker, Economic buyer, Champion, Influencer, Legal, Procurement, Technical evaluator, or Other. The detail workspace also includes activities, assigned tasks with complete/reopen actions, optional email reminders, private proposal/SOW/MSA/contract files, and stage history. Archive is recoverable; permanent deletion is not part of this module.
+
+The list view is sortable and exports the current filtered view to CSV. Insights show active and weighted pipeline, wins/losses, close timing, funnel value, stage velocity, overdue/stalled opportunities, activity, loss reasons, competitors, sources, products, owners, and organizations. Admins configure how many days without meaningful activity marks an opportunity stalled.
+
+Persistence is provided by `supabase/migrations_v2/20261012120000_marketing_pipeline.sql`: `marketing_opportunities`, `marketing_opportunity_contacts`, `marketing_activities`, `marketing_activity_users`, `marketing_activity_contacts`, `marketing_tasks`, `marketing_documents`, and `marketing_stage_history`, plus the private `marketing-documents` Storage bucket, `app_settings.marketing_stalled_after_days`, and the `marketing` alert subject. Activation is manual: apply the migration in Supabase Studio, confirm `beacon_v2` remains exposed, redeploy `send-alert`, deploy the frontend, grant the Marketing workflow/views to any custom-access users who need them, then run one production smoke opportunity through the full flow.
+
+---
+
 **Supporting master tables**
 
 **Clients table** — organizations we work for.
