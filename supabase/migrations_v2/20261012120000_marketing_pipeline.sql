@@ -256,7 +256,11 @@ create trigger trg_marketing_opportunity_before_update
   for each row execute function beacon_v2.fn_marketing_opportunity_before_update();
 
 create or replace function beacon_v2.fn_marketing_history()
-returns trigger language plpgsql as $$
+returns trigger
+language plpgsql
+security definer
+set search_path = beacon_v2, pg_temp
+as $$
 declare
   v_changed_by uuid;
 begin
@@ -279,6 +283,8 @@ begin
   return new;
 end;
 $$;
+
+revoke all on function beacon_v2.fn_marketing_history() from public, anon, authenticated;
 
 drop trigger if exists trg_marketing_history on beacon_v2.marketing_opportunities;
 create trigger trg_marketing_history
@@ -443,7 +449,9 @@ create policy marketing_tasks_auth_all on beacon_v2.marketing_tasks for all to a
 drop policy if exists marketing_documents_auth_all on beacon_v2.marketing_documents;
 create policy marketing_documents_auth_all on beacon_v2.marketing_documents for all to authenticated using (true) with check (true);
 drop policy if exists marketing_history_auth_all on beacon_v2.marketing_stage_history;
-create policy marketing_history_auth_all on beacon_v2.marketing_stage_history for all to authenticated using (true) with check (true);
+drop policy if exists marketing_history_auth_select on beacon_v2.marketing_stage_history;
+create policy marketing_history_auth_select on beacon_v2.marketing_stage_history
+  for select to authenticated using (true);
 
 grant select, insert, update, delete on beacon_v2.marketing_opportunities to authenticated;
 grant select, insert, update, delete on beacon_v2.marketing_opportunity_contacts to authenticated;
@@ -452,7 +460,8 @@ grant select, insert, update, delete on beacon_v2.marketing_activity_users to au
 grant select, insert, update, delete on beacon_v2.marketing_activity_contacts to authenticated;
 grant select, insert, update, delete on beacon_v2.marketing_tasks to authenticated;
 grant select, insert, update, delete on beacon_v2.marketing_documents to authenticated;
-grant select, insert, update, delete on beacon_v2.marketing_stage_history to authenticated;
+revoke insert, update, delete on beacon_v2.marketing_stage_history from authenticated;
+grant select on beacon_v2.marketing_stage_history to authenticated;
 
 --------------------------------------------------------------------------------
 -- 8. Private Marketing document bucket

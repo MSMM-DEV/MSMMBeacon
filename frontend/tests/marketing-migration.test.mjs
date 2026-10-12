@@ -37,3 +37,12 @@ test("Marketing migration enforces concurrency, terminal outcomes, RLS and priva
   assert.match(sql, /to authenticated using \(true\) with check \(true\)/i);
   assert.match(sql, /values \('marketing-documents', 'marketing-documents', false\)/i);
 });
+
+test("stage history is client-read-only and trigger-authored", async () => {
+  const sql = await readFile(url, "utf8");
+  assert.match(sql, /fn_marketing_history\(\)[\s\S]*?security definer[\s\S]*?set search_path = beacon_v2, pg_temp/i);
+  assert.match(sql, /revoke all on function beacon_v2\.fn_marketing_history\(\) from public, anon, authenticated/i);
+  assert.match(sql, /create policy marketing_history_auth_select[\s\S]*?for select to authenticated using \(true\)/i);
+  assert.match(sql, /grant select on beacon_v2\.marketing_stage_history to authenticated/i);
+  assert.doesNotMatch(sql, /grant select, insert, update, delete on beacon_v2\.marketing_stage_history to authenticated/i);
+});
