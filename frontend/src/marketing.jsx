@@ -18,6 +18,7 @@ import {
 } from "./marketing-rules.js";
 import { MarketingBoard } from "./marketing-components/MarketingBoard.jsx";
 import { MarketingTransitionDialog } from "./marketing-components/MarketingTransitionDialog.jsx";
+import { MarketingOpportunitySheet } from "./marketing-components/MarketingOpportunitySheet.jsx";
 
 const VIEW_LABELS = { pipeline: "Pipeline", list: "Opportunity list", insights: "Insights" };
 const money = value => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value || 0));
@@ -223,7 +224,19 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
       ) : (
         <div className="marketing-insights-preview"><h2>Pipeline by stage</h2>{insights.stages.map(stage => <div key={stage.stage}><span>{stage.stage}</span><strong>{stage.count}</strong><span>{money(stage.weightedValue)}</span></div>)}</div>
       )}
-      {selected && <Alert tone="info" title={selected.title}>Selected opportunity · {selected.stage}</Alert>}
+      {selected && <MarketingOpportunitySheet
+        opportunity={selected}
+        contacts={selected.contacts || workspace.contacts.filter(item => item.opportunityId === selected.id)}
+        activities={selected.activities || workspace.activities.filter(item => item.opportunityId === selected.id)}
+        tasks={selected.tasks || workspace.tasks.filter(item => item.opportunityId === selected.id)}
+        documents={selected.documents || workspace.documents.filter(item => item.opportunityId === selected.id)}
+        history={selected.history || workspace.history.filter(item => item.opportunityId === selected.id)}
+        lookups={{ users, clients, usersById, clientsById }}
+        onClose={() => setSelectedId(null)}
+        onSaved={row => setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row) }))}
+        onArchived={row => { setWorkspace(current => ({ ...current, opportunities: current.opportunities.filter(item => item.id !== row.id), archivedOpportunities: applyAuthoritativeOpportunity(current.archivedOpportunities, row) })); setSelectedId(null); }}
+        onRestored={row => setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row), archivedOpportunities: current.archivedOpportunities.filter(item => item.id !== row.id) }))}
+      />}
       <MarketingCreateDialog open={createOpen} clients={clients} users={users} currentUser={currentUser} onCancel={() => setCreateOpen(false)} onCreated={row => { setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row) })); setCreateOpen(false); setSelectedId(row.id); }}/>
       {moveIntent && <MarketingTransitionDialog opportunity={moveIntent.opportunity} toStage={moveIntent.toStage} saving={moveSaving} error={moveError} onCancel={() => { if (!moveSaving) setMoveIntent(null); }} onConfirm={confirmMove}/>}
     </section>

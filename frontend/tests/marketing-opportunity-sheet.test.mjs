@@ -1,0 +1,48 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const path = new URL("../src/marketing-components/MarketingOpportunitySheet.jsx", import.meta.url);
+
+test("opportunity sheet exposes the complete six-section workspace", async () => {
+  const source = await readFile(path, "utf8");
+  for (const section of ["Overview", "Qualification", "Activity", "Tasks", "Documents", "History"]) {
+    assert.match(source, new RegExp(`label:\\s*"${section}"`), section);
+  }
+  for (const label of [
+    "Opportunity name", "Organization", "Owner", "Source", "Introducer", "Summary",
+    "Next action", "Expected close date", "Estimated value", "Products", "Probability",
+    "Problem statement", "Desired outcome", "Solution fit", "Clarifying questions",
+    "Budget", "Authority", "Need", "Time", "Proposal", "Verbal approval", "Legal and contract",
+  ]) assert.match(source, new RegExp(label, "i"), label);
+  assert.match(source, /changedBy/);
+  assert.match(source, /changedAt/);
+});
+
+test("dirty dismissal confirms and conflict recovery never overwrites automatically", async () => {
+  const source = await readFile(path, "utf8");
+  assert.match(source, /requestClose[\s\S]*setConfirmClose\(true\)/);
+  assert.match(source, /This opportunity changed after you opened it\./);
+  assert.match(source, /Review latest/);
+  assert.match(source, /Keep my draft/);
+  assert.doesNotMatch(source, /forceOverwrite|overwrite:\s*true/);
+
+  const { attemptMarketingSectionSave } = await import("../src/marketing-components/marketing-sheet-model.js");
+  const calls = [];
+  const api = async (_id, _draft, version) => {
+    calls.push(version);
+    if (version === 4) throw Object.assign(new Error("conflict"), { code: "MARKETING_CONFLICT", latestVersion: 5 });
+    return { id: "o1", version: 6 };
+  };
+  await assert.rejects(() => attemptMarketingSectionSave({ api, id: "o1", draft: { summary: "Mine" }, version: 4 }));
+  assert.deepEqual(calls, [4]);
+  await attemptMarketingSectionSave({ api, id: "o1", draft: { summary: "Mine" }, version: 5 });
+  assert.deepEqual(calls, [4, 5]);
+});
+
+test("archive is recoverable and permanent delete is absent", async () => {
+  const source = await readFile(path, "utf8");
+  assert.match(source, /Archive opportunity/);
+  assert.match(source, /Restore opportunity/);
+  assert.doesNotMatch(source, /deleteMarketingOpportunity|Permanently delete/);
+});
