@@ -40,7 +40,7 @@ do $$ begin create type beacon_v2.marketing_document_type_enum as enum ('Proposa
 create table if not exists beacon_v2.marketing_opportunities (
   id                          uuid primary key default gen_random_uuid(),
   title                       text not null check (btrim(title) <> ''),
-  client_id                   uuid references beacon_v2.clients(id) on delete set null,
+  client_id                   uuid references beacon_v2.companies(id) on delete set null,
   owner_id                    uuid references beacon_v2.users(id) on delete set null,
   created_by                  uuid references beacon_v2.users(id) on delete set null,
   updated_by                  uuid references beacon_v2.users(id) on delete set null,
@@ -475,4 +475,3 @@ create policy marketing_documents_obj_delete on storage.objects
   for delete to authenticated using (bucket_id = 'marketing-documents');
 
 notify pgrst, 'reload schema';
-

@@ -5355,7 +5355,7 @@ export function mergeRefSummary(entity, { projectsByType, invoice, hotLeads = []
 // ----------------------------------------------------------------------
 // Marketing — dedicated SaaS / AI opportunity pipeline.
 // ----------------------------------------------------------------------
-const MARKETING_OPPORTUNITY_SELECT = "*, client:clients!marketing_opportunities_client_id_fkey(*), owner:users!marketing_opportunities_owner_id_fkey(*)";
+const MARKETING_OPPORTUNITY_SELECT = "*, client:companies!marketing_opportunities_client_id_fkey(*), owner:users!marketing_opportunities_owner_id_fkey(*)";
 
 const groupMarketingRows = rows => (rows || []).reduce((map, row) => {
   const key = row.opportunity_id;
@@ -5424,27 +5424,34 @@ export async function loadMarketingWorkspace() {
 
 export async function createMarketingOpportunity(input = {}) {
   let clientId = input.clientId || null;
+  let createdContactId = null;
   if (!clientId && input.newClient?.name) {
-    const clean = String(input.newClient.name).trim();
-    const { data: client, error: clientError } = await supabase.from("clients").insert({
-      name: clean,
-      district: String(input.newClient.district || "").trim() || null,
-      org_type: input.newClient.orgType || null,
-      contact_person: String(input.newClient.contactPerson || "").trim() || null,
-      email: String(input.newClient.email || "").trim() || null,
-      phone: String(input.newClient.phone || "").trim() || null,
-      address: String(input.newClient.address || "").trim() || null,
-      notes: String(input.newClient.notes || "").trim() || null,
-    }).select("id").single();
-    if (clientError?.code === "23505") throw new Error(`A client named "${clean}" already exists in the Directory`);
-    if (clientError) throw new Error(`create Directory client: ${clientError.message}`);
+    const client = await addCompany({
+      name: input.newClient.name,
+      contact: input.newClient.contactPerson,
+      email: input.newClient.email,
+      phone: input.newClient.phone,
+      address: input.newClient.address,
+      notes: input.newClient.notes,
+      district: input.newClient.district,
+      orgType: input.newClient.orgType,
+      website: input.newClient.website,
+    });
     clientId = client.id;
+    createdContactId = client.contacts?.[0]?.id || null;
   }
   const me = getCurrentBeaconUser();
   const payload = marketingOpportunityInsert({ ...input, clientId, createdBy: me?.id, updatedBy: me?.id });
   const { data, error } = await supabase.from("marketing_opportunities")
     .insert(payload).select(MARKETING_OPPORTUNITY_SELECT).single();
   throwMarketingError(error, "create Marketing opportunity");
+  if (createdContactId) {
+    const { error: contactError } = await supabase.from("marketing_opportunity_contacts").insert({
+      opportunity_id: data.id, contact_id: createdContactId, role: "Champion", is_primary: true,
+    });
+    throwMarketingError(contactError, "connect new Directory contact");
+    return loadMarketingOpportunityFresh(data.id);
+  }
   return adaptMarketingOpportunity(data);
 }
 
