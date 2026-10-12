@@ -98,6 +98,14 @@ export async function extractBusinessCards(images) {
   return data;
 }
 
+export async function applyBusinessCardImport(payload) {
+  const { data, error } = await supabase.rpc("apply_business_card_import", {
+    p_payload: payload,
+  });
+  if (error) throw new Error(error.message || "Business-card import failed");
+  return data;
+}
+
 export async function saveProjectEgnyteFolder(projectId, egnyteFolderPath) {
   return authedApiFetch("/api/projects/egnyte-folder", {
     method: "POST",
