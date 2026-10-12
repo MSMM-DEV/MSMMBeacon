@@ -43,6 +43,41 @@ test("filtered CSV retains exact stages and excludes hidden rows", () => {
   assert.doesNotMatch(csv, /Archived|Lost one|December SaaS/);
 });
 
+test("filtered insights scope supporting records and ignore same-stage history for velocity", () => {
+  const focused = [{
+    id: "focus", title: "Focused", stage: "BANT - Budget Authority Need Time",
+    createdAt: "2027-01-01T18:00:00Z", stageEnteredAt: "2027-01-11T18:00:00Z",
+    estimatedValue: 100, probability: 45,
+  }];
+  const insights = buildMarketingInsights(
+    focused,
+    [
+      { opportunityId: "focus", status: "open", dueAt: "2027-01-14T18:00:00Z" },
+      { opportunityId: "outside", status: "open", dueAt: "2027-01-01T18:00:00Z" },
+    ],
+    [
+      { opportunityId: "focus", activityType: "Meeting", authorId: "u1" },
+      { opportunityId: "outside", activityType: "Email", authorId: "u2" },
+    ],
+    {
+      now,
+      history: [
+        { opportunityId: "focus", fromStage: "Intro to Target or prospect", toStage: "Intro to Target or prospect", changedAt: "2027-01-05T18:00:00Z" },
+        { opportunityId: "focus", fromStage: "Intro to Target or prospect", toStage: "BANT - Budget Authority Need Time", changedAt: "2027-01-11T18:00:00Z" },
+        { opportunityId: "outside", fromStage: "Intro to Target or prospect", toStage: "BANT - Budget Authority Need Time", changedAt: "2027-01-03T18:00:00Z" },
+      ],
+      usersById: { u1: { name: "Dan" }, u2: { name: "Outside" } },
+    },
+  );
+  assert.equal(insights.overdueTaskCount, 1);
+  assert.deepEqual(insights.activityTypes, [{ label: "Meeting", count: 1, value: 0 }]);
+  assert.equal(insights.activityOwners.some(item => item.label === "Outside"), false);
+  assert.deepEqual(
+    insights.stageVelocity.find(item => item.stage === "Intro to Target or prospect"),
+    { stage: "Intro to Target or prospect", samples: 1, averageDays: 10 },
+  );
+});
+
 test("CSV serialization handles quotes, commas, newlines, zero, null and BOM", () => {
   const csv = serializeCSV([{ label: "Name", key: "name" }, { label: "Value", key: "value" }, { label: "Note", key: "note" }], [
     { name: 'A, "quoted"', value: 0, note: "line 1\nline 2" },

@@ -47,3 +47,8 @@ test("Marketing view state is persisted and URL state responds to browser naviga
   assert.match(page, /popstate/);
   assert.match(page, /replaceState/);
 });
+
+test("an incompatible filter set has a named recovery action", () => {
+  assert.match(page, /No opportunities match these filters/);
+  assert.match(page, /Clear filters/);
+});

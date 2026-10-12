@@ -100,6 +100,8 @@ export function MarketingBoard({
   stalledAfterDays = 14,
   selectedMobileStage = null,
   onSelectedMobileStage,
+  terminalOutcome = "all",
+  onTerminalOutcomeChange,
   onOpen,
   onMoveIntent,
 }) {
@@ -117,7 +119,8 @@ export function MarketingBoard({
       </label>
       <div className="marketing-board" aria-label="Marketing opportunity pipeline">
         {MARKETING_STAGES.map((stage, index) => {
-          const rows = active.filter(row => row.stage === stage.name);
+          const terminal = index === MARKETING_STAGES.length - 1;
+          const rows = active.filter(row => row.stage === stage.name && (!terminal || terminalOutcome === "all" || row.outcome === terminalOutcome));
           const headingId = `marketing-stage-${index}`;
           return (
             <section
@@ -137,6 +140,7 @@ export function MarketingBoard({
               <header className="marketing-lane-head">
                 <div><h3 id={headingId}>{stage.name}</h3><span>{stage.min === stage.max ? `${stage.min}%` : `${stage.min}–${stage.max}%`}</span></div>
                 <Badge tone="neutral">{rows.length}</Badge>
+                {terminal && <select aria-label="Filter final stage by outcome" value={terminalOutcome} onChange={event => onTerminalOutcomeChange?.(event.target.value)}><option value="all">Won &amp; lost</option><option value="won">Won</option><option value="lost">Lost</option></select>}
               </header>
               <div className="marketing-lane-cards">
                 {rows.map(row => (

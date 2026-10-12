@@ -33,6 +33,9 @@ test("Marketing reminder UI limits recurrence to supported modes and retains Ret
   assert.doesNotMatch(panel, /value="custom"/);
   assert.match(panel, /Task saved; reminder was not scheduled/);
   assert.match(panel, /Retry reminder/);
+  assert.match(panel, /setAlertActive\(alertId, false\)/);
+  const data = await read("../src/data.js");
+  assert.match(data, /updateMarketingTask[\s\S]*setAlertActive\(linkedAlertId, patch\.status !== "completed"\)/);
 });
 
 test("send-alert renders Marketing details and opportunity deep links", async () => {

@@ -64,6 +64,21 @@ test("move menu sends the original opportunity and exact destination stage", () 
   assert.equal(calls[0][1], "IQM - Initial Qualified Meeting");
 });
 
+test("terminal lane can filter Won and Lost locally", () => {
+  const terminal = rules.MARKETING_STAGE_NAMES.at(-1);
+  const tree = boardModule.exports.MarketingBoard({
+    opportunities: [
+      { id: "w", title: "Won deal", stage: terminal, outcome: "won", probability: 100 },
+      { id: "l", title: "Lost deal", stage: terminal, outcome: "lost", probability: 0 },
+    ],
+    tasks: [],
+    terminalOutcome: "won",
+  });
+  const cardRows = nodes(tree).filter(node => typeof node.type === "function" && node.props.opportunity).map(node => node.props.opportunity.title);
+  assert.deepEqual(cardRows, ["Won deal"]);
+  assert.ok(nodes(tree).some(node => node.props["aria-label"] === "Filter final stage by outcome"));
+});
+
 test("transition coordinator changes rows only after authoritative success", async () => {
   const marketingModule = { exports: {} };
   const compiled = await compile("../src/marketing.jsx");
@@ -89,6 +104,18 @@ test("transition coordinator changes rows only after authoritative success", asy
   const saved = await marketingModule.exports.runMarketingTransition({ api: async () => returned, opportunity: original[0], transition: { toStage: returned.stage, probability: 20 } });
   assert.deepEqual(marketingModule.exports.applyAuthoritativeOpportunity(original, saved), [returned]);
   assert.notEqual(saved, original[0]);
+
+  const workspace = {
+    opportunities: [{ ...original[0], contacts: [{ id: "old" }] }], archivedOpportunities: [],
+    contacts: [{ opportunityId: "a", id: "old" }], activities: [], tasks: [], documents: [], history: [],
+  };
+  const reconciled = marketingModule.exports.reconcileMarketingWorkspace(workspace, {
+    ...returned, contacts: [{ opportunityId: "a", id: "new" }], activities: [], tasks: [], documents: [], history: [],
+  });
+  assert.equal(reconciled.contacts[0].id, "new");
+  const archived = marketingModule.exports.reconcileMarketingWorkspace(reconciled, { ...reconciled.opportunities[0], archivedAt: "2026-10-12" });
+  assert.equal(archived.opportunities.length, 0);
+  assert.equal(archived.archivedOpportunities.length, 1);
 });
 
 test("create and terminal transitions enforce the marketing rules", () => {

@@ -46,3 +46,20 @@ test("stage history is client-read-only and trigger-authored", async () => {
   assert.match(sql, /grant select on beacon_v2\.marketing_stage_history to authenticated/i);
   assert.doesNotMatch(sql, /grant select, insert, update, delete on beacon_v2\.marketing_stage_history to authenticated/i);
 });
+
+test("stage changes are RPC-only and material edits plus task lifecycle are audited", async () => {
+  const sql = await readFile(url, "utf8");
+  const data = await readFile(new URL("../src/data.js", import.meta.url), "utf8");
+  assert.match(sql, /update_marketing_opportunity/);
+  assert.match(sql, /marketing_transition_rpc/);
+  assert.match(sql, /Stage and outcome changes must use transition_marketing_opportunity/i);
+  assert.match(sql, /fn_marketing_task_history/);
+  assert.match(sql, /Task completed:/);
+  assert.match(sql, /Task reopened:/);
+  assert.match(sql, /Opportunity details updated/);
+  assert.match(sql, /Opportunity archived/);
+  assert.match(sql, /Opportunity restored/);
+  assert.match(sql, /unique[\s\S]*marketing_contacts_one_primary/i);
+  assert.match(sql, /revoke update, delete on beacon_v2\.marketing_opportunities from authenticated/i);
+  assert.match(data, /rpc\("update_marketing_opportunity"/);
+});

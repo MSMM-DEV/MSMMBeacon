@@ -16,8 +16,9 @@ const TERMINAL_STAGE = MARKETING_STAGE_NAMES.at(-1);
 
 export function MarketingTransitionDialog({ opportunity, toStage, onCancel, onConfirm, saving = false, error = null }) {
   const [form, setForm] = useState(() => transitionDraft(opportunity, toStage));
+  const [warningsAcknowledged, setWarningsAcknowledged] = useState(false);
   const errorRef = useRef(null);
-  useEffect(() => { setForm(transitionDraft(opportunity, toStage)); }, [opportunity, toStage]);
+  useEffect(() => { setForm(transitionDraft(opportunity, toStage)); setWarningsAcknowledged(false); }, [opportunity, toStage]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
   const result = useMemo(() => validateMarketingTransition(form), [form]);
   const terminal = toStage === TERMINAL_STAGE;
@@ -25,7 +26,7 @@ export function MarketingTransitionDialog({ opportunity, toStage, onCancel, onCo
 
   const submit = event => {
     event.preventDefault();
-    if (!result.errors.length && !saving) onConfirm?.(result.normalized);
+    if (!result.errors.length && (!result.warnings.length || warningsAcknowledged) && !saving) onConfirm?.(result.normalized);
   };
 
   return (
@@ -96,14 +97,15 @@ export function MarketingTransitionDialog({ opportunity, toStage, onCancel, onCo
               </ul>
             )}
             {!!result.warnings.length && (
-              <ul className="marketing-form-warnings">
-                {result.warnings.map(item => <li key={`${item.field}-${item.message}`}>{item.message}</li>)}
-              </ul>
+              <div className="marketing-form-warnings">
+                <ul>{result.warnings.map(item => <li key={`${item.field}-${item.message}`}>{item.message}</li>)}</ul>
+                <label><input type="checkbox" checked={warningsAcknowledged} onChange={event => setWarningsAcknowledged(event.target.checked)}/>I reviewed this exception and want to continue.</label>
+              </div>
             )}
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="default" onClick={onCancel} disabled={saving}>Cancel</Button>
-            <Button type="submit" variant="primary" disabled={saving || result.errors.length > 0} loading={saving}>
+            <Button type="submit" variant="primary" disabled={saving || result.errors.length > 0 || (result.warnings.length > 0 && !warningsAcknowledged)} loading={saving}>
               {saving ? "Saving…" : "Confirm move"}
             </Button>
           </DialogFooter>

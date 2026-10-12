@@ -5462,6 +5462,7 @@ export async function loadMarketingWorkspace() {
 export async function createMarketingOpportunity(input = {}) {
   let clientId = input.clientId || null;
   let createdContactId = null;
+  let createdClientName = null;
   if (!clientId && input.newClient?.name) {
     const client = await addCompany({
       name: input.newClient.name,
@@ -5475,18 +5476,31 @@ export async function createMarketingOpportunity(input = {}) {
       website: input.newClient.website,
     });
     clientId = client.id;
+    createdClientName = client.name || input.newClient.name;
     createdContactId = client.contacts?.[0]?.id || null;
   }
   const me = getCurrentBeaconUser();
   const payload = marketingOpportunityInsert({ ...input, clientId, createdBy: me?.id, updatedBy: me?.id });
   const { data, error } = await supabase.from("marketing_opportunities")
     .insert(payload).select(MARKETING_OPPORTUNITY_SELECT).single();
-  throwMarketingError(error, "create Marketing opportunity");
-  if (createdContactId) {
+  if (error) {
+    const createError = new Error(`create Marketing opportunity: ${error.message}`);
+    if (createdClientName) {
+      createError.createdClientId = clientId;
+      createError.createdClientName = createdClientName;
+    }
+    throw createError;
+  }
+  const primaryContactId = input.primaryContactId || createdContactId;
+  if (primaryContactId) {
     const { error: contactError } = await supabase.from("marketing_opportunity_contacts").insert({
-      opportunity_id: data.id, contact_id: createdContactId, role: "Champion", is_primary: true,
+      opportunity_id: data.id, contact_id: primaryContactId, role: "Champion", is_primary: true,
     });
-    throwMarketingError(contactError, "connect new Directory contact");
+    if (contactError) {
+      const saved = adaptMarketingOpportunity(data);
+      saved.setupWarning = `Opportunity created, but the primary contact could not be linked: ${contactError.message}`;
+      return saved;
+    }
     return loadMarketingOpportunityFresh(data.id);
   }
   return adaptMarketingOpportunity(data);
@@ -5495,10 +5509,11 @@ export async function createMarketingOpportunity(input = {}) {
 export async function updateMarketingOpportunity(id, input, expectedVersion) {
   const { patch, expectedVersion: version } = marketingOpportunityPatch(input, expectedVersion);
   if (!Object.keys(patch).length) return loadMarketingOpportunityFresh(id);
-  patch.updated_by = getCurrentBeaconUser()?.id || null;
-  const { data, error } = await supabase.from("marketing_opportunities")
-    .update(patch).eq("id", id).eq("version", version)
-    .select(MARKETING_OPPORTUNITY_SELECT).maybeSingle();
+  const { data, error } = await supabase.rpc("update_marketing_opportunity", {
+    _id: id,
+    _expected_version: version,
+    _patch: patch,
+  });
   if (error?.code === "40001") throw await marketingConflict(id, error);
   throwMarketingError(error, "update Marketing opportunity");
   if (!data) throw await marketingConflict(id);
@@ -5526,11 +5541,13 @@ export async function transitionMarketingOpportunity(id, input = {}, expectedVer
 async function setMarketingArchive(id, expectedVersion, archived) {
   const me = getCurrentBeaconUser();
   const patch = archived
-    ? { archived_at: new Date().toISOString(), archived_by: me?.id || null, updated_by: me?.id || null }
-    : { archived_at: null, archived_by: null, updated_by: me?.id || null };
-  const { data, error } = await supabase.from("marketing_opportunities")
-    .update(patch).eq("id", id).eq("version", Number(expectedVersion))
-    .select(MARKETING_OPPORTUNITY_SELECT).maybeSingle();
+    ? { archived_at: new Date().toISOString(), archived_by: me?.id || null }
+    : { archived_at: null, archived_by: null };
+  const { data, error } = await supabase.rpc("update_marketing_opportunity", {
+    _id: id,
+    _expected_version: Number(expectedVersion),
+    _patch: patch,
+  });
   throwMarketingError(error, archived ? "archive Marketing opportunity" : "restore Marketing opportunity");
   if (!data) throw await marketingConflict(id);
   return adaptMarketingOpportunity(data);
@@ -5546,6 +5563,11 @@ export async function addMarketingContact(input = {}) {
     contactId = contact.id;
   }
   if (!input.opportunityId || !contactId) throw new Error("Choose an opportunity and Directory contact");
+  if (input.isPrimary) {
+    const { error: clearError } = await supabase.from("marketing_opportunity_contacts")
+      .update({ is_primary: false }).eq("opportunity_id", input.opportunityId).eq("is_primary", true);
+    throwMarketingError(clearError, "update primary Marketing contact");
+  }
   const { data, error } = await supabase.from("marketing_opportunity_contacts").insert({
     opportunity_id: input.opportunityId,
     contact_id: contactId,
@@ -5646,6 +5668,7 @@ export async function createMarketingTask(input = {}) {
 
 export async function updateMarketingTask(id, patch = {}) {
   const dbPatch = {};
+  let linkedAlertId = null;
   if ("title" in patch) {
     dbPatch.title = String(patch.title || "").trim();
     if (!dbPatch.title) throw new Error("Task title is required");
@@ -5656,11 +5679,17 @@ export async function updateMarketingTask(id, patch = {}) {
   if ("notes" in patch) dbPatch.notes = String(patch.notes || "").trim() || null;
   if ("alertId" in patch) dbPatch.alert_id = patch.alertId || null;
   if ("status" in patch) {
+    const { data: currentTask, error: readError } = await supabase.from("marketing_tasks")
+      .select("alert_id").eq("id", id).maybeSingle();
+    throwMarketingError(readError, "load Marketing task reminder");
+    linkedAlertId = currentTask?.alert_id || null;
+    if (linkedAlertId) await setAlertActive(linkedAlertId, patch.status !== "completed");
     dbPatch.status = patch.status;
     dbPatch.completed_at = patch.status === "completed" ? new Date().toISOString() : null;
     dbPatch.completed_by = patch.status === "completed" ? getCurrentBeaconUser()?.id || null : null;
   }
   const { data, error } = await supabase.from("marketing_tasks").update(dbPatch).eq("id", id).select("*").single();
+  if (error && linkedAlertId) await setAlertActive(linkedAlertId, patch.status === "completed").catch(() => {});
   throwMarketingError(error, "update Marketing task");
   return adaptMarketingTask(data);
 }

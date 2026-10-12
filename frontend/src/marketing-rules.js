@@ -258,6 +258,9 @@ export function buildMarketingInsights(rows = [], tasks = [], activities = [], o
     };
   });
   const visible = rows.filter(row => !row.archivedAt);
+  const visibleIds = new Set(visible.map(row => row.id));
+  const scopedTasks = tasks.filter(task => visibleIds.has(task.opportunityId));
+  const scopedActivities = activities.filter(activity => visibleIds.has(activity.opportunityId));
   const expectedCloseMonths = countBy(visible.filter(row => row.expectedCloseDate), row => String(row.expectedCloseDate).slice(0, 7), row => row.estimatedValue);
   const expectedCloseQuarters = countBy(visible.filter(row => row.expectedCloseDate), row => {
     const close = dateOnlyParts(row.expectedCloseDate);
@@ -271,10 +274,11 @@ export function buildMarketingInsights(rows = [], tasks = [], activities = [], o
     const rowHistory = history.filter(item => item.opportunityId === row.id).sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
     let enteredAt = row.createdAt ? new Date(row.createdAt) : null;
     for (const item of rowHistory) {
+      if (!item.fromStage || item.fromStage === item.toStage) continue;
       const changedAt = new Date(item.changedAt);
-      if (item.fromStage && enteredAt && !Number.isNaN(+changedAt) && !Number.isNaN(+enteredAt)) {
+      if (enteredAt && !Number.isNaN(+changedAt) && !Number.isNaN(+enteredAt)) {
         durations.get(item.fromStage)?.push(Math.max(0, (changedAt - enteredAt) / 86400000));
-      } else if (item.fromStage) durations.get(item.fromStage)?.push(0);
+      } else durations.get(item.fromStage)?.push(0);
       enteredAt = changedAt;
     }
     if (!row.outcome && row.stage) {
@@ -297,21 +301,21 @@ export function buildMarketingInsights(rows = [], tasks = [], activities = [], o
     winRate: won.length + lost.length ? won.length / (won.length + lost.length) : 0,
     closingThisQuarterCount: closingThisQuarter.length,
     closingThisQuarterValue: closingThisQuarter.reduce((sum, row) => sum + Number(row.estimatedValue || 0), 0),
-    overdueTaskCount: tasks.filter(task => isOpenTask(task) && task.dueAt && new Date(task.dueAt).getTime() < now.getTime()).length,
-    stalledCount: active.filter(row => marketingHealth(row, tasks, { now, stalledAfterDays }) === "stalled").length,
+    overdueTaskCount: scopedTasks.filter(task => isOpenTask(task) && task.dueAt && new Date(task.dueAt).getTime() < now.getTime()).length,
+    stalledCount: active.filter(row => marketingHealth(row, scopedTasks, { now, stalledAfterDays }) === "stalled").length,
     stages: stageRows,
     lossReasons: countBy(lost, row => row.lossReason, row => row.estimatedValue),
     sources: countBy(rows.filter(row => !row.archivedAt), row => row.source, row => row.estimatedValue),
     products: countBy(rows.filter(row => !row.archivedAt).flatMap(row => (row.productTags || []).map(product => ({ product, estimatedValue: row.estimatedValue }))), row => row.product, row => row.estimatedValue),
-    activityTypes: countBy(activities, row => row.activityType || row.type),
-    activityOwners: countBy(activities, row => usersById[row.authorId]?.name || row.authorName || "Unassigned"),
+    activityTypes: countBy(scopedActivities, row => row.activityType || row.type),
+    activityOwners: countBy(scopedActivities, row => usersById[row.authorId]?.name || row.authorName || "Unassigned"),
     owners: countBy(visible, row => usersById[row.ownerId]?.name || row.ownerName || "Unassigned", row => row.estimatedValue),
     organizations: countBy(visible, row => clientsById[row.clientId]?.name || row.organizationName || "Unspecified", row => row.estimatedValue),
     competitors: countBy(lost.filter(row => row.competitor), row => row.competitor, row => row.estimatedValue),
     expectedCloseMonths,
     expectedCloseQuarters,
     stageVelocity,
-    attention: active.filter(row => ["attention", "stalled"].includes(marketingHealth(row, tasks, { now, stalledAfterDays }))),
+    attention: active.filter(row => ["attention", "stalled"].includes(marketingHealth(row, scopedTasks, { now, stalledAfterDays }))),
   };
 }
 

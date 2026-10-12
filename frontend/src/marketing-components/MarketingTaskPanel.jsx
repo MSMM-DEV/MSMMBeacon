@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Alert, Badge, Button, Field, Input, Textarea } from "@/ui";
 import { Icon } from "../icons.jsx";
-import { createMarketingTask, createScheduledAlert, updateMarketingTask } from "../data.js";
+import { createMarketingTask, createScheduledAlert, setAlertActive, updateMarketingTask } from "../data.js";
 import { sortMarketingTasks } from "../marketing-model.js";
 
 export function MarketingTaskPanel({ opportunityId, tasks = [], users = [], onChanged, createApi = createMarketingTask, updateApi = updateMarketingTask, now = new Date() }) {
@@ -30,7 +30,12 @@ export function MarketingTaskPanel({ opportunityId, tasks = [], users = [], onCh
   };
   const scheduleReminder = async draft => {
     const alertId = await createScheduledAlert({ subjectTable: "marketing", subjectRowId: opportunityId, firstFireAt: new Date(draft.firstFireAt).toISOString(), recurrence: draft.recurrence, message: `Task: ${draft.task.title}${draft.task.notes ? `\n${draft.task.notes}` : ""}`, recipientUserIds: draft.recipientUserIds });
-    const saved = await updateApi(draft.task.id, { alertId });
+    let saved;
+    try { saved = await updateApi(draft.task.id, { alertId }); }
+    catch (linkError) {
+      await setAlertActive(alertId, false).catch(() => {});
+      throw linkError;
+    }
     onChanged?.(saved, "updated");
     setReminderDraft(null);
     return saved;
@@ -44,7 +49,8 @@ export function MarketingTaskPanel({ opportunityId, tasks = [], users = [], onCh
   };
   const toggle = async task => {
     setBusyId(task.id); setError("");
-    try { onChanged?.(await updateApi(task.id, { status: task.status === "completed" ? "open" : "completed" }), "updated"); }
+    const nextStatus = task.status === "completed" ? "open" : "completed";
+    try { onChanged?.(await updateApi(task.id, { status: nextStatus }), "updated"); }
     catch (saveError) { setError(saveError.message || "The task could not be updated."); }
     finally { setBusyId(null); }
   };

@@ -40,6 +40,33 @@ test("dirty dismissal confirms and conflict recovery never overwrites automatica
   assert.deepEqual(calls, [4, 5]);
 });
 
+test("sheet saves preserve supporting records and datetime-local values round trip", async () => {
+  const {
+    mergeMarketingRelations,
+    toMarketingDateTimeLocal,
+    fromMarketingDateTimeLocal,
+  } = await import("../src/marketing-components/marketing-sheet-model.js");
+  const supporting = {
+    contacts: [{ id: "c1" }], activities: [{ id: "a1" }], tasks: [{ id: "t1" }],
+    documents: [{ id: "d1" }], history: [{ id: "h1" }],
+  };
+  assert.deepEqual(mergeMarketingRelations({ id: "o1", version: 2 }, supporting), {
+    id: "o1", version: 2, ...supporting,
+  });
+  const iso = "2026-10-12T18:30:00.000Z";
+  const local = toMarketingDateTimeLocal(iso);
+  assert.match(local, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+  assert.equal(fromMarketingDateTimeLocal(local), iso);
+  assert.equal(fromMarketingDateTimeLocal(""), null);
+});
+
+test("qualification UUID relationships use contact and user selectors", async () => {
+  const source = await readFile(path, "utf8");
+  for (const label of ["Clarifying owner", "Authority contact", "Approver contact", "Legal owner", "Customer legal contact"]) {
+    assert.match(source, new RegExp(`selectField\\(\"${label}\"`), label);
+  }
+});
+
 test("archive is recoverable and permanent delete is absent", async () => {
   const source = await readFile(path, "utf8");
   assert.match(source, /Archive opportunity/);

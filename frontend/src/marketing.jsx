@@ -6,7 +6,6 @@ import {
 } from "@/ui";
 import { Icon } from "./icons.jsx";
 import {
-  addMarketingContact,
   createMarketingOpportunity,
   loadMarketingWorkspace,
   transitionMarketingOpportunity,
@@ -26,6 +25,10 @@ const VIEW_LABELS = { pipeline: "Pipeline", list: "Opportunity list", insights: 
 const money = value => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value || 0));
 const MARKETING_VIEW_KEY = "beacon.marketing.view";
 const MARKETING_STAGE_KEY = "beacon.marketing.stage";
+const DEFAULT_MARKETING_FILTERS = Object.freeze({
+  search: "", ownerId: "all", clientId: "all", stage: "all", product: "all",
+  health: "all", closePeriod: "all", outcome: "all", archiveMode: "active",
+});
 
 function storedMarketingValue(key) {
   try { return window.localStorage.getItem(key); }
@@ -47,6 +50,27 @@ export function applyAuthoritativeOpportunity(rows, returned) {
   return found ? rows.map(row => row.id === returned.id ? returned : row) : [returned, ...(rows || [])];
 }
 
+export function reconcileMarketingWorkspace(workspace, returned) {
+  if (!workspace || !returned?.id) return workspace;
+  const replaceSupporting = (key, rows) => Array.isArray(returned[key])
+    ? [...(rows || []).filter(item => item.opportunityId !== returned.id), ...returned[key]]
+    : rows;
+  return {
+    ...workspace,
+    opportunities: returned.archivedAt
+      ? (workspace.opportunities || []).filter(row => row.id !== returned.id)
+      : applyAuthoritativeOpportunity(workspace.opportunities, returned),
+    archivedOpportunities: returned.archivedAt
+      ? applyAuthoritativeOpportunity(workspace.archivedOpportunities, returned)
+      : (workspace.archivedOpportunities || []).filter(row => row.id !== returned.id),
+    contacts: replaceSupporting("contacts", workspace.contacts),
+    activities: replaceSupporting("activities", workspace.activities),
+    tasks: replaceSupporting("tasks", workspace.tasks),
+    documents: replaceSupporting("documents", workspace.documents),
+    history: replaceSupporting("history", workspace.history),
+  };
+}
+
 export async function runMarketingTransition({ api = transitionMarketingOpportunity, opportunity, transition }) {
   return api(opportunity.id, { ...transition, stage: transition.toStage || transition.stage }, opportunity.version);
 }
@@ -65,6 +89,7 @@ function emptyCreateForm(currentUser) {
     title: "", clientId: "", ownerId: currentUser?.id || "", nextAction: "",
     estimatedValue: "", expectedCloseDate: "", productTags: "", primaryContactId: "",
     newOrganization: false, organizationName: "", contactName: "", contactEmail: "",
+    recoveredOrganizationName: "",
   };
 }
 
@@ -100,16 +125,21 @@ function MarketingCreateDialog({ open, clients, users, currentUser, onCancel, on
         estimatedValue: form.estimatedValue,
         expectedCloseDate: form.expectedCloseDate,
         productTags: form.productTags.split(",").map(tag => tag.trim()).filter(Boolean),
+        primaryContactId: form.primaryContactId || null,
         stage: MARKETING_STAGE_NAMES[0],
         probability: 5,
       });
-      if (!form.newOrganization && form.primaryContactId) {
-        const linked = await addMarketingContact({ opportunityId: row.id, contactId: form.primaryContactId, role: "Champion", isPrimary: true });
-        row = { ...row, contacts: [...(row.contacts || []), linked] };
-      }
       onCreated(row);
       setForm(emptyCreateForm(currentUser));
     } catch (saveError) {
+      if (saveError.createdClientId) {
+        setForm(current => ({
+          ...current,
+          newOrganization: false,
+          clientId: saveError.createdClientId,
+          recoveredOrganizationName: saveError.createdClientName || current.organizationName,
+        }));
+      }
       setError(saveError.message || "The opportunity could not be created.");
       setSaving(false);
     }
@@ -130,7 +160,9 @@ function MarketingCreateDialog({ open, clients, users, currentUser, onCancel, on
               <Field label="Organization" htmlFor="marketing-client" required>
                 {!form.newOrganization ? (
                   <select id="marketing-client" className="select" required value={form.clientId} onChange={event => { set("clientId", event.target.value); set("primaryContactId", ""); }}>
-                    <option value="">Choose from Directory</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                    <option value="">Choose from Directory</option>
+                    {form.recoveredOrganizationName && !clients.some(client => client.id === form.clientId) && <option value={form.clientId}>{form.recoveredOrganizationName} (created)</option>}
+                    {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
                   </select>
                 ) : <Input id="marketing-client" required value={form.organizationName} onChange={event => set("organizationName", event.target.value)}/>}
                 <Button type="button" size="sm" variant="ghost" onClick={() => set("newOrganization", !form.newOrganization)}>{form.newOrganization ? "Choose existing organization" : "Add a new organization"}</Button>
@@ -163,7 +195,6 @@ function MarketingToolbar({ filters, setFilters, opportunities, users, clients, 
       <select aria-label="Filter by owner" value={filters.ownerId} onChange={event => update("ownerId", event.target.value)}><option value="all">All owners</option>{users.map(user => <option key={user.id} value={user.id}>{user.name || user.display_name}</option>)}</select>
       <select aria-label="Filter by organization" value={filters.clientId} onChange={event => update("clientId", event.target.value)}><option value="all">All organizations</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
       <select aria-label="Filter by stage" value={filters.stage} onChange={event => update("stage", event.target.value)}><option value="all">All stages</option>{MARKETING_STAGE_NAMES.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select>
-      <select aria-label="Filter by product" value={filters.product} onChange={event => update("product", event.target.value)}><option value="all">All products</option>{products.map(product => <option key={product} value={product}>{product}</option>)}</select>
       <select aria-label="Filter by health" value={filters.health} onChange={event => update("health", event.target.value)}><option value="all">All health</option><option value="on_track">On track</option><option value="attention">Needs attention</option><option value="stalled">Stalled</option></select>
       <select aria-label="Filter by close period" value={filters.closePeriod} onChange={event => update("closePeriod", event.target.value)}><option value="all">Any close date</option><option value="overdue">Overdue</option><option value="month">This month</option><option value="quarter">This quarter</option></select>
       <select aria-label="Filter by outcome" value={filters.outcome} onChange={event => update("outcome", event.target.value)}><option value="all">All outcomes</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select>
@@ -196,11 +227,13 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
   const [moveIntent, setMoveIntent] = useState(null);
   const [moveSaving, setMoveSaving] = useState(false);
   const [moveError, setMoveError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [terminalOutcome, setTerminalOutcome] = useState("all");
   const [mobileStage, setMobileStage] = useState(() => {
     const saved = storedMarketingValue(MARKETING_STAGE_KEY);
     return MARKETING_STAGE_NAMES.includes(saved) ? saved : MARKETING_STAGE_NAMES[0];
   });
-  const [filters, setFilters] = useState({ search: "", ownerId: "all", clientId: "all", stage: "all", product: "all", health: "all", closePeriod: "all", outcome: "all", archiveMode: "active" });
+  const [filters, setFilters] = useState(() => ({ ...DEFAULT_MARKETING_FILTERS }));
   const launchControlRef = useRef(null);
   const previousViewRef = useRef(view);
 
@@ -278,7 +311,7 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
     setMoveSaving(true); setMoveError("");
     try {
       const returned = await runMarketingTransition({ opportunity: moveIntent.opportunity, transition });
-      setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, returned) }));
+      setWorkspace(current => reconcileMarketingWorkspace(current, returned));
       setSelectedId(returned.id);
       setMoveIntent(null);
     } catch (transitionError) { setMoveError(transitionError.message || "The stage move could not be saved."); }
@@ -287,13 +320,16 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
 
   return (
     <section className="marketing-page" aria-label="Marketing workspace" data-current-user={currentUser?.id || undefined}>
+      {notice && <Alert tone="warning" title="Opportunity created with one follow-up needed"><p>{notice}</p><Button size="sm" variant="ghost" onClick={() => setNotice("")}>Dismiss</Button></Alert>}
       <div className="marketing-page-bar">{visibleViews.length > 1 && <Tabs value={view} onValueChange={setView}><TabsList variant="underline" className="bx-page-tabs" aria-label="Marketing views">{visibleViews.map(node => <TabsTrigger key={node.key} value={node.view}>{VIEW_LABELS[node.view] || node.label}</TabsTrigger>)}</TabsList></Tabs>}</div>
       <MarketingKpis insights={insights}/>
       <MarketingToolbar filters={filters} setFilters={setFilters} opportunities={opportunities} users={users} clients={clients} onCreate={() => setCreateOpen(true)}/>
       {!allOpportunities.length ? (
         <EmptyState iconName="marketing" title="Build your first Marketing opportunity" hint="Track the relationship from introduction through a signed or lost contract." action={<Button variant="primary" onClick={() => setCreateOpen(true)}>New opportunity</Button>}/>
+      ) : !filtered.length ? (
+        <EmptyState iconName="search" title="No opportunities match these filters" hint="Clear the current filters to return to the full Marketing pipeline." action={<Button variant="default" onClick={() => setFilters({ ...DEFAULT_MARKETING_FILTERS, archiveMode: opportunities.length ? "active" : "all" })}>Clear filters</Button>}/>
       ) : view === "pipeline" ? (
-        <MarketingBoard opportunities={filtered} tasks={workspace.tasks} stalledAfterDays={workspace.stalledAfterDays} clientsById={clientsById} usersById={usersById} selectedMobileStage={mobileStage} onSelectedMobileStage={setMobileStage} onOpen={openOpportunity} onMoveIntent={(opportunity, toStage) => { setMoveError(""); setMoveIntent({ opportunity, toStage }); }}/>
+        <MarketingBoard opportunities={filtered} tasks={workspace.tasks} stalledAfterDays={workspace.stalledAfterDays} clientsById={clientsById} usersById={usersById} selectedMobileStage={mobileStage} onSelectedMobileStage={setMobileStage} terminalOutcome={terminalOutcome} onTerminalOutcomeChange={setTerminalOutcome} onOpen={openOpportunity} onMoveIntent={(opportunity, toStage) => { setMoveError(""); setMoveIntent({ opportunity, toStage }); }}/>
       ) : view === "list" ? (
         <MarketingList rows={filtered} tasks={workspace.tasks} usersById={usersById} clientsById={clientsById} stalledAfterDays={workspace.stalledAfterDays} onOpen={openOpportunity}/>
       ) : (
@@ -308,11 +344,11 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
         history={selected.history || workspace.history.filter(item => item.opportunityId === selected.id)}
         lookups={{ users, clients, usersById, clientsById }}
         onClose={closeOpportunity}
-        onSaved={row => setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row) }))}
-        onArchived={row => { setWorkspace(current => ({ ...current, opportunities: current.opportunities.filter(item => item.id !== row.id), archivedOpportunities: applyAuthoritativeOpportunity(current.archivedOpportunities, row) })); closeOpportunity(); }}
-        onRestored={row => setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row), archivedOpportunities: current.archivedOpportunities.filter(item => item.id !== row.id) }))}
+        onSaved={row => setWorkspace(current => reconcileMarketingWorkspace(current, row))}
+        onArchived={row => { setWorkspace(current => reconcileMarketingWorkspace(current, row)); closeOpportunity(); }}
+        onRestored={row => setWorkspace(current => reconcileMarketingWorkspace(current, row))}
       />}
-      <MarketingCreateDialog open={createOpen} clients={clients} users={users} currentUser={currentUser} onCancel={() => setCreateOpen(false)} onCreated={row => { setWorkspace(current => ({ ...current, opportunities: applyAuthoritativeOpportunity(current.opportunities, row) })); setCreateOpen(false); setSelectedId(row.id); }}/>
+      <MarketingCreateDialog open={createOpen} clients={clients} users={users} currentUser={currentUser} onCancel={() => setCreateOpen(false)} onCreated={row => { if (row.setupWarning) setNotice(row.setupWarning); setWorkspace(current => reconcileMarketingWorkspace(current, row)); setCreateOpen(false); setSelectedId(row.id); }}/>
       {moveIntent && <MarketingTransitionDialog opportunity={moveIntent.opportunity} toStage={moveIntent.toStage} saving={moveSaving} error={moveError} onCancel={() => { if (!moveSaving) setMoveIntent(null); }} onConfirm={confirmMove}/>}
     </section>
   );

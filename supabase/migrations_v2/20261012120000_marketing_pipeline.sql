@@ -151,6 +151,20 @@ create table if not exists beacon_v2.marketing_opportunity_contacts (
   updated_at     timestamptz not null default now(),
   primary key (opportunity_id, contact_id)
 );
+with ranked as (
+  select opportunity_id, contact_id,
+         row_number() over (partition by opportunity_id order by created_at, contact_id) as position
+    from beacon_v2.marketing_opportunity_contacts
+   where is_primary
+)
+update beacon_v2.marketing_opportunity_contacts target
+   set is_primary = false
+  from ranked
+ where target.opportunity_id = ranked.opportunity_id
+   and target.contact_id = ranked.contact_id
+   and ranked.position > 1;
+create unique index if not exists marketing_contacts_one_primary
+  on beacon_v2.marketing_opportunity_contacts(opportunity_id) where is_primary;
 
 create table if not exists beacon_v2.marketing_activities (
   id              uuid primary key default gen_random_uuid(),
@@ -237,6 +251,17 @@ create index if not exists marketing_history_opportunity_idx on beacon_v2.market
 create or replace function beacon_v2.fn_marketing_opportunity_before_update()
 returns trigger language plpgsql as $$
 begin
+  if (
+    new.stage is distinct from old.stage
+    or new.outcome is distinct from old.outcome
+    or new.signed_at is distinct from old.signed_at
+    or new.final_contract_value is distinct from old.final_contract_value
+    or new.loss_reason is distinct from old.loss_reason
+    or new.loss_detail is distinct from old.loss_detail
+  ) and coalesce(current_setting('beacon_v2.marketing_transition_rpc', true), '') <> 'on' then
+    raise exception 'Stage and outcome changes must use transition_marketing_opportunity'
+      using errcode = '42501';
+  end if;
   if new.stage is distinct from old.stage then
     new.stage_entered_at := now();
   else
@@ -263,11 +288,20 @@ set search_path = beacon_v2, pg_temp
 as $$
 declare
   v_changed_by uuid;
+  v_note text;
 begin
   if new.stage is not distinct from old.stage
      and new.probability is not distinct from old.probability
      and new.outcome is not distinct from old.outcome then
-    return new;
+    if new.archived_at is distinct from old.archived_at then
+      v_note := case when new.archived_at is null then 'Opportunity restored' else 'Opportunity archived' end;
+    elsif (to_jsonb(new) - array['version','updated_at','updated_by','last_activity_at','last_transition_note'])
+          is distinct from
+          (to_jsonb(old) - array['version','updated_at','updated_by','last_activity_at','last_transition_note']) then
+      v_note := 'Opportunity details updated';
+    else
+      return new;
+    end if;
   end if;
   v_changed_by := new.updated_by;
   if v_changed_by is null and auth.uid() is not null then
@@ -278,7 +312,7 @@ begin
     previous_outcome, new_outcome, transition_note, changed_by
   ) values (
     new.id, old.stage, new.stage, old.probability, new.probability,
-    old.outcome, new.outcome, new.last_transition_note, v_changed_by
+    old.outcome, new.outcome, coalesce(new.last_transition_note, v_note), v_changed_by
   );
   return new;
 end;
@@ -292,7 +326,11 @@ create trigger trg_marketing_history
   for each row execute function beacon_v2.fn_marketing_history();
 
 create or replace function beacon_v2.fn_marketing_refresh_last_activity()
-returns trigger language plpgsql as $$
+returns trigger
+language plpgsql
+security definer
+set search_path = beacon_v2, pg_temp
+as $$
 declare
   v_opportunity uuid;
 begin
@@ -313,6 +351,8 @@ begin
 end;
 $$;
 
+revoke all on function beacon_v2.fn_marketing_refresh_last_activity() from public, anon, authenticated;
+
 drop trigger if exists trg_marketing_activity_refresh on beacon_v2.marketing_activities;
 create trigger trg_marketing_activity_refresh
   after insert or update or delete on beacon_v2.marketing_activities
@@ -328,6 +368,128 @@ drop trigger if exists touch_marketing_tasks on beacon_v2.marketing_tasks;
 create trigger touch_marketing_tasks before update on beacon_v2.marketing_tasks
   for each row execute function beacon_v2.touch_updated_at();
 
+create or replace function beacon_v2.fn_marketing_task_history()
+returns trigger
+language plpgsql
+security definer
+set search_path = beacon_v2, pg_temp
+as $$
+declare
+  v_opportunity beacon_v2.marketing_opportunities;
+  v_actor uuid;
+  v_note text;
+begin
+  if tg_op <> 'UPDATE' or new.status is not distinct from old.status then
+    return new;
+  end if;
+  select * into v_opportunity from beacon_v2.marketing_opportunities where id = new.opportunity_id;
+  v_actor := new.completed_by;
+  if v_actor is null and auth.uid() is not null then
+    select id into v_actor from beacon_v2.users where auth_user_id = auth.uid() limit 1;
+  end if;
+  v_note := case when new.status = 'completed' then 'Task completed: ' else 'Task reopened: ' end || new.title;
+  insert into beacon_v2.marketing_stage_history (
+    opportunity_id, from_stage, to_stage, previous_probability, new_probability,
+    previous_outcome, new_outcome, transition_note, changed_by
+  ) values (
+    new.opportunity_id, v_opportunity.stage, v_opportunity.stage,
+    v_opportunity.probability, v_opportunity.probability,
+    v_opportunity.outcome, v_opportunity.outcome, v_note, v_actor
+  );
+  return new;
+end;
+$$;
+
+revoke all on function beacon_v2.fn_marketing_task_history() from public, anon, authenticated;
+drop trigger if exists trg_marketing_task_history on beacon_v2.marketing_tasks;
+create trigger trg_marketing_task_history
+  after update on beacon_v2.marketing_tasks
+  for each row execute function beacon_v2.fn_marketing_task_history();
+
+create or replace function beacon_v2.update_marketing_opportunity(
+  _id uuid,
+  _expected_version integer,
+  _patch jsonb
+) returns beacon_v2.marketing_opportunities
+language plpgsql
+security definer
+set search_path = beacon_v2, pg_temp
+as $$
+declare
+  v_old beacon_v2.marketing_opportunities;
+  v_patch beacon_v2.marketing_opportunities;
+  v_new beacon_v2.marketing_opportunities;
+  v_actor uuid;
+  v_unknown text[];
+  v_allowed constant text[] := array[
+    'title','client_id','owner_id','probability','expected_close_date','estimated_value','currency',
+    'product_tags','source','introducer','summary','next_action','next_action_due_at',
+    'showcase_meeting_at','showcase_location','showcase_products','showcase_attendees_summary','showcase_fit','showcase_outcome',
+    'problem_statement','desired_outcome','solution_fit','clarifying_questions','clarifying_owner_id','clarifying_due_at','clarifying_answers_status','draft_sow_status',
+    'budget_amount','budget_status','budget_notes','authority_contact_id','authority_notes','need_summary','timing_summary','decision_process',
+    'proposal_version','proposal_value','proposal_sent_at','scope_summary','anticipated_decision_date',
+    'verbal_approval_at','verbal_approver_contact_id','verbal_terms','target_signature_date','signature_risks','resource_planning_note',
+    'msa_status','sow_status','legal_owner_id','customer_legal_contact_id','redline_status','legal_issues','latest_document_version',
+    'competitor','lesson_learned','archived_at','archived_by'
+  ];
+begin
+  if auth.uid() is null and coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+  select * into v_old from beacon_v2.marketing_opportunities where id = _id for update;
+  if not found then
+    raise exception 'Marketing opportunity % not found', _id using errcode = 'P0002';
+  end if;
+  if v_old.version <> _expected_version then
+    raise exception 'Marketing opportunity changed (expected version %, current %)', _expected_version, v_old.version
+      using errcode = '40001';
+  end if;
+  select array_agg(key) into v_unknown
+    from jsonb_object_keys(coalesce(_patch, '{}'::jsonb)) as keys(key)
+   where not (key = any(v_allowed));
+  if v_unknown is not null then
+    raise exception 'Unsupported Marketing fields: %', array_to_string(v_unknown, ', ')
+      using errcode = '22023';
+  end if;
+  select * into v_patch from jsonb_populate_record(v_old, coalesce(_patch, '{}'::jsonb));
+  select id into v_actor from beacon_v2.users where auth_user_id = auth.uid() limit 1;
+
+  update beacon_v2.marketing_opportunities set
+    title = v_patch.title, client_id = v_patch.client_id, owner_id = v_patch.owner_id,
+    probability = v_patch.probability, expected_close_date = v_patch.expected_close_date,
+    estimated_value = v_patch.estimated_value, currency = v_patch.currency,
+    product_tags = v_patch.product_tags, source = v_patch.source, introducer = v_patch.introducer,
+    summary = v_patch.summary, next_action = v_patch.next_action, next_action_due_at = v_patch.next_action_due_at,
+    showcase_meeting_at = v_patch.showcase_meeting_at, showcase_location = v_patch.showcase_location,
+    showcase_products = v_patch.showcase_products, showcase_attendees_summary = v_patch.showcase_attendees_summary,
+    showcase_fit = v_patch.showcase_fit, showcase_outcome = v_patch.showcase_outcome,
+    problem_statement = v_patch.problem_statement, desired_outcome = v_patch.desired_outcome,
+    solution_fit = v_patch.solution_fit, clarifying_questions = v_patch.clarifying_questions,
+    clarifying_owner_id = v_patch.clarifying_owner_id, clarifying_due_at = v_patch.clarifying_due_at,
+    clarifying_answers_status = v_patch.clarifying_answers_status, draft_sow_status = v_patch.draft_sow_status,
+    budget_amount = v_patch.budget_amount, budget_status = v_patch.budget_status, budget_notes = v_patch.budget_notes,
+    authority_contact_id = v_patch.authority_contact_id, authority_notes = v_patch.authority_notes,
+    need_summary = v_patch.need_summary, timing_summary = v_patch.timing_summary, decision_process = v_patch.decision_process,
+    proposal_version = v_patch.proposal_version, proposal_value = v_patch.proposal_value,
+    proposal_sent_at = v_patch.proposal_sent_at, scope_summary = v_patch.scope_summary,
+    anticipated_decision_date = v_patch.anticipated_decision_date,
+    verbal_approval_at = v_patch.verbal_approval_at, verbal_approver_contact_id = v_patch.verbal_approver_contact_id,
+    verbal_terms = v_patch.verbal_terms, target_signature_date = v_patch.target_signature_date,
+    signature_risks = v_patch.signature_risks, resource_planning_note = v_patch.resource_planning_note,
+    msa_status = v_patch.msa_status, sow_status = v_patch.sow_status, legal_owner_id = v_patch.legal_owner_id,
+    customer_legal_contact_id = v_patch.customer_legal_contact_id, redline_status = v_patch.redline_status,
+    legal_issues = v_patch.legal_issues, latest_document_version = v_patch.latest_document_version,
+    competitor = v_patch.competitor, lesson_learned = v_patch.lesson_learned,
+    archived_at = v_patch.archived_at, archived_by = v_patch.archived_by, updated_by = v_actor
+  where id = _id
+  returning * into v_new;
+  return v_new;
+end;
+$$;
+
+revoke all on function beacon_v2.update_marketing_opportunity(uuid,integer,jsonb) from public, anon;
+grant execute on function beacon_v2.update_marketing_opportunity(uuid,integer,jsonb) to authenticated, service_role;
+
 create or replace function beacon_v2.transition_marketing_opportunity(
   _id uuid,
   _expected_version integer,
@@ -340,7 +502,7 @@ create or replace function beacon_v2.transition_marketing_opportunity(
   _loss_detail text default null,
   _transition_note text default null
 ) returns beacon_v2.marketing_opportunities
-language plpgsql security invoker
+language plpgsql security definer
 set search_path = beacon_v2, public, extensions
 as $$
 declare
@@ -359,6 +521,8 @@ begin
   if auth.uid() is not null then
     select id into v_actor from beacon_v2.users where auth_user_id = auth.uid() limit 1;
   end if;
+
+  perform set_config('beacon_v2.marketing_transition_rpc', 'on', true);
 
   if _stage = 'Contract Signed Won or Lost' and _outcome = 'won' then
     _probability := 100;
@@ -435,7 +599,14 @@ alter table beacon_v2.marketing_documents enable row level security;
 alter table beacon_v2.marketing_stage_history enable row level security;
 
 drop policy if exists marketing_opportunities_auth_all on beacon_v2.marketing_opportunities;
-create policy marketing_opportunities_auth_all on beacon_v2.marketing_opportunities for all to authenticated using (true) with check (true);
+drop policy if exists marketing_opportunities_auth_select on beacon_v2.marketing_opportunities;
+drop policy if exists marketing_opportunities_auth_insert on beacon_v2.marketing_opportunities;
+create policy marketing_opportunities_auth_select on beacon_v2.marketing_opportunities
+  for select to authenticated using (true);
+create policy marketing_opportunities_auth_insert on beacon_v2.marketing_opportunities
+  for insert to authenticated with check (
+    stage = 'Intro to Target or prospect' and outcome is null and archived_at is null
+  );
 drop policy if exists marketing_opportunity_contacts_auth_all on beacon_v2.marketing_opportunity_contacts;
 create policy marketing_opportunity_contacts_auth_all on beacon_v2.marketing_opportunity_contacts for all to authenticated using (true) with check (true);
 drop policy if exists marketing_activities_auth_all on beacon_v2.marketing_activities;
@@ -453,7 +624,8 @@ drop policy if exists marketing_history_auth_select on beacon_v2.marketing_stage
 create policy marketing_history_auth_select on beacon_v2.marketing_stage_history
   for select to authenticated using (true);
 
-grant select, insert, update, delete on beacon_v2.marketing_opportunities to authenticated;
+grant select, insert on beacon_v2.marketing_opportunities to authenticated;
+revoke update, delete on beacon_v2.marketing_opportunities from authenticated;
 grant select, insert, update, delete on beacon_v2.marketing_opportunity_contacts to authenticated;
 grant select, insert, update, delete on beacon_v2.marketing_activities to authenticated;
 grant select, insert, update, delete on beacon_v2.marketing_activity_users to authenticated;

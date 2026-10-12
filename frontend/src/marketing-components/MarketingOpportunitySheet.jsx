@@ -17,7 +17,13 @@ import {
   updateMarketingOpportunity,
 } from "../data.js";
 import { MARKETING_CONTACT_ROLES, MarketingConflictError } from "../marketing-model.js";
-import { attemptMarketingSectionSave, changedMarketingFields } from "./marketing-sheet-model.js";
+import {
+  attemptMarketingSectionSave,
+  changedMarketingFields,
+  fromMarketingDateTimeLocal,
+  mergeMarketingRelations,
+  toMarketingDateTimeLocal,
+} from "./marketing-sheet-model.js";
 import { MarketingActivityPanel } from "./MarketingActivityPanel.jsx";
 import { MarketingTaskPanel } from "./MarketingTaskPanel.jsx";
 import { MarketingDocumentPanel } from "./MarketingDocumentPanel.jsx";
@@ -45,7 +51,16 @@ const QUALIFICATION_FIELDS = [
   "competitor", "lessonLearned",
 ];
 
-const valuesFor = (opportunity, fields) => Object.fromEntries(fields.map(field => [field, Array.isArray(opportunity?.[field]) ? [...opportunity[field]] : (opportunity?.[field] ?? "")]));
+const DATETIME_FIELDS = new Set([
+  "nextActionDueAt", "showcaseMeetingAt", "clarifyingDueAt", "proposalSentAt", "verbalApprovalAt",
+]);
+
+const valuesFor = (opportunity, fields) => Object.fromEntries(fields.map(field => [
+  field,
+  DATETIME_FIELDS.has(field)
+    ? toMarketingDateTimeLocal(opportunity?.[field])
+    : Array.isArray(opportunity?.[field]) ? [...opportunity[field]] : (opportunity?.[field] ?? ""),
+]));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const displayDate = value => value ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Not recorded";
 
@@ -114,6 +129,7 @@ export function MarketingOpportunitySheet({
   const [snapshotVersion, setSnapshotVersion] = useState(opportunity?.version || 1);
   const [busySection, setBusySection] = useState(null);
   const [error, setError] = useState("");
+  const [errorAction, setErrorAction] = useState(null);
   const [conflict, setConflict] = useState(null);
   const [reviewing, setReviewing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -129,7 +145,7 @@ export function MarketingOpportunitySheet({
     setOverview(valuesFor(opportunity, OVERVIEW_FIELDS));
     setQualification(valuesFor(opportunity, QUALIFICATION_FIELDS));
     setSnapshotVersion(opportunity?.version || 1);
-    setError(""); setConflict(null);
+    setError(""); setErrorAction(null); setConflict(null);
   }, [opportunity?.id, opportunity?.version]);
   useEffect(() => { setLocalContacts(contacts); }, [contacts]);
   useEffect(() => { setLocalActivities(activities); }, [activities]);
@@ -149,6 +165,19 @@ export function MarketingOpportunitySheet({
   const userName = id => lookups.usersById?.[id]?.name || users.find(user => user.id === id)?.name || "Unknown user";
   const contactName = id => lookups.contactsById?.[id]?.name || contacts.find(contact => (contact.contactId || contact.id) === id)?.name || "Unknown contact";
   const setField = (key, value) => setActiveDraft(draft => ({ ...draft, [key]: value }));
+  const relations = () => ({
+    contacts: localContacts, activities: localActivities, tasks: localTasks,
+    documents: localDocuments, history: current?.history || history,
+  });
+  const reconcileRelation = (key, rows) => {
+    if (key === "contacts") setLocalContacts(rows);
+    if (key === "activities") setLocalActivities(rows);
+    if (key === "tasks") setLocalTasks(rows);
+    if (key === "documents") setLocalDocuments(rows);
+    const enriched = mergeMarketingRelations(current, { ...relations(), [key]: rows });
+    setCurrent(enriched);
+    onSaved?.(enriched);
+  };
 
   const requestClose = () => {
     if (dirty) setConfirmClose(true);
@@ -161,20 +190,26 @@ export function MarketingOpportunitySheet({
       setError("Opportunity name is required.");
       return;
     }
-    setBusySection(section); setError(""); setConflict(null);
+    setBusySection(section); setError(""); setErrorAction(null); setConflict(null);
     const fields = section === "overview" ? OVERVIEW_FIELDS : QUALIFICATION_FIELDS;
     const baseline = section === "overview" ? baselineOverview : baselineQualification;
     const draft = section === "overview" ? overview : qualification;
-    const patch = Object.fromEntries(fields.filter(field => !same(draft[field], baseline[field])).map(field => [field, field === "productTags" || field === "showcaseProducts" ? (Array.isArray(draft[field]) ? draft[field] : String(draft[field] || "").split(",").map(value => value.trim()).filter(Boolean)) : draft[field]]));
+    const patch = Object.fromEntries(fields.filter(field => !same(draft[field], baseline[field])).map(field => [
+      field,
+      field === "productTags" || field === "showcaseProducts"
+        ? (Array.isArray(draft[field]) ? draft[field] : String(draft[field] || "").split(",").map(value => value.trim()).filter(Boolean))
+        : DATETIME_FIELDS.has(field) ? fromMarketingDateTimeLocal(draft[field]) : draft[field],
+    ]));
     try {
       const saved = await attemptMarketingSectionSave({ api: updateApi, id: current.id, draft: patch, version: snapshotVersion });
-      setCurrent(saved); setSnapshotVersion(saved.version);
-      setOverview(valuesFor(saved, OVERVIEW_FIELDS)); setQualification(valuesFor(saved, QUALIFICATION_FIELDS));
-      onSaved?.(saved);
+      const enriched = mergeMarketingRelations(saved, relations());
+      setCurrent(enriched); setSnapshotVersion(enriched.version);
+      setOverview(valuesFor(enriched, OVERVIEW_FIELDS)); setQualification(valuesFor(enriched, QUALIFICATION_FIELDS));
+      onSaved?.(enriched);
     } catch (saveError) {
       if (saveError instanceof MarketingConflictError || saveError?.code === "MARKETING_CONFLICT") {
         setConflict({ error: saveError, latest: null });
-      } else setError(saveError.message || "The section could not be saved. Your draft is still here; try again.");
+      } else { setError(saveError.message || "The section could not be saved. Your draft is still here; try again."); setErrorAction("save"); }
     } finally { setBusySection(null); }
   };
 
@@ -195,21 +230,24 @@ export function MarketingOpportunitySheet({
   };
 
   const performArchive = async () => {
-    setBusySection("archive"); setError("");
+    setBusySection("archive"); setError(""); setErrorAction(null);
     try { const saved = await archiveApi(current.id, snapshotVersion); onArchived?.(saved); }
-    catch (archiveError) { setError(archiveError.message || "The opportunity could not be archived."); }
+    catch (archiveError) { setError(archiveError.message || "The opportunity could not be archived."); setErrorAction("archive"); }
     finally { setBusySection(null); setConfirmArchive(false); }
   };
 
   const performRestore = async () => {
-    setBusySection("restore"); setError("");
-    try { const saved = await restoreApi(current.id, snapshotVersion); setCurrent(saved); setSnapshotVersion(saved.version); onRestored?.(saved); }
-    catch (restoreError) { setError(restoreError.message || "The opportunity could not be restored."); }
+    setBusySection("restore"); setError(""); setErrorAction(null);
+    try {
+      const saved = mergeMarketingRelations(await restoreApi(current.id, snapshotVersion), relations());
+      setCurrent(saved); setSnapshotVersion(saved.version); onRestored?.(saved);
+    }
+    catch (restoreError) { setError(restoreError.message || "The opportunity could not be restored."); setErrorAction("restore"); }
     finally { setBusySection(null); }
   };
 
   const activityCreated = async row => {
-    setLocalActivities(list => [row, ...list]);
+    reconcileRelation("activities", [row, ...localActivities]);
     try {
       const latest = await freshApi(current.id);
       if (latest) {
@@ -220,12 +258,18 @@ export function MarketingOpportunitySheet({
   };
 
   const taskChanged = (row, action) => {
-    setLocalTasks(list => action === "created" ? [row, ...list] : list.map(item => item.id === row.id ? row : item));
+    reconcileRelation("tasks", action === "created" ? [row, ...localTasks] : localTasks.map(item => item.id === row.id ? row : item));
+    freshApi(current.id).then(latest => {
+      if (!latest) return;
+      setCurrent(latest); setSnapshotVersion(latest.version); onSaved?.(latest);
+    }).catch(() => {});
   };
 
   if (!current) return null;
   const field = (label, key, props = {}) => <Field label={label} htmlFor={`marketing-${key}`} className={props.wide ? "marketing-field-wide" : undefined}><Input id={`marketing-${key}`} value={activeDraft[key] ?? ""} onChange={event => setField(key, event.target.value)} {...props.input}/></Field>;
   const area = (label, key) => <Field label={label} htmlFor={`marketing-${key}`} className="marketing-field-wide"><Textarea id={`marketing-${key}`} value={activeDraft[key] ?? ""} onChange={event => setField(key, event.target.value)}/></Field>;
+  const selectField = (label, key, options, emptyLabel) => <Field label={label} htmlFor={`marketing-${key}`}><select id={`marketing-${key}`} className="select" value={activeDraft[key] || ""} onChange={event => setField(key, event.target.value)}><option value="">{emptyLabel}</option>{options.map(option => <option key={option.id} value={option.id}>{option.name || option.display_name || option.email || "Unnamed"}</option>)}</select></Field>;
+  const contactOptions = localContacts.map(link => ({ id: link.contactId || link.id, name: link.name || contactName(link.contactId || link.id) }));
 
   return (
     <>
@@ -238,7 +282,7 @@ export function MarketingOpportunitySheet({
           </SheetHeader>
           <Tabs value={section} onValueChange={setSection}><TabsList variant="underline" className="marketing-sheet-tabs" aria-label="Opportunity details">{SECTIONS.map(item => <TabsTrigger key={item.key} value={item.key}>{item.label}</TabsTrigger>)}</TabsList></Tabs>
           <SheetBody>
-            {error && <div ref={errorRef} tabIndex={-1}><Alert role="alert" tone="danger" title="Could not save">{error}<Button size="sm" variant="default" onClick={saveSection}>Retry</Button></Alert></div>}
+            {error && <div ref={errorRef} tabIndex={-1}><Alert role="alert" tone="danger" title="Could not save">{error}{errorAction && <Button size="sm" variant="default" onClick={errorAction === "archive" ? performArchive : errorAction === "restore" ? performRestore : saveSection}>Retry</Button>}</Alert></div>}
             {conflict && <ConflictPanel conflict={conflict} draft={activeDraft} onReview={reviewLatest} onKeep={keepDraft} reviewing={reviewing}/>} 
 
             {section === "overview" && <div className="marketing-form-grid">
@@ -249,22 +293,22 @@ export function MarketingOpportunitySheet({
               {field("Next action due", "nextActionDueAt", { input: { type: "datetime-local" } })}{field("Expected close date", "expectedCloseDate", { input: { type: "date" } })}
               {field("Estimated value", "estimatedValue", { input: { type: "number", min: 0, step: "0.01" } })}{field("Probability", "probability", { input: { type: "number", min: 0, max: 100 } })}
               <Field label="Products" htmlFor="marketing-productTags" className="marketing-field-wide"><Input id="marketing-productTags" value={Array.isArray(overview.productTags) ? overview.productTags.join(", ") : overview.productTags} onChange={event => setField("productTags", event.target.value)}/></Field>
-              <div className="marketing-field-wide"><MarketingContactsPanel opportunity={current} contacts={localContacts} clients={clients} onChanged={setLocalContacts}/></div>
+              <div className="marketing-field-wide"><MarketingContactsPanel opportunity={current} contacts={localContacts} clients={clients} onChanged={rows => reconcileRelation("contacts", rows)}/></div>
             </div>}
 
             {section === "qualification" && <div className="marketing-qualification">
               <fieldset><legend>Initial showcase</legend><div className="marketing-form-grid">{field("Meeting date", "showcaseMeetingAt", { input: { type: "datetime-local" } })}{field("Location", "showcaseLocation")}{area("Products showcased", "showcaseProducts")}{area("Attendees", "showcaseAttendeesSummary")}{area("Fit", "showcaseFit")}{area("Outcome", "showcaseOutcome")}</div></fieldset>
-              <fieldset><legend>IQM - Initial Qualified Meeting</legend><div className="marketing-form-grid">{area("Problem statement", "problemStatement")}{area("Desired outcome", "desiredOutcome")}{area("Solution fit", "solutionFit")}{area("Clarifying questions", "clarifyingQuestions")}{field("Clarifying questions due", "clarifyingDueAt", { input: { type: "datetime-local" } })}{field("Answers status", "clarifyingAnswersStatus")}{field("Draft SOW status", "draftSowStatus")}</div></fieldset>
-              <fieldset><legend>BANT - Budget Authority Need Time</legend><div className="marketing-bant-grid"><section><h4>Budget</h4>{field("Budget amount", "budgetAmount", { input: { type: "number", min: 0 } })}{field("Budget status", "budgetStatus")}{area("Budget notes", "budgetNotes")}</section><section><h4>Authority</h4>{field("Authority contact", "authorityContactId")}{area("Authority notes", "authorityNotes")}</section><section><h4>Need</h4>{area("Need summary", "needSummary")}</section><section><h4>Time</h4>{area("Timing summary", "timingSummary")}{area("Decision process", "decisionProcess")}</section></div></fieldset>
+              <fieldset><legend>IQM - Initial Qualified Meeting</legend><div className="marketing-form-grid">{area("Problem statement", "problemStatement")}{area("Desired outcome", "desiredOutcome")}{area("Solution fit", "solutionFit")}{area("Clarifying questions", "clarifyingQuestions")}{selectField("Clarifying owner", "clarifyingOwnerId", users, "Unassigned")}{field("Clarifying questions due", "clarifyingDueAt", { input: { type: "datetime-local" } })}{field("Answers status", "clarifyingAnswersStatus")}{field("Draft SOW status", "draftSowStatus")}</div></fieldset>
+              <fieldset><legend>BANT - Budget Authority Need Time</legend><div className="marketing-bant-grid"><section><h4>Budget</h4>{field("Budget amount", "budgetAmount", { input: { type: "number", min: 0 } })}{field("Budget status", "budgetStatus")}{area("Budget notes", "budgetNotes")}</section><section><h4>Authority</h4>{selectField("Authority contact", "authorityContactId", contactOptions, "Not selected")}{area("Authority notes", "authorityNotes")}</section><section><h4>Need</h4>{area("Need summary", "needSummary")}</section><section><h4>Time</h4>{area("Timing summary", "timingSummary")}{area("Decision process", "decisionProcess")}</section></div></fieldset>
               <fieldset><legend>Proposal</legend><div className="marketing-form-grid">{field("Proposal version", "proposalVersion")}{field("Proposal value", "proposalValue", { input: { type: "number", min: 0 } })}{field("Proposal sent", "proposalSentAt", { input: { type: "datetime-local" } })}{field("Anticipated decision date", "anticipatedDecisionDate", { input: { type: "date" } })}{area("Scope summary", "scopeSummary")}</div></fieldset>
-              <fieldset><legend>Verbal approval</legend><div className="marketing-form-grid">{field("Verbal approval date", "verbalApprovalAt", { input: { type: "datetime-local" } })}{field("Approver contact", "verbalApproverContactId")}{field("Target signature date", "targetSignatureDate", { input: { type: "date" } })}{area("Verbal terms", "verbalTerms")}{area("Signature risks", "signatureRisks")}{area("Resource planning note", "resourcePlanningNote")}</div></fieldset>
-              <fieldset><legend>Legal and contract</legend><div className="marketing-form-grid">{field("MSA status", "msaStatus")}{field("SOW status", "sowStatus")}{field("Legal owner", "legalOwnerId")}{field("Customer legal contact", "customerLegalContactId")}{field("Redline status", "redlineStatus")}{field("Latest document version", "latestDocumentVersion")}{area("Legal issues", "legalIssues")}</div></fieldset>
+              <fieldset><legend>Verbal approval</legend><div className="marketing-form-grid">{field("Verbal approval date", "verbalApprovalAt", { input: { type: "datetime-local" } })}{selectField("Approver contact", "verbalApproverContactId", contactOptions, "Not selected")}{field("Target signature date", "targetSignatureDate", { input: { type: "date" } })}{area("Verbal terms", "verbalTerms")}{area("Signature risks", "signatureRisks")}{area("Resource planning note", "resourcePlanningNote")}</div></fieldset>
+              <fieldset><legend>Legal and contract</legend><div className="marketing-form-grid">{field("MSA status", "msaStatus")}{field("SOW status", "sowStatus")}{selectField("Legal owner", "legalOwnerId", users, "Unassigned")}{selectField("Customer legal contact", "customerLegalContactId", contactOptions, "Not selected")}{field("Redline status", "redlineStatus")}{field("Latest document version", "latestDocumentVersion")}{area("Legal issues", "legalIssues")}{field("Competitor", "competitor")}{area("Lesson learned", "lessonLearned")}</div></fieldset>
             </div>}
 
             {section === "activity" && <MarketingActivityPanel opportunityId={current.id} activities={localActivities} users={users} contacts={localContacts} onCreated={activityCreated}/>}
             {section === "tasks" && <MarketingTaskPanel opportunityId={current.id} tasks={localTasks} users={users} onChanged={taskChanged}/>}
-            {section === "documents" && <MarketingDocumentPanel opportunityId={current.id} documents={localDocuments} onChanged={setLocalDocuments}/>}
-            {section === "history" && <section className="marketing-detail-list"><h3>History</h3>{history.length ? history.map(item => <article key={item.id}><strong>{item.fromStage || "Created"} → {item.toStage}</strong><span>{userName(item.changedBy)} · {displayDate(item.changedAt)}</span>{item.transitionNote && <p>{item.transitionNote}</p>}</article>) : <p>No stage changes yet.</p>}</section>}
+            {section === "documents" && <MarketingDocumentPanel opportunityId={current.id} documents={localDocuments} onChanged={rows => reconcileRelation("documents", rows)}/>}
+            {section === "history" && <section className="marketing-detail-list"><h3>History</h3>{(current.history || history).length ? (current.history || history).map(item => <article key={item.id}><strong>{item.fromStage || "Created"} → {item.toStage}</strong><span>{userName(item.changedBy)} · {displayDate(item.changedAt)}</span>{item.transitionNote && <p>{item.transitionNote}</p>}</article>) : <p>No stage changes yet.</p>}</section>}
           </SheetBody>
           <SheetFooter>
             {current.archivedAt ? <Button variant="primary" onClick={performRestore} disabled={!!busySection}><Icon name="restore"/>Restore opportunity</Button> : <Button variant="destructive-soft" onClick={() => setConfirmArchive(true)} disabled={!!busySection}><Icon name="trash"/>Archive opportunity</Button>}
