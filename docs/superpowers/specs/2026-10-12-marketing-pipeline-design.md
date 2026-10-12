@@ -179,7 +179,7 @@ The feature lives in focused modules rather than adding another large implementa
 - `frontend/src/marketing-rules.js` owns stages, defaults, validation, health, weighted value, transition requirements, filtering, and reporting calculations as pure functions.
 - `frontend/src/marketing-components/` contains board, card, transition dialog, opportunity sheet sections, filters, list, and insight components.
 - `frontend/src/data.js` exposes the Supabase adapters and write functions needed by the module.
-- `frontend/src/styles.css` receives the Marketing-specific responsive styles using existing design tokens and shared `@/ui` primitives.
+- `frontend/src/design/pages/marketing.css` receives the Marketing-specific responsive styles, is imported by `frontend/src/design/index.css`, and uses existing design tokens and shared `@/ui` primitives.
 
 Marketing data loads when the page is first visited rather than joining the already-large global `loadBeacon()` request. The page owns loading, error, empty, and retry states. Successful writes return authoritative database rows and update local state from those rows. Writes are never reported as successful solely because an optimistic state change rendered.
 
