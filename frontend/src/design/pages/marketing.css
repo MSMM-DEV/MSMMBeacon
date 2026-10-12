@@ -28,13 +28,13 @@
 
 .marketing-board-wrap { min-width: 0; }
 .marketing-mobile-stage { display: none; }
-.marketing-board { display: grid; grid-template-columns: repeat(7, minmax(300px, 340px)); align-items: start; gap: 12px; padding: 2px 2px 14px; overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x proximity; }
-.marketing-lane { min-width: 0; min-height: 260px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); scroll-snap-align: start; }
+.marketing-board { display: grid; grid-template-columns: repeat(7, minmax(300px, 340px)); align-items: stretch; gap: 12px; height: clamp(480px, 70dvh, 720px); padding: 2px 2px 14px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; scroll-snap-type: x proximity; }
+.marketing-lane { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); scroll-snap-align: start; }
 .marketing-lane-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-height: 88px; padding: 14px; border-bottom: 1px solid var(--border); border-radius: 14px 14px 0 0; background: color-mix(in srgb, var(--surface-2) 95%, transparent); backdrop-filter: blur(10px); }
 .marketing-lane-head > div { min-width: 0; }
 .marketing-lane-head h3 { margin: 0; color: var(--text); font-size: 14px; font-weight: 650; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
 .marketing-lane-head span { display: block; margin-top: 5px; color: var(--text-muted); font-size: 12px; }
-.marketing-lane-cards { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.marketing-lane-cards { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; padding: 10px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .marketing-lane-empty { margin: 0; padding: 24px 12px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-muted); font-size: 13px; text-align: center; }
 
 .marketing-card { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow-xs); }
@@ -181,10 +181,11 @@
   .marketing-toolbar > button { position: fixed; z-index: 20; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); min-height: 48px; box-shadow: var(--shadow-lg); }
   .marketing-mobile-stage { display: grid; gap: 6px; margin-bottom: 10px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
   .marketing-mobile-stage select { min-height: 44px; font-size: 14px; }
-  .marketing-board { display: block; padding: 0; overflow: visible; }
+  .marketing-board { display: block; height: auto; padding: 0; overflow: visible; }
   .marketing-lane { display: none; width: 100%; min-height: 220px; }
-  .marketing-lane[data-mobile-active="true"] { display: block; }
+  .marketing-lane[data-mobile-active="true"] { display: block; height: auto; overflow: visible; }
   .marketing-lane-head { position: static; min-height: 0; }
+  .marketing-lane-cards { overflow: visible; }
   .marketing-card { padding: 16px; }
   .marketing-card-open,
   .marketing-card-move select { min-height: 44px; }
