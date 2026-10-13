@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  Badge, Button, Field, Input, Sheet, SheetBody, SheetContent, SheetDescription,
-  SheetFooter, SheetHeader, SheetTitle, Tabs, TabsList, TabsTrigger, Textarea,
+  Badge, Button, Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, Field, Input, Tabs, TabsList, TabsTrigger, Textarea,
 } from "@/ui";
 import { Icon } from "../icons.jsx";
 import {
@@ -11,6 +11,7 @@ import {
   addMarketingContact,
   archiveMarketingOpportunity,
   loadMarketingOpportunityFresh,
+  reloadDirectory,
   removeMarketingContact,
   restoreMarketingOpportunity,
   updateMarketingContact,
@@ -21,7 +22,9 @@ import {
   attemptMarketingSectionSave,
   changedMarketingFields,
   fromMarketingDateTimeLocal,
+  marketingDirectoryContactOptions,
   mergeMarketingRelations,
+  saveMarketingStakeholder,
   toMarketingDateTimeLocal,
 } from "./marketing-sheet-model.js";
 import { MarketingActivityPanel } from "./MarketingActivityPanel.jsx";
@@ -31,10 +34,10 @@ import { MarketingDocumentPanel } from "./MarketingDocumentPanel.jsx";
 const SECTIONS = [
   { key: "overview", label: "Overview" },
   { key: "qualification", label: "Qualification" },
+  { key: "people", label: "People" },
   { key: "activity", label: "Activity" },
   { key: "tasks", label: "Tasks" },
-  { key: "documents", label: "Documents" },
-  { key: "history", label: "History" },
+  { key: "files", label: "Files & History" },
 ];
 
 const OVERVIEW_FIELDS = [
@@ -64,6 +67,9 @@ const valuesFor = (opportunity, fields) => Object.fromEntries(fields.map(field =
 ]));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const displayDate = value => value ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Not recorded";
+const displayMoney = value => value === null || value === undefined || value === ""
+  ? "Not set"
+  : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value));
 
 function ConflictPanel({ conflict, draft, onReview, onKeep, reviewing }) {
   const changed = conflict.latest ? changedMarketingFields(conflict.latest, draft) : [];
@@ -79,24 +85,31 @@ function ConflictPanel({ conflict, draft, onReview, onKeep, reviewing }) {
   );
 }
 
-function MarketingContactsPanel({ opportunity, contacts, clients, onChanged }) {
+function MarketingContactsPanel({ opportunity, contacts, clients, onChanged, onRefreshDirectory, refreshing }) {
   const company = clients.find(client => client.id === opportunity.clientId);
-  const available = (company?.contacts || []).filter(contact => !contacts.some(link => link.contactId === contact.id));
+  const [search, setSearch] = useState("");
   const [form, setForm] = useState({ contactId: "", role: "Champion", isPrimary: false, notes: "", newName: "", newEmail: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const available = useMemo(
+    () => marketingDirectoryContactOptions(clients, contacts, search),
+    [clients, contacts, search],
+  );
   const submit = async event => {
     event.preventDefault(); setSaving(true); setError("");
     try {
-      let contactId = form.contactId;
-      if (!contactId && form.newName.trim()) {
-        const created = await addContact({ companyId: opportunity.clientId, name: form.newName, email: form.newEmail });
-        contactId = created.id;
-      }
-      if (!contactId) throw new Error("Choose or create a Directory contact.");
-      const linked = await addMarketingContact({ opportunityId: opportunity.id, contactId, role: form.role, isPrimary: form.isPrimary, notes: form.notes });
-      onChanged([...contacts, linked]);
+      const result = await saveMarketingStakeholder({
+        opportunityId: opportunity.id,
+        companyId: opportunity.clientId,
+        form,
+        createContact: addContact,
+        linkContact: addMarketingContact,
+        refreshDirectory: onRefreshDirectory,
+      });
+      onChanged([...contacts, result.linked]);
+      if (result.refreshError) setError(`Stakeholder linked, but the Directory could not refresh: ${result.refreshError}`);
       setForm({ contactId: "", role: "Champion", isPrimary: false, notes: "", newName: "", newEmail: "" });
+      setSearch("");
     } catch (saveError) { setError(saveError.message || "The contact could not be linked."); }
     finally { setSaving(false); }
   };
@@ -110,13 +123,50 @@ function MarketingContactsPanel({ opportunity, contacts, clients, onChanged }) {
     try { await removeMarketingContact(opportunity.id, link.contactId); onChanged(contacts.filter(item => item.contactId !== link.contactId)); }
     catch (saveError) { setError(saveError.message || "The stakeholder could not be unlinked."); }
   };
-  return <section className="marketing-stakeholders"><h3>Stakeholders</h3>{error && <Alert role="alert" tone="danger">{error}</Alert>}<div className="marketing-contact-list">{contacts.map(link => <article key={link.contactId}><div><strong>{link.name}</strong><span>{link.email || "No email"}</span></div><select aria-label={`Role for ${link.name}`} value={link.role} onChange={event => update(link, { role: event.target.value })}>{MARKETING_CONTACT_ROLES.map(role => <option key={role}>{role}</option>)}</select><label><input type="checkbox" checked={link.isPrimary} onChange={event => update(link, { isPrimary: event.target.checked })}/> Primary</label><Input aria-label={`Notes for ${link.name}`} defaultValue={link.notes || ""} onBlur={event => update(link, { notes: event.target.value })}/><Button size="sm" variant="ghost" onClick={() => unlink(link)}>Unlink</Button></article>)}</div><form onSubmit={submit} className="marketing-contact-add"><Field label="Directory contact" htmlFor="marketing-link-contact"><select id="marketing-link-contact" value={form.contactId} onChange={event => setForm(current => ({ ...current, contactId: event.target.value }))}><option value="">Choose contact</option>{available.map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></Field><Field label="Role" htmlFor="marketing-contact-role"><select id="marketing-contact-role" value={form.role} onChange={event => setForm(current => ({ ...current, role: event.target.value }))}>{MARKETING_CONTACT_ROLES.map(role => <option key={role}>{role}</option>)}</select></Field><Field label="Or create contact" htmlFor="marketing-new-contact"><Input id="marketing-new-contact" placeholder="Full name" value={form.newName} onChange={event => setForm(current => ({ ...current, newName: event.target.value }))}/></Field><Field label="Email" htmlFor="marketing-new-contact-email"><Input id="marketing-new-contact-email" type="email" value={form.newEmail} onChange={event => setForm(current => ({ ...current, newEmail: event.target.value }))}/></Field><label><input type="checkbox" checked={form.isPrimary} onChange={event => setForm(current => ({ ...current, isPrimary: event.target.checked }))}/> Primary contact</label><Button type="submit" variant="default" loading={saving}>Link stakeholder</Button></form></section>;
+  return (
+    <section className="marketing-stakeholders">
+      <header className="marketing-section-heading">
+        <div><h3>People and decision-makers</h3><p>Connect anyone from the Directory, then record their role in this opportunity.</p></div>
+        <Button type="button" size="sm" variant="ghost" onClick={() => onRefreshDirectory?.().catch(refreshError => setError(refreshError.message || "Directory contacts could not be refreshed."))} disabled={refreshing} loading={refreshing}><Icon name="refresh"/>Refresh Directory</Button>
+      </header>
+      {error && <Alert role="alert" tone="danger">{error}</Alert>}
+      <div className="marketing-contact-list">
+        {contacts.length ? contacts.map(link => {
+          const organization = clients.find(client => client.id === link.companyId)?.name;
+          return <article key={link.contactId}>
+            <div className="marketing-contact-person"><strong>{link.name}</strong><span>{link.email || "No email"}</span>{organization && <small>{organization}</small>}</div>
+            <select aria-label={`Role for ${link.name}`} value={link.role} onChange={event => update(link, { role: event.target.value })}>{MARKETING_CONTACT_ROLES.map(role => <option key={role}>{role}</option>)}</select>
+            <label className="marketing-primary-check"><input type="checkbox" checked={link.isPrimary} onChange={event => update(link, { isPrimary: event.target.checked })}/> Primary</label>
+            <Input aria-label={`Notes for ${link.name}`} placeholder="Relationship notes" defaultValue={link.notes || ""} onBlur={event => update(link, { notes: event.target.value })}/>
+            <Button type="button" size="sm" variant="ghost" onClick={() => unlink(link)}>Unlink</Button>
+          </article>;
+        }) : <p className="marketing-empty-note">No stakeholders linked yet.</p>}
+      </div>
+      <form onSubmit={submit} className="marketing-contact-add">
+        <div className="marketing-contact-add-heading"><h4>Link a stakeholder</h4><p>Search the full Directory or create a contact for {company?.name || "this opportunity’s organization"}.</p></div>
+        <Field label="Search Directory" htmlFor="marketing-contact-search" className="marketing-field-wide"><Input id="marketing-contact-search" type="search" placeholder="Name, email, or organization" value={search} onChange={event => setSearch(event.target.value)}/></Field>
+        <Field label="Directory contact" htmlFor="marketing-link-contact" className="marketing-field-wide">
+          <select id="marketing-link-contact" value={form.contactId} onChange={event => setForm(current => ({ ...current, contactId: event.target.value, newName: event.target.value ? "" : current.newName, newEmail: event.target.value ? "" : current.newEmail }))}>
+            <option value="">{available.length ? "Choose contact" : "No unlinked contacts match"}</option>
+            {available.map(contact => <option key={contact.id} value={contact.id}>{contact.label}{contact.email ? ` · ${contact.email}` : ""}</option>)}
+          </select>
+        </Field>
+        <div className="marketing-contact-divider marketing-field-wide"><span>or create a Directory contact</span></div>
+        <Field label="Full name" htmlFor="marketing-new-contact"><Input id="marketing-new-contact" placeholder="Full name" value={form.newName} onChange={event => setForm(current => ({ ...current, contactId: event.target.value ? "" : current.contactId, newName: event.target.value }))}/></Field>
+        <Field label="Email" htmlFor="marketing-new-contact-email"><Input id="marketing-new-contact-email" type="email" value={form.newEmail} onChange={event => setForm(current => ({ ...current, newEmail: event.target.value }))}/></Field>
+        <Field label="Relationship role" htmlFor="marketing-contact-role"><select id="marketing-contact-role" value={form.role} onChange={event => setForm(current => ({ ...current, role: event.target.value }))}>{MARKETING_CONTACT_ROLES.map(role => <option key={role}>{role}</option>)}</select></Field>
+        <Field label="Notes" htmlFor="marketing-contact-notes"><Input id="marketing-contact-notes" placeholder="Influence, priorities, follow-up" value={form.notes} onChange={event => setForm(current => ({ ...current, notes: event.target.value }))}/></Field>
+        <label className="marketing-primary-check"><input type="checkbox" checked={form.isPrimary} onChange={event => setForm(current => ({ ...current, isPrimary: event.target.checked }))}/> Primary contact</label>
+        <Button type="submit" variant="primary" loading={saving} disabled={saving || (!form.contactId && !form.newName.trim())}>Link stakeholder</Button>
+      </form>
+    </section>
+  );
 }
 
 export function MarketingOpportunitySheet({
   opportunity,
   contacts = [], activities = [], tasks = [], documents = [], history = [],
-  lookups = {}, onSaved, onArchived, onRestored, onClose,
+  lookups = {}, onSaved, onArchived, onRestored, onClose, onDirectoryRefresh,
   api = {},
 }) {
   const updateApi = api.update || updateMarketingOpportunity;
@@ -139,6 +189,8 @@ export function MarketingOpportunitySheet({
   const [localActivities, setLocalActivities] = useState(activities);
   const [localTasks, setLocalTasks] = useState(tasks);
   const [localDocuments, setLocalDocuments] = useState(documents);
+  const [directoryClients, setDirectoryClients] = useState(lookups.clients || []);
+  const [directoryRefreshing, setDirectoryRefreshing] = useState(false);
   const errorRef = useRef(null);
 
   useEffect(() => {
@@ -152,7 +204,24 @@ export function MarketingOpportunitySheet({
   useEffect(() => { setLocalActivities(activities); }, [activities]);
   useEffect(() => { setLocalTasks(tasks); }, [tasks]);
   useEffect(() => { setLocalDocuments(documents); }, [documents]);
+  useEffect(() => { setDirectoryClients(lookups.clients || []); }, [lookups.clients]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
+
+  const refreshDirectory = useCallback(async () => {
+    setDirectoryRefreshing(true);
+    try {
+      const fresh = await reloadDirectory();
+      setDirectoryClients(fresh);
+      onDirectoryRefresh?.(fresh);
+      return fresh;
+    } finally { setDirectoryRefreshing(false); }
+  }, [onDirectoryRefresh]);
+
+  useEffect(() => {
+    if (section !== "people") return undefined;
+    refreshDirectory().catch(refreshError => setError(refreshError.message || "Directory contacts could not be refreshed."));
+    return undefined;
+  }, [section, refreshDirectory]);
 
   const baselineOverview = useMemo(() => valuesFor(current, OVERVIEW_FIELDS), [current]);
   const baselineQualification = useMemo(() => valuesFor(current, QUALIFICATION_FIELDS), [current]);
@@ -162,7 +231,7 @@ export function MarketingOpportunitySheet({
   const activeDraft = section === "qualification" ? qualification : overview;
   const setActiveDraft = section === "qualification" ? setQualification : setOverview;
   const users = lookups.users || [];
-  const clients = lookups.clients || [];
+  const clients = directoryClients;
   const userName = id => lookups.usersById?.[id]?.name || users.find(user => user.id === id)?.name || "Unknown user";
   const contactName = id => lookups.contactsById?.[id]?.name || contacts.find(contact => (contact.contactId || contact.id) === id)?.name || "Unknown contact";
   const setField = (key, value) => setActiveDraft(draft => ({ ...draft, [key]: value }));
@@ -274,27 +343,39 @@ export function MarketingOpportunitySheet({
 
   return (
     <>
-      <Sheet open onOpenChange={open => { if (!open) requestClose(); }}>
-        <SheetContent side="right" className="marketing-opportunity-sheet" aria-describedby="marketing-sheet-description">
-          <SheetHeader>
-            <div><Badge tone={current.outcome === "won" ? "success" : current.outcome === "lost" ? "danger" : "brand"}>{current.stage}</Badge></div>
-            <SheetTitle>{current.title}</SheetTitle>
-            <SheetDescription id="marketing-sheet-description">Complete the evidence for the current stage and keep the next action clear.</SheetDescription>
-          </SheetHeader>
+      <Dialog open onOpenChange={open => { if (!open) requestClose(); }}>
+        <DialogContent size="xl" className="marketing-opportunity-dialog" aria-describedby="marketing-dialog-description">
+          <DialogHeader className="marketing-dialog-header">
+            <div className="marketing-dialog-kicker"><Badge tone={current.outcome === "won" ? "success" : current.outcome === "lost" ? "danger" : "brand"}>{current.stage}</Badge>{current.archivedAt && <Badge tone="neutral">Archived</Badge>}</div>
+            <DialogTitle>{overview.title || current.title}</DialogTitle>
+            <DialogDescription id="marketing-dialog-description">Keep the decision path, next action, and supporting evidence together.</DialogDescription>
+            <div className="marketing-dialog-summary" aria-label="Opportunity summary">
+              <div><span>Organization</span><strong>{clients.find(client => client.id === overview.clientId)?.name || current.organizationName || "Not set"}</strong></div>
+              <div><span>Owner</span><strong>{users.find(user => user.id === overview.ownerId)?.name || current.ownerName || "Unassigned"}</strong></div>
+              <div><span>Probability</span><strong>{overview.probability === "" || overview.probability === null ? "Not set" : `${overview.probability}%`}</strong></div>
+              <div><span>Value</span><strong>{displayMoney(overview.estimatedValue)}</strong></div>
+              <div className="marketing-dialog-next"><span>Next action</span><strong>{overview.nextAction || "No next action recorded"}</strong></div>
+            </div>
+          </DialogHeader>
           <Tabs value={section} onValueChange={setSection}><TabsList variant="underline" className="marketing-sheet-tabs" aria-label="Opportunity details">{SECTIONS.map(item => <TabsTrigger key={item.key} value={item.key}>{item.label}</TabsTrigger>)}</TabsList></Tabs>
-          <SheetBody>
-            {error && <div ref={errorRef} tabIndex={-1}><Alert role="alert" tone="danger" title="Could not save">{error}{errorAction && <Button size="sm" variant="default" onClick={errorAction === "archive" ? performArchive : errorAction === "restore" ? performRestore : saveSection}>Retry</Button>}</Alert></div>}
+          <DialogBody className="marketing-dialog-body">
+            {error && <div ref={errorRef} tabIndex={-1}><Alert role="alert" tone="danger" title="Something needs attention">{error}{errorAction && <Button size="sm" variant="default" onClick={errorAction === "archive" ? performArchive : errorAction === "restore" ? performRestore : saveSection}>Retry</Button>}</Alert></div>}
             {conflict && <ConflictPanel conflict={conflict} draft={activeDraft} onReview={reviewLatest} onKeep={keepDraft} reviewing={reviewing}/>} 
 
-            {section === "overview" && <div className="marketing-form-grid">
-              {field("Opportunity name", "title", { wide: true })}
-              <Field label="Organization" htmlFor="marketing-clientId"><select id="marketing-clientId" className="select" value={overview.clientId || ""} onChange={event => setField("clientId", event.target.value)}><option value="">Not set</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
-              <Field label="Owner" htmlFor="marketing-ownerId"><select id="marketing-ownerId" className="select" value={overview.ownerId || ""} onChange={event => setField("ownerId", event.target.value)}><option value="">Unassigned</option>{users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field>
-              {field("Source", "source")}{field("Introducer", "introducer")}{area("Summary", "summary")}{area("Next action", "nextAction")}
-              {field("Next action due", "nextActionDueAt", { input: { type: "datetime-local" } })}{field("Expected close date", "expectedCloseDate", { input: { type: "date" } })}
-              {field("Estimated value", "estimatedValue", { input: { type: "number", min: 0, step: "0.01" } })}{field("Probability", "probability", { input: { type: "number", min: 0, max: 100 } })}
-              <Field label="Products" htmlFor="marketing-productTags" className="marketing-field-wide"><Input id="marketing-productTags" value={Array.isArray(overview.productTags) ? overview.productTags.join(", ") : overview.productTags} onChange={event => setField("productTags", event.target.value)}/></Field>
-              <fieldset className="marketing-portfolio-context marketing-field-wide">
+            {section === "overview" && <div className="marketing-overview-sections">
+              <section className="marketing-detail-section"><div className="marketing-section-heading"><div><h3>Opportunity essentials</h3><p>The account, ownership, source, and product context.</p></div></div><div className="marketing-form-grid">
+                {field("Opportunity name", "title", { wide: true })}
+                <Field label="Organization" htmlFor="marketing-clientId"><select id="marketing-clientId" className="select" value={overview.clientId || ""} onChange={event => setField("clientId", event.target.value)}><option value="">Not set</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field>
+                <Field label="Owner" htmlFor="marketing-ownerId"><select id="marketing-ownerId" className="select" value={overview.ownerId || ""} onChange={event => setField("ownerId", event.target.value)}><option value="">Unassigned</option>{users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field>
+                {field("Source", "source")}{field("Introducer", "introducer")}
+                <Field label="Products" htmlFor="marketing-productTags" className="marketing-field-wide"><Input id="marketing-productTags" value={Array.isArray(overview.productTags) ? overview.productTags.join(", ") : overview.productTags} onChange={event => setField("productTags", event.target.value)}/></Field>
+              </div></section>
+              <section className="marketing-detail-section"><div className="marketing-section-heading"><div><h3>Next step and forecast</h3><p>What matters now, when it is due, and the current commercial outlook.</p></div></div><div className="marketing-form-grid">
+                {area("Summary", "summary")}{area("Next action", "nextAction")}
+                {field("Next action due", "nextActionDueAt", { input: { type: "datetime-local" } })}{field("Expected close date", "expectedCloseDate", { input: { type: "date" } })}
+                {field("Estimated value", "estimatedValue", { input: { type: "number", min: 0, step: "0.01" } })}{field("Probability", "probability", { input: { type: "number", min: 0, max: 100 } })}
+              </div></section>
+              <fieldset className="marketing-portfolio-context">
                 <legend>Portfolio context</legend>
                 <p>These fields preserve the operating view supplied by the marketing team. Beacon stage and probability remain the sales forecast controls.</p>
                 <div className="marketing-form-grid">
@@ -305,7 +386,6 @@ export function MarketingOpportunitySheet({
                   {field("Original sales phase", "sourceSalesPhase", { wide: true })}
                 </div>
               </fieldset>
-              <div className="marketing-field-wide"><MarketingContactsPanel opportunity={current} contacts={localContacts} clients={clients} onChanged={rows => reconcileRelation("contacts", rows)}/></div>
             </div>}
 
             {section === "qualification" && <div className="marketing-qualification">
@@ -317,17 +397,17 @@ export function MarketingOpportunitySheet({
               <fieldset><legend>Legal and contract</legend><div className="marketing-form-grid">{field("MSA status", "msaStatus")}{field("SOW status", "sowStatus")}{selectField("Legal owner", "legalOwnerId", users, "Unassigned")}{selectField("Customer legal contact", "customerLegalContactId", contactOptions, "Not selected")}{field("Redline status", "redlineStatus")}{field("Latest document version", "latestDocumentVersion")}{area("Legal issues", "legalIssues")}{field("Competitor", "competitor")}{area("Lesson learned", "lessonLearned")}</div></fieldset>
             </div>}
 
+            {section === "people" && <MarketingContactsPanel opportunity={current} contacts={localContacts} clients={clients} onChanged={rows => reconcileRelation("contacts", rows)} onRefreshDirectory={refreshDirectory} refreshing={directoryRefreshing}/>}
             {section === "activity" && <MarketingActivityPanel opportunityId={current.id} activities={localActivities} users={users} contacts={localContacts} onCreated={activityCreated}/>}
             {section === "tasks" && <MarketingTaskPanel opportunityId={current.id} tasks={localTasks} users={users} onChanged={taskChanged}/>}
-            {section === "documents" && <MarketingDocumentPanel opportunityId={current.id} documents={localDocuments} onChanged={rows => reconcileRelation("documents", rows)}/>}
-            {section === "history" && <section className="marketing-detail-list"><h3>History</h3>{(current.history || history).length ? (current.history || history).map(item => <article key={item.id}><strong>{item.fromStage || "Created"} → {item.toStage}</strong><span>{userName(item.changedBy)} · {displayDate(item.changedAt)}</span>{item.transitionNote && <p>{item.transitionNote}</p>}</article>) : <p>No stage changes yet.</p>}</section>}
-          </SheetBody>
-          <SheetFooter>
-            {current.archivedAt ? <Button variant="primary" onClick={performRestore} disabled={!!busySection}><Icon name="restore"/>Restore opportunity</Button> : <Button variant="destructive-soft" onClick={() => setConfirmArchive(true)} disabled={!!busySection}><Icon name="trash"/>Archive opportunity</Button>}
-            {(section === "overview" || section === "qualification") && <Button variant="primary" onClick={saveSection} disabled={!!busySection || !(section === "overview" ? dirtyOverview : dirtyQualification)} loading={busySection === section}>Save {SECTIONS.find(item => item.key === section)?.label}</Button>}
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+            {section === "files" && <div className="marketing-files-history"><MarketingDocumentPanel opportunityId={current.id} documents={localDocuments} onChanged={rows => reconcileRelation("documents", rows)}/><section className="marketing-detail-list"><h3>Stage history</h3>{(current.history || history).length ? (current.history || history).map(item => <article key={item.id}><strong>{item.fromStage || "Created"} → {item.toStage}</strong><span>{userName(item.changedBy)} · {displayDate(item.changedAt)}</span>{item.transitionNote && <p>{item.transitionNote}</p>}</article>) : <p>No stage changes yet.</p>}</section></div>}
+          </DialogBody>
+          <DialogFooter className="marketing-detail-footer">
+            <div>{current.archivedAt ? <Button variant="primary" onClick={performRestore} disabled={!!busySection}><Icon name="restore"/>Restore opportunity</Button> : <Button variant="destructive-soft" onClick={() => setConfirmArchive(true)} disabled={!!busySection}><Icon name="trash"/>Archive opportunity</Button>}</div>
+            <div><Button variant="default" onClick={requestClose} disabled={!!busySection}>Close</Button>{(section === "overview" || section === "qualification") && <Button variant="primary" onClick={saveSection} disabled={!!busySection || !(section === "overview" ? dirtyOverview : dirtyQualification)} loading={busySection === section}>Save {SECTIONS.find(item => item.key === section)?.label}</Button>}</div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle><AlertDialogDescription>Your draft changes have not been saved.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={onClose}>Discard and close</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <AlertDialog open={confirmArchive} onOpenChange={setConfirmArchive}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Archive opportunity?</AlertDialogTitle><AlertDialogDescription>It will leave active views but can be restored later. No history is deleted.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={performArchive}>Archive opportunity</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>

@@ -6983,6 +6983,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
               currentUser={currentUser}
               initialView={marketingDeepLink.view}
               initialOpportunityId={marketingDeepLink.opportunityId}
+              onDirectoryRefresh={setCompanies}
             />
           </React.Suspense>
         )}

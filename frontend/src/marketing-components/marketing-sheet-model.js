@@ -18,6 +18,62 @@ export function mergeMarketingRelations(opportunity, relations = {}) {
   };
 }
 
+export function marketingDirectoryContactOptions(companies = [], linkedContacts = [], search = "") {
+  const linkedIds = new Set((linkedContacts || []).map(link => link.contactId || link.id).filter(Boolean));
+  const query = String(search || "").trim().toLowerCase();
+  return (companies || []).flatMap(company => (company.contacts || []).map(contact => ({
+    id: contact.id,
+    name: contact.name || "Unnamed contact",
+    email: contact.email || "",
+    companyId: company.id,
+    companyName: company.name || "Unnamed organization",
+    label: `${contact.name || "Unnamed contact"} — ${company.name || "Unnamed organization"}`,
+  }))).filter(contact => {
+    if (!contact.id || linkedIds.has(contact.id)) return false;
+    if (!query) return true;
+    return `${contact.name} ${contact.email} ${contact.companyName}`.toLowerCase().includes(query);
+  }).sort((a, b) =>
+    a.companyName.localeCompare(b.companyName) || a.name.localeCompare(b.name)
+  );
+}
+
+export async function saveMarketingStakeholder({
+  opportunityId,
+  companyId,
+  form = {},
+  createContact,
+  linkContact,
+  refreshDirectory,
+}) {
+  let contactId = form.contactId || null;
+  let created = false;
+  if (!contactId && String(form.newName || "").trim()) {
+    if (!companyId) throw new Error("Choose an organization before creating a Directory contact.");
+    const contact = await createContact({
+      companyId,
+      name: String(form.newName).trim(),
+      email: String(form.newEmail || "").trim(),
+    });
+    contactId = contact.id;
+    created = true;
+  }
+  if (!contactId) throw new Error("Choose or create a Directory contact.");
+  const linked = await linkContact({
+    opportunityId,
+    contactId,
+    role: form.role || "Other",
+    isPrimary: !!form.isPrimary,
+    notes: form.notes || "",
+  });
+  let directory = null;
+  let refreshError = null;
+  if (created && refreshDirectory) {
+    try { directory = await refreshDirectory(); }
+    catch (error) { refreshError = error?.message || "Directory refresh failed"; }
+  }
+  return refreshError ? { linked, directory, refreshError } : { linked, directory };
+}
+
 export function toMarketingDateTimeLocal(value) {
   if (!value) return "";
   const date = new Date(value);

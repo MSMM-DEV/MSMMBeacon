@@ -4,11 +4,14 @@ import test from "node:test";
 
 const path = new URL("../src/marketing-components/MarketingOpportunitySheet.jsx", import.meta.url);
 
-test("opportunity sheet exposes the complete six-section workspace", async () => {
+test("opportunity details use a centered popup with the simplified workspace", async () => {
   const source = await readFile(path, "utf8");
-  for (const section of ["Overview", "Qualification", "Activity", "Tasks", "Documents", "History"]) {
+  for (const section of ["Overview", "Qualification", "People", "Activity", "Tasks", "Files & History"]) {
     assert.match(source, new RegExp(`label:\\s*"${section}"`), section);
   }
+  assert.match(source, /<Dialog open/);
+  assert.match(source, /<DialogContent size="xl"/);
+  assert.doesNotMatch(source, /<Sheet(?:Content|Header|Body|Footer)?\b/);
   for (const label of [
     "Opportunity name", "Organization", "Owner", "Source", "Introducer", "Summary",
     "Next action", "Expected close date", "Estimated value", "Products", "Probability",

@@ -8,11 +8,72 @@ import {
   sortMarketingActivities,
   sortMarketingTasks,
 } from "../src/marketing-model.js";
+import {
+  marketingDirectoryContactOptions,
+  saveMarketingStakeholder,
+} from "../src/marketing-components/marketing-sheet-model.js";
 
 test("stakeholder roles exactly match the approved relationship model", () => {
   assert.deepEqual(MARKETING_CONTACT_ROLES, [
     "Champion", "Decision-maker", "Budget owner", "Legal contact", "Technical evaluator", "Other",
   ]);
+});
+
+test("stakeholder picker searches the full Directory and excludes linked contacts", () => {
+  const companies = [
+    { id: "c1", name: "USACE", contacts: [
+      { id: "p1", name: "Durand Elzey", email: "durand@example.com" },
+      { id: "p2", name: "Vic Landry", email: "vic@example.com" },
+    ] },
+    { id: "c2", name: "CPRA", contacts: [
+      { id: "p3", name: "Jas Singh", email: "jas@cpra.example" },
+    ] },
+  ];
+  const linked = [{ contactId: "p1" }];
+
+  assert.deepEqual(marketingDirectoryContactOptions(companies, linked, "cpra"), [{
+    id: "p3",
+    name: "Jas Singh",
+    email: "jas@cpra.example",
+    companyId: "c2",
+    companyName: "CPRA",
+    label: "Jas Singh — CPRA",
+  }]);
+  assert.deepEqual(marketingDirectoryContactOptions(companies, linked, "vic").map(row => row.id), ["p2"]);
+});
+
+test("creating and linking a stakeholder refreshes Directory state", async () => {
+  const refreshed = [{ id: "c1", name: "USACE", contacts: [{ id: "p4", name: "New Person" }] }];
+  const result = await saveMarketingStakeholder({
+    opportunityId: "o1",
+    companyId: "c1",
+    form: { contactId: "", newName: " New Person ", newEmail: "new@example.com", role: "Champion", isPrimary: true, notes: "Lead" },
+    createContact: async input => ({ id: "p4", ...input }),
+    linkContact: async input => ({ opportunityId: input.opportunityId, contactId: input.contactId, role: input.role, isPrimary: input.isPrimary }),
+    refreshDirectory: async () => refreshed,
+  });
+
+  assert.deepEqual(result, {
+    linked: { opportunityId: "o1", contactId: "p4", role: "Champion", isPrimary: true },
+    directory: refreshed,
+  });
+});
+
+test("a completed stakeholder link is not reported as failed when Directory refresh fails", async () => {
+  const result = await saveMarketingStakeholder({
+    opportunityId: "o1",
+    companyId: "c1",
+    form: { newName: "New Person", role: "Other" },
+    createContact: async () => ({ id: "p4" }),
+    linkContact: async input => ({ opportunityId: input.opportunityId, contactId: input.contactId }),
+    refreshDirectory: async () => { throw new Error("network unavailable"); },
+  });
+
+  assert.deepEqual(result, {
+    linked: { opportunityId: "o1", contactId: "p4" },
+    directory: null,
+    refreshError: "network unavailable",
+  });
 });
 
 test("activities sort newest first without mutating input", () => {

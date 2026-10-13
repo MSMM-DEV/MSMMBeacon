@@ -214,7 +214,7 @@ function MarketingKpis({ insights }) {
   return <section className="marketing-kpis" aria-label="Marketing summary">{cards.map(([label, value, note]) => <article key={label}><p>{label}</p><strong>{value}</strong><span>{note}</span></article>)}</section>;
 }
 
-export function MarketingPage({ access, users = [], clients = [], currentUser = null, initialView = "pipeline", initialOpportunityId = null }) {
+export function MarketingPage({ access, users = [], clients = [], currentUser = null, initialView = "pipeline", initialOpportunityId = null, onDirectoryRefresh }) {
   const visibleViews = useMemo(() => access.visibleChildren("page.marketing").filter(node => node.view), [access]);
   const allowedNames = useMemo(() => visibleViews.map(node => node.view), [visibleViews]);
   const [view, setView] = useState(() => initialMarketingView(initialView, allowedNames));
@@ -347,6 +347,7 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
         onSaved={row => setWorkspace(current => reconcileMarketingWorkspace(current, row))}
         onArchived={row => { setWorkspace(current => reconcileMarketingWorkspace(current, row)); closeOpportunity(); }}
         onRestored={row => setWorkspace(current => reconcileMarketingWorkspace(current, row))}
+        onDirectoryRefresh={onDirectoryRefresh}
       />}
       <MarketingCreateDialog open={createOpen} clients={clients} users={users} currentUser={currentUser} onCancel={() => setCreateOpen(false)} onCreated={row => { if (row.setupWarning) setNotice(row.setupWarning); setWorkspace(current => reconcileMarketingWorkspace(current, row)); setCreateOpen(false); setSelectedId(row.id); }}/>
       {moveIntent && <MarketingTransitionDialog opportunity={moveIntent.opportunity} toStage={moveIntent.toStage} saving={moveSaving} error={moveError} onCancel={() => { if (!moveSaving) setMoveIntent(null); }} onConfirm={confirmMove}/>}
