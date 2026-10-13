@@ -128,11 +128,41 @@ test("create and terminal transitions enforce the marketing rules", () => {
   assert.equal(valid.errors.length, 0);
 });
 
-test("cards expose delivery progress and original sales context", async () => {
-  const source = await readFile(new URL("../src/marketing-components/MarketingBoard.jsx", import.meta.url), "utf8");
-  assert.match(source, /projectProgress/);
-  assert.match(source, /deliveryStatus/);
-  assert.match(source, /sourceSalesPhase/);
-  assert.match(source, /Internal \/ non-sales/);
-  assert.match(source, /<progress/);
+test("cards keep scan-critical context visible and leave detail fields to the drawer", () => {
+  const row = {
+    id: "compact",
+    title: "HSDRRS",
+    stage: rules.MARKETING_STAGE_NAMES[0],
+    organizationName: "USACE",
+    probability: 90,
+    projectProgress: 20,
+    deliveryStatus: "Waiting for Contract",
+    assignedTeam: "RAJ",
+    expectedCloseDate: "2026-12-15",
+    stageEnteredAt: "2026-10-01T12:00:00Z",
+    estimatedValue: 125000,
+    sourceSalesPhase: "Verified BANT and Economic Buyer Approval",
+    productTags: ["Parish Intelligence"],
+    nextAction: "Send clarifying questions",
+    nextActionDueAt: "2026-10-17",
+  };
+  const tree = boardModule.exports.MarketingBoard({ opportunities: [row], tasks: [] });
+  const cardElement = nodes(tree).find(node => typeof node.type === "function" && node.props.opportunity === row);
+  const card = cardElement.type(cardElement.props);
+  const text = words(card).replace(/\s+/g, " ");
+
+  assert.match(text, /HSDRRS/);
+  assert.match(text, /USACE/);
+  assert.match(text, /Sales 90\s*%/);
+  assert.match(text, /Project 20\s*%/);
+  assert.match(text, /RAJ/);
+  assert.match(text, /Waiting for Contract/);
+  assert.match(text, /Send clarifying questions/);
+  assert.ok(nodes(card).some(node => node.type === "select" && node.props["aria-label"]?.startsWith("Move")));
+
+  assert.doesNotMatch(text, /\$125,000/);
+  assert.doesNotMatch(text, /Verified BANT and Economic Buyer Approval/);
+  assert.doesNotMatch(text, /Parish Intelligence/);
+  assert.doesNotMatch(text, /Dec 15, 2026/);
+  assert.doesNotMatch(text, /in stage/);
 });

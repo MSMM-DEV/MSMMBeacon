@@ -4,22 +4,12 @@ import { Icon } from "../icons.jsx";
 import {
   MARKETING_STAGES,
   marketingHealth,
-  weightedMarketingValue,
 } from "../marketing-rules.js";
 import { nextMarketingAction } from "../marketing-model.js";
-
-const money = value => new Intl.NumberFormat("en-US", {
-  style: "currency", currency: "USD", maximumFractionDigits: 0,
-}).format(Number(value || 0));
 
 const shortDate = value => value ? new Intl.DateTimeFormat("en-US", {
   month: "short", day: "numeric", year: "numeric",
 }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : "Not set";
-
-const daysInStage = value => {
-  if (!value) return 0;
-  return Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 86400000));
-};
 
 const HEALTH_META = {
   on_track: { label: "On track", icon: "checkCircle", tone: "success" },
@@ -36,6 +26,12 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, onOpen, onMoveI
   const nextLabel = typeof next === "string" ? next : next?.title;
   const nextDue = typeof next === "object" ? next?.dueAt : opportunity.nextActionDueAt;
   const label = `Open ${opportunity.title} opportunity`;
+  const organization = opportunity.organizationName || opportunity.client?.name || "Organization not set";
+  const internal = opportunity.sourceSalesPhase === "NOT A SALES CONTRACT";
+  const assignment = opportunity.assignedTeam || opportunity.ownerName || opportunity.owner?.display_name || "Unassigned";
+  const projectProgress = opportunity.projectProgress !== null && opportunity.projectProgress !== undefined
+    ? Number(opportunity.projectProgress)
+    : null;
   return (
     <article
       className="marketing-card"
@@ -48,56 +44,43 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, onOpen, onMoveI
       }}
     >
       <button type="button" className="marketing-card-open" aria-label={label} onClick={event => onOpen?.(opportunity, event)}>
-        <span className="marketing-card-title">{opportunity.title}</span>
-        <span className="marketing-card-org">{opportunity.organizationName || opportunity.client?.name || "Organization not set"}</span>
+        <span className="marketing-card-title" title={opportunity.title}>{opportunity.title}</span>
+        <span className="marketing-card-org" title={`${organization}${internal ? " — Internal / non-sales" : ""}`}>
+          <span>{organization}</span>
+          {internal && <span className="marketing-card-kind">Internal / non-sales</span>}
+        </span>
       </button>
-      <div className="marketing-card-badges">
-        {opportunity.outcome && <Badge tone={opportunity.outcome === "won" ? "success" : "danger"}>{opportunity.outcome === "won" ? "Won" : "Lost"}</Badge>}
-        {opportunity.sourceSalesPhase === "NOT A SALES CONTRACT" && <Badge tone="neutral">Internal / non-sales</Badge>}
+      <div className="marketing-card-signals" aria-label="Opportunity status">
         <Badge tone={health.tone}><Icon name={health.icon} size={12}/>{health.label}</Badge>
-        <Badge tone="neutral">{Number(opportunity.probability || 0)}%</Badge>
+        <span className="marketing-card-stat" aria-label={`Sales probability ${Number(opportunity.probability || 0)} percent`}><strong>Sales</strong>{Number(opportunity.probability || 0)}%</span>
+        {projectProgress !== null && <span className="marketing-card-stat" aria-label={`Project progress ${projectProgress} percent`}><strong>Project</strong>{projectProgress}%</span>}
       </div>
-      <dl className="marketing-card-metrics">
-        <div><dt>Estimated</dt><dd>{money(opportunity.estimatedValue)}</dd></div>
-        <div><dt>Weighted</dt><dd>{money(weightedMarketingValue(opportunity))}</dd></div>
-      </dl>
-      <div className="marketing-card-meta">
-        <span><Icon name="user" size={13}/>{opportunity.assignedTeam || opportunity.ownerName || opportunity.owner?.display_name || "Unassigned"}</span>
-        <span><Icon name="calendar" size={13}/>{shortDate(opportunity.expectedCloseDate)}</span>
-        <span><Icon name="clock" size={13}/>{daysInStage(opportunity.stageEnteredAt)}d in stage</span>
+      <div className="marketing-card-context">
+        <span title={assignment}><Icon name="user" size={13}/>{assignment}</span>
+        {opportunity.deliveryStatus && <span title={opportunity.deliveryStatus}><Icon name="briefcase" size={13}/>{opportunity.deliveryStatus}</span>}
       </div>
-      {!!opportunity.productTags?.length && (
-        <div className="marketing-card-tags" aria-label="Products">
-          {opportunity.productTags.map(tag => <span key={tag}>{tag}</span>)}
+      <footer className="marketing-card-actions">
+        <div className="marketing-card-next">
+          <strong>Next</strong>
+          <span title={nextLabel || "Add a next action"}>{nextLabel || "Add a next action"}</span>
+          {nextDue && <time dateTime={nextDue}>{shortDate(nextDue)}</time>}
         </div>
-      )}
-      {(opportunity.deliveryStatus || opportunity.projectProgress !== null && opportunity.projectProgress !== undefined || opportunity.sourceSalesPhase) && (
-        <section className="marketing-card-portfolio" aria-label="Portfolio context">
-          {opportunity.deliveryStatus && <p><strong>Current status</strong><span>{opportunity.deliveryStatus}</span></p>}
-          {opportunity.projectProgress !== null && opportunity.projectProgress !== undefined && <div className="marketing-card-progress"><span><strong>Project progress</strong><b>{Number(opportunity.projectProgress)}%</b></span><progress max="100" value={Number(opportunity.projectProgress)} aria-label={`Project progress ${Number(opportunity.projectProgress)} percent`}/></div>}
-          {opportunity.sourceSalesPhase && <p><strong>Original sales phase</strong><span>{opportunity.sourceSalesPhase}</span></p>}
-        </section>
-      )}
-      <div className="marketing-card-next">
-        <strong>Next</strong>
-        <span>{nextLabel || "Add a next action"}</span>
-        {nextDue && <time dateTime={nextDue}>{shortDate(nextDue)}</time>}
-      </div>
-      <label className="marketing-card-move">
-        <span className="sr-only">Move {opportunity.title}</span>
-        <select
-          aria-label={`Move ${opportunity.title} to another stage`}
-          value=""
-          onChange={event => {
-            if (event.target.value) onMoveIntent?.(opportunity, event.target.value);
-          }}
-        >
-          <option value="">Move to…</option>
-          {MARKETING_STAGES.filter(stage => stage.name !== opportunity.stage).map(stage => (
-            <option key={stage.name} value={stage.name}>{stage.name}</option>
-          ))}
-        </select>
-      </label>
+        <label className="marketing-card-move">
+          <span className="sr-only">Move {opportunity.title}</span>
+          <select
+            aria-label={`Move ${opportunity.title} to another stage`}
+            value=""
+            onChange={event => {
+              if (event.target.value) onMoveIntent?.(opportunity, event.target.value);
+            }}
+          >
+            <option value="">Move to…</option>
+            {MARKETING_STAGES.filter(stage => stage.name !== opportunity.stage).map(stage => (
+              <option key={stage.name} value={stage.name}>{stage.name}</option>
+            ))}
+          </select>
+        </label>
+      </footer>
     </article>
   );
 }
