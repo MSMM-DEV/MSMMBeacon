@@ -7,6 +7,7 @@ import {
 import { Icon } from "./icons.jsx";
 import {
   createMarketingOpportunity,
+  loadMarketingOpportunityFresh,
   loadMarketingWorkspace,
   transitionMarketingOpportunity,
 } from "./data.js";
@@ -150,7 +151,7 @@ function MarketingCreateDialog({ open, clients, users, currentUser, onCancel, on
       <DialogContent size="lg" aria-describedby="marketing-create-description">
         <form onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>New Marketing opportunity</DialogTitle>
+            <DialogTitle>New Sales opportunity</DialogTitle>
             <DialogDescription id="marketing-create-description">Start with the essentials. Qualification details can be completed as the relationship develops.</DialogDescription>
           </DialogHeader>
           <DialogBody>
@@ -176,7 +177,7 @@ function MarketingCreateDialog({ open, clients, users, currentUser, onCancel, on
               <Field label="First next action" htmlFor="marketing-next-action" required className="marketing-field-wide"><Textarea id="marketing-next-action" required value={form.nextAction} onChange={event => set("nextAction", event.target.value)} placeholder="For example: Dan to introduce us to the prospect"/></Field>
               <Field label="Estimated value" htmlFor="marketing-estimated-value"><Input id="marketing-estimated-value" type="number" min="0" step="0.01" value={form.estimatedValue} onChange={event => set("estimatedValue", event.target.value)}/></Field>
               <Field label="Expected close date" htmlFor="marketing-close"><Input id="marketing-close" type="date" value={form.expectedCloseDate} onChange={event => set("expectedCloseDate", event.target.value)}/></Field>
-              <Field label="Products" htmlFor="marketing-products" hint="Separate products with commas" className="marketing-field-wide"><Input id="marketing-products" value={form.productTags} onChange={event => set("productTags", event.target.value)} placeholder="AI assistant, SaaS platform"/></Field>
+              <Field label="Products" htmlFor="marketing-products" description="Separate products with commas" className="marketing-field-wide"><Input id="marketing-products" value={form.productTags} onChange={event => set("productTags", event.target.value)} placeholder="AI assistant, SaaS platform"/></Field>
             </div>
           </DialogBody>
           <DialogFooter><Button type="button" variant="default" onClick={onCancel} disabled={saving}>Cancel</Button><Button type="submit" variant="primary" disabled={saving} loading={saving}>{saving ? "Creating…" : "Create opportunity"}</Button></DialogFooter>
@@ -186,20 +187,34 @@ function MarketingCreateDialog({ open, clients, users, currentUser, onCancel, on
   );
 }
 
-function MarketingToolbar({ filters, setFilters, opportunities, users, clients, onCreate }) {
-  const products = [...new Set(opportunities.flatMap(row => row.productTags || []))].sort();
+const EXTRA_FILTER_KEYS = ["clientId", "stage", "closePeriod", "outcome"];
+
+function MarketingToolbar({ filters, setFilters, users, clients, onCreate }) {
   const update = (key, value) => setFilters(current => ({ ...current, [key]: value }));
+  const extraActive = EXTRA_FILTER_KEYS.filter(key => filters[key] && filters[key] !== "all").length + (filters.archiveMode !== "active" ? 1 : 0);
+  const anyActive = Boolean(filters.search) || filters.ownerId !== "all" || filters.health !== "all" || extraActive > 0;
+  const [moreOpen, setMoreOpen] = useState(() => extraActive > 0);
   return (
-    <div className="marketing-toolbar" aria-label="Marketing filters">
-      <InputGroup type="search" aria-label="Search opportunities" placeholder="Search opportunities…" value={filters.search} onChange={event => update("search", event.target.value)} leading={<Icon name="search"/>}/>
-      <select aria-label="Filter by owner" value={filters.ownerId} onChange={event => update("ownerId", event.target.value)}><option value="all">All owners</option>{users.map(user => <option key={user.id} value={user.id}>{user.name || user.display_name}</option>)}</select>
-      <select aria-label="Filter by organization" value={filters.clientId} onChange={event => update("clientId", event.target.value)}><option value="all">All organizations</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
-      <select aria-label="Filter by stage" value={filters.stage} onChange={event => update("stage", event.target.value)}><option value="all">All stages</option>{MARKETING_STAGE_NAMES.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select>
-      <select aria-label="Filter by health" value={filters.health} onChange={event => update("health", event.target.value)}><option value="all">All health</option><option value="on_track">On track</option><option value="attention">Needs attention</option><option value="stalled">Stalled</option></select>
-      <select aria-label="Filter by close period" value={filters.closePeriod} onChange={event => update("closePeriod", event.target.value)}><option value="all">Any close date</option><option value="overdue">Overdue</option><option value="month">This month</option><option value="quarter">This quarter</option></select>
-      <select aria-label="Filter by outcome" value={filters.outcome} onChange={event => update("outcome", event.target.value)}><option value="all">All outcomes</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select>
-      <select aria-label="Show active or archived" value={filters.archiveMode} onChange={event => update("archiveMode", event.target.value)}><option value="active">Active only</option><option value="archived">Archived only</option><option value="all">Active and archived</option></select>
-      <Button variant="primary" onClick={onCreate}><Icon name="plus"/>New opportunity</Button>
+    <div className="marketing-toolbar" role="group" aria-label="Sales filters">
+      <div className="marketing-toolbar-row">
+        <InputGroup className="marketing-toolbar-search" type="search" aria-label="Search opportunities" placeholder="Search opportunities…" value={filters.search} onChange={event => update("search", event.target.value)} leading={<Icon name="search"/>}/>
+        <select aria-label="Filter by owner" value={filters.ownerId} onChange={event => update("ownerId", event.target.value)}><option value="all">All owners</option>{users.map(user => <option key={user.id} value={user.id}>{user.name || user.display_name}</option>)}</select>
+        <select aria-label="Filter by health" value={filters.health} onChange={event => update("health", event.target.value)}><option value="all">All health</option><option value="on_track">On track</option><option value="attention">Needs attention</option><option value="stalled">Stalled</option></select>
+        <Button variant="default" className="marketing-more-toggle" aria-expanded={moreOpen} aria-controls="marketing-more-filters" onClick={() => setMoreOpen(open => !open)}>
+          <Icon name="sliders"/>More filters{extraActive > 0 && <span className="marketing-filter-count" aria-label={`${extraActive} active`}>{extraActive}</span>}
+        </Button>
+        {anyActive && <Button variant="ghost" className="marketing-clear-filters" onClick={() => setFilters({ ...DEFAULT_MARKETING_FILTERS })}><Icon name="x"/>Clear</Button>}
+        <Button variant="primary" className="marketing-new-button" onClick={onCreate}><Icon name="plus"/>New opportunity</Button>
+      </div>
+      {moreOpen && (
+        <div id="marketing-more-filters" className="marketing-toolbar-more">
+          <label><span>Organization</span><select value={filters.clientId} onChange={event => update("clientId", event.target.value)}><option value="all">All organizations</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+          <label><span>Stage</span><select value={filters.stage} onChange={event => update("stage", event.target.value)}><option value="all">All stages</option>{MARKETING_STAGE_NAMES.map(stage => <option key={stage} value={stage}>{stage}</option>)}</select></label>
+          <label><span>Close date</span><select value={filters.closePeriod} onChange={event => update("closePeriod", event.target.value)}><option value="all">Any close date</option><option value="overdue">Overdue</option><option value="month">This month</option><option value="quarter">This quarter</option></select></label>
+          <label><span>Outcome</span><select value={filters.outcome} onChange={event => update("outcome", event.target.value)}><option value="all">All outcomes</option><option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option></select></label>
+          <label><span>Records</span><select value={filters.archiveMode} onChange={event => update("archiveMode", event.target.value)}><option value="active">Active only</option><option value="archived">Archived only</option><option value="all">Active and archived</option></select></label>
+        </div>
+      )}
     </div>
   );
 }
@@ -211,7 +226,7 @@ function MarketingKpis({ insights }) {
     ["Won", insights.wonCount, money(insights.wonValue)],
     ["Needs attention", insights.overdueTaskCount + insights.stalledCount, `${insights.stalledCount} stalled`],
   ];
-  return <section className="marketing-kpis" aria-label="Marketing summary">{cards.map(([label, value, note]) => <article key={label}><p>{label}</p><strong>{value}</strong><span>{note}</span></article>)}</section>;
+  return <section className="marketing-kpis" aria-label="Sales summary">{cards.map(([label, value, note]) => <div key={label}><p>{label}</p><strong>{value}</strong><span>{note}</span></div>)}</section>;
 }
 
 export function MarketingPage({ access, users = [], clients = [], currentUser = null, initialView = "pipeline", initialOpportunityId = null, onDirectoryRefresh }) {
@@ -276,8 +291,8 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
     return () => window.removeEventListener("beacon:marketing-settings", applySettings);
   }, []);
 
-  if (status === "loading") return <div className="marketing-state" role="status" aria-live="polite"><Icon name="spinner" className="animate-spin"/> Loading Marketing…</div>;
-  if (status === "error") return <Alert tone="danger" title="Marketing could not load" icon={<Icon name="warn"/>}><p>{error?.message || "Please try again."}</p><Button size="sm" variant="default" onClick={() => setReloadKey(key => key + 1)}><Icon name="refresh"/> Retry</Button></Alert>;
+  if (status === "loading") return <div className="marketing-state" role="status" aria-live="polite"><Icon name="spinner" className="animate-spin"/> Loading Sales…</div>;
+  if (status === "error") return <Alert tone="danger" title="Sales could not load" icon={<Icon name="warn"/>}><p>{error?.message || "Please try again."}</p><Button size="sm" variant="default" onClick={() => setReloadKey(key => key + 1)}><Icon name="refresh"/> Retry</Button></Alert>;
 
   const opportunities = workspace?.opportunities || [];
   const allOpportunities = [...opportunities, ...(workspace?.archivedOpportunities || [])];
@@ -312,22 +327,38 @@ export function MarketingPage({ access, users = [], clients = [], currentUser = 
     try {
       const returned = await runMarketingTransition({ opportunity: moveIntent.opportunity, transition });
       setWorkspace(current => reconcileMarketingWorkspace(current, returned));
-      setSelectedId(returned.id);
+      // Keep the sheet open if it already was; a board move shouldn't pop it open.
+      setSelectedId(current => current ? returned.id : current);
       setMoveIntent(null);
-    } catch (transitionError) { setMoveError(transitionError.message || "The stage move could not be saved."); }
+    } catch (transitionError) {
+      if (transitionError?.code === "MARKETING_CONFLICT") {
+        // Someone else saved this opportunity first. Pull the latest row so the
+        // next confirm carries the current version instead of failing again.
+        try {
+          const latest = await loadMarketingOpportunityFresh(moveIntent.opportunity.id);
+          setWorkspace(current => reconcileMarketingWorkspace(current, latest));
+          setMoveIntent(current => current ? { ...current, opportunity: latest } : current);
+          setMoveError("Someone else updated this opportunity. The latest version is loaded — confirm the move again.");
+        } catch {
+          setMoveError("Someone else updated this opportunity. Reload the page and try the move again.");
+        }
+      } else {
+        setMoveError(transitionError.message || "The stage move could not be saved.");
+      }
+    }
     finally { setMoveSaving(false); }
   };
 
   return (
-    <section className="marketing-page" aria-label="Marketing workspace" data-current-user={currentUser?.id || undefined}>
+    <section className="marketing-page" aria-label="Sales workspace" data-current-user={currentUser?.id || undefined}>
       {notice && <Alert tone="warning" title="Opportunity created with one follow-up needed"><p>{notice}</p><Button size="sm" variant="ghost" onClick={() => setNotice("")}>Dismiss</Button></Alert>}
-      <div className="marketing-page-bar">{visibleViews.length > 1 && <Tabs value={view} onValueChange={setView}><TabsList variant="underline" className="bx-page-tabs" aria-label="Marketing views">{visibleViews.map(node => <TabsTrigger key={node.key} value={node.view}>{VIEW_LABELS[node.view] || node.label}</TabsTrigger>)}</TabsList></Tabs>}</div>
+      <div className="marketing-page-bar">{visibleViews.length > 1 && <Tabs value={view} onValueChange={setView}><TabsList variant="underline" className="bx-page-tabs" aria-label="Sales views">{visibleViews.map(node => <TabsTrigger key={node.key} value={node.view}>{VIEW_LABELS[node.view] || node.label}</TabsTrigger>)}</TabsList></Tabs>}</div>
       <MarketingKpis insights={insights}/>
-      <MarketingToolbar filters={filters} setFilters={setFilters} opportunities={opportunities} users={users} clients={clients} onCreate={() => setCreateOpen(true)}/>
+      <MarketingToolbar filters={filters} setFilters={setFilters} users={users} clients={clients} onCreate={() => setCreateOpen(true)}/>
       {!allOpportunities.length ? (
-        <EmptyState iconName="marketing" title="Build your first Marketing opportunity" hint="Track the relationship from introduction through a signed or lost contract." action={<Button variant="primary" onClick={() => setCreateOpen(true)}>New opportunity</Button>}/>
+        <EmptyState iconName="marketing" title="Build your first Sales opportunity" description="Track the relationship from introduction through a signed or lost contract." action={<Button variant="primary" onClick={() => setCreateOpen(true)}>New opportunity</Button>}/>
       ) : !filtered.length ? (
-        <EmptyState iconName="search" title="No opportunities match these filters" hint="Clear the current filters to return to the full Marketing pipeline." action={<Button variant="default" onClick={() => setFilters({ ...DEFAULT_MARKETING_FILTERS, archiveMode: opportunities.length ? "active" : "all" })}>Clear filters</Button>}/>
+        <EmptyState iconName="search" title="No opportunities match these filters" description="Clear the current filters to return to the full Sales pipeline." action={<Button variant="default" onClick={() => setFilters({ ...DEFAULT_MARKETING_FILTERS, archiveMode: opportunities.length ? "active" : "all" })}>Clear filters</Button>}/>
       ) : view === "pipeline" ? (
         <MarketingBoard opportunities={filtered} tasks={workspace.tasks} stalledAfterDays={workspace.stalledAfterDays} clientsById={clientsById} usersById={usersById} selectedMobileStage={mobileStage} onSelectedMobileStage={setMobileStage} terminalOutcome={terminalOutcome} onTerminalOutcomeChange={setTerminalOutcome} onOpen={openOpportunity} onMoveIntent={(opportunity, toStage) => { setMoveError(""); setMoveIntent({ opportunity, toStage }); }}/>
       ) : view === "list" ? (

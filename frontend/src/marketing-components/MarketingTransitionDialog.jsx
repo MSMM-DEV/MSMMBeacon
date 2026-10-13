@@ -18,7 +18,10 @@ export function MarketingTransitionDialog({ opportunity, toStage, onCancel, onCo
   const [form, setForm] = useState(() => transitionDraft(opportunity, toStage));
   const [warningsAcknowledged, setWarningsAcknowledged] = useState(false);
   const errorRef = useRef(null);
-  useEffect(() => { setForm(transitionDraft(opportunity, toStage)); setWarningsAcknowledged(false); }, [opportunity, toStage]);
+  // Reset only for a different record or target stage. A conflict refresh hands
+  // in a newer copy of the SAME opportunity — keep what the user already typed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setForm(transitionDraft(opportunity, toStage)); setWarningsAcknowledged(false); }, [opportunity?.id, toStage]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
   const result = useMemo(() => validateMarketingTransition(form), [form]);
   const terminal = toStage === TERMINAL_STAGE;

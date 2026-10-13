@@ -169,7 +169,7 @@ const TAB_META = [
   { key: "projects",  label: "Projects",      stage: "stage-awarded"   },
   { key: "events",    label: "Events & Other",stage: "stage-events"    },
   { key: "directory", label: "Directory",     stage: "stage-clients"   },
-  { key: "marketing", label: "Marketing",     stage: "stage-marketing" },
+  { key: "marketing", label: "Sales",         stage: "stage-marketing" },
   { key: "licenses",  label: "Licenses",      stage: "stage-events"    },
   { key: "timesheet", label: "Time & Leave",  stage: "stage-events"    },
   { key: "time-admin",label: "Time Admin",    stage: "stage-events", adminOnly: true },
@@ -192,7 +192,7 @@ const NAV_GROUPS = [
   { key: "leads",     label: "Leads & Bids",        stage: "stage-openbids",  group: "engineering", tabs: ["hotleads", "openbids", "leads-deleted"] },
   { key: "proposals", label: "Proposals & Awarded", stage: "stage-awaiting",  group: "engineering", tabs: ["awaiting", "awarded", "proposals-deleted"] },
   { key: "invoice",   label: "Invoice",             stage: "stage-invoice",   group: "engineering", tabs: ["invoice", "between", "closed"] },
-  { key: "marketing", label: "Marketing",           stage: "stage-marketing", group: "marketing", tabs: ["marketing"] },
+  { key: "marketing", label: "Sales",               stage: "stage-marketing", group: "marketing", tabs: ["marketing"] },
   { key: "projects",  label: "Projects",            stage: "stage-awarded",   group: "workspace", tabs: ["projects"] },
   { key: "events",    label: "Events & Other",      stage: "stage-events",    group: "workspace", tabs: ["events"] },
   { key: "directory", label: "Directory",           stage: "stage-clients",   group: "workspace", tabs: ["directory"] },
@@ -223,7 +223,7 @@ const TAB_FALLBACK_ORDER = [
 // sidebar reads the same as Admin → User Management.
 const RAIL_SECTIONS = [
   { group: "engineering", label: "Engineering", flow: "pipeline" },
-  { group: "marketing",   label: "Marketing & Sales" },
+  { group: "marketing",   label: "Sales" },
   { group: "workspace",   label: "Workspace" },
   { group: "operations",  label: "Management & Operations" },
   { group: "admin",       label: "Admin" },
@@ -318,7 +318,7 @@ const PAGE_META = {
   "leads-deleted": { title: "Deleted: Leads & Bids", desc: "Deleted Hot Leads and Open Bids. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
   "proposals-deleted": { title: "Deleted: Proposals & Awarded", desc: "Deleted Proposals and Awarded projects. Nothing is lost, every field is preserved. Restore any row to send it back to its tab." },
   directory: { title: "Directory", desc: "Find people and firms. Contact details first, linked projects one step away." },
-  marketing: { title: "Marketing", desc: "Manage SaaS and AI opportunities from first introduction through a signed or lost contract." },
+  marketing: { title: "Sales", desc: "Manage SaaS and AI opportunities from first introduction through a signed or lost contract." },
   // No desc. The page's own colour key and the "Expiring soon" panel state
   // the same things, in place and against real data.
   licenses:  { title: "Licenses & Certifications", desc: "" },
@@ -6975,7 +6975,7 @@ function BeaconApp({ initial, initialAccess, currentUser, onSignOut, onRefreshCu
             tab="directory"/>
         )}
         {tab === "marketing" && (
-          <React.Suspense fallback={<div className="marketing-state" role="status">Loading Marketing…</div>}>
+          <React.Suspense fallback={<div className="marketing-state" role="status">Loading Sales…</div>}>
             <MarketingPage
               access={access}
               users={getUsers()}

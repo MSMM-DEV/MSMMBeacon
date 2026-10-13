@@ -6,6 +6,7 @@ import React from "react";
 import { transform } from "esbuild";
 import * as rules from "../src/marketing-rules.js";
 import * as model from "../src/marketing-model.js";
+import * as stageColors from "../src/marketing-components/stage-colors.js";
 
 const passthrough = ({ children, ...props }) => React.createElement("div", props, children);
 const ui = new Proxy({}, { get: () => passthrough });
@@ -22,10 +23,12 @@ if (!boardCompiled.error) {
   vm.runInNewContext(boardCompiled.code, {
     module: boardModule,
     exports: boardModule.exports,
-    require: name => name === "react" ? React : name.includes("marketing-rules") ? rules : name.includes("marketing-model") ? model : name === "@/ui" ? ui : icon,
+    require: name => name === "react" ? React : name.includes("marketing-rules") ? rules : name.includes("marketing-model") ? model : name.includes("stage-colors") ? stageColors : name === "@/ui" ? ui : icon,
     console,
     Date,
     Intl,
+    Number,
+    String,
   });
 }
 
@@ -53,13 +56,15 @@ test("board renders all exact stages in order, with one terminal lane", () => {
   assert.ok(cards.every(card => card.props["aria-label"]?.includes("opportunity")));
 });
 
-test("move menu sends the original opportunity and exact destination stage", () => {
+test("card menu sends the original opportunity and exact destination stage", () => {
   const row = { id: "a", title: "AI assistant", stage: rules.MARKETING_STAGE_NAMES[0], probability: 5 };
   const calls = [];
   const tree = boardModule.exports.MarketingBoard({ opportunities: [row], tasks: [], onMoveIntent: (...args) => calls.push(args) });
   const card = nodes(tree).find(node => typeof node.type === "function" && node.props.opportunity === row);
-  const select = nodes(card.type(card.props)).find(node => node.type === "select" && node.props["aria-label"]?.startsWith("Move"));
-  select.props.onChange({ target: { value: rules.MARKETING_STAGE_NAMES[2] } });
+  const items = nodes(card.type(card.props)).filter(node => node.props["data-move-stage"]);
+  // Every OTHER stage is offered; the current one is not.
+  assert.deepEqual(items.map(item => item.props["data-move-stage"]), rules.MARKETING_STAGE_NAMES.slice(1));
+  items.find(item => item.props["data-move-stage"] === rules.MARKETING_STAGE_NAMES[2]).props.onSelect();
   assert.equal(calls[0][0], row);
   assert.equal(calls[0][1], "IQM - Initial Qualified Meeting");
 });
@@ -158,7 +163,8 @@ test("cards keep scan-critical context visible and leave detail fields to the dr
   assert.match(text, /RAJ/);
   assert.match(text, /Waiting for Contract/);
   assert.match(text, /Send clarifying questions/);
-  assert.ok(nodes(card).some(node => node.type === "select" && node.props["aria-label"]?.startsWith("Move")));
+  assert.ok(nodes(card).some(node => node.props["data-move-stage"]), "a non-drag move path stays on the card");
+  assert.ok(!nodes(card).some(node => node.type === "select"), "no always-visible stage select on the card face");
 
   assert.doesNotMatch(text, /\$125,000/);
   assert.doesNotMatch(text, /Verified BANT and Economic Buyer Approval/);

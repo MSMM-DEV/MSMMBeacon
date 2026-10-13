@@ -2,6 +2,9 @@ import React, { useRef, useState } from "react";
 import { Alert, Badge, Button, EmptyState } from "@/ui";
 import { Icon } from "../icons.jsx";
 import { getMarketingDocumentSignedUrl, removeMarketingDocument, uploadMarketingDocument } from "../data.js";
+import { MarketingEgnyteLinks } from "./MarketingEgnyteLinks.jsx";
+
+const FileIcon = props => <Icon name="file" {...props}/>;
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set(["pdf", "doc", "docx", "xls", "xlsx", "png", "jpg", "jpeg"]);
@@ -42,7 +45,41 @@ export function MarketingDocumentPanel({ opportunityId, documents = [], onChange
       if (removeError.code === "MARKETING_DOCUMENT_CLEANUP") setCleanupRow(row);
     }
   };
-  return <section className="marketing-document-panel"><div className="marketing-document-actions"><select aria-label="Document type" value={documentType} onChange={event => setDocumentType(event.target.value)}>{DOCUMENT_TYPES.map(type => <option key={type}>{type}</option>)}</select><input ref={inputRef} className="sr-only" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" onChange={upload}/><Button variant="primary" loading={saving} onClick={() => inputRef.current?.click()}><Icon name="upload"/>Upload document</Button></div>{error && <Alert role="alert" tone="danger" title="Document action failed">{error}{cleanupRow && <Button size="sm" variant="default" onClick={() => remove(cleanupRow)}>Retry cleanup</Button>}</Alert>}{documents.length ? <div className="marketing-document-list">{documents.map(row => <article key={row.id}><Icon name="file"/><div><strong>{row.fileName}</strong><span>{row.sizeBytes ? `${(row.sizeBytes / 1048576).toFixed(1)} MiB` : ""}</span></div><Badge tone="neutral">{row.documentType}</Badge><Button size="sm" variant="default" onClick={() => download(row)}><Icon name="download"/>Open</Button><Button size="sm" variant="ghost" onClick={() => remove(row)}><Icon name="trash"/>Remove</Button></article>)}</div> : <EmptyState iconName="file" title="No documents yet" hint="Upload proposals, SOWs, MSAs, contracts, or supporting files."/>}</section>;
+  return (
+    <div className="marketing-files-groups">
+      <MarketingEgnyteLinks opportunityId={opportunityId}/>
+      <section className="marketing-document-panel" aria-labelledby={`marketing-uploads-${opportunityId}`}>
+        <header className="egx-group-head">
+          <div className="egx-group-title">
+            <Icon name="upload" size={16}/>
+            <h3 id={`marketing-uploads-${opportunityId}`}>Uploaded files</h3>
+            {documents.length > 0 && <Badge tone="neutral" size="sm">{documents.length}</Badge>}
+          </div>
+        </header>
+        <div className="marketing-document-actions">
+          <select aria-label="Document type" value={documentType} onChange={event => setDocumentType(event.target.value)}>{DOCUMENT_TYPES.map(type => <option key={type}>{type}</option>)}</select>
+          <input ref={inputRef} className="sr-only" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" onChange={upload}/>
+          <Button variant="primary" loading={saving} onClick={() => inputRef.current?.click()}><Icon name="upload"/>Upload document</Button>
+        </div>
+        {error && <Alert role="alert" tone="danger" title="Document action failed">{error}{cleanupRow && <Button size="sm" variant="default" onClick={() => remove(cleanupRow)}>Retry cleanup</Button>}</Alert>}
+        {documents.length ? (
+          <div className="marketing-document-list">
+            {documents.map(row => (
+              <article key={row.id}>
+                <Icon name="file"/>
+                <div><strong>{row.fileName}</strong><span>{row.sizeBytes ? `${(row.sizeBytes / 1048576).toFixed(1)} MiB` : ""}</span></div>
+                <Badge tone="neutral">{row.documentType}</Badge>
+                <Button size="sm" variant="default" onClick={() => download(row)}><Icon name="download"/>Open</Button>
+                <Button size="sm" variant="ghost" onClick={() => remove(row)}><Icon name="trash"/>Remove</Button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState compact icon={FileIcon} title="No uploaded files yet" description="Upload proposals, SOWs, MSAs, contracts, or supporting files (PDF, DOCX, XLSX, PNG, JPEG)."/>
+        )}
+      </section>
+    </div>
+  );
 }
 
 export default MarketingDocumentPanel;

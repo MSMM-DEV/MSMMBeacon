@@ -140,7 +140,7 @@ function normalizedField(key, value) {
 
 function validateDomain(payload) {
   if (payload.stage !== undefined && payload.stage !== null && !MARKETING_STAGE_NAMES.includes(payload.stage)) {
-    throw new Error("Choose a valid Marketing stage");
+    throw new Error("Choose a valid Sales stage");
   }
   if (payload.loss_reason !== undefined && payload.loss_reason !== null && !MARKETING_LOSS_REASONS.includes(payload.loss_reason)) {
     throw new Error("Choose a valid loss reason");

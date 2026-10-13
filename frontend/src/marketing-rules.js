@@ -69,7 +69,7 @@ export function validateMarketingTransition(input = {}) {
   const errors = [];
   const warnings = [];
   if (!definition) {
-    errors.push(errorFor("toStage", "Choose a valid Marketing stage."));
+    errors.push(errorFor("toStage", "Choose a valid Sales stage."));
     return { errors, warnings, normalized: { ...input } };
   }
 

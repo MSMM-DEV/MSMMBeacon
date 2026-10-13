@@ -872,7 +872,7 @@ const MarketingStalledCard = ({ appSettings, onSaved, onError }) => {
     setPending(true);
     try {
       const next = await updateMarketingSettings({ stalledAfterDays: days });
-      onSaved?.(next, "Marketing threshold updated");
+      onSaved?.(next, "Sales threshold updated");
     } catch (error) {
       onError?.(String(error.message || error));
     } finally {
@@ -883,11 +883,11 @@ const MarketingStalledCard = ({ appSettings, onSaved, onError }) => {
   return (
     <form className="adm-card" onSubmit={onSubmit}>
       <div className="adm-card-head">
-        <p className="adm-card-eyebrow">Marketing · Pipeline health</p>
+        <p className="adm-card-eyebrow">Sales · Pipeline health</p>
         <h4 className="adm-card-title">Stalled opportunity threshold</h4>
         <p className="adm-card-desc">
           Flag an open opportunity as stalled after this many days without meaningful activity.
-          Marketing uses the flag in the board, list, filters, and insights.
+          Sales uses the flag in the board, list, filters, and insights.
         </p>
       </div>
       <div className="adm-card-body">

@@ -1,0 +1,163 @@
+/* Sales opportunity ↔ Egnyte: linked files + folder trees (Files & History)
+   and the file-and-folder picker dialog. Prefix: egx-. Every long name or
+   path truncates with an ellipsis (the full value is on the title tooltip),
+   so nothing scrolls sideways at 375px. */
+
+.marketing-files-groups { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+
+.egx-links { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.egx-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; margin-bottom: 2px; flex-wrap: wrap; }
+.egx-group-title { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-muted); }
+.egx-group-title h3 { margin: 0; color: var(--text); font-size: 15px; font-weight: 650; line-height: 1.3; }
+.marketing-document-panel .egx-group-head { margin-bottom: 10px; }
+
+.egx-state { display: flex; align-items: center; gap: 10px; padding: 18px 12px; color: var(--text-muted); font-size: 13px; }
+.egx-spinner {
+  width: 14px; height: 14px; flex: none;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent);
+  border-radius: 50%; animation: egx-spin .8s linear infinite;
+}
+@keyframes egx-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .egx-spinner { animation-duration: 2.4s; } }
+
+.egx-notice { margin: 0; min-height: 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.egx-notice:empty { display: none; }
+
+/* ---------- linked items ---------- */
+.egx-link-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.egx-link { min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-xs); }
+.egx-link.is-folder { background: var(--surface); }
+.egx-link-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 10px 10px 12px; }
+.egx-link-toggle {
+  display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0;
+  margin: -4px; padding: 4px; border: 0; border-radius: var(--radius-sm);
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.egx-link-toggle:hover .egx-link-text strong { color: var(--accent-ink); }
+.egx-link-text { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; }
+.egx-link-text strong { overflow: hidden; color: var(--text); font-size: 13.5px; font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.egx-link-sub { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-muted); font-size: 12px; line-height: 1.35; }
+.egx-link-sub > span:first-child { flex: none; white-space: nowrap; }
+.egx-link-path { min-width: 0; overflow: hidden; font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.egx-link-path::before { content: "· "; font-family: var(--font-sans, inherit); }
+.egx-link-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+.egx-link-body { border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 10px 10px; padding: 6px 4px 8px; }
+
+.egx-entry-icon { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: var(--surface-2); color: var(--text-muted); }
+.egx-entry-icon.is-folder { background: var(--accent-soft); color: var(--accent-ink); }
+.egx-link-body .egx-entry-icon,
+.egx-tree .egx-entry-icon { width: 22px; height: 22px; border-radius: 6px; background: transparent; }
+
+.egx-chevron { display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; color: var(--text-soft); transition: transform var(--dur-fast) var(--ease-out); }
+.egx-chevron.is-open { transform: rotate(90deg); }
+.egx-chevron.is-spacer { visibility: hidden; }
+
+.egx-item-actions { display: inline-flex; align-items: center; gap: 2px; }
+.egx-web-link {
+  display: inline-flex; align-items: center; gap: 5px; height: var(--control-h-sm); padding: 0 8px;
+  border-radius: var(--radius-sm); color: var(--text-muted); font-size: var(--fs-xs); font-weight: 500;
+  text-decoration: none; white-space: nowrap;
+}
+.egx-web-link.is-compact { width: var(--control-h-sm); padding: 0; justify-content: center; }
+.egx-web-link:hover { background: var(--surface-2); color: var(--text); }
+.egx-web-link:focus-visible,
+.egx-link-toggle:focus-visible,
+.egx-tree-toggle:focus-visible,
+.egx-entry-main:focus-visible,
+.egx-crumbs button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ---------- folder tree ---------- */
+.egx-tree { min-width: 0; }
+.egx-tree-list { margin: 0; padding: 0; list-style: none; min-width: 0; }
+.egx-tree-item { min-width: 0; }
+.egx-tree-row {
+  display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 34px;
+  padding-left: calc(var(--egx-depth, 0) * 16px + 2px); padding-right: 2px; border-radius: 7px;
+}
+.egx-tree-row:hover,
+.egx-tree-row:focus-within { background: var(--surface); }
+.egx-tree-row .egx-item-actions { opacity: .55; transition: opacity var(--dur-fast) var(--ease-out); }
+.egx-tree-row:hover .egx-item-actions,
+.egx-tree-row:focus-within .egx-item-actions { opacity: 1; }
+.egx-tree-toggle,
+.egx-tree-file {
+  display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; min-height: 30px;
+  padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left;
+}
+.egx-tree-toggle { cursor: pointer; }
+.egx-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.egx-tree-toggle .egx-tree-name { font-weight: 550; }
+.egx-tree-meta { flex: none; margin-left: auto; padding-left: 8px; color: var(--text-muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.egx-tree-status {
+  display: flex; align-items: center; gap: 8px; min-height: 30px;
+  padding: 4px 8px 4px calc(var(--egx-depth, 0) * 16px + 28px);
+  color: var(--text-muted); font-size: 12px;
+}
+.egx-tree-status.is-error { color: var(--rose-ink); }
+.egx-tree-status.is-error span { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- picker dialog ---------- */
+.egx-title { display: flex; align-items: center; gap: 8px; }
+.egx-picker-bar { display: flex; flex-direction: column; gap: 8px; padding: 12px 24px; border-bottom: 1px solid var(--border); min-width: 0; }
+.egx-picker-nav { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.egx-crumbs { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.egx-crumbs ol { display: flex; align-items: center; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; overflow: hidden; }
+.egx-crumbs li { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; color: var(--text-soft); }
+.egx-crumbs li:last-child { flex: 0 0 auto; max-width: 60%; }
+.egx-crumbs button,
+.egx-crumbs [aria-current] {
+  min-width: 0; max-width: 100%; overflow: hidden; padding: 3px 5px; border: 0; border-radius: 5px;
+  background: none; color: var(--text-muted); font: inherit; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+.egx-crumbs button { cursor: pointer; }
+.egx-crumbs button:hover { background: var(--surface-2); color: var(--text); }
+.egx-crumbs [aria-current] { color: var(--text); font-weight: 600; }
+.egx-crumb-placeholder { color: var(--text-muted); font-size: 12.5px; }
+
+.egx-picker-body { display: flex; flex-direction: column; gap: 8px; min-height: min(360px, 50dvh); padding-top: 12px; }
+.egx-current {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px;
+  border: 1px dashed var(--border-strong); border-radius: 10px; color: var(--accent-ink);
+}
+.egx-current.is-selected { border-style: solid; border-color: var(--accent-line); background: var(--accent-soft); }
+.egx-current-text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.egx-current-text strong { overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.egx-current-text span { color: var(--text-muted); font-size: 11.5px; }
+
+.egx-inline-error { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--rose-line); border-radius: 8px; background: var(--rose-soft); color: var(--rose-ink); font-size: 12.5px; }
+.egx-inline-error span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+.egx-entry-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.egx-entry { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 6px; border: 1px solid transparent; border-radius: 9px; }
+.egx-entry:hover { background: var(--surface-2); }
+.egx-entry.is-selected { border-color: var(--accent-line); background: var(--accent-soft); }
+.egx-entry-main {
+  display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; min-height: 44px; padding: 6px 8px;
+  border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.egx-entry-main > svg { flex: none; color: var(--text-soft); }
+.egx-entry-text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.egx-entry-text strong { overflow: hidden; color: var(--text); font-size: 13.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.egx-entry-text span { overflow: hidden; color: var(--text-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.egx-entry-check { display: inline-grid; place-items: center; width: 24px; height: 24px; color: var(--accent-ink); }
+
+.egx-picker-foot { gap: 8px; }
+.egx-selection { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; color: var(--text-muted); font-size: 12px; }
+.egx-selection > svg { flex: none; }
+.egx-selection span { min-width: 0; overflow: hidden; font-family: var(--font-mono); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.egx-selection .egx-selection-empty { font-family: inherit; }
+
+/* ---------- phone ---------- */
+@media (max-width: 640px) {
+  .egx-link-head { flex-wrap: wrap; padding: 10px; }
+  .egx-link-toggle,
+  .egx-link-head > .egx-link-text { flex-basis: calc(100% - 40px); }
+  .egx-link-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  .egx-link-actions .egx-web-link { height: 36px; }
+  .egx-link-path { display: none; }
+  .egx-tree-row { min-height: 40px; padding-left: calc(var(--egx-depth, 0) * 12px + 2px); }
+  .egx-tree-row .egx-item-actions { opacity: 1; }
+  .egx-tree-meta { display: none; }
+  .egx-tree-status { padding-left: calc(var(--egx-depth, 0) * 12px + 24px); }
+  .egx-picker-bar { padding: 10px 16px; }
+}

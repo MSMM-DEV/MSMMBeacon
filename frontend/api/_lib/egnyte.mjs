@@ -1,4 +1,12 @@
 const DEFAULT_FOLDER = "/Shared/PData";
+// File-and-folder browsing (the Sales opportunity "Link from Egnyte" flow) is
+// confined to the shared tree. Private user folders stay out of reach even
+// though the service user can technically see them.
+export const EGNYTE_SHARED_ROOT = "/Shared";
+// Default starting point for the Sales picker. Locally this is
+// `Egnyte-msmm/Shared/PData/BD/BD-AI` — `Egnyte-msmm` is only the sync-root
+// folder name on disk; the cloud API path starts at `/Shared`.
+export const DEFAULT_SALES_EGNYTE_PATH = "/Shared/PData/BD/BD-AI";
 const DEFAULT_TOKEN_TTL_MS = 50 * 60 * 1000;
 const TOKEN_EXPIRY_SKEW_MS = 60 * 1000;
 
@@ -96,17 +104,44 @@ export function defaultEgnyteFolder(env = process.env) {
   return normalizeEgnytePath(env.EGNYTE_DEFAULT_FOLDER_PATH || DEFAULT_FOLDER);
 }
 
+function invalidPathError(message = "Invalid Egnyte folder path") {
+  const err = new Error(message);
+  err.status = 400;
+  err.code = "EGNYTE_PATH";
+  return err;
+}
+
 export function normalizeEgnytePath(input, env = process.env) {
   const fallback = env.EGNYTE_DEFAULT_FOLDER_PATH || DEFAULT_FOLDER;
   const raw = input == null || String(input).trim() === "" ? fallback : String(input).trim();
-  if (raw.includes("\\")) throw new Error("Invalid Egnyte folder path");
+  if (raw.includes("\\")) throw invalidPathError();
+  // Control characters (incl. NUL / newlines) never appear in a real Egnyte
+  // name and would only ever be an attempt to smuggle something past us.
+  if (/[\u0000-\u001f\u007f]/.test(raw)) throw invalidPathError();
   const prefixed = raw.startsWith("/") ? raw : `/${raw}`;
   const collapsed = prefixed.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
   const segments = collapsed.split("/").filter(Boolean);
   if (segments.some(seg => seg === "." || seg === "..")) {
-    throw new Error("Invalid Egnyte folder path");
+    throw invalidPathError();
   }
   return collapsed;
+}
+
+export function isWithinEgnyteRoot(path, root = EGNYTE_SHARED_ROOT) {
+  const cleanRoot = String(root || "/").replace(/\/+$/, "") || "/";
+  const clean = String(path || "");
+  if (cleanRoot === "/") return clean.startsWith("/");
+  return clean === cleanRoot || clean.startsWith(`${cleanRoot}/`);
+}
+
+// Validates a path for the file-and-folder browser: normalised, no
+// traversal, and inside /Shared. Empty input starts at the Sales default.
+export function validateSharedEgnytePath(input) {
+  const clean = normalizeEgnytePath(input, { EGNYTE_DEFAULT_FOLDER_PATH: DEFAULT_SALES_EGNYTE_PATH });
+  if (!isWithinEgnyteRoot(clean, EGNYTE_SHARED_ROOT)) {
+    throw invalidPathError("Only Egnyte items under /Shared can be browsed here");
+  }
+  return clean;
 }
 
 export function validateProjectFolderPath(input) {
@@ -138,6 +173,64 @@ export function foldersFromEgnyteListing(listing) {
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+function egnyteModifiedIso(entry) {
+  // Folders carry `lastModified` (epoch ms); files carry `last_modified`
+  // (an RFC 1123 string). Either may be absent.
+  const raw = entry?.lastModified ?? entry?.last_modified ?? null;
+  if (raw == null || raw === "") return null;
+  const ts = typeof raw === "number" ? raw : Date.parse(raw);
+  return Number.isFinite(ts) && ts > 0 ? new Date(ts).toISOString() : null;
+}
+
+function egnyteEntryName(entry, path) {
+  return entry?.name || path.split("/").filter(Boolean).pop() || path;
+}
+
+// Web link that opens an item in the Egnyte web UI. `/navigate/path/...`
+// resolves files and folders alike (it bounces through Egnyte sign-in and
+// back), so it survives the item being re-uploaded with a new entry id.
+export function egnyteWebUrl(path, webBase) {
+  if (!webBase) return null;
+  return `${String(webBase).replace(/\/+$/, "")}/navigate/path${encodeEgnytePath(path)}`;
+}
+
+function shapeFileEntry(entry, webBase) {
+  const path = normalizeEgnytePath(entry.path || entry.name);
+  const size = Number(entry.size);
+  return {
+    kind: "file",
+    name: egnyteEntryName(entry, path),
+    path,
+    size: Number.isFinite(size) && size >= 0 ? size : null,
+    modified: egnyteModifiedIso(entry),
+    webUrl: egnyteWebUrl(path, webBase),
+  };
+}
+
+// Folder + file listing for the file-aware browser. Folders keep the same
+// alphabetical order as foldersFromEgnyteListing; files follow, also sorted.
+export function entriesFromEgnyteListing(listing, { webBase = null } = {}) {
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  const folders = (listing?.folders || [])
+    .filter(f => f && (f.path || f.name))
+    .map(f => {
+      const path = normalizeEgnytePath(f.path || f.name);
+      return {
+        kind: "folder",
+        name: egnyteEntryName(f, path),
+        path,
+        modified: egnyteModifiedIso(f),
+        webUrl: egnyteWebUrl(path, webBase),
+      };
+    })
+    .sort(byName);
+  const files = (listing?.files || [])
+    .filter(f => f && (f.path || f.name))
+    .map(f => shapeFileEntry(f, webBase))
+    .sort(byName);
+  return { folders, files };
 }
 
 export function egnyteDomain(env = process.env) {
@@ -216,21 +309,73 @@ export async function getEgnyteAccessToken({ env = process.env, fetchImpl = fetc
   return requestEgnyteOAuthToken({ url, cacheKey, body, fetchImpl });
 }
 
-export async function browseEgnyteFolders({ path, env = process.env, fetchImpl = fetch } = {}) {
-  const cleanPath = normalizeEgnytePath(path, env);
+export function egnyteWebBase(env = process.env) {
+  return `https://${egnyteDomain(env)}`;
+}
+
+// `includeFiles` is the opt-in used by the Sales "Link from Egnyte" flow. It
+// confines browsing to /Shared and returns files alongside folders. Without
+// it the response is byte-for-byte the folder-only shape the Invoice table
+// has always consumed: { path, folders: [{ name, path }] }.
+// Egnyte enforces a per-second request cap (a burst of 3+ listings in the
+// same second answers 429 with a short Retry-After). One bounded retry turns
+// that transient bounce into a slightly slower success; anything longer —
+// e.g. the daily quota — is surfaced to the caller unchanged.
+const MAX_RETRY_AFTER_MS = 2500;
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function retryAfterMs(response) {
+  const raw = response?.headers?.get?.("retry-after");
+  if (raw == null || raw === "") return 1000;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : Infinity;
+}
+
+export async function browseEgnyteFolders({
+  path,
+  includeFiles = false,
+  env = process.env,
+  fetchImpl = fetch,
+  sleep = defaultSleep,
+} = {}) {
+  const cleanPath = includeFiles ? validateSharedEgnytePath(path) : normalizeEgnytePath(path, env);
   const token = await getEgnyteAccessToken({ env, fetchImpl });
   const url = `https://${egnyteDomain(env)}/pubapi/v1/fs${encodeEgnytePath(cleanPath)}`;
-  const response = await fetchImpl(url, {
+  const request = () => fetchImpl(url, {
     headers: {
       authorization: `Bearer ${token}`,
       accept: "application/json",
     },
   });
+  let response = await request();
+  if (response.status === 429) {
+    const wait = retryAfterMs(response);
+    if (wait <= MAX_RETRY_AFTER_MS) {
+      await sleep(wait);
+      response = await request();
+    }
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const err = new Error(payload?.message || payload?.errorMessage || "Egnyte folders could not be loaded");
     err.status = response.status;
     throw err;
+  }
+  if (includeFiles) {
+    const webBase = egnyteWebBase(env);
+    if (payload?.is_folder === false) {
+      // The path names a file; answer with just that file's metadata.
+      return { path: cleanPath, isFile: true, folders: [], files: [shapeFileEntry({ ...payload, path: cleanPath }, webBase)], webBase };
+    }
+    const { folders, files } = entriesFromEgnyteListing(payload, { webBase });
+    const total = Number(payload?.total_count);
+    return {
+      path: cleanPath,
+      folders,
+      files,
+      webBase,
+      totalCount: Number.isFinite(total) ? total : folders.length + files.length,
+    };
   }
   return {
     path: cleanPath,

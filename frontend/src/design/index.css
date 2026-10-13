@@ -44,6 +44,7 @@
 @import "./pages/directory.css"     layer(beacon);
 @import "./pages/business-card-import.css" layer(beacon);
 @import "./pages/marketing.css"     layer(beacon);
+@import "./pages/marketing-egnyte.css" layer(beacon);
 @import "./pages/team-calendar.css" layer(beacon);
 @import "./pages/timesheet.css"     layer(beacon);
 @import "./pages/time-admin.css"    layer(beacon);

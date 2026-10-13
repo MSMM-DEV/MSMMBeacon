@@ -88,9 +88,28 @@ async function authedApiFetch(url, options = {}) {
   return payload;
 }
 
-export async function browseEgnyteFolders(path) {
-  const qs = path ? `?path=${encodeURIComponent(path)}` : "";
-  return authedApiFetch(`/api/egnyte/folders${qs}`);
+// `includeFiles` is opt-in (Sales "Link from Egnyte"): the API then also
+// returns files and confines browsing to /Shared. Without it the call and the
+// response are exactly the Invoice table's folder-only contract.
+export async function browseEgnyteFolders(path, { includeFiles = false } = {}) {
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  if (includeFiles) params.set("files", "1");
+  const qs = params.toString();
+  return authedApiFetch(`/api/egnyte/folders${qs ? `?${qs}` : ""}`);
+}
+
+// { webBase, defaultPath, root } — no Egnyte API call is spent. Cached for the
+// session; a failure clears the cache so the next caller retries.
+let _egnyteInfoPromise = null;
+export function loadEgnyteInfo() {
+  if (!_egnyteInfoPromise) {
+    _egnyteInfoPromise = authedApiFetch("/api/egnyte/folders?info=1").catch((error) => {
+      _egnyteInfoPromise = null;
+      throw error;
+    });
+  }
+  return _egnyteInfoPromise;
 }
 
 export async function extractBusinessCards(images) {
@@ -5412,9 +5431,24 @@ async function marketingConflict(id, error = null) {
   return new MarketingConflictError(error?.message || undefined, latestVersion);
 }
 
+// A locked row (lock_timeout, migration 20261013120000), a statement timeout,
+// or an exhausted API pool all mean "another save is holding this record" —
+// say so plainly instead of surfacing the raw Postgres text.
+const MARKETING_BUSY_CODES = new Set(["55P03", "57014", "PGRST003"]);
+
+export function marketingBusyError(error) {
+  if (!error || !MARKETING_BUSY_CODES.has(error.code)) return null;
+  const busy = new Error("This opportunity is busy — another save is in progress. Try again in a moment.");
+  busy.code = "MARKETING_BUSY";
+  busy.cause = error;
+  return busy;
+}
+
 function throwMarketingError(error, label) {
   if (!error) return;
-  if (error.code === "40001") throw new MarketingConflictError(error.message);
+  if (error.code === "40001") throw new MarketingConflictError();
+  const busy = marketingBusyError(error);
+  if (busy) throw busy;
   throw new Error(`${label}: ${error.message}`);
 }
 
@@ -5533,8 +5567,8 @@ export async function transitionMarketingOpportunity(id, input = {}, expectedVer
     _loss_detail: String(input.lossDetail || "").trim() || null,
     _transition_note: String(input.transitionNote || "").trim() || null,
   });
-  if (error?.code === "40001") throw await marketingConflict(id, error);
-  throwMarketingError(error, "move Marketing opportunity");
+  if (error?.code === "40001") throw await marketingConflict(id);
+  throwMarketingError(error, "Move Sales opportunity");
   return loadMarketingOpportunityFresh(data?.id || id);
 }
 
@@ -5761,6 +5795,84 @@ export async function removeMarketingDocument({ id, filePath }) {
     const cleanupError = new Error(`File removed, but metadata cleanup failed: ${error.message}`);
     cleanupError.code = "MARKETING_DOCUMENT_CLEANUP";
     throw cleanupError;
+  }
+}
+
+// ----------------------------------------------------------------------
+// Sales opportunity ↔ Egnyte links (beacon_v2.marketing_egnyte_links,
+// migration 20261013130000). A link is only a pointer to a cloud path —
+// removing it never touches anything in Egnyte. Graceful degrade: before the
+// migration is applied, loads report { available: false } instead of failing.
+// ----------------------------------------------------------------------
+export const MARKETING_EGNYTE_UNAVAILABLE = "MARKETING_EGNYTE_UNAVAILABLE";
+
+function marketingEgnyteUnavailableError() {
+  const error = new Error("Egnyte linking needs a database update before it can be used.");
+  error.code = MARKETING_EGNYTE_UNAVAILABLE;
+  return error;
+}
+
+export function adaptMarketingEgnyteLink(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    opportunityId: row.opportunity_id,
+    path: row.egnyte_path,
+    kind: row.kind === "folder" ? "folder" : "file",
+    name: row.name || String(row.egnyte_path || "").split("/").filter(Boolean).pop() || row.egnyte_path,
+    sizeBytes: row.size_bytes ?? null,
+    modifiedAt: row.modified_at || null,
+    createdBy: row.created_by || null,
+    createdAt: row.created_at || null,
+  };
+}
+
+export async function loadMarketingEgnyteLinks(opportunityId) {
+  if (!opportunityId) return { links: [], available: true };
+  const { data, error } = await supabase
+    .from("marketing_egnyte_links")
+    .select("*")
+    .eq("opportunity_id", opportunityId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    if (isMissingTableError(error)) return { links: [], available: false };
+    throw new Error(`Egnyte links: ${error.message}`);
+  }
+  return { links: (data || []).map(adaptMarketingEgnyteLink), available: true };
+}
+
+// Returns { link, existed }. Linking the same path twice is a no-op that hands
+// back the existing row rather than an error.
+export async function addMarketingEgnyteLink({ opportunityId, path, kind, name = null, sizeBytes = null, modifiedAt = null }) {
+  if (!opportunityId || !path) throw new Error("Choose an Egnyte file or folder to link.");
+  if (kind !== "file" && kind !== "folder") throw new Error("Unknown Egnyte item type.");
+  const { data, error } = await supabase.from("marketing_egnyte_links").insert({
+    opportunity_id: opportunityId,
+    egnyte_path: path,
+    kind,
+    name: name || null,
+    size_bytes: sizeBytes != null && Number.isFinite(Number(sizeBytes)) && Number(sizeBytes) >= 0 ? Math.round(Number(sizeBytes)) : null,
+    modified_at: modifiedAt || null,
+    created_by: getCurrentBeaconUser()?.id || null,
+  }).select("*").single();
+  if (error) {
+    if (isMissingTableError(error)) throw marketingEgnyteUnavailableError();
+    if (error.code === "23505") {
+      const existing = await supabase.from("marketing_egnyte_links").select("*")
+        .eq("opportunity_id", opportunityId).eq("egnyte_path", path).maybeSingle();
+      if (existing.data) return { link: adaptMarketingEgnyteLink(existing.data), existed: true };
+    }
+    throw new Error(`Link Egnyte item: ${error.message}`);
+  }
+  return { link: adaptMarketingEgnyteLink(data), existed: false };
+}
+
+export async function removeMarketingEgnyteLink(id) {
+  if (!id) return;
+  const { error } = await supabase.from("marketing_egnyte_links").delete().eq("id", id);
+  if (error) {
+    if (isMissingTableError(error)) throw marketingEgnyteUnavailableError();
+    throw new Error(`Unlink Egnyte item: ${error.message}`);
   }
 }
 

@@ -127,3 +127,82 @@ export function egnyteFolderOpenTarget({
     localPath,
   };
 }
+
+// ---------------------------------------------------------------------------
+// File-and-folder linking (Sales opportunity "Link from Egnyte").
+//
+// Cloud paths start at `/Shared/...`; the local sync root (`Egnyte-msmm` on a
+// Mac) is prepended by egnyteFolderOpenTarget, so the local folder
+// `Egnyte-msmm/Shared/PData/BD/BD-AI` is the cloud path below.
+// ---------------------------------------------------------------------------
+export const EGNYTE_SHARED_ROOT = "/Shared";
+export const DEFAULT_SALES_EGNYTE_PATH = "/Shared/PData/BD/BD-AI";
+
+export function normalizeEgnyteClientPath(path) {
+  return cleanEgnytePath(path);
+}
+
+export function egnyteBaseName(path) {
+  const parts = pathParts(path);
+  return parts[parts.length - 1] || "/";
+}
+
+export function egnyteParentPath(path, root = EGNYTE_SHARED_ROOT) {
+  const clean = cleanEgnytePath(path);
+  if (!clean || clean === "/") return null;
+  const cleanRoot = cleanEgnytePath(root) || "/";
+  if (clean === cleanRoot) return null;
+  const parent = `/${pathParts(clean).slice(0, -1).join("/")}`;
+  return isWithinEgnyteRoot(parent, cleanRoot) ? parent : null;
+}
+
+export function isWithinEgnyteRoot(path, root = EGNYTE_SHARED_ROOT) {
+  const clean = cleanEgnytePath(path);
+  const cleanRoot = cleanEgnytePath(root) || "/";
+  if (!clean) return false;
+  if (cleanRoot === "/") return true;
+  return clean === cleanRoot || clean.startsWith(`${cleanRoot}/`);
+}
+
+// Breadcrumbs from the browsing root down to `path`. Ancestors above the
+// root are not navigable, so they are folded into the root crumb.
+export function egnyteBreadcrumbs(path, root = EGNYTE_SHARED_ROOT) {
+  const clean = cleanEgnytePath(path);
+  if (!clean || !isWithinEgnyteRoot(clean, root)) return [];
+  const rootParts = pathParts(root);
+  const parts = pathParts(clean);
+  const crumbs = [];
+  for (let i = Math.max(rootParts.length, 1); i <= parts.length; i += 1) {
+    crumbs.push({ label: parts[i - 1], path: `/${parts.slice(0, i).join("/")}` });
+  }
+  return crumbs;
+}
+
+// "Open in Egnyte" web link — same `/navigate/path/...` shape the server
+// returns per listing entry. `webBase` comes from the API (never hardcoded).
+export function egnyteWebUrl(webBase, path) {
+  const base = String(webBase || "").trim().replace(/\/+$/, "");
+  const suffix = encodePathSegments(path);
+  if (!base || !suffix) return "";
+  return `${base}/navigate/path/${suffix}`;
+}
+
+export function formatEgnyteSize(bytes) {
+  const n = Number(bytes);
+  if (bytes == null || bytes === "" || !Number.isFinite(n) || n < 0) return "";
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+// Compact display of a path that keeps its most specific end:
+// "/Shared/PData/BD/BD-AI/Proposals" → "…/BD-AI/Proposals" (keep = 2).
+export function egnyteShortPath(path, keep = 2) {
+  const parts = pathParts(path);
+  if (!parts.length) return "/";
+  if (parts.length <= keep) return `/${parts.join("/")}`;
+  return `…/${parts.slice(-keep).join("/")}`;
+}

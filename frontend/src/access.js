@@ -91,10 +91,10 @@ export const ACCESS_TREE = [
     ],
   },
   {
-    key: "workflow.marketing", kind: "workflow", label: "Marketing & Sales", requiresChild: true,
+    key: "workflow.marketing", kind: "workflow", label: "Sales", requiresChild: true,
     description: "SaaS and AI opportunities from first introduction through signed or lost.",
     children: [{
-      key: "page.marketing", kind: "page", label: "Marketing", tab: "marketing", requiresChild: true,
+      key: "page.marketing", kind: "page", label: "Sales", tab: "marketing", requiresChild: true,
       children: [
         { key: "view.marketing.pipeline", kind: "subtab", label: "Pipeline", view: "pipeline" },
         { key: "view.marketing.list", kind: "subtab", label: "Opportunity list", view: "list" },
