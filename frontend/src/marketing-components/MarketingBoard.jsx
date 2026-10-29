@@ -172,24 +172,26 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, stageIndex = 0,
         <span>{organization}</span>
         {internal && <span className="marketing-card-kind">Internal</span>}
       </p>
+      {/* Each row holds ONE flexible item; everything else is fixed-width
+          and wraps to its own line in a narrow lane instead of overprinting. */}
       <div className="marketing-card-meta">
         <span className="marketing-card-owner" title={assignment}>
           <span className="marketing-card-avatar" aria-hidden="true">{initialsOf(assignment)}</span>
           <span className="marketing-card-owner-name">{assignment}</span>
         </span>
-        <span className="marketing-card-figures">
-          {endDate && <time className="marketing-card-stat marketing-card-end" dateTime={String(endDate.value).slice(0, 10)} data-past={endDate.past ? "true" : undefined}
-            title={`${endDate.label === "Signed" ? "Signed" : endDate.past ? "Expected close has passed" : "Expected close"} ${longDate(endDate.value)}`}>
-            <span>{endDate.label}</span> {cardDate(endDate.value)}
-          </time>}
-          <span className="marketing-card-stat" aria-label={`Sales probability ${probability} percent`}><span>Sales</span> {probability}%</span>
-        </span>
+        <span className="marketing-card-stat" aria-label={`Sales probability ${probability} percent`}><span>Sales</span> {probability}%</span>
       </div>
       <div className="marketing-card-status">
         <span className="marketing-card-health" data-tone={health.tone}><span className="marketing-card-health-dot" aria-hidden="true"/>{health.label}</span>
+        {endDate && <time className="marketing-card-stat marketing-card-end" dateTime={String(endDate.value).slice(0, 10)} data-past={endDate.past ? "true" : undefined}
+          title={`${endDate.label === "Signed" ? "Signed" : endDate.past ? "Expected close has passed" : "Expected close"} ${longDate(endDate.value)}`}>
+          <span>{endDate.label}</span> {cardDate(endDate.value)}
+        </time>}
+      </div>
+      {(projectProgress !== null || opportunity.deliveryStatus) && <div className="marketing-card-progress">
         {projectProgress !== null && <span className="marketing-card-stat" aria-label={`Project progress ${projectProgress} percent`}><span>Project</span> {projectProgress}%</span>}
         {opportunity.deliveryStatus && <span className="marketing-card-delivery" title={opportunity.deliveryStatus}>{opportunity.deliveryStatus}</span>}
-      </div>
+      </div>}
       <div className="marketing-card-next" data-overdue={overdue ? "true" : undefined} data-empty={nextLabel ? undefined : "true"}>
         <Icon name={overdue ? "warn" : "forward"} size={13}/>
         <span title={nextLabel || "Add a next action"}>{nextLabel || "Add a next action"}</span>

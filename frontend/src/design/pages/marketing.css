@@ -134,15 +134,19 @@
 .marketing-card-org { display: flex; min-width: 0; align-items: center; gap: 6px; margin: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; line-height: 1.35; white-space: nowrap; }
 .marketing-card-org > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .marketing-card-kind { flex: 0 0 auto; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-full); color: var(--text-muted); font-size: 12px; font-weight: 600; line-height: 1.5; }
+/* Narrow lanes (172px) leave ~130px of content: rows wrap rather than let
+   fixed-width chips overprint each other or spill past the card edge. */
 .marketing-card-meta,
-.marketing-card-status { display: flex; min-width: 0; align-items: center; gap: 8px; font-size: 12px; line-height: 1.35; }
-.marketing-card-meta { justify-content: space-between; }
-.marketing-card-owner { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--text); }
+.marketing-card-status,
+.marketing-card-progress { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 4px 8px; font-size: 12px; line-height: 1.35; }
+.marketing-card-meta > :last-child,
+.marketing-card-status > .marketing-card-end { margin-left: auto; }
+.marketing-card-progress { flex-wrap: nowrap; color: var(--text-muted); }
+.marketing-card-owner { display: flex; flex: 1 1 0; min-width: 48px; align-items: center; gap: 6px; overflow: hidden; color: var(--text); }
 .marketing-card-avatar { display: grid; flex: 0 0 auto; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 9.5px; font-weight: 700; letter-spacing: .02em; }
 .marketing-card-owner-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marketing-card-stat { display: inline-flex; flex: 0 0 auto; align-items: baseline; gap: 3px; color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .marketing-card-stat > span { color: var(--text-muted); font-weight: 500; }
-.marketing-card-figures { display: inline-flex; flex: 0 0 auto; align-items: baseline; gap: 10px; }
 .marketing-card-end[data-past] { color: var(--rose-ink); }
 [data-theme="dark"] .marketing-card-end[data-past] { color: var(--rose); }
 .marketing-card-health { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; font-weight: 600; white-space: nowrap; }
@@ -152,8 +156,8 @@
 .marketing-card-health[data-tone="danger"] { color: var(--rose-ink); }
 [data-theme="dark"] .marketing-card-health[data-tone="success"] { color: var(--sage); }
 [data-theme="dark"] .marketing-card-health[data-tone="danger"] { color: var(--rose); }
-.marketing-card-delivery { min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
-.marketing-card-delivery::before { margin-right: 6px; content: "·"; }
+.marketing-card-delivery { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.marketing-card-stat + .marketing-card-delivery::before { margin-right: 6px; content: "·"; }
 .marketing-card-next { display: flex; min-width: 0; align-items: center; gap: 6px; margin-top: 2px; padding-top: 7px; border-top: 1px solid var(--border); color: var(--text); font-size: 12px; line-height: 1.35; }
 .marketing-card-next > svg { flex: 0 0 auto; color: var(--text-muted); }
 .marketing-card-next > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
