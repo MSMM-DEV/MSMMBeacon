@@ -77,3 +77,25 @@ test("archive is recoverable and permanent delete is absent", async () => {
   assert.match(source, /Restore opportunity/);
   assert.doesNotMatch(source, /deleteMarketingOpportunity|Permanently delete/);
 });
+
+test("own writes never discard an unsaved draft in the other section", async () => {
+  const source = await readFile(path, "utf8");
+  // A same-record version bump re-baselines only clean sections.
+  assert.match(source, /setOverview\(rebase\(OVERVIEW_FIELDS\)\)/);
+  assert.match(source, /setQualification\(rebase\(QUALIFICATION_FIELDS\)\)/);
+  // Saving one section resets only that section's draft.
+  assert.match(source, /if \(section === "overview"\) setOverview\(valuesFor\(enriched, OVERVIEW_FIELDS\)\);\s*else setQualification/);
+  assert.doesNotMatch(source, /setOverview\(valuesFor\(enriched, OVERVIEW_FIELDS\)\); setQualification/);
+  // Terminal outcome details entered in the move dialog are shown.
+  for (const label of ["Contract outcome", "Signature date", "Final contract value", "Loss reason", "What we learned"]) {
+    assert.match(source, new RegExp(label), label);
+  }
+});
+
+test("saves hand back the full record, not the bare RPC row", async () => {
+  const data = await readFile(new URL("../src/data.js", import.meta.url), "utf8");
+  const update = data.slice(data.indexOf("export async function updateMarketingOpportunity"), data.indexOf("export async function transitionMarketingOpportunity"));
+  assert.match(update, /return marketingRecordAfterWrite\(data\)/);
+  const archive = data.slice(data.indexOf("async function setMarketingArchive"), data.indexOf("export const archiveMarketingOpportunity"));
+  assert.match(archive, /return marketingRecordAfterWrite\(data\)/);
+});

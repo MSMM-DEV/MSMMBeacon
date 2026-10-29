@@ -17,7 +17,7 @@ import {
   updateMarketingContact,
   updateMarketingOpportunity,
 } from "../data.js";
-import { MARKETING_CONTACT_ROLES, MarketingConflictError } from "../marketing-model.js";
+import { MARKETING_CONTACT_ROLES, MarketingConflictError, nextMarketingAction } from "../marketing-model.js";
 import {
   attemptMarketingSectionSave,
   changedMarketingFields,
@@ -67,6 +67,7 @@ const valuesFor = (opportunity, fields) => Object.fromEntries(fields.map(field =
 ]));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const displayDate = value => value ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Not recorded";
+const displayDay = value => value ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : "Not recorded";
 const displayMoney = value => value === null || value === undefined || value === ""
   ? "Not set"
   : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(Number(value));
@@ -192,13 +193,22 @@ export function MarketingOpportunitySheet({
   const [directoryClients, setDirectoryClients] = useState(lookups.clients || []);
   const [directoryRefreshing, setDirectoryRefreshing] = useState(false);
   const errorRef = useRef(null);
+  const currentRef = useRef(current);
+  currentRef.current = current;
 
+  // A newer copy of the SAME record arrives whenever one of our own writes
+  // bumps its version (a save, a logged activity, a task change). Re-baseline
+  // only the sections the user isn't editing: replacing a dirty draft here is
+  // what made typed-but-unsaved Overview / Qualification text vanish.
   useEffect(() => {
+    const previous = currentRef.current;
+    const sameRecord = previous?.id === opportunity?.id;
+    const rebase = fields => draft => (sameRecord && !same(draft, valuesFor(previous, fields)) ? draft : valuesFor(opportunity, fields));
     setCurrent(opportunity);
-    setOverview(valuesFor(opportunity, OVERVIEW_FIELDS));
-    setQualification(valuesFor(opportunity, QUALIFICATION_FIELDS));
+    setOverview(rebase(OVERVIEW_FIELDS));
+    setQualification(rebase(QUALIFICATION_FIELDS));
     setSnapshotVersion(opportunity?.version || 1);
-    setError(""); setErrorAction(null); setConflict(null);
+    if (!sameRecord) { setError(""); setErrorAction(null); setConflict(null); }
   }, [opportunity?.id, opportunity?.version]);
   useEffect(() => { setLocalContacts(contacts); }, [contacts]);
   useEffect(() => { setLocalActivities(activities); }, [activities]);
@@ -239,6 +249,9 @@ export function MarketingOpportunitySheet({
     contacts: localContacts, activities: localActivities, tasks: localTasks,
     documents: localDocuments, history: current?.history || history,
   });
+  // Every opportunity write appends a history row server-side, so a re-read
+  // record's history is newer than ours; keep ours only if it came back empty.
+  const relationsFor = saved => ({ ...relations(), ...(saved?.history?.length ? { history: saved.history } : {}) });
   const reconcileRelation = (key, rows) => {
     if (key === "contacts") setLocalContacts(rows);
     if (key === "activities") setLocalActivities(rows);
@@ -272,9 +285,12 @@ export function MarketingOpportunitySheet({
     ]));
     try {
       const saved = await attemptMarketingSectionSave({ api: updateApi, id: current.id, draft: patch, version: snapshotVersion });
-      const enriched = mergeMarketingRelations(saved, relations());
+      const enriched = mergeMarketingRelations(saved, relationsFor(saved));
       setCurrent(enriched); setSnapshotVersion(enriched.version);
-      setOverview(valuesFor(enriched, OVERVIEW_FIELDS)); setQualification(valuesFor(enriched, QUALIFICATION_FIELDS));
+      // Re-baseline only the section that was saved — the other one may hold
+      // unsaved edits the user hasn't submitted yet.
+      if (section === "overview") setOverview(valuesFor(enriched, OVERVIEW_FIELDS));
+      else setQualification(valuesFor(enriched, QUALIFICATION_FIELDS));
       onSaved?.(enriched);
     } catch (saveError) {
       if (saveError instanceof MarketingConflictError || saveError?.code === "MARKETING_CONFLICT") {
@@ -309,7 +325,8 @@ export function MarketingOpportunitySheet({
   const performRestore = async () => {
     setBusySection("restore"); setError(""); setErrorAction(null);
     try {
-      const saved = mergeMarketingRelations(await restoreApi(current.id, snapshotVersion), relations());
+      const restored = await restoreApi(current.id, snapshotVersion);
+      const saved = mergeMarketingRelations(restored, relationsFor(restored));
       setCurrent(saved); setSnapshotVersion(saved.version); onRestored?.(saved);
     }
     catch (restoreError) { setError(restoreError.message || "The opportunity could not be restored."); setErrorAction("restore"); }
@@ -339,6 +356,8 @@ export function MarketingOpportunitySheet({
   const field = (label, key, props = {}) => <Field label={label} htmlFor={`marketing-${key}`} className={props.wide ? "marketing-field-wide" : undefined}><Input id={`marketing-${key}`} value={activeDraft[key] ?? ""} onChange={event => setField(key, event.target.value)} {...props.input}/></Field>;
   const area = (label, key) => <Field label={label} htmlFor={`marketing-${key}`} className="marketing-field-wide"><Textarea id={`marketing-${key}`} value={activeDraft[key] ?? ""} onChange={event => setField(key, event.target.value)}/></Field>;
   const selectField = (label, key, options, emptyLabel) => <Field label={label} htmlFor={`marketing-${key}`}><select id={`marketing-${key}`} className="select" value={activeDraft[key] || ""} onChange={event => setField(key, event.target.value)}><option value="">{emptyLabel}</option>{options.map(option => <option key={option.id} value={option.id}>{option.name || option.display_name || option.email || "Unnamed"}</option>)}</select></Field>;
+  const nextUp = nextMarketingAction(localTasks, overview.nextAction || "");
+  const nextUpLabel = typeof nextUp === "string" ? nextUp : nextUp?.title;
   const contactOptions = localContacts.map(link => ({ id: link.contactId || link.id, name: link.name || contactName(link.contactId || link.id) }));
 
   return (
@@ -354,7 +373,7 @@ export function MarketingOpportunitySheet({
               <div><span>Owner</span><strong>{users.find(user => user.id === overview.ownerId)?.name || current.ownerName || "Unassigned"}</strong></div>
               <div><span>Probability</span><strong>{overview.probability === "" || overview.probability === null ? "Not set" : `${overview.probability}%`}</strong></div>
               <div><span>Value</span><strong>{displayMoney(overview.estimatedValue)}</strong></div>
-              <div className="marketing-dialog-next"><span>Next action</span><strong>{overview.nextAction || "No next action recorded"}</strong></div>
+              <div className="marketing-dialog-next"><span>Next action</span><strong>{nextUpLabel || "No next action recorded"}</strong></div>
             </div>
           </DialogHeader>
           <Tabs value={section} onValueChange={setSection}><TabsList variant="underline" className="marketing-sheet-tabs" aria-label="Opportunity details">{SECTIONS.map(item => <TabsTrigger key={item.key} value={item.key}>{item.label}</TabsTrigger>)}</TabsList></Tabs>
@@ -375,6 +394,11 @@ export function MarketingOpportunitySheet({
                 {field("Next action due", "nextActionDueAt", { input: { type: "datetime-local" } })}{field("Expected close date", "expectedCloseDate", { input: { type: "date" } })}
                 {field("Estimated value", "estimatedValue", { input: { type: "number", min: 0, step: "0.01" } })}{field("Probability", "probability", { input: { type: "number", min: 0, max: 100 } })}
               </div></section>
+              {current.outcome && <section className="marketing-detail-section" aria-label="Contract outcome"><div className="marketing-section-heading"><div><h3>Contract outcome</h3><p>Recorded when the opportunity moved to the final stage. Change it by moving the card again.</p></div></div><dl className="marketing-outcome-list">
+                <div><dt>Outcome</dt><dd>{current.outcome === "won" ? "Won" : "Lost"}</dd></div>
+                {current.outcome === "won" && <><div><dt>Signature date</dt><dd>{displayDay(current.signedAt)}</dd></div><div><dt>Final contract value</dt><dd>{displayMoney(current.finalContractValue)}</dd></div></>}
+                {current.outcome === "lost" && <><div><dt>Loss reason</dt><dd>{current.lossReason || "Not recorded"}</dd></div><div className="marketing-field-wide"><dt>What we learned</dt><dd>{current.lossDetail || "Not recorded"}</dd></div></>}
+              </dl></section>}
               <fieldset className="marketing-portfolio-context">
                 <legend>Portfolio context</legend>
                 <p>These fields preserve the operating view supplied by the marketing team. Beacon stage and probability remain the sales forecast controls.</p>

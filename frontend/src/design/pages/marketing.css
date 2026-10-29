@@ -142,6 +142,9 @@
 .marketing-card-owner-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marketing-card-stat { display: inline-flex; flex: 0 0 auto; align-items: baseline; gap: 3px; color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .marketing-card-stat > span { color: var(--text-muted); font-weight: 500; }
+.marketing-card-figures { display: inline-flex; flex: 0 0 auto; align-items: baseline; gap: 10px; }
+.marketing-card-end[data-past] { color: var(--rose-ink); }
+[data-theme="dark"] .marketing-card-end[data-past] { color: var(--rose); }
 .marketing-card-health { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; font-weight: 600; white-space: nowrap; }
 .marketing-card-health-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .marketing-card-health[data-tone="success"] { color: var(--sage-ink); }
@@ -200,6 +203,10 @@
 .marketing-dialog-body { background: var(--surface-2); }
 .marketing-sheet-tabs { width: 100%; padding: 0 24px; overflow-x: auto; background: var(--surface); }
 .marketing-overview-sections { display: flex; flex-direction: column; gap: 14px; }
+.marketing-outcome-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 0; }
+.marketing-outcome-list dt { margin-bottom: 2px; color: var(--text-muted); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.marketing-outcome-list dd { margin: 0; color: var(--text); font-size: 13px; line-height: 1.4; white-space: pre-wrap; }
+.marketing-outcome-list .marketing-field-wide { grid-column: 1 / -1; }
 .marketing-detail-section { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .marketing-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .marketing-section-heading h3,

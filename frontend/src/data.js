@@ -5551,7 +5551,17 @@ export async function updateMarketingOpportunity(id, input, expectedVersion) {
   if (error?.code === "40001") throw await marketingConflict(id, error);
   throwMarketingError(error, "update Marketing opportunity");
   if (!data) throw await marketingConflict(id);
-  return adaptMarketingOpportunity(data);
+  return marketingRecordAfterWrite(data);
+}
+
+// The update RPC returns the bare table row: no client/owner embeds and no
+// supporting records. Handing that back as "the opportunity" blanked the
+// organization and owner on the card and in the detail popup, and emptied its
+// stakeholders, tasks and history in the workspace. Re-read the full record;
+// the write already succeeded, so a failed re-read degrades to the bare row.
+async function marketingRecordAfterWrite(data) {
+  try { return (await loadMarketingOpportunityFresh(data.id)) || adaptMarketingOpportunity(data); }
+  catch { return adaptMarketingOpportunity(data); }
 }
 
 export async function transitionMarketingOpportunity(id, input = {}, expectedVersion) {
@@ -5584,7 +5594,7 @@ async function setMarketingArchive(id, expectedVersion, archived) {
   });
   throwMarketingError(error, archived ? "archive Marketing opportunity" : "restore Marketing opportunity");
   if (!data) throw await marketingConflict(id);
-  return adaptMarketingOpportunity(data);
+  return marketingRecordAfterWrite(data);
 }
 
 export const archiveMarketingOpportunity = (id, expectedVersion) => setMarketingArchive(id, expectedVersion, true);

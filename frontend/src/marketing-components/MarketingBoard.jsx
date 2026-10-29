@@ -27,6 +27,13 @@ const shortDate = value => value ? new Intl.DateTimeFormat("en-US", {
   month: "short", day: "numeric",
 }).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : "";
 
+const longDate = value => value ? new Intl.DateTimeFormat("en-US", {
+  month: "short", day: "numeric", year: "numeric",
+}).format(new Date(`${String(value).slice(0, 10)}T12:00:00`)) : "";
+
+// Month + day keeps the card compact; another year's date carries its year.
+const cardDate = value => String(value).slice(0, 4) === String(new Date().getFullYear()) ? shortDate(value) : longDate(value);
+
 const compactMoney = value => new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1,
 }).format(Number(value || 0));
@@ -68,7 +75,21 @@ function clearDropTargets() {
 
 const isCardDrag = event => Array.from(event.dataTransfer?.types || []).includes(DRAG_TYPE);
 
-function OpportunityCard({ opportunity, tasks, stalledAfterDays, stageIndex = 0, onOpen, onMoveIntent }) {
+// The card's end date: when a won deal was signed, otherwise the forecast
+// close. A past close on a still-open deal is flagged like an overdue action.
+function cardEndDate(opportunity) {
+  if (opportunity.outcome === "won" && opportunity.signedAt) {
+    return { label: "Signed", value: opportunity.signedAt, past: false };
+  }
+  if (!opportunity.expectedCloseDate) return null;
+  return {
+    label: "Close",
+    value: opportunity.expectedCloseDate,
+    past: !opportunity.outcome && dueIsPast(opportunity.expectedCloseDate),
+  };
+}
+
+function OpportunityCard({ opportunity, tasks, stalledAfterDays, stageIndex = 0, clientsById = {}, usersById = {}, onOpen, onMoveIntent }) {
   const healthKey = marketingHealth(opportunity, tasks, { stalledAfterDays });
   const health = HEALTH_META[healthKey] || HEALTH_META.on_track;
   const next = nextMarketingAction(tasks, opportunity.nextAction || "");
@@ -76,9 +97,10 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, stageIndex = 0,
   const nextDue = typeof next === "object" ? next?.dueAt : opportunity.nextActionDueAt;
   const overdue = dueIsPast(nextDue);
   const label = `Open ${opportunity.title} opportunity`;
-  const organization = opportunity.organizationName || opportunity.client?.name || "Organization not set";
+  const organization = opportunity.organizationName || opportunity.client?.name || clientsById[opportunity.clientId]?.name || "Organization not set";
   const internal = opportunity.sourceSalesPhase === "NOT A SALES CONTRACT";
-  const assignment = opportunity.assignedTeam || opportunity.ownerName || opportunity.owner?.display_name || "Unassigned";
+  const assignment = opportunity.assignedTeam || opportunity.ownerName || opportunity.owner?.display_name || usersById[opportunity.ownerId]?.name || "Unassigned";
+  const endDate = cardEndDate(opportunity);
   const probability = Number(opportunity.probability || 0);
   const projectProgress = opportunity.projectProgress !== null && opportunity.projectProgress !== undefined
     ? Number(opportunity.projectProgress)
@@ -155,7 +177,13 @@ function OpportunityCard({ opportunity, tasks, stalledAfterDays, stageIndex = 0,
           <span className="marketing-card-avatar" aria-hidden="true">{initialsOf(assignment)}</span>
           <span className="marketing-card-owner-name">{assignment}</span>
         </span>
-        <span className="marketing-card-stat" aria-label={`Sales probability ${probability} percent`}><span>Sales</span> {probability}%</span>
+        <span className="marketing-card-figures">
+          {endDate && <time className="marketing-card-stat marketing-card-end" dateTime={String(endDate.value).slice(0, 10)} data-past={endDate.past ? "true" : undefined}
+            title={`${endDate.label === "Signed" ? "Signed" : endDate.past ? "Expected close has passed" : "Expected close"} ${longDate(endDate.value)}`}>
+            <span>{endDate.label}</span> {cardDate(endDate.value)}
+          </time>}
+          <span className="marketing-card-stat" aria-label={`Sales probability ${probability} percent`}><span>Sales</span> {probability}%</span>
+        </span>
       </div>
       <div className="marketing-card-status">
         <span className="marketing-card-health" data-tone={health.tone}><span className="marketing-card-health-dot" aria-hidden="true"/>{health.label}</span>
@@ -227,6 +255,8 @@ export function MarketingBoard({
   onSelectedMobileStage,
   terminalOutcome = "all",
   onTerminalOutcomeChange,
+  clientsById = {},
+  usersById = {},
   onOpen,
   onMoveIntent,
 }) {
@@ -310,6 +340,7 @@ export function MarketingBoard({
                     tasks={tasks.filter(task => task.opportunityId === row.id)}
                     stalledAfterDays={stalledAfterDays}
                     stageIndex={index}
+                    clientsById={clientsById} usersById={usersById}
                     onOpen={onOpen} onMoveIntent={onMoveIntent}/>
                 ))}
                 {!rows.length && <p className="marketing-lane-empty"><span className="marketing-lane-empty-idle">No opportunities</span><span className="marketing-lane-empty-drop">Drop here</span></p>}

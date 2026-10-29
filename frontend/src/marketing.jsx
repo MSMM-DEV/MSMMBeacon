@@ -48,7 +48,26 @@ function initialMarketingView(fallback, allowed) {
 export function applyAuthoritativeOpportunity(rows, returned) {
   if (!returned?.id) return [...(rows || [])];
   const found = (rows || []).some(row => row.id === returned.id);
-  return found ? rows.map(row => row.id === returned.id ? returned : row) : [returned, ...(rows || [])];
+  return found ? rows.map(row => row.id === returned.id ? withDisplayEmbeds(returned, row) : row) : [returned, ...(rows || [])];
+}
+
+// A bare RPC row carries client_id/owner_id but not the joined names. Keep the
+// names we already had while the ids still match, so the card never flips to
+// "Organization not set" just because a save answered without the join.
+function withDisplayEmbeds(returned, previous) {
+  const keepClient = !returned.client && previous?.client && previous.clientId === returned.clientId;
+  const keepOwner = !returned.owner && previous?.owner && previous.ownerId === returned.ownerId;
+  if (!keepClient && !keepOwner) return returned;
+  const next = { ...returned };
+  if (keepClient) {
+    next.client = previous.client;
+    next.organizationName = next.organizationName || previous.organizationName;
+  }
+  if (keepOwner) {
+    next.owner = previous.owner;
+    next.ownerName = next.ownerName || previous.ownerName;
+  }
+  return next;
 }
 
 export function reconcileMarketingWorkspace(workspace, returned) {

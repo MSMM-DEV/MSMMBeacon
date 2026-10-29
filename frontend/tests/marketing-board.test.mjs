@@ -169,6 +169,32 @@ test("cards keep scan-critical context visible and leave detail fields to the dr
   assert.doesNotMatch(text, /\$125,000/);
   assert.doesNotMatch(text, /Verified BANT and Economic Buyer Approval/);
   assert.doesNotMatch(text, /Parish Intelligence/);
-  assert.doesNotMatch(text, /Dec 15, 2026/);
+  assert.match(text, /Close Dec 15/, "the expected close (end) date is on the card");
   assert.doesNotMatch(text, /in stage/);
+});
+
+test("card end date: signed date for won deals, flagged when an open close date has passed", () => {
+  const base = { id: "e", title: "T", stage: rules.MARKETING_STAGE_NAMES[0], organizationName: "Org", probability: 10 };
+  const render = row => {
+    const tree = boardModule.exports.MarketingBoard({ opportunities: [row], tasks: [] });
+    const cardElement = nodes(tree).find(node => typeof node.type === "function" && node.props.opportunity === row);
+    return cardElement.type(cardElement.props);
+  };
+  const endOf = card => nodes(card).find(node => String(node.props.className || "").includes("marketing-card-end"));
+  assert.equal(endOf(render({ ...base })), undefined, "no date, no chip");
+  const past = endOf(render({ ...base, expectedCloseDate: "2020-01-15" }));
+  assert.equal(past.props["data-past"], "true");
+  assert.match(words(past), /Close/);
+  const won = endOf(render({ ...base, stage: rules.MARKETING_STAGE_NAMES.at(-1), outcome: "won", signedAt: "2020-03-02", expectedCloseDate: "2020-01-15" }));
+  assert.match(words(won), /Signed/);
+  assert.equal(won.props["data-past"], undefined);
+});
+
+test("card falls back to Directory names when a row arrives without its joins", () => {
+  const row = { id: "bare", title: "T", stage: rules.MARKETING_STAGE_NAMES[0], clientId: "c1", ownerId: "u1", probability: 10 };
+  const tree = boardModule.exports.MarketingBoard({ opportunities: [row], tasks: [], clientsById: { c1: { name: "Acme Parish" } }, usersById: { u1: { name: "Raj Mehta" } } });
+  const cardElement = nodes(tree).find(node => typeof node.type === "function" && node.props.opportunity === row);
+  const text = words(cardElement.type(cardElement.props));
+  assert.match(text, /Acme Parish/);
+  assert.match(text, /Raj Mehta/);
 });
