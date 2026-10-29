@@ -104,8 +104,18 @@ const CalendarGlyph = (props) => <Icon name="calendarDays" {...props} />;
    grid chrome back to the tokens so both themes are finished.
    ---------------------------------------------------------------------- */
 const RBC_BRIDGE = [
-  // A definite box: `height:100%` inside an auto-height parent collapses.
-  "[&_.rbc-calendar]:h-[clamp(520px,70vh,860px)]!",
+  // Size to content, so the PAGE is the only scroller. rbc assumes a fixed
+  // box (`height:100%` + `flex:1 0 0` children); a pinned height clipped
+  // the last month rows and turned the week/day grid into an inner
+  // scroll box. Each view is taken out of the flex-basis-0 sizing so it
+  // reports its natural height instead of collapsing.
+  "[&_.rbc-calendar]:h-auto!",
+  "[&_:is(.rbc-month-view,.rbc-time-view,.rbc-agenda-view)]:flex-none!",
+  "[&_:is(.rbc-month-view,.rbc-time-view,.rbc-agenda-view)]:h-auto!",
+  "[&_.rbc-month-row]:flex-[1_0_auto]!",
+  "[&_.rbc-time-content]:flex-none!",
+  "[&_.rbc-time-content]:overflow-visible!",
+  "[&_.rbc-agenda-content]:overflow-visible!",
   // Hairlines.
   "[&_:is(.rbc-header,.rbc-month-view,.rbc-month-row,.rbc-day-bg,.rbc-time-view,.rbc-time-header,.rbc-time-header-content,.rbc-time-content,.rbc-timeslot-group,.rbc-time-slot,.rbc-day-slot,.rbc-allday-cell,.rbc-time-gutter,.rbc-agenda-view,.rbc-agenda-view_table,.rbc-agenda-view_th,.rbc-agenda-view_td,.rbc-agenda-view_tr,.rbc-overlay,.rbc-overlay-header)]:border-[var(--border)]!",
   // Time-grid blocks render their own time range inside the card, so the
